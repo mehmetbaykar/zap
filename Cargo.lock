@@ -14867,6 +14867,7 @@ dependencies = [
  "ui_components",
  "unic-langid",
  "unicase",
+ "unicode-general-category",
  "unicode-width 0.1.14",
  "unindent 0.1.11",
  "url",
