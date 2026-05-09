@@ -1350,8 +1350,9 @@ impl RichTextEditorView {
                     ctx.spawn(future, move |me, (), ctx| {
                         me.pending_layout_affecting_asset_loads.remove(&handle);
                         me.model.update(ctx, |model, ctx| {
-                            if matches!(model.interaction_state(ctx), InteractionState::Selectable)
-                            {
+                            if Self::should_rebuild_layout_after_layout_affecting_asset_load(
+                                model.interaction_state(ctx),
+                            ) {
                                 model.rebuild_layout(ctx);
                             }
                         });
@@ -1362,6 +1363,15 @@ impl RichTextEditorView {
                 }
             }
         }
+    }
+
+    fn should_rebuild_layout_after_layout_affecting_asset_load(state: InteractionState) -> bool {
+        matches!(
+            state,
+            InteractionState::Selectable
+                | InteractionState::Editable
+                | InteractionState::EditableWithInvalidSelection
+        )
     }
 
     /// Handles changes to the lifecycle state.
