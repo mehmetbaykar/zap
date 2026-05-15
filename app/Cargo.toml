@@ -567,6 +567,7 @@ default = [
     "cli_agent_rich_input",
     "vertical_tabs",
     "tab_configs",
+    "agent_harness",
     "hoa_onboarding_flow",
     "hoa_remote_control",
     "codex_notifications",

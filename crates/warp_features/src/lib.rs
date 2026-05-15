@@ -739,7 +739,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::DirectoryTabColors,
     FeatureFlag::EditableMarkdownMermaid,
     FeatureFlag::CodeReviewScrollPreservation,
-    FeatureFlag::AgentHarness,
     FeatureFlag::RememberFastForwardState,
     FeatureFlag::HOANotifications,
     FeatureFlag::GeminiNotifications,
