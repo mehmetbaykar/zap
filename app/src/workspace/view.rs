@@ -5468,8 +5468,14 @@ impl Workspace {
 
     #[cfg(not(target_family = "wasm"))]
     fn view_logs(&mut self, ctx: &mut ViewContext<Self>) {
+        // 在调用线程同步采集诊断信息(版本、平台、channel、执行模式、MCP/更新日志路径等),
+        // 真正的 zip 打包在阻塞线程上完成,避免读取 `AppContext` 全局状态时跨线程。
+        let extras = Self::collect_log_bundle_extras(ctx);
         ctx.spawn(
-            async { tokio::task::spawn_blocking(warp_logging::create_log_bundle_zip).await },
+            async move {
+                tokio::task::spawn_blocking(move || warp_logging::create_log_bundle_zip(extras))
+                    .await
+            },
             |me, result, ctx| match result {
                 Ok(Ok(path)) => {
                     ctx.open_file_path_in_explorer(&path);
@@ -5492,6 +5498,103 @@ impl Workspace {
                 }
             },
         );
+    }
+
+    /// 收集本次"导出日志"要附加进 zip 的诊断材料:
+    ///
+    /// - `manifest.txt`:版本 / channel / 平台 / arch / 执行模式 / 生成时间戳;
+    /// - 其它子系统日志(MCP server stderr、Windows 自动更新器、minidump 服务进程),
+    ///   仅当文件实际存在时才会进入 zip。
+    ///
+    /// 故意**不**打包的内容(权衡):
+    /// - `.dmp` minidump 二进制(可能极大,需要单独按需上传);
+    /// - `openwarp.prompt_chips.log`(含命令 stdout/stderr,仅在 debug channel 生成,默认隐私风险);
+    /// - profiling 产物(`dhat-heap.json` / `profile.pb`,仅特殊 cargo feature 启用)。
+    #[cfg(not(target_family = "wasm"))]
+    fn collect_log_bundle_extras(ctx: &AppContext) -> warp_logging::LogBundleExtras {
+        use std::path::{Path, PathBuf};
+        use warp_core::channel::ChannelState;
+        use warp_core::execution_mode::AppExecutionMode;
+        use warp_logging::{ExtraFile, InlineFile, LogBundleExtras};
+
+        let log_dir = warp_logging::log_directory().ok();
+
+        // 1) manifest.txt:可读的诊断摘要,排查问题时第一眼看的内容。
+        let manifest = {
+            let version = ChannelState::app_version().unwrap_or("Dev");
+            let channel = ChannelState::channel();
+            let execution_mode = AppExecutionMode::as_ref(ctx);
+            let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %z");
+            let log_dir_str = log_dir
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string());
+
+            format!(
+                "OpenWarp 日志导出\n\
+                 生成时间: {now}\n\
+                 版本: {version}\n\
+                 channel: {channel}\n\
+                 执行模式: {execution_mode:?}\n\
+                 OS: {os}\n\
+                 ARCH: {arch}\n\
+                 日志目录: {log_dir_str}\n",
+                os = std::env::consts::OS,
+                arch = std::env::consts::ARCH,
+            )
+        };
+
+        let mut extras = LogBundleExtras {
+            inline_files: vec![InlineFile {
+                entry_name: "manifest.txt".to_string(),
+                contents: manifest,
+            }],
+            ..Default::default()
+        };
+
+        // 2) 同目录下其它产物:同 channel 的 minidump 服务进程日志、Windows 更新器日志。
+        if let Some(dir) = log_dir.as_ref() {
+            let candidates: &[&str] = &[
+                "warp-minidump.log", // Linux/Windows minidump 服务进程
+                "warp_update.log",   // Windows 自动更新器(Inno Setup)
+            ];
+            for name in candidates {
+                let path = dir.join(name);
+                if path.is_file() {
+                    extras.extra_files.push(ExtraFile {
+                        source_path: path,
+                        entry_name: (*name).to_string(),
+                    });
+                }
+            }
+        }
+
+        // 3) MCP server 当前会话 stderr(`purge_on_startup: true`,只在运行期间存在)。
+        // 路径通过 `simple_logger::manager::resolve_log_path` 间接得到:取一个虚拟文件名
+        // 再 `parent()` 得到 namespace 目录,避免暴露 `log_directory_path` 私有 API。
+        let mcp_probe = simple_logger::manager::resolve_log_path("mcp", Path::new("_probe"));
+        if let Some(mcp_dir) = mcp_probe.parent() {
+            if let Ok(read_dir) = std::fs::read_dir(mcp_dir) {
+                for entry in read_dir.flatten() {
+                    let path: PathBuf = entry.path();
+                    let is_log = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .map(|ext| ext.eq_ignore_ascii_case("log"))
+                        .unwrap_or(false);
+                    if path.is_file() && is_log {
+                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                            extras.extra_files.push(ExtraFile {
+                                source_path: path.clone(),
+                                entry_name: format!("mcp/{file_name}"),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        extras
     }
 
     fn copy_version(&mut self, version: &str, ctx: &mut ViewContext<Self>) {

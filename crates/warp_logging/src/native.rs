@@ -263,9 +263,44 @@ fn current_and_rotated_log_paths() -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
+/// 额外打包到日志 zip 的内容,由调用方收集后传入。
+///
+/// `warp_logging` 本身只知道主日志文件;诊断摘要、其它子系统(如 MCP)的日志
+/// 路径、自动更新日志等都由 `app` 层在收集后通过本结构体传入,避免本 crate
+/// 反向依赖上层模块。
+#[derive(Debug, Default)]
+pub struct LogBundleExtras {
+    /// 需要原样打包进 zip 的额外磁盘文件;不存在的文件会被静默跳过。
+    pub extra_files: Vec<ExtraFile>,
+    /// 直接以内存字符串形式写入 zip 的虚拟文件(如 `manifest.txt`)。
+    pub inline_files: Vec<InlineFile>,
+}
+
+/// 额外打包的磁盘文件描述。
+#[derive(Debug)]
+pub struct ExtraFile {
+    /// 真实磁盘路径。
+    pub source_path: PathBuf,
+    /// 在 zip 中保存为的相对路径(支持子目录,如 `mcp/<uuid>.log`)。
+    pub entry_name: String,
+}
+
+/// 以内存内容写入 zip 的虚拟文件。
+#[derive(Debug)]
+pub struct InlineFile {
+    /// 在 zip 中保存为的相对路径。
+    pub entry_name: String,
+    /// 文件内容(UTF-8)。
+    pub contents: String,
+}
+
 /// Creates a timestamped zip archive containing the current log file
 /// and any older logs for the active instance.
-pub fn create_log_bundle_zip() -> Result<PathBuf> {
+///
+/// `extras` 让调用方追加其它诊断产物(MCP 日志、自动更新日志、诊断摘要等);
+/// 任何不存在或无法读取的额外文件都会被跳过并通过 `log::warn!` 记录,
+/// 不会让整个导出失败。
+pub fn create_log_bundle_zip(extras: LogBundleExtras) -> Result<PathBuf> {
     let log_files = current_and_rotated_log_paths()?;
     let log_directory = log_directory()?;
     let logfile_name = ChannelState::logfile_name();
@@ -287,6 +322,7 @@ pub fn create_log_bundle_zip() -> Result<PathBuf> {
     let mut zip_writer = ZipWriter::new(zip_file);
     let zip_options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
+    // 主日志 + 轮转的旧日志,平铺到 zip 根目录。
     for log_file in log_files {
         let entry_name = log_file
             .file_name()
@@ -296,6 +332,53 @@ pub fn create_log_bundle_zip() -> Result<PathBuf> {
 
         let mut source = File::open(&log_file)?;
         copy(&mut source, &mut zip_writer)?;
+    }
+
+    // 额外的磁盘文件:存在则打包,不存在/读取失败仅打印 warn,不影响主流程。
+    for extra in &extras.extra_files {
+        if !extra.source_path.is_file() {
+            continue;
+        }
+        match File::open(&extra.source_path) {
+            Ok(mut source) => {
+                if let Err(err) = zip_writer.start_file(&extra.entry_name, zip_options) {
+                    log::warn!(
+                        "Skipping extra log file {} in bundle: {err}",
+                        extra.source_path.display()
+                    );
+                    continue;
+                }
+                if let Err(err) = copy(&mut source, &mut zip_writer) {
+                    log::warn!(
+                        "Failed to write extra log file {} into bundle: {err}",
+                        extra.source_path.display()
+                    );
+                }
+            }
+            Err(err) => {
+                log::warn!(
+                    "Failed to open extra log file {} for bundle: {err}",
+                    extra.source_path.display()
+                );
+            }
+        }
+    }
+
+    // 内存内容 (`manifest.txt` 等):始终尝试写入。
+    for inline in &extras.inline_files {
+        if let Err(err) = zip_writer.start_file(&inline.entry_name, zip_options) {
+            log::warn!(
+                "Failed to start inline entry {} in bundle: {err}",
+                inline.entry_name
+            );
+            continue;
+        }
+        if let Err(err) = zip_writer.write_all(inline.contents.as_bytes()) {
+            log::warn!(
+                "Failed to write inline entry {} into bundle: {err}",
+                inline.entry_name
+            );
+        }
     }
 
     zip_writer.finish()?;

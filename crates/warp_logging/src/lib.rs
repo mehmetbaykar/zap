@@ -23,7 +23,10 @@ mod imp;
 
 pub use imp::init;
 #[cfg(not(target_family = "wasm"))]
-pub use imp::{create_log_bundle_zip, log_directory, log_file_path, rotate_log_files};
+pub use imp::{
+    create_log_bundle_zip, log_directory, log_file_path, rotate_log_files, ExtraFile, InlineFile,
+    LogBundleExtras,
+};
 
 #[cfg(not(target_family = "wasm"))]
 pub use imp::{

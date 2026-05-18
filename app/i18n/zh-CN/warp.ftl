@@ -600,6 +600,8 @@ settings-about-update-up-to-date = 已是最新版本。
 settings-about-update-available = 发现新版本 { $version }。
 settings-about-update-check-now = 检查更新
 settings-about-update-open-release = 前往 GitHub 下载
+settings-about-export-logs = 导出日志
+settings-about-export-logs-description = 将最近的应用日志(以及存在时的 MCP / 自动更新日志)和一份诊断摘要打包为 zip，并在文件管理器中显示，便于分享给排查人员。
 
 # OpenWarp：main_page.rs 相关文案随 Account 设置页一同删除。
 
