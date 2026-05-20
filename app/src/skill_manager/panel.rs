@@ -32,9 +32,12 @@ const ROW_PADDING_HORIZONTAL: f32 = 8.0;
 const FONT_SIZE: f32 = 13.0;
 const SEARCH_FONT_SIZE: f32 = 14.0;
 const META_FONT_SIZE: f32 = 11.0;
+// filter tab:保持紧凑高度,用 12px 字号 + 强对比激活态撑起可读性,
+// 避免被外壳 ClippedScrollable 拦截点击事件。
 const FILTER_BUTTON_HEIGHT: f32 = 24.0;
-const FILTER_LABEL_WIDTH: f32 = 44.0;
+const FILTER_BUTTON_FONT_SIZE: f32 = 12.0;
 const FILTER_BUTTON_HORIZONTAL_PADDING: f32 = 8.0;
+const FILTER_BUTTON_CORNER_RADIUS: f32 = 4.0;
 
 #[derive(Clone, Debug)]
 pub enum SkillManagerPanelAction {
@@ -248,17 +251,26 @@ impl SkillManagerPanel {
         let action = SkillManagerPanelAction::SelectProviderFilter(provider);
 
         Hoverable::new(state, move |mouse| {
-            let mut button = Container::new(Self::render_label(
-                label.clone(),
-                appearance,
-                META_FONT_SIZE,
-                text_color,
-            ))
-            .with_padding_left(FILTER_BUTTON_HORIZONTAL_PADDING)
-            .with_padding_right(FILTER_BUTTON_HORIZONTAL_PADDING)
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)));
+            // 文字用 Flex::row + CrossAxisAlignment::Center 垂直居中于固定行高里。
+            let label_row = Flex::row()
+                .with_main_axis_size(MainAxisSize::Min)
+                .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                .with_child(Self::render_label(
+                    label.clone(),
+                    appearance,
+                    FILTER_BUTTON_FONT_SIZE,
+                    text_color,
+                ))
+                .finish();
+            let mut button = Container::new(label_row)
+                .with_padding_left(FILTER_BUTTON_HORIZONTAL_PADDING)
+                .with_padding_right(FILTER_BUTTON_HORIZONTAL_PADDING)
+                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(
+                    FILTER_BUTTON_CORNER_RADIUS,
+                )));
             if is_active {
-                button = button.with_background(internal_colors::fg_overlay_3(theme));
+                // 激活态使用 fg_overlay_4 让对比更强,避免快速切换时看不出选中变化。
+                button = button.with_background(internal_colors::fg_overlay_4(theme));
             } else if mouse.is_hovered() {
                 button = button.with_background(internal_colors::fg_overlay_2(theme));
             }
@@ -278,7 +290,6 @@ impl SkillManagerPanel {
         providers: &[SkillProvider],
         appearance: &Appearance,
     ) -> Box<dyn Element> {
-        let theme = appearance.theme();
         let active_filter = self.provider_filter;
 
         let mut filter_buttons = Flex::row()
@@ -301,30 +312,11 @@ impl SkillManagerPanel {
             ));
         }
 
-        let filter_group = Container::new(filter_buttons.finish())
-            .with_border(Border::all(1.0).with_border_fill(theme.surface_3()))
-            .with_background(ElementFill::Solid(
-                internal_colors::fg_overlay_1(theme).into(),
-            ))
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0)))
-            .finish();
-
-        Flex::row()
-            .with_main_axis_size(MainAxisSize::Min)
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_spacing(8.0)
-            .with_child(
-                ConstrainedBox::new(Self::render_label(
-                    crate::t!("skill-manager-filter-provider"),
-                    appearance,
-                    META_FONT_SIZE,
-                    theme.sub_text_color(theme.background()),
-                ))
-                .with_width(FILTER_LABEL_WIDTH)
-                .finish(),
-            )
-            .with_child(filter_group)
-            .finish()
+        // 不再外套 ClippedScrollable / 外壳容器:
+        // 1. 横向滚动容器会拦截 mouse-down 用于拖拽判定,导致快速切换 tab 时点击响应延迟。
+        // 2. 大多数场景 provider 数 ≤ 3,250px 侧栏宽度即可容纳;真溢出时由 Clipped 裁切,
+        //    用户可拖宽侧栏。
+        Clipped::new(filter_buttons.finish()).finish()
     }
 
     fn render_search_input(&self, appearance: &Appearance) -> Box<dyn Element> {

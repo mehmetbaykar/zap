@@ -66,8 +66,6 @@ use crate::{
     TelemetryEvent,
 };
 
-const SKILL_MANAGER_MIN_SIDEBAR_WIDTH: f32 = 360.0;
-
 #[derive(Default)]
 struct MouseStateHandles {
     project_explorer_button: MouseStateHandle,
@@ -1329,18 +1327,13 @@ impl View for LeftPanelView {
             super::PanelPosition::Left => DragBarSide::Right,
             super::PanelPosition::Right => DragBarSide::Left,
         };
-        let min_sidebar_width = if self.active_view.get() == ToolPanelView::SkillManager {
-            SKILL_MANAGER_MIN_SIDEBAR_WIDTH
-        } else {
-            MIN_SIDEBAR_WIDTH
-        };
         Resizable::new(self.resizable_state_handle.clone(), panel_content)
             .with_dragbar_side(drag_side)
             .on_resize(move |ctx, _| {
                 ctx.notify();
             })
             .with_bounds_callback(Box::new(move |window_size| {
-                let min_width = min_sidebar_width;
+                let min_width = MIN_SIDEBAR_WIDTH;
                 let max_width = window_size.x() * MAX_SIDEBAR_WIDTH_RATIO;
                 (min_width, max_width.max(min_width))
             }))
