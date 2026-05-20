@@ -303,7 +303,3 @@ fn package_name(channel: Channel) -> &'static str {
         Channel::Oss => "warp-oss",
     }
 }
-
-#[cfg(test)]
-#[path = "linux_test.rs"]
-mod tests;
