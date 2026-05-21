@@ -1,4 +1,33 @@
-<svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path fill-rule="evenodd" clip-rule="evenodd" d="M27.1214 18.8492C27.1214 19.8492 25.9388 20.8492 25.4417 20.8492L18.1213 20.8492L22.1213 5.84924L25.1927 5.84925C25.1927 5.84925 26.1214 5.84925 26.6214 6.34925C27.1214 6.84925 27.1214 7.84925 27.1214 7.84925L27.1214 18.8492ZM20.6213 18.8492C20.6213 18.8492 23.1214 18.8492 24.1214 18.8492C25.1214 18.8492 25.1214 17.8492 25.1214 17.8492C25.1214 17.8492 25.1869 9.04847 25.1214 8.34925C25.0558 7.65003 24.1214 7.65003 24.1214 7.65003L23.285 7.65003L20.6213 18.8492Z" fill="#FF0505"/>
-<path fill-rule="evenodd" clip-rule="evenodd" d="M3.12131 10.8492C3.12131 9.84924 4.30386 8.84924 4.80092 8.84924L12.1213 8.84924L8.12224 23.8492L5.04994 23.8492C5.04994 23.8492 4.12131 23.8492 3.62131 23.3492C3.12131 22.8492 3.12131 21.8492 3.12131 21.8492L3.12131 10.8492ZM9.62131 10.8492C9.62131 10.8492 7.12131 10.8492 6.12131 10.8492C5.12131 10.8492 5.12131 11.8492 5.12131 11.8492C5.12131 11.8492 5.05574 20.65 5.12131 21.3492C5.18688 22.0485 6.12131 22.0485 6.12131 22.0485L6.83713 22.0485L9.62131 10.8492Z" fill="#FF0505"/>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="zap">
+  <defs>
+    <linearGradient id="v1Tile" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#15181D"/>
+      <stop offset="1" stop-color="#0B0D10"/>
+    </linearGradient>
+    <linearGradient id="v1Shard" x1="130" y1="350" x2="400" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2B7BF5"/>
+      <stop offset="0.55" stop-color="#2BC9F5"/>
+      <stop offset="1" stop-color="#7CF6D2"/>
+    </linearGradient>
+    <filter id="v1Glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="120" fill="url(#v1Tile)"/>
+  <rect x="16.5" y="16.5" width="479" height="479" rx="119.5" fill="none" stroke="#262B32" stroke-width="1"/>
+
+  <!-- Accelerating shards: progressively taller, leaning, rising — frozen motion -->
+  <g fill="url(#v1Shard)">
+    <path d="M132 352 L160 352 L148 380 L120 380 Z" opacity="0.30"/>
+    <path d="M172 322 L210 322 L192 368 L154 368 Z" opacity="0.48"/>
+    <path d="M222 284 L270 284 L244 350 L196 350 Z" opacity="0.70"/>
+    <path d="M282 232 L340 232 L306 326 L248 326 Z"/>
+  </g>
+
+  <!-- Leading edge: a fast vertical bar (the cursor / strike point) with glow -->
+  <g filter="url(#v1Glow)">
+    <path d="M352 150 L392 150 L356 304 L316 304 Z" fill="#7CF6D2"/>
+  </g>
 </svg>
