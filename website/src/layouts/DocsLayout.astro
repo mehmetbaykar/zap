@@ -46,13 +46,34 @@ const editUrl = `${repo}/blob/main/website/src/content/docs/${activeSlug}.mdx`;
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
     <Analytics />
+    {/* FOUC 防护 */}
+    <script is:inline>
+      (function () {
+        try {
+          var stored = localStorage.getItem('zap:theme');
+          var theme = stored;
+          if (!theme || (theme !== 'light' && theme !== 'dark')) {
+            theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (_) {}
+        try {
+          var lc = localStorage.getItem('zap:locale');
+          if (!lc) {
+            var nav = (navigator.language || 'en').toLowerCase();
+            lc = nav.startsWith('zh') ? 'zh' : nav.startsWith('ja') ? 'ja' : 'en';
+          }
+          document.documentElement.setAttribute('data-locale', lc);
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body data-locale="en">
     <I18nScript />
     <Banner
-      en="Early development · Docs are evolving alongside the source · Community fork of Warp"
-      zh="早期开发阶段 · 文档随源码持续更新 · Warp 的社区分支"
-      ja="初期開発段階 · ドキュメントはソースとともに更新中 · Warp のコミュニティフォーク"
+      en="Early development · Docs are evolving alongside the source · An independent product built on Warp"
+      zh="早期开发阶段 · 文档随源码持续更新 · 基于 Warp 构建的独立产品"
+      ja="初期開発段階 · ドキュメントはソースとともに更新中 · Warp を基にした独立プロダクト"
     />
     <DocsNav />
 
@@ -205,6 +226,18 @@ const editUrl = `${repo}/blob/main/website/src/content/docs/${activeSlug}.mdx`;
         });
         document.addEventListener('keydown', (event) => {
           if (event.key === 'Escape') closeLocaleMenus();
+        });
+
+        // 主题切换
+        function applyTheme(theme: string) {
+          document.documentElement.setAttribute('data-theme', theme);
+          try { localStorage.setItem('zap:theme', theme); } catch (_) {}
+        }
+        document.querySelectorAll<HTMLButtonElement>('[data-theme-toggle]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+            applyTheme(cur === 'dark' ? 'light' : 'dark');
+          });
         });
 
         // 移动端侧边栏开关

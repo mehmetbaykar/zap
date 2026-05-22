@@ -12,7 +12,7 @@ interface Props {
 }
 const {
   title = 'Zap — Bring any AI model into your terminal',
-  description = 'A community fork of Warp that keeps the full terminal experience and opens the AI layer.',
+  description = 'A derivative product built on Warp — a fully open, local-first agentic terminal that brings any AI model into your shell.',
 } = Astro.props;
 ---
 <!doctype html>
@@ -27,13 +27,34 @@ const {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <Analytics />
+    {/* FOUC 防护:在页面渲染前先设好 theme 与 locale */}
+    <script is:inline>
+      (function () {
+        try {
+          var stored = localStorage.getItem('zap:theme');
+          var theme = stored;
+          if (!theme || (theme !== 'light' && theme !== 'dark')) {
+            theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (_) {}
+        try {
+          var lc = localStorage.getItem('zap:locale');
+          if (!lc) {
+            var nav = (navigator.language || 'en').toLowerCase();
+            lc = nav.startsWith('zh') ? 'zh' : nav.startsWith('ja') ? 'ja' : 'en';
+          }
+          document.documentElement.setAttribute('data-locale', lc);
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body data-locale="en">
     <I18nScript />
     <Banner
-      en="Early development · Unofficial fork of Warp · Not affiliated with Warp Inc."
-      zh="早期开发阶段 · Warp 的非官方社区分支 · 与 Warp Inc. 无隶属关系"
-      ja="初期開発段階 · Warp の非公式コミュニティフォーク · Warp Inc. とは無関係"
+      en="Early development · An independent product built on Warp · Not affiliated with Warp Inc."
+      zh="早期开发阶段 · 基于 Warp 构建的独立产品 · 与 Warp Inc. 无隶属关系"
+      ja="初期開発段階 · Warp を基にした独立プロダクト · Warp Inc. とは無関係"
     />
     <LandingNav />
 
@@ -116,6 +137,18 @@ const {
         }
         document.addEventListener('scroll', onScroll, { passive: true });
         onScroll();
+
+        // 主题切换
+        function applyTheme(theme) {
+          document.documentElement.setAttribute('data-theme', theme);
+          try { localStorage.setItem('zap:theme', theme); } catch (_) {}
+        }
+        document.querySelectorAll('[data-theme-toggle]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+            applyTheme(cur === 'dark' ? 'light' : 'dark');
+          });
+        });
 
         // 移动端导航开关
         const toggle = document.querySelector<HTMLButtonElement>('.nav-toggle');
