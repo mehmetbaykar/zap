@@ -3072,7 +3072,6 @@ dependencies = [
  "clap",
  "command",
  "computer_use",
- "core-foundation 0.10.1",
  "dispatch2",
  "futures",
  "image",
