@@ -366,6 +366,16 @@ if [[ -z $WARP_BOOTSTRAPPED ]]; then
       bindkey -r '\ew'
       bindkey '\ew' warp_change_prompt_modes_to_warp_prompt
 
+      # 将 bracketed-paste ZLE widget 重置为内置默认值（.bracketed-paste）。
+      # bracketed-paste-magic 等插件（如 Oh My Zsh 中的同名插件）会覆盖此 widget，
+      # 对紧跟在 URL 之后的 ')' 等字符进行转义。由于 Warp 提交命令时使用 bracketed
+      # paste 序列，这类插件会在提交时错误地修改命令文本——例如将
+      # `(echo "https://example.com")` 变为 `(echo "https://example.com"\)`，
+      # 导致 ZSH 进入续行提示而非直接执行命令。
+      # 由于 Warp 通过自身输入层（而非 ZSH ZLE）管理所有编辑操作，重置此 widget
+      # 对用户不会产生任何可见影响。
+      zle -A .bracketed-paste bracketed-paste 2>/dev/null || true
+
       local escaped_pwd
       if [ -n "${WSL_DISTRO_NAME:-}" ]; then
         # In WSL, avoid symlinks b/c on Windows `std::fs` is unable to resolve symlink inside WSL containers.
