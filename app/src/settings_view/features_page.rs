@@ -563,6 +563,15 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
         flags::PRESERVE_INPUT_FOCUS_ON_BLOCK_SELECTION_FLAG,
     ));
 
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "preserve input focus on block selection",
+        builder(SettingsAction::FeaturesPageToggle(
+            FeaturesPageAction::TogglePreserveInputFocusOnBlockSelection,
+        )),
+        context,
+        flags::PRESERVE_INPUT_FOCUS_ON_BLOCK_SELECTION_FLAG,
+    ));
+
     if FeatureFlag::AgentView.is_enabled() && AISettings::as_ref(app).is_any_ai_enabled(app) {
         toggle_binding_pairs.push(
             ToggleSettingActionPair::new(
