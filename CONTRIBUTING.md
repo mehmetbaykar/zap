@@ -130,6 +130,16 @@ Contributors with several merged PRs may be invited to become collaborators. Col
 - Use complimentary Oz credits for contributions to this repository.
 - Apply and manage issue labels.
 
+### Stale PRs with requested changes
+
+If a review (from Oz or a maintainer) leaves your PR with **changes requested** and it then goes quiet, automation follows up and eventually closes it so the review queue stays current. This applies only to external-contributor PRs with an active requested-changes review.
+
+- **Reminders** are posted at **7** and **14** days of inactivity, with a **final warning at 26 days**.
+- The PR is **automatically closed at ~30 days** of inactivity — but only after that final warning, so you always get a heads-up first.
+- Only **your** activity resets the timer: pushing to your branch (including a force-push) or commenting on the PR. Maintainer comments don't reset it, since the PR is waiting on you.
+- To keep a PR open, just push updates or reply. A closed PR can be reopened when you're ready to continue (reopen it and push, or ask a maintainer to reopen).
+- Maintainers can apply the **`no-autoclose`** label to exempt a PR that should stay open (for example, when it's blocked on us).
+
 ## Development Setup
 
 See [README.md](README.md) and [WARP.md](WARP.md) for the full engineering guide. Quick start:
