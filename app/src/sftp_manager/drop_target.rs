@@ -1,8 +1,7 @@
-//! SFTP 浏览器拖拽目标 Element，拦截 OS 级文件拖拽事件。
+//! SFTP browser drag-and-drop target Element that intercepts OS-level file drag events.
 //!
-//! 仿照 `terminal_size_element.rs` 实现，在 `dispatch_event` 中
-//! 捕获 `DragFiles` / `DragFileExit` / `DragAndDropFiles` 事件，
-//! 转发为 `SftpBrowserAction`。
+//! Modeled after `terminal_size_element.rs`, it captures `DragFiles` / `DragFileExit` / `DragAndDropFiles`
+//! events in `dispatch_event` and forwards them as `SftpBrowserAction`.
 //! author: logic
 //! date: 2026-05-27
 
@@ -10,22 +9,19 @@ use std::any::Any;
 use std::path::PathBuf;
 
 use warpui::{
-    elements::Point,
-    event::DispatchedEvent,
-    geometry::vector::Vector2F,
-    AfterLayoutContext, AppContext, Element, Event, EventContext, LayoutContext, PaintContext,
-    SizeConstraint,
+    elements::Point, event::DispatchedEvent, geometry::vector::Vector2F, AfterLayoutContext,
+    AppContext, Element, Event, EventContext, LayoutContext, PaintContext, SizeConstraint,
 };
 
 use super::browser::SftpBrowserAction;
 
-/// SFTP 拖拽目标 Element
+/// SFTP drag-and-drop target Element
 pub struct SftpDropTargetElement {
     child: Box<dyn Element>,
 }
 
 impl SftpDropTargetElement {
-    /// 创建拖拽目标 Element
+    /// Create a drag-and-drop target Element
     pub fn new(child: Box<dyn Element>) -> Self {
         Self { child }
     }
@@ -93,8 +89,7 @@ impl Element for SftpDropTargetElement {
                     }
                     Event::DragAndDropFiles { paths, location } => {
                         if self.mouse_position_is_in_bounds(*location) && !paths.is_empty() {
-                            let paths: Vec<PathBuf> =
-                                paths.iter().map(PathBuf::from).collect();
+                            let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
                             ctx.dispatch_typed_action(SftpBrowserAction::DragAndDropFiles(paths));
                         }
                         return true;
@@ -108,7 +103,7 @@ impl Element for SftpDropTargetElement {
 }
 
 impl SftpDropTargetElement {
-    /// 判断鼠标位置是否在 Element 边界内
+    /// Determine whether the mouse position is within the Element's bounds
     fn mouse_position_is_in_bounds(&self, position: Vector2F) -> bool {
         let Some(bounds) = self.bounds() else {
             return false;

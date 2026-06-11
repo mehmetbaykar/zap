@@ -13,16 +13,16 @@
 
 use std::{borrow::Cow, future::Future};
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use rangemap::RangeSet;
 use regex_automata::{
-    Anchored, Input, MatchError, MatchKind,
     hybrid::{
-        BuildError, LazyStateID,
         dfa::{Cache, DFA},
+        BuildError, LazyStateID,
     },
     nfa::thompson,
     util::syntax::Config,
+    Anchored, Input, MatchError, MatchKind,
 };
 use sum_tree::SumTree;
 
@@ -320,7 +320,7 @@ impl Engine {
                     } else if let Some(character) = cursor.char() {
                         let mut bytes = [0u8; 4];
                         let utf8_len = character.encode_utf8(&mut bytes).len();
-                        // 反向 DFA 需按字节反序喂入,以匹配 query 的字节反向序列。
+                        // The reverse DFA must be fed bytes in reverse order, to match the reversed byte sequence of the query.
                         let byte_iter: &mut dyn Iterator<Item = u8> = match direction {
                             SearchDirection::Forward => &mut bytes[..utf8_len].iter().copied(),
                             SearchDirection::Reverse => {

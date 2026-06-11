@@ -1,7 +1,7 @@
-//! 提示用户类工具:`suggest_new_conversation` / `suggest_prompt`。
+//! User-prompting tools: `suggest_new_conversation` / `suggest_prompt`.
 //!
-//! 这两个 tool 都是**纯本地 channel 信号** + UI 弹窗 — 模型主动建议某个动作,
-//! 用户在 UI 接受/拒绝,executor 等用户决定后回写 result。不依赖任何 server。
+//! Both tools are **pure local channel signals** + a UI dialog — the model proactively suggests an action,
+//! the user accepts/rejects it in the UI, and the executor writes back the result after the user decides. They don't depend on any server.
 
 use anyhow::Result;
 use serde::Deserialize;
@@ -16,7 +16,7 @@ use super::OpenAiTool;
 
 #[derive(Debug, Deserialize)]
 struct NewConvArgs {
-    /// 当前 assistant message 的 id(模型若不知道可传空字符串,controller 会兜底)。
+    /// The id of the current assistant message (if the model doesn't know it, it can pass an empty string and the controller will fill it in).
     #[serde(default)]
     message_id: String,
 }
@@ -27,7 +27,7 @@ fn new_conv_parameters() -> Value {
         "properties": {
             "message_id": {
                 "type": "string",
-                "description": "可选: 从哪条 assistant message 处分支新对话(留空则用当前 message)。"
+                "description": "Optional: which assistant message to branch the new conversation from (leave empty to use the current message)."
             }
         },
         "additionalProperties": false
@@ -66,10 +66,10 @@ fn new_conv_result_to_json(result: &api::message::tool_call_result::Result) -> O
 
 pub static SUGGEST_NEW_CONVERSATION: OpenAiTool = OpenAiTool {
     name: "suggest_new_conversation",
-    description: "建议用户从当前 message 处分支出一个新对话。\
-                  适用场景:当前对话上下文已经很长且即将切换主题,或当前任务结束、\
-                  下一个任务与之无关时。UI 会弹出确认框,用户接受才真正分支。\
-                  **不要滥用** — 只在上下文切换收益明显时调。",
+    description: "Suggests that the user branch a new conversation from the current message. \
+                  Applicable when the current conversation context is already long and is about to switch topics, or when the current task has ended and \
+                  the next task is unrelated to it. The UI pops up a confirmation box, and it only branches once the user accepts. \
+                  **Don't abuse it** — only call it when the benefit of switching context is clear.",
     parameters: new_conv_parameters,
     from_args: new_conv_from_args,
     result_to_json: new_conv_result_to_json,
@@ -81,9 +81,9 @@ pub static SUGGEST_NEW_CONVERSATION: OpenAiTool = OpenAiTool {
 
 #[derive(Debug, Deserialize)]
 struct PromptArgs {
-    /// 实际发给 agent 的 prompt 文本。
+    /// The prompt text actually sent to the agent.
     prompt: String,
-    /// 可选:UI 上展示的短标签(若 prompt 太长用作 chip 显示)。
+    /// Optional: a short label shown in the UI (used for chip display if the prompt is too long).
     #[serde(default)]
     label: String,
 }
@@ -94,11 +94,11 @@ fn prompt_parameters() -> Value {
         "properties": {
             "prompt": {
                 "type": "string",
-                "description": "建议给用户的下一条 prompt(用户点击后实际发给 agent)。"
+                "description": "The next prompt to suggest to the user (sent to the agent when the user clicks it)."
             },
             "label": {
                 "type": "string",
-                "description": "可选: chip 上显示的短标签(prompt 较长时建议提供)。"
+                "description": "Optional: a short label shown on the chip (recommended when the prompt is long)."
             }
         },
         "required": ["prompt"],
@@ -138,9 +138,9 @@ fn prompt_result_to_json(result: &api::message::tool_call_result::Result) -> Opt
 
 pub static SUGGEST_PROMPT: OpenAiTool = OpenAiTool {
     name: "suggest_prompt",
-    description: "在回答末尾给用户提议下一条 prompt(以 chip 形式展示)。\
-                  适用场景:任务自然延伸出明显的 follow-up(测试通过后建议跑 lint;读完代码建议补单测等)。\
-                  避免给重复或显而易见的建议。",
+    description: "Proposes the next prompt to the user at the end of the answer (shown as a chip). \
+                  Applicable when the task naturally extends into an obvious follow-up (suggest running lint after tests pass; suggest adding unit tests after reading code, etc.). \
+                  Avoid giving repetitive or obvious suggestions.",
     parameters: prompt_parameters,
     from_args: prompt_from_args,
     result_to_json: prompt_result_to_json,

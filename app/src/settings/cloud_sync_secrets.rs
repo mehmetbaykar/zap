@@ -1,7 +1,7 @@
-//! 云同步 Token 安全存储 — 使用 OS 密钥库（Windows Credential Manager / macOS Keychain / Linux Secret Service）。
+//! Secure storage for cloud sync tokens — uses the OS keychain (Windows Credential Manager / macOS Keychain / Linux Secret Service).
 //!
-//! 数据形态: `HashMap<platform_key, token>`, 通过 `serde_json` 序列化后写入
-//! `secure_storage` 的 `CloudSyncTokens` 键。
+//! Data shape: `HashMap<platform_key, token>`, serialized via `serde_json` and written to
+//! the `CloudSyncTokens` key in `secure_storage`.
 //!
 // author: logic
 // date: 2026-05-26
@@ -13,35 +13,35 @@ use warpui_extras::secure_storage::{self, AppContextExt};
 
 const SECURE_STORAGE_KEY: &str = "CloudSyncTokens";
 
-/// 平台 Token 在 HashMap 中的 key
+/// Keys for the platform tokens in the HashMap
 pub const GITHUB_TOKEN_KEY: &str = "github_token";
 pub const GITEE_TOKEN_KEY: &str = "gitee_token";
 
-/// 当 Token 发生变化时发出
+/// Emitted when a token changes
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CloudSyncTokenStoreEvent {
     TokensChanged,
 }
 
-/// 单例: 管理云同步平台的访问令牌
+/// Singleton: manages access tokens for cloud sync platforms
 pub struct CloudSyncTokenStore {
     tokens: HashMap<String, String>,
 }
 
 impl CloudSyncTokenStore {
-    /// 启动时从 secure storage 读取所有 token
+    /// Reads all tokens from secure storage at startup
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
         Self {
             tokens: Self::load_from_storage(ctx),
         }
     }
 
-    /// 读取指定平台的 token, 若未配置则返回 `None`
+    /// Reads the token for the given platform; returns `None` if it is not configured
     pub fn get(&self, platform_key: &str) -> Option<&str> {
         self.tokens.get(platform_key).map(String::as_str)
     }
 
-    /// 设置/更新某个平台的 token。传入空字符串等价于删除
+    /// Sets/updates a platform's token. Passing an empty string is equivalent to deletion
     pub fn set(&mut self, platform_key: &str, token: String, ctx: &mut ModelContext<Self>) {
         if token.is_empty() {
             self.tokens.remove(platform_key);
@@ -139,7 +139,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(GITHUB_TOKEN_KEY.to_string(), "ghp_abc".to_string());
         let mut store = make_store(map);
-        // 模拟 set 中空串删除逻辑
+        // Simulate the empty-string deletion logic in set
         store.tokens.remove(GITHUB_TOKEN_KEY);
         assert_eq!(store.get(GITHUB_TOKEN_KEY), None);
     }
@@ -149,7 +149,9 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(GITHUB_TOKEN_KEY.to_string(), "old_token".to_string());
         let mut store = make_store(map);
-        store.tokens.insert(GITHUB_TOKEN_KEY.to_string(), "new_token".to_string());
+        store
+            .tokens
+            .insert(GITHUB_TOKEN_KEY.to_string(), "new_token".to_string());
         assert_eq!(store.get(GITHUB_TOKEN_KEY), Some("new_token"));
     }
 
@@ -178,7 +180,7 @@ mod tests {
     #[test]
     fn test_persist_removes_key_when_empty() {
         let store = make_store(HashMap::new());
-        // 空 map 不应序列化写入
+        // An empty map should not be serialized and written
         assert!(store.tokens.is_empty());
     }
 
@@ -205,6 +207,9 @@ mod tests {
 
     #[test]
     fn test_event_equality() {
-        assert_eq!(CloudSyncTokenStoreEvent::TokensChanged, CloudSyncTokenStoreEvent::TokensChanged);
+        assert_eq!(
+            CloudSyncTokenStoreEvent::TokensChanged,
+            CloudSyncTokenStoreEvent::TokensChanged
+        );
     }
 }

@@ -44,7 +44,7 @@ fn only_environment_context_returns_none() {
     ];
     assert!(
         render_user_attachments(&ctx).is_none(),
-        "环境型 context 不应进 user message"
+        "environment-type context should not enter the user message"
     );
 }
 
@@ -57,7 +57,7 @@ fn single_block_renders_required_fields() {
         1,
         false,
     )))];
-    let out = render_user_attachments(&ctx).expect("应当渲染");
+    let out = render_user_attachments(&ctx).expect("should render");
     assert!(out.starts_with("<attached_context>"));
     assert!(out.ends_with("</attached_context>"));
     assert!(out.contains("command_id=\"b-1\""));
@@ -150,7 +150,7 @@ fn file_binary_content_self_closing_with_size() {
         None,
     );
     let out = render_user_attachments(&[AIAgentContext::File(f)]).unwrap();
-    // 新版 placeholder:path + mime_type + binary + size,缺一不可。
+    // the new placeholder: path + mime_type + binary + size, all required.
     assert!(out.contains("path=\"logo.png\""));
     assert!(out.contains("mime_type=\"image/png\""));
     assert!(out.contains("binary=\"true\""));
@@ -159,7 +159,7 @@ fn file_binary_content_self_closing_with_size() {
 
 #[test]
 fn file_binary_empty_omits_size_attr() {
-    // 上层故意没读 bytes(.exe / 超大文件)→ size 属性应被省略,但 path / mime / binary 必存
+    // the upper layer deliberately didn't read the bytes (.exe / very large file) → the size attribute should be omitted, but path / mime / binary must exist
     let f = FileContext::new(
         "C:\\Users\\me\\WarpSetup.exe".into(),
         AnyFileContent::BinaryContent(Vec::new()),
@@ -171,10 +171,10 @@ fn file_binary_empty_omits_size_attr() {
     assert!(out.contains("binary=\"true\""));
     assert!(
         !out.contains("size="),
-        "空 BinaryContent 不应输出 size 属性"
+        "empty BinaryContent should not output the size attribute"
     );
-    // .exe 默认 mime 是 application/vnd.microsoft.portable-executable 或 octet-stream,
-    // 不强 assert 具体值,只验证 mime_type 属性存在
+    // the .exe default mime is application/vnd.microsoft.portable-executable or octet-stream,
+    // don't assert the exact value, only verify the mime_type attribute exists
     assert!(out.contains("mime_type=\""));
 }
 
@@ -190,7 +190,7 @@ fn image_renders_placeholder_only() {
     assert!(out.contains("<image file_name=\"shot.png\" mime_type=\"image/png\" />"));
     assert!(
         !out.contains("BASE64DATA"),
-        "首版不应内联 base64,避免上下文被填爆"
+        "the first version should not inline base64, to avoid flooding the context"
     );
 }
 
@@ -203,18 +203,18 @@ fn referenced_notebook_renders_full_payload() {
             uid: "Client-1".to_string(),
             payload: Some(DriveObjectPayload::Notebook {
                 title: "base".to_string(),
-                content: "base prompt 内容".to_string(),
+                content: "base prompt content".to_string(),
             }),
         },
     );
 
-    let out = render_referenced_attachments(&attachments).expect("应当渲染");
+    let out = render_referenced_attachments(&attachments).expect("should render");
     assert!(out.contains("<attached_context>"));
     assert!(out.contains("reference=\"@base\""));
     assert!(out.contains("uid=\"Client-1\""));
     assert!(out.contains("type=\"notebook\""));
     assert!(out.contains("<title>\nbase\n    </title>"));
-    assert!(out.contains("base prompt 内容"));
+    assert!(out.contains("base prompt content"));
 }
 
 #[test]
@@ -230,7 +230,7 @@ fn referenced_document_content_renders_full_payload() {
         },
     );
 
-    let out = render_referenced_attachments(&attachments).expect("应当渲染");
+    let out = render_referenced_attachments(&attachments).expect("should render");
     assert!(out.contains("<document_content"));
     assert!(out.contains("reference=\"@plan\""));
     assert!(out.contains("document_id=\"doc-1\""));

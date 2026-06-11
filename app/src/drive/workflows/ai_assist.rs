@@ -37,8 +37,8 @@ impl GeneratedCommandMetadataError {
 }
 
 impl WorkflowModal {
-    /// 通过 BYOP one-shot completion 为命令生成 metadata,并把 AI 反馈
-    /// 直接落到 modal 编辑器对应字段。无 BYOP 配置 → 直接 emit 错误事件。
+    /// Generates metadata for a command via a BYOP one-shot completion, and applies the AI
+    /// feedback directly into the corresponding fields of the modal editor. No BYOP config → emit an error event directly.
     pub(super) fn issue_request(&mut self, ctx: &mut ViewContext<Self>) {
         let content = self.content_editor.as_ref(ctx).buffer_text(ctx);
         let raw_request = content.trim().to_string();

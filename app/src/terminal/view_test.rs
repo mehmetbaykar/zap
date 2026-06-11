@@ -3674,9 +3674,9 @@ fn cli_agent_rich_input_open_sets_terminal_keymap_context() {
     })
 }
 
-// 行为测试：当 rich input 已打开时，再次触发 OpenCLIAgentRichInput action
-// （即 Ctrl-G 实际命中绑定后被 dispatch 的 handler）应当关闭 rich input。
-// 这覆盖了本次修复的核心 toggle 路径。
+// Behavior test: when rich input is already open, triggering the OpenCLIAgentRichInput action again
+// (i.e. the handler dispatched after Ctrl-G actually hits its binding) should close rich input.
+// This covers the core toggle path of this fix.
 #[test]
 fn ctrl_g_action_closes_open_cli_agent_rich_input() {
     use crate::settings::import::model::ImportedConfigModel;
@@ -4713,11 +4713,11 @@ fn linear_deeplink_via_default_entrypoint_does_not_auto_submit_in_fullscreen() {
     })
 }
 
-// ---- OneKey 搜索过滤 pure 函数测试 ----
+// ---- OneKey search-filter pure-function tests ----
 //
-// 这些测试只针对 `filter_and_sort_onekey_candidates` 这条 pure 路径,
-// 不需要构造 TerminalView / ctx。skim 算法的 Unicode 处理由 fuzzy_match
-// crate 负责,这里只验证我们在 view.rs 中对它的使用是否符合预期。
+// These tests target only the `filter_and_sort_onekey_candidates` pure path,
+// without constructing a TerminalView / ctx. The skim algorithm's Unicode handling is owned by the fuzzy_match
+// crate; here we only verify that our usage of it in view.rs behaves as expected.
 
 use super::filter_and_sort_onekey_candidates;
 use super::OnekeyMenuRows;
@@ -4750,9 +4750,9 @@ fn onekey_empty_query_after_trim_returns_full_set() {
 #[test]
 fn onekey_query_filters_out_non_matches() {
     let candidates = vec![("apple", "x"), ("banana", "x"), ("apricot", "x")];
-    // "ap" 应该命中 apple / apricot,banana 不命中。
-    // 这里不断言 apple / apricot 之间的相对顺序——具体打分由 skim 决定,
-    // 我们只保证 banana 被过滤掉。
+    // "ap" should match apple / apricot, not banana.
+    // We don't assert the relative order between apple / apricot here — the exact score is decided by skim,
+    // we only guarantee that banana is filtered out.
     let result = filter_and_sort_onekey_candidates(candidates.iter().copied(), "ap");
     let indices = rows_indices(result);
     assert!(indices.contains(&0)); // apple
@@ -4768,7 +4768,7 @@ fn onekey_query_matches_subtitle() {
     ];
     let result = filter_and_sort_onekey_candidates(candidates.iter().copied(), "prod");
     let indices = rows_indices(result);
-    // 只有 server-1 的 subtitle 含 prod。
+    // Only server-1's subtitle contains prod.
     assert_eq!(indices, vec![0]);
 }
 
@@ -4781,7 +4781,7 @@ fn onekey_query_no_match_returns_no_matches() {
 
 #[test]
 fn onekey_query_matches_chinese_characters() {
-    // 中文字符序列匹配:skim 算法按 Unicode char 处理。
+    // Chinese character sequence matching: the skim algorithm processes per Unicode char.
     let candidates = vec![
         ("生产数据库", "ops@db.example.com:22"),
         ("测试服务器", "qa@test.example.com:22"),

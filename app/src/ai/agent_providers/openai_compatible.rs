@@ -1,21 +1,21 @@
-//! OpenAI 兼容客户端的最小子集:目前只用来抓 `/models` 列表。
+//! A minimal subset of an OpenAI-compatible client: currently only used to fetch the `/models` list.
 //!
-//! 等第二阶段做 multi-agent 调用时,这里会扩展为完整的
-//! Chat Completions + 工具调用 stream。
+//! When the second phase adds multi-agent calls, this will be expanded into a complete
+//! Chat Completions + tool-calling stream.
 
 use serde::Deserialize;
 
 use http_client::Client;
 
-/// `/models` 端点返回的单个模型条目。
+/// A single model entry returned by the `/models` endpoint.
 ///
-/// 我们只关心 `id`(给 Agent 用作 model 名)。其他字段(`object`/`created`/`owned_by`)
-/// 不同提供商差异较大,这里全部忽略。
+/// We only care about `id` (used by the Agent as the model name). Other fields (`object`/`created`/`owned_by`)
+/// vary significantly across providers and are all ignored here.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct OpenAiCompatibleModel {
     pub id: String,
-    /// 由 `owned_by` 推断的拥有者,主要用作 UI 展示,可能为空。
+    /// The owner inferred from `owned_by`, mainly for UI display; may be empty.
     #[serde(default)]
     pub owned_by: Option<String>,
 }
@@ -25,49 +25,49 @@ struct ModelsResponse {
     data: Vec<OpenAiCompatibleModel>,
 }
 
-/// fetch 期间可能出现的错误。
+/// Errors that may occur during fetch.
 #[derive(Debug, thiserror::Error)]
 pub enum OpenAiCompatibleError {
-    #[error("base URL 无效: {0}")]
+    #[error("invalid base URL: {0}")]
     InvalidBaseUrl(String),
 
-    #[error("HTTP 错误: {0}")]
+    #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
-    #[error("HTTP 状态码 {status}: {body}")]
+    #[error("HTTP status code {status}: {body}")]
     Status { status: u16, body: String },
 
-    #[error("响应解析失败: {0}")]
+    #[error("response parsing failed: {0}")]
     Decode(String),
 
-    #[error("网络/流式请求失败: {0}")]
+    #[error("network/streaming request failed: {0}")]
     Stream(String),
 
-    #[error("调用失败: {0}")]
+    #[error("call failed: {0}")]
     Other(String),
 }
 
-/// 把用户输入的 base_url 规范化成绝对 URL 形式,
-/// 容忍尾部 `/`、缺失的 `/v1`、`/openai/v1` 等情况。
+/// Normalizes the user-entered base_url into an absolute URL form,
+/// tolerating a trailing `/`, a missing `/v1`, `/openai/v1`, etc.
 pub(crate) fn normalize_base_url(input: &str) -> Result<String, OpenAiCompatibleError> {
     let trimmed = input.trim().trim_end_matches('/');
     if trimmed.is_empty() {
         return Err(OpenAiCompatibleError::InvalidBaseUrl(
-            "base URL 不能为空".to_string(),
+            "base URL cannot be empty".to_string(),
         ));
     }
     if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
         return Err(OpenAiCompatibleError::InvalidBaseUrl(format!(
-            "base URL 必须以 http:// 或 https:// 开头: {trimmed}"
+            "base URL must start with http:// or https://: {trimmed}"
         )));
     }
     Ok(trimmed.to_string())
 }
 
-/// 调用 `${base_url}/models`,返回模型 ID 列表(已去重 + 按字母序排序)。
+/// Calls `${base_url}/models`, returning the list of model IDs (deduplicated + alphabetically sorted).
 ///
-/// 鉴权:若 `api_key` 非空则以 `Authorization: Bearer ...` 形式带上。
-/// 部分本地服务(如 Ollama)允许不带鉴权,因此 key 为空时不发送 header。
+/// Authentication: if `api_key` is non-empty, it's attached as `Authorization: Bearer ...`.
+/// Some local services (such as Ollama) allow no authentication, so the header isn't sent when the key is empty.
 pub async fn fetch_openai_compatible_models(
     client: Client,
     base_url: &str,

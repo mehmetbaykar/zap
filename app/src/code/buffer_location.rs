@@ -10,8 +10,9 @@ use warp_util::standardized_path::StandardizedPath;
 /// Pairs a [`HostId`] (to deduplicate across multiple SSH sessions to the
 /// same host) with the server-side [`StandardizedPath`].
 ///
-/// 实现 `Serialize`/`Deserialize` 仅为让其能作为 `CodeSource` 的字段编译通过
-/// (`CodeSource` 整体派生 serde);远端文件 pane 实际不持久化。
+/// `Serialize`/`Deserialize` are implemented only so this can compile as a
+/// field of `CodeSource` (which derives serde wholesale); remote file panes
+/// are not actually persisted.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RemotePath {
     pub host_id: HostId,
@@ -24,7 +25,7 @@ impl RemotePath {
         Self { host_id, path }
     }
 
-    /// 远端文件名(取路径最后一段),用作 tab / pane header 标题。
+    /// Remote file name (last path segment), used as the tab / pane header title.
     pub fn file_name(&self) -> &str {
         self.path
             .as_str()
@@ -45,7 +46,7 @@ pub enum BufferLocation {
 }
 
 impl BufferLocation {
-    /// 本地路径(仅 `Local` 变体有);远端文件返回 `None`。
+    /// Local path (only the `Local` variant has one); remote files return `None`.
     pub fn local_path(&self) -> Option<&std::path::Path> {
         match self {
             BufferLocation::Local(path) => Some(path.as_path()),
@@ -53,7 +54,7 @@ impl BufferLocation {
         }
     }
 
-    /// 用于 tab / header 显示的文件名。
+    /// File name used for tab / header display.
     pub fn display_name(&self) -> String {
         match self {
             BufferLocation::Local(path) => path
@@ -64,8 +65,8 @@ impl BufferLocation {
         }
     }
 
-    /// 用于语言识别(后缀)的路径。远端文件用其远端路径构造一个
-    /// `PathBuf`(只取后缀,不做文件系统访问)。
+    /// Path used for language detection (by extension). Remote files build a
+    /// `PathBuf` from their remote path (extension only, no filesystem access).
     pub fn language_path(&self) -> PathBuf {
         match self {
             BufferLocation::Local(path) => path.clone(),
@@ -107,7 +108,7 @@ impl SyncClock {
     }
 
     /// Reconstruct a `SyncClock` from wire values (proto deserialization).
-    /// 用 `from_wire_u64` 饱和而不是 `as usize`,避免 32-bit 平台上隐式截断。
+    /// Use `from_wire_u64` saturation instead of `as usize` to avoid implicit truncation on 32-bit platforms.
     pub fn from_wire(server_version: u64, client_version: u64) -> Self {
         Self {
             server_version: ContentVersion::from_wire_u64(server_version),

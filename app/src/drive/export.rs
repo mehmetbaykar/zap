@@ -367,7 +367,7 @@ impl ExportManager {
         ctx: &mut ModelContext<Self>,
     ) {
         let id = *export.key();
-        // 导出失败可能包含用户文件路径或对象名,只写本地安全日志;最常见原因也是本机 I/O 问题。
+        // An export failure may include user file paths or object names, so only write a local safe log; the most common cause is also a local I/O problem.
         safe_warn!(
             safe: ("Exporting {id:?} failed"),
             full: ("Exporting {id:?} failed: {error:#}")

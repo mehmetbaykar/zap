@@ -329,7 +329,7 @@ pub fn read_images_from_clipboard(
             }
         }
         // arboard saw no CF_DIB / CF_BITMAP, or failed to convert it.
-        // On Windows, many screenshot tools (Snipaste / ShareX / QQ / 微信)
+        // On Windows, many screenshot tools (Snipaste / ShareX / QQ / WeChat)
         // only write the registered "PNG" format, or write a malformed CF_DIB
         // alongside a real PNG payload. Try those raw formats before giving up.
         Err(err) => {
@@ -354,12 +354,13 @@ pub fn read_images_from_clipboard(
     }
 }
 
-/// Windows 专用兜底: 只枚举看起来像图片的剪贴板格式,并寻找
-/// PNG/JPEG/GIF/WebP 等已知图片字节。
+/// Windows-only fallback: only enumerate clipboard formats that look like images,
+/// and search for known image bytes such as PNG/JPEG/GIF/WebP.
 ///
-/// 这用于兼容不写 CF_DIB、只注册 "PNG" 或 "image/png" 之类格式名的截图工具。
-/// 不要探测任意注册格式: clipboard-win 读取原始字节时必须调用
-/// GlobalSize/GlobalLock,而一些外部剪贴板格式不能安全地当成 HGLOBAL 字节缓冲读取。
+/// This exists to support screenshot tools that don't write CF_DIB and only register
+/// a format name like "PNG" or "image/png". Do not probe arbitrary registered formats:
+/// reading raw bytes through clipboard-win requires calling GlobalSize/GlobalLock, and
+/// some external clipboard formats cannot safely be read as an HGLOBAL byte buffer.
 #[cfg(target_os = "windows")]
 fn try_read_image_via_custom_windows_formats(
     filename: Option<String>,
@@ -376,7 +377,8 @@ fn try_read_image_via_custom_windows_formats(
         }
     };
 
-    // 先收集候选格式,避免为了诊断而 raw-read 外部应用放入的每一种自定义格式。
+    // Collect candidate formats first, to avoid raw-reading every custom format an
+    // external app placed on the clipboard just for diagnostics.
     let formats: Vec<(u32, String)> = EnumFormats::new()
         .filter_map(|fmt| {
             let name = raw::format_name_big(fmt).unwrap_or_else(|| format!("<unknown {fmt:#06x}>"));
@@ -449,8 +451,9 @@ fn is_windows_image_clipboard_format_candidate(format: u32, name: &str) -> bool 
         return true;
     }
 
-    // 只有格式名明确表示图片字节的注册格式才足够适合 raw-read。
-    // 这样保留常见截图工具支持,同时文本粘贴时不会触碰浏览器/编辑器的任意私有格式。
+    // Only registered formats whose name clearly indicates image bytes are safe enough to raw-read.
+    // This keeps support for common screenshot tools while not touching arbitrary private formats
+    // from browsers/editors when pasting text.
     let normalized = name.to_ascii_lowercase();
     ["png", "jpeg", "jpg", "gif", "webp", "image/"]
         .iter()

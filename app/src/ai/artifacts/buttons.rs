@@ -53,7 +53,7 @@ impl ArtifactButtonsRow {
 }
 
 pub enum ArtifactButtonsRowEvent {
-    /// openWarp 本地化:点击 plan 按钮走本地 AIDocumentId,不再依赖云 notebook 镜像。
+    /// openWarp localization: clicking the plan button uses the local AIDocumentId and no longer depends on the cloud notebook mirror.
     OpenPlan {
         document_uid: AIDocumentId,
     },
@@ -129,11 +129,11 @@ fn collect_buttons(
         match artifact {
             Artifact::Plan {
                 title,
-                notebook_uid: _, // openWarp 不再依赖云 notebook_uid;本地走 document_uid
+                notebook_uid: _, // openWarp no longer depends on the cloud notebook_uid; locally it uses document_uid
                 document_uid,
             } => {
-                // openWarp 本地化:只要能解析出本地 AIDocumentId 就显示按钮,
-                // 点击打开本地 AIDocument pane;不再依赖云 notebook 镜像。
+                // openWarp localization: as long as a local AIDocumentId can be parsed, show the button,
+                // which on click opens the local AIDocument pane; no longer depends on the cloud notebook mirror.
                 if let Ok(document_uid) = AIDocumentId::try_from(document_uid.as_str()) {
                     let button_text = title.clone().unwrap_or("Untitled Plan".to_string());
                     let theme = theme.clone();

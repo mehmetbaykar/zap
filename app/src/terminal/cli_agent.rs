@@ -568,12 +568,12 @@ impl From<CLIAgent> for CLIAgentType {
     }
 }
 
-/// CLI agent 安装状态缓存。应用启动时后台线程填充一次。
+/// CLI agent install-status cache. Populated once by a background thread at app startup.
 static AGENT_INSTALL_CACHE: LazyLock<Arc<RwLock<Option<HashMap<CLIAgent, bool>>>>> =
     LazyLock::new(|| Arc::new(RwLock::new(None)));
 
 impl CLIAgent {
-    /// 非阻塞读取缓存。缓存未就绪时返回 false，菜单中不展示该 agent。
+    /// Non-blocking cache read. Returns false when the cache is not ready, so the agent is hidden from the menu.
     pub fn is_installed(&self) -> bool {
         AGENT_INSTALL_CACHE
             .read()
@@ -582,8 +582,8 @@ impl CLIAgent {
             .unwrap_or(false)
     }
 
-    /// 后台刷新全部 agent 的安装状态，不阻塞 UI。
-    /// 仅在应用启动时调用一次。
+    /// Refreshes the install status of all agents in the background without blocking the UI.
+    /// Called only once at app startup.
     pub fn refresh_install_cache() {
         let cache = AGENT_INSTALL_CACHE.clone();
         std::thread::spawn(move || {
@@ -597,20 +597,20 @@ impl CLIAgent {
         });
     }
 
-    /// 同步检测系统是否安装了此 agent。后台线程专用。
+    /// Synchronously detects whether this agent is installed on the system. Background-thread only.
     fn is_installed_blocking(&self) -> bool {
         match self {
             CLIAgent::Unknown => false,
-            // `agent` 太泛化，Cursor CLI 用 cursor-agent 检测
+            // `agent` is too generic; detect Cursor CLI via cursor-agent
             CLIAgent::CursorCli => is_on_path("cursor-agent"),
-            // DeepSeek 同时检查主命令和别名
+            // DeepSeek: check both the main command and the alias
             CLIAgent::DeepSeek => is_on_path("deepseek") || is_on_path("deepseek-tui"),
             other => is_on_path(other.command_prefix()),
         }
     }
 }
 
-/// 内联 PATH 搜索，零进程、零闪窗。
+/// Inline PATH search; zero processes, zero flashing windows.
 #[cfg(unix)]
 fn is_on_path(cmd: &str) -> bool {
     let Ok(path_var) = std::env::var("PATH") else {

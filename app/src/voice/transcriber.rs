@@ -17,7 +17,7 @@ pub enum TranscribeError {
     #[error("Failed to deserialize JSON.")]
     Deserialization,
 
-    /// Zap 已禁用语音转写(BYOP genai 协议无法承载音频)。
+    /// Voice transcription is disabled in Zap (the BYOP genai protocol cannot carry audio).
     #[error("Voice transcription is unavailable in Zap.")]
     Disabled,
 
@@ -55,9 +55,10 @@ impl VoiceTranscriber {
         }
     }
 
-    /// Zap(本地化,Phase 4):创建一个禁用的 transcriber。原语义上 `Some(...)`
-    /// 代表云端 STT 后端可用,`None` 代表 "transcriber disabled";本地化后云端
-    /// `ServerVoiceTranscriber`(调 server_api.transcribe 发 Wispr STT)不可用,改走该构造子。
+    /// Zap (localization, Phase 4): create a disabled transcriber. In the original semantics
+    /// `Some(...)` meant the cloud STT backend was available and `None` meant "transcriber disabled";
+    /// after localization the cloud `ServerVoiceTranscriber` (which calls server_api.transcribe to
+    /// invoke Wispr STT) is unavailable, so this constructor is used instead.
     pub fn disabled() -> Self {
         Self { transcriber: None }
     }

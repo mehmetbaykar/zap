@@ -1,13 +1,13 @@
-//! `apply_file_diffs`:写文件 / 改文件 / 删文件 三合一。
+//! `apply_file_diffs`: write file / edit file / delete file, three-in-one.
 //!
-//! warp protobuf 中的 `ApplyFileDiffs` 包含 4 个并列 vec:
-//! - `diffs`: search/replace 风格的字符串替换
-//! - `v4a_updates`: V4A 风格的多 hunk 修补(高级,Phase 4 再加)
-//! - `new_files`: 创建新文件
-//! - `deleted_files`: 删除文件
+//! The `ApplyFileDiffs` in the warp protobuf contains 4 parallel vecs:
+//! - `diffs`: search/replace-style string replacement
+//! - `v4a_updates`: V4A-style multi-hunk patching (advanced, added in Phase 4)
+//! - `new_files`: create new files
+//! - `deleted_files`: delete files
 //!
-//! 给上游模型提供一个聚合的 `apply_file_diffs(operations)` 工具,通过
-//! `op` 字段区分子类型 — 比让模型一次回 4 个并列数组更直观、错误率低。
+//! Provides the upstream model with an aggregated `apply_file_diffs(operations)` tool that distinguishes
+//! subtypes via the `op` field — more intuitive and lower error rate than having the model return 4 parallel arrays at once.
 
 use anyhow::Result;
 use serde::Deserialize;
@@ -25,17 +25,17 @@ struct Args {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op")]
 enum Operation {
-    /// 字符串搜索-替换(最常用,适合改一两处)。
+    /// String search-replace (most common, suitable for changing one or two spots).
     #[serde(rename = "edit")]
     Edit {
         file_path: String,
         search: String,
         replace: String,
     },
-    /// 创建新文件。
+    /// Create a new file.
     #[serde(rename = "create")]
     Create { file_path: String, content: String },
-    /// 删除已有文件。
+    /// Delete an existing file.
     #[serde(rename = "delete")]
     Delete { file_path: String },
 }
@@ -46,11 +46,11 @@ fn parameters() -> Value {
         "properties": {
             "summary": {
                 "type": "string",
-                "description": "对本次修改的简短中文总结(1 句),会展示给用户审批用。"
+                "description": "A short summary of this change (1 sentence), shown to the user for approval."
             },
             "operations": {
                 "type": "array",
-                "description": "本次要执行的所有文件操作(可批量)。op 区分子类型: edit/create/delete。",
+                "description": "All file operations to perform this time (can be batched). op distinguishes subtypes: edit/create/delete.",
                 "items": {
                     "oneOf": [
                         {
@@ -58,8 +58,8 @@ fn parameters() -> Value {
                             "properties": {
                                 "op": {"type": "string", "enum": ["edit"]},
                                 "file_path": {"type": "string"},
-                                "search": {"type": "string", "description": "要被替换掉的原文片段(必须与文件中已存在的内容完全一致,包括空白/换行)。"},
-                                "replace": {"type": "string", "description": "替换后的内容。"}
+                                "search": {"type": "string", "description": "The original snippet to be replaced (must exactly match the existing content in the file, including whitespace/newlines)."},
+                                "replace": {"type": "string", "description": "The content after replacement."}
                             },
                             "required": ["op", "file_path", "search", "replace"]
                         },

@@ -1,20 +1,20 @@
 /* ============================================================
- * Zap landing — Cursor 风格双主题重构
- * 深色 token 参考 cursor.com 实测:body bg #14120b、文本 #ededed
- * 浅色 token 参考 Cursor 浅色主题:body warm-off-white、文本 #14120b
- * H1 26px/400、卡片稍亮一档、sans 字体 + JetBrains Mono code。
+ * Zap landing — Cursor-style dual-theme rebuild
+ * Dark tokens based on measurements from cursor.com: body bg #14120b, text #ededed
+ * Light tokens based on Cursor's light theme: body warm-off-white, text #14120b
+ * H1 26px/400, cards one notch brighter, sans font + JetBrains Mono code.
  * ============================================================ */
 
 :root {
     color-scheme: dark;
 }
 
-/* 默认(不带 data-theme 或 = dark)与显式 dark */
+/* Default (no data-theme, or = dark) and explicit dark */
 :root,
 :root[data-theme="dark"] {
     color-scheme: dark;
 
-    /* 基础调色 — 暖暗棕黑系 */
+    /* Base palette — warm dark brown-black family */
     --bg: #0f0e0a;
     --bg-2: #16140e;
     --bg-3: #1c1a13;
@@ -31,7 +31,7 @@
     --line-2: #383428;
     --line-strong: #4a4636;
 
-    /* 兼容旧 token 名(部分类还在引用) */
+    /* Compat with old token names (some classes still reference them) */
     --dark: var(--surface);
     --dark-2: var(--surface-2);
     --dark-3: var(--bg-2);
@@ -51,7 +51,7 @@
     --syn-num: #e6a86a;
     --syn-com: #6b685f;
 
-    /* 动态颜色(主题相关的透明蒙版 / shadow) */
+    /* Dynamic colors (theme-dependent translucent overlays / shadow) */
     --nav-bg: rgba(15, 14, 10, 0.78);
     --nav-bg-scrolled: rgba(15, 14, 10, 0.92);
     --shadow-card:
@@ -67,7 +67,7 @@
     --kbd-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 
-/* 浅色主题 */
+/* Light theme */
 :root[data-theme="light"] {
     color-scheme: light;
 
@@ -134,8 +134,8 @@ body {
     overflow-x: clip;
     max-width: 100%;
 }
-/* 主题切换过渡 — 全局启用 color/background 平滑过渡,让点击主题按钮时能"看见"切换。
-   仅在用户未设 reduce-motion 时生效。 */
+/* Theme-switch transition — enable smooth color/background transitions globally so the switch is visible when the theme button is clicked.
+   Only active when the user has not set reduce-motion. */
 @media (prefers-reduced-motion: no-preference) {
     html {
         transition:
@@ -217,7 +217,7 @@ a {
     }
 }
 
-/* ---------- ASCII rule(保留类,但去掉视觉负担) ---------- */
+/* ---------- ASCII rule (keep class, but drop the visual weight) ---------- */
 .ascii-rule {
     display: none;
 }
@@ -324,7 +324,7 @@ header.nav.scrolled {
     gap: 10px;
 }
 
-/* 语言下拉 — 纯图标按钮(与 .theme-toggle 视觉一致) */
+/* Language dropdown — icon-only button (visually consistent with .theme-toggle) */
 .lang {
     position: relative;
 }
@@ -360,7 +360,7 @@ header.nav.scrolled {
     height: 16px;
     display: block;
 }
-/* 仅供屏幕阅读器使用 */
+/* Screen-reader only */
 .sr-only {
     position: absolute;
     width: 1px;
@@ -419,7 +419,7 @@ header.nav.scrolled {
     opacity: 1;
 }
 
-/* GitHub 按钮 */
+/* GitHub button */
 .gh {
     display: inline-flex;
     align-items: center;
@@ -483,7 +483,7 @@ header.nav.scrolled {
     }
 }
 
-/* ---------- Section label(小段首标签) ---------- */
+/* ---------- Section label (small section-heading tag) ---------- */
 .sec-label {
     display: inline-flex;
     align-items: center;
@@ -592,13 +592,13 @@ header.nav.scrolled {
     transform: translateX(2px);
 }
 
-/* Hero 下方:仿真终端窗口(横向全宽) */
+/* Below hero: mock terminal window (full-width horizontal) */
 .hero-art {
     position: relative;
     width: 100%;
     max-width: 1080px;
     margin: 16px auto 0;
-    /* 让窗口底部越过 hero 底边,制造"从下一 section 接过"的视觉衰减 */
+    /* Let the window bottom extend past the hero's bottom edge, creating a "handed off from the next section" visual fade */
     margin-bottom: -56px;
     transform: translateY(0);
     transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -635,10 +635,10 @@ header.nav.scrolled {
     }
 }
 
-/* Hero 下方的仿真窗口:水平布局(左提示卡 / 右终端区) */
+/* Mock window below hero: horizontal layout (left hint card / right terminal area) */
 .mock-terminal.hero-window {
     aspect-ratio: auto;
-    /* 改用 min-height + 内容擑开,避免固定高度造成内容被裁。 */
+    /* Use min-height + content expansion instead, to avoid a fixed height clipping the content. */
     min-height: 440px;
     height: auto;
 }
@@ -665,11 +665,11 @@ header.nav.scrolled {
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    /* 保证右侧不被压缩到太短 */
+    /* Keep the right side from being compressed too short */
     min-height: 360px;
 }
 .mock-terminal.hero-window .hero-main .term-stage {
-    /* 不抢 flex 空间 — 为了让 term-input 能贴底;但有最小高度避免输出多后指令时跳动 */
+    /* Don't grab flex space — so term-input can stick to the bottom; but keep a min-height to avoid jumping when there's a lot of output before the prompt */
     flex: 1 1 auto;
     min-height: 0;
     max-height: none;
@@ -677,7 +677,7 @@ header.nav.scrolled {
     padding: 18px 22px 8px;
 }
 .mock-terminal.hero-window .hero-main .term-input.live {
-    /* 默认贴底(stage 撑满)、同时保证与窗口边缘有足够间距 */
+    /* Stick to the bottom by default (stage fills), while keeping enough spacing from the window edge */
     margin: 12px 16px 18px;
     flex-shrink: 0;
 }
@@ -688,7 +688,7 @@ header.nav.scrolled {
     }
 }
 
-/* 左侧"快捷键提示"卡(原 hint 的精简版) */
+/* Left "keyboard-shortcut hints" card (slimmed-down version of the original hint) */
 .hero-hint {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -752,7 +752,7 @@ header.nav.scrolled {
     box-shadow: 0 0 0 3px rgba(143, 204, 122, 0.18);
 }
 
-/* 在窄屏上 — 两栏变为上下 */
+/* On narrow screens — two columns become stacked */
 @media (max-width: 760px) {
     .mock-terminal.hero-window {
         min-height: 600px;
@@ -773,9 +773,9 @@ header.nav.scrolled {
     }
 }
 
-/* ---------- Logos 信赖墙 ---------- */
+/* ---------- Logos trust wall ---------- */
 .logos {
-    /* hero 仿真窗口造成 -56px 负 margin,这里加上 top-padding 补偿 */
+    /* The hero mock window creates a -56px negative margin; add top-padding here to compensate */
     padding: 112px 0 56px;
     border-bottom: 1px solid var(--line);
     text-align: center;
@@ -809,7 +809,7 @@ header.nav.scrolled {
     color: var(--ink);
 }
 
-/* ---------- 通用 section ---------- */
+/* ---------- Generic section ---------- */
 .section {
     padding: 88px 0;
     border-bottom: 1px solid var(--line);
@@ -838,7 +838,7 @@ header.nav.scrolled {
     max-width: 58ch;
 }
 
-/* ---------- 特性卡(左字右图,交替) ---------- */
+/* ---------- Feature cards (text left, image right, alternating) ---------- */
 .feat-card {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -908,7 +908,7 @@ header.nav.scrolled {
     position: relative;
 }
 
-/* ---------- 客户证言(单列 + 大引号) ---------- */
+/* ---------- Customer testimonials (single column + large quote marks) ---------- */
 .quote {
     padding: 88px 0;
     border-bottom: 1px solid var(--line);
@@ -1038,7 +1038,7 @@ header.nav.scrolled {
     letter-spacing: 0.04em;
 }
 
-/* ---------- "How it works" 卡片网格 ---------- */
+/* ---------- "How it works" card grid ---------- */
 .how-grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -1102,7 +1102,7 @@ header.nav.scrolled {
     font-size: 11px;
 }
 
-/* ---------- 安装卡(install) ---------- */
+/* ---------- Install card (install) ---------- */
 .install-card {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -1145,7 +1145,7 @@ header.nav.scrolled {
     color: var(--muted);
 }
 
-/* ---------- 代码块 ---------- */
+/* ---------- Code block ---------- */
 .pre-wrap {
     position: relative;
 }
@@ -1202,7 +1202,7 @@ pre.code .acc {
     border-color: var(--accent-line);
 }
 
-/* ---------- 终端 mock(hero 与 feature 卡内复用) ---------- */
+/* ---------- Terminal mock (reused in hero and feature cards) ---------- */
 .term-mock {
     height: 100%;
     min-height: 320px;
@@ -1321,7 +1321,7 @@ pre.code .acc {
     color: var(--muted);
 }
 
-/* ---------- 简化的 TOML / 配置预览 ---------- */
+/* ---------- Simplified TOML / config preview ---------- */
 .mini-toml {
     background: var(--bg-2);
     border: 1px solid var(--line);
@@ -1494,7 +1494,7 @@ pre.code .acc {
     max-width: 90ch;
 }
 
-/* ---------- 进场动画 ---------- */
+/* ---------- Entrance animation ---------- */
 .fade-in {
     opacity: 0;
     transform: translateY(14px);
@@ -1534,7 +1534,7 @@ pre.code .acc {
     }
 }
 
-/* ---------- App 窗口外壳(仿真 Zap 客户端) ---------- */
+/* ---------- App window shell (mock Zap client) ---------- */
 .app-window {
     position: relative;
     width: 100%;
@@ -1643,7 +1643,7 @@ pre.code .acc {
     height: 22px;
 }
 
-/* App body: 主内容区 */
+/* App body: main content area */
 .app-body {
     flex: 1;
     min-height: 0;
@@ -1652,7 +1652,7 @@ pre.code .acc {
     position: relative;
 }
 
-/* 以下 3 个 feat-card 内部仍是双栏 mock,需要给 mock-terminal 作为 feat 时重新设高 */
+/* The 3 feat-cards below are still two-column mocks internally, so re-set the height for mock-terminal when used as a feat */
 .feat-card .mock-terminal {
     aspect-ratio: 16 / 11;
     min-height: 360px;
@@ -1661,7 +1661,7 @@ pre.code .acc {
     background: var(--bg);
     padding: 0;
 }
-/* 终端输出区域(作为 feat-card 内的终端类型使用) */
+/* Terminal output area (used as the terminal type inside a feat-card) */
 .term-stage {
     flex: 1;
     min-height: 80px;
@@ -1817,7 +1817,7 @@ pre.code .acc {
     padding: 0 4px;
 }
 
-/* ---------- 仿真 2: 设置-Agent 提供商 ---------- */
+/* ---------- Mock 2: Settings - Agent providers ---------- */
 .mock-settings {
     aspect-ratio: 16 / 11;
     min-height: 380px;
@@ -2096,7 +2096,7 @@ pre.code .acc {
     border-color: var(--accent);
 }
 
-/* ---------- 仿真 3: 语言下拉 ---------- */
+/* ---------- Mock 3: Language dropdown ---------- */
 .mock-language {
     aspect-ratio: 16 / 11;
     min-height: 320px;
@@ -2191,17 +2191,12 @@ pre.code .acc {
     color: var(--btn-text-on-ink);
 }
 
-/* lb-current:根据当前 locale 显示对应项;仅为 mock UI 的 select 标题 */
+/* lb-current: the select title for the mock UI */
 .lb-current {
-    display: none;
-}
-body[data-locale="en"] .lb-current[data-locale-current="en"],
-body[data-locale="zh"] .lb-current[data-locale-current="zh"],
-body[data-locale="ja"] .lb-current[data-locale-current="ja"] {
     display: inline;
 }
 
-/* ---------- pulse dot (结设主题带起 hero 中) ---------- */
+/* ---------- pulse dot (used in the hero) ---------- */
 .pulse-dot {
     position: relative;
     width: 8px;
@@ -2229,7 +2224,7 @@ body[data-locale="ja"] .lb-current[data-locale-current="ja"] {
     }
 }
 
-/* ---------- hero badge 带 dot ---------- */
+/* ---------- hero badge with dot ---------- */
 .hero-badge {
     display: inline-flex;
     align-items: center;
@@ -2247,7 +2242,7 @@ body[data-locale="ja"] .lb-current[data-locale-current="ja"] {
     height: 6px;
 }
 
-/* ---------- 特性卷表头 ---------- */
+/* ---------- Feature header ---------- */
 .feat-eyebrow {
     display: inline-flex;
     align-items: center;
@@ -2276,7 +2271,7 @@ body[data-locale="ja"] .lb-current[data-locale-current="ja"] {
     min-height: 0;
 }
 
-/* ---------- 兼容旧类(landing 旧内容若引用了 .band-dark / .acks-grid 等) ---------- */
+/* ---------- Compat with old classes (in case old landing content references .band-dark / .acks-grid etc.) ---------- */
 .band-dark {
     background: var(--surface);
     color: var(--ink);
@@ -2351,19 +2346,12 @@ body[data-locale="ja"] .lb-current[data-locale-current="ja"] {
     background: var(--surface-hover);
 }
 
-/* 杂项小工具 */
+/* Misc utilities */
 .muted {
     color: var(--muted);
 }
 
-/* ---------- i18n 可见性(必须保留,三语切换依赖此规则) ---------- */
-body[data-locale="en"] [data-lang]:not([data-lang="en"]),
-body[data-locale="zh"] [data-lang]:not([data-lang="zh"]),
-body[data-locale="ja"] [data-lang]:not([data-lang="ja"]) {
-    display: none;
-}
-
-/* ---------- Scrollbar(深色) ---------- */
+/* ---------- Scrollbar (dark) ---------- */
 * {
     scrollbar-width: thin;
     scrollbar-color: var(--line-strong) transparent;
@@ -2390,10 +2378,10 @@ body[data-locale="ja"] [data-lang]:not([data-lang="ja"]) {
 }
 
 /* ============================================================
- * 主题切换按钮
- * 适用于两种触发点:
- *   1. nav 中独立按钮 .theme-toggle (两个独立 svg 叠放)
- *   2. 仿真 titlebar 里的 .tb-icon.tb-theme 按钮 (单个 svg 内包 sun 与 moon 两组)
+ * Theme toggle button
+ * Applies to two trigger points:
+ *   1. Standalone .theme-toggle button in the nav (two separate svgs stacked)
+ *   2. .tb-icon.tb-theme button in the mock titlebar (one svg containing both sun and moon groups)
  * ============================================================ */
 .theme-toggle {
     display: inline-flex;
@@ -2421,7 +2409,7 @@ body[data-locale="ja"] [data-lang]:not([data-lang="ja"]) {
     background: var(--surface);
 }
 
-/* nav 按钮 — 两个独立 svg 叠放切换 */
+/* nav button — two separate stacked svgs toggled */
 .theme-toggle .ico-sun,
 .theme-toggle .ico-moon {
     position: absolute;
@@ -2453,7 +2441,7 @@ body[data-locale="ja"] [data-lang]:not([data-lang="ja"]) {
     transform: translate(-50%, -50%) rotate(90deg) scale(0.6);
 }
 
-/* 仿真 titlebar 里的主题按钮 — 单 SVG, 内部两组(sun / moon)用 opacity 切换 */
+/* Theme button in the mock titlebar — single SVG, two inner groups (sun / moon) toggled via opacity */
 button.tb-icon.tb-theme {
     background: transparent;
     border: 0;
@@ -2477,7 +2465,7 @@ button.tb-icon.tb-theme:hover {
         opacity 0.25s ease,
         transform 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
-/* dark 主题 — 显示 moon, 隐藏 sun */
+/* dark theme — show moon, hide sun */
 :root[data-theme="dark"] .tb-theme-svg .tb-sun,
 :root:not([data-theme]) .tb-theme-svg .tb-sun {
     opacity: 0;
@@ -2488,7 +2476,7 @@ button.tb-icon.tb-theme:hover {
     opacity: 1;
     transform: rotate(0) scale(1);
 }
-/* light 主题 — 显示 sun, 隐藏 moon */
+/* light theme — show sun, hide moon */
 :root[data-theme="light"] .tb-theme-svg .tb-sun {
     opacity: 1;
     transform: rotate(0) scale(1);
@@ -2507,7 +2495,7 @@ button.tb-icon.tb-theme:hover {
 }
 
 /* ============================================================
- * Mock terminal 深度美化
+ * Mock terminal deep polish
  * ============================================================ */
 .app-window {
     --tm-glow: radial-gradient(
@@ -2520,14 +2508,14 @@ button.tb-icon.tb-theme:hover {
     background: var(--tm-glow), var(--bg-2);
 }
 
-/* tab 加上轻微内阴影,增加层级感 */
+/* Add a subtle inner shadow to the tab for more depth */
 .app-tab.active {
     box-shadow:
         0 -1px 0 var(--accent-soft) inset,
         0 1px 0 var(--bg-2);
 }
 
-/* term-stage 加上扫描线(subtle) */
+/* Add scanlines to term-stage (subtle) */
 .mock-terminal .app-body::before {
     content: "";
     position: absolute;
@@ -2547,13 +2535,13 @@ button.tb-icon.tb-theme:hover {
     z-index: 2;
 }
 
-/* 仿真点击反馈 */
+/* Mock click feedback */
 .app-titlebar .tb-icon:active {
     transform: scale(0.92);
 }
 
 /* ============================================================
- * Term-input.live: 可执行的 fake shell
+ * Term-input.live: executable fake shell
  * ============================================================ */
 .term-input.live {
     padding: 10px 12px 12px;
@@ -2611,7 +2599,7 @@ button.tb-icon.tb-theme:hover {
     margin: 0 2px;
 }
 
-/* fake shell 输出 */
+/* fake shell output */
 .term-stage {
     overflow-y: auto;
 }
@@ -2640,7 +2628,7 @@ button.tb-icon.tb-theme:hover {
     color: var(--syn-str);
 }
 
-/* light 主题下扫描线消失(无意义) */
+/* Scanlines disappear in light theme (pointless there) */
 :root[data-theme="light"] .mock-terminal .app-body::before {
     display: none;
 }

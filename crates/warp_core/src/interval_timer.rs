@@ -61,10 +61,11 @@ impl IntervalTimer {
             })
     }
 
-    /// 当 `WARP_STARTUP_TRACE=1` 环境变量开启时,把 IntervalTimer 已采集的时序
-    /// 表(每段 marginal_ms / 累计 cumulative_ms / 名称)按 ASCII 表格写到 stderr。
-    /// 主要用于本地调优 —— 不依赖任何遥测后端,纯本地诊断。
-    /// 没有副作用,不修改任何状态。
+    /// When the `WARP_STARTUP_TRACE=1` environment variable is set, writes the
+    /// timing table already collected by the IntervalTimer (per-segment marginal_ms /
+    /// cumulative cumulative_ms / name) to stderr as an ASCII table.
+    /// Primarily for local tuning -- it does not depend on any telemetry backend, purely local diagnostics.
+    /// It has no side effects and does not modify any state.
     pub fn print_trace_to_stderr_if_enabled(&self) {
         let enabled = std::env::var("WARP_STARTUP_TRACE")
             .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes"))
@@ -142,17 +143,17 @@ impl TimingDataPoint {
         }
     }
 
-    /// 单段耗时(毫秒)。
+    /// Duration of this single segment (in milliseconds).
     pub fn marginal_duration_ms(&self) -> u64 {
         self.marginal_duration_ms
     }
 
-    /// 自启动以来累计耗时(毫秒)。
+    /// Cumulative duration since startup (in milliseconds).
     pub fn cumulative_duration_ms(&self) -> u64 {
         self.cumulative_duration_ms
     }
 
-    /// 该 interval 的名称。
+    /// The name of this interval.
     pub fn name(&self) -> &str {
         &self.name
     }

@@ -1,17 +1,16 @@
-//! panel.rs 的单元测试 — 覆盖树构建、父级解析和显示排序等纯逻辑。
+//! Unit tests for panel.rs — covering pure logic such as tree building, parent
+//! resolution, and display sorting.
 //!
-//! 作者：logic
+//! author: logic
 
 use super::*;
 use chrono::NaiveDateTime;
 use warp_ssh_manager::{NodeKind, SshNode};
 
-// --- 测试辅助 --------------------------------------------------------------
+// --- Test helpers ----------------------------------------------------------
 
 fn ts() -> NaiveDateTime {
-    chrono::DateTime::from_timestamp(0, 0)
-        .unwrap()
-        .naive_utc()
+    chrono::DateTime::from_timestamp(0, 0).unwrap().naive_utc()
 }
 
 fn folder(id: &str, parent_id: Option<&str>, name: &str, sort_order: i32) -> SshNode {
@@ -40,7 +39,7 @@ fn server(id: &str, parent_id: Option<&str>, name: &str, sort_order: i32) -> Ssh
     }
 }
 
-// --- resolve_parent_for_new_node 测试 ---------------------------------------
+// --- resolve_parent_for_new_node tests --------------------------------------
 
 #[test]
 fn parent_no_selection_returns_none() {
@@ -78,7 +77,10 @@ fn parent_server_under_folder_selected_returns_folder_id() {
 #[test]
 fn parent_invalid_selected_id_returns_none() {
     let nodes = vec![folder("f1", None, "Root", 0)];
-    assert_eq!(resolve_parent_for_new_node(Some("nonexistent"), &nodes), None);
+    assert_eq!(
+        resolve_parent_for_new_node(Some("nonexistent"), &nodes),
+        None
+    );
 }
 
 #[test]
@@ -94,19 +96,19 @@ fn parent_deeply_nested_folder_selected_returns_immediate_parent() {
         folder("f2", Some("f1"), "L1", 0),
         server("s1", Some("f2"), "srv", 0),
     ];
-    // 选中 f2 → 新节点创建在 f2 下
+    // Select f2 → the new node is created under f2
     assert_eq!(
         resolve_parent_for_new_node(Some("f2"), &nodes),
         Some("f2".to_string())
     );
-    // 选中 s1 → 新节点创建在 s1 的父级(f2)下（兄弟语义）
+    // Select s1 → the new node is created under s1's parent (f2) (sibling semantics)
     assert_eq!(
         resolve_parent_for_new_node(Some("s1"), &nodes),
         Some("f2".to_string())
     );
 }
 
-// --- compute_depths 测试 ---------------------------------------------------
+// --- compute_depths tests ---------------------------------------------------
 
 #[test]
 fn depths_empty_nodes() {
@@ -149,7 +151,7 @@ fn depths_multiple_roots() {
     assert_eq!(depths["s2"], 1);
 }
 
-// --- sort_for_display 测试 -------------------------------------------------
+// --- sort_for_display tests -------------------------------------------------
 
 #[test]
 fn sort_empty() {
@@ -175,17 +177,14 @@ fn sort_respects_parent_child_order() {
     ];
     let depths = compute_depths(&nodes);
     let sorted = sort_for_display(nodes, &depths);
-    // f1 在前，s1 在后
+    // f1 first, s1 after
     assert_eq!(sorted[0].id, "f1");
     assert_eq!(sorted[1].id, "s1");
 }
 
 #[test]
 fn sort_multiple_roots_by_sort_order() {
-    let nodes = vec![
-        folder("f2", None, "B", 1),
-        folder("f1", None, "A", 0),
-    ];
+    let nodes = vec![folder("f2", None, "B", 1), folder("f1", None, "A", 0)];
     let depths = compute_depths(&nodes);
     let sorted = sort_for_display(nodes, &depths);
     assert_eq!(sorted[0].id, "f1");
@@ -217,6 +216,6 @@ fn sort_multiple_roots_with_children() {
     let depths = compute_depths(&nodes);
     let sorted = sort_for_display(nodes, &depths);
     let ids: Vec<&str> = sorted.iter().map(|n| n.id.as_str()).collect();
-    // f1(Prod) 及其子节点在前，f2(Stage) 及其子节点在后
+    // f1(Prod) and its children first, f2(Stage) and its children after
     assert_eq!(ids, &["f1", "s1", "f2", "s2"]);
 }

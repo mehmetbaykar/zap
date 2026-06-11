@@ -9,7 +9,7 @@ use crate::search::mixer::{DataSourceRunErrorWrapper, SyncDataSource};
 
 use warp_ssh_manager::{NodeKind, SshRepository};
 
-/// 上限。SSH 一般几个到几十个,不会爆。
+/// Upper bound. SSH typically has a few to a few dozen, so this won't blow up.
 const MAX_SSH_SERVERS_CONSIDERED: usize = 200;
 
 #[derive(Default)]
@@ -33,10 +33,10 @@ impl SyncDataSource for SshServersDataSource {
         query: &Query,
         _app: &AppContext,
     ) -> Result<Vec<QueryResult<Self::Action>>, DataSourceRunErrorWrapper> {
-        // 走自家的 with_conn(独立写连接),不污染 PaneGroup 的主写线程。
-        // DataSourceRunErrorWrapper 是 Box<dyn DataSourceRunError> 自定义 trait,
-        // 包装成本太高 — 失败时 log + 返回空结果(palette 里不显示 SSH,但其他
-        // source 不受影响)。
+        // Use our own with_conn (an independent write connection) so we don't pollute PaneGroup's main write thread.
+        // DataSourceRunErrorWrapper is a Box<dyn DataSourceRunError> custom trait,
+        // and wrapping it is too costly — on failure, log + return an empty result (SSH is not shown in the
+        // palette, but other sources are unaffected).
         let nodes = match warp_ssh_manager::with_conn(|c| Ok(SshRepository::list_nodes(c)?)) {
             Ok(n) => n,
             Err(e) => {
@@ -45,7 +45,7 @@ impl SyncDataSource for SshServersDataSource {
             }
         };
 
-        // 只展示 server 节点。把每个节点拉一次详情,失败的跳过(folder 没详情会被 None)。
+        // Only show server nodes. Fetch details for each node once, skipping failures (folders have no details and become None).
         let server_nodes: Vec<_> = nodes
             .into_iter()
             .filter(|n| matches!(n.kind, NodeKind::Server))
@@ -61,7 +61,7 @@ impl SyncDataSource for SshServersDataSource {
                         .ok()
                         .flatten()?;
 
-                // 用 name + " " + host 作为搜索文本,name 或 host 任一命中都行。
+                // Use name + " " + host as the search text; a match on either name or host works.
                 let display_name = node.name.clone();
                 let host_user = if server.username.is_empty() {
                     server.host.clone()
@@ -78,7 +78,7 @@ impl SyncDataSource for SshServersDataSource {
 
                 let mut item = SshServerSearchItem::new(node, server, host_user, display_name);
                 let mut mr = match_result;
-                // 跟 RepoDataSource 一样略 boost,让 ssh 结果在混合面板里有竞争力。
+                // Boost slightly like RepoDataSource so ssh results stay competitive in the mixed panel.
                 mr.score *= 4;
                 item.match_result = mr;
                 Some(item.into())

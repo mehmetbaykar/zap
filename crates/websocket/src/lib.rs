@@ -10,7 +10,7 @@ use anyhow::anyhow;
 pub use async_tungstenite::tungstenite::client::IntoClientRequest;
 #[cfg(not(target_family = "wasm"))]
 use async_tungstenite::tungstenite::http::HeaderValue;
-use futures_util::{future, SinkExt, TryStreamExt};
+use futures_util::{SinkExt, TryStreamExt, future};
 #[cfg(not(target_family = "wasm"))]
 use itertools::Itertools;
 use thiserror::Error;
@@ -18,11 +18,11 @@ use thiserror::Error;
 #[cfg(not(target_family = "wasm"))]
 pub use async_tungstenite::tungstenite;
 
-// Issue #72:把 native::proxy 模块的全局代理类型重导出到 crate root,供
-// `app::settings::network` / `app::settings::init` 通过 `websocket::ProxyMode`
-// 直接引用。
+// Issue #72: re-export the native::proxy module's global proxy types to the crate
+// root, so `app::settings::network` / `app::settings::init` can reference them
+// directly via `websocket::ProxyMode`.
 #[cfg(not(target_family = "wasm"))]
-pub use imp::proxy::{set_global_proxy_config, ProxyConfig, ProxyMode};
+pub use imp::proxy::{ProxyConfig, ProxyMode, set_global_proxy_config};
 
 use crate::sink_map_err::map_err;
 

@@ -45,9 +45,7 @@ use crate::workspace::view::conversation_list::view::{
 use crate::workspace::view::global_search::view::{
     Event as GlobalSearchViewEvent, GlobalSearchEntryFocus, GlobalSearchView,
 };
-use crate::workspace::view::server_file_browser::{
-    ServerFileBrowserEvent, ServerFileBrowserView,
-};
+use crate::workspace::view::server_file_browser::{ServerFileBrowserEvent, ServerFileBrowserView};
 use crate::workspace::view::{
     LEFT_PANEL_AGENT_CONVERSATIONS_BINDING_NAME, LEFT_PANEL_GLOBAL_SEARCH_BINDING_NAME,
     LEFT_PANEL_PROJECT_EXPLORER_BINDING_NAME, LEFT_PANEL_SKILL_MANAGER_BINDING_NAME,
@@ -107,7 +105,7 @@ pub enum LeftPanelEvent {
     OpenSkillFile {
         source: CodeSource,
     },
-    /// 用户在远端文件树里点击一个文件 → 主窗口应以远端 buffer 方式打开它。
+    /// User clicks a file in the remote file tree → the main window should open it as a remote buffer.
     #[cfg_attr(not(feature = "local_tty"), allow(dead_code))]
     OpenRemoteFile {
         remote_path: crate::code::buffer_location::RemotePath,
@@ -118,18 +116,18 @@ pub enum LeftPanelEvent {
         conversation_title: String,
         terminal_view_id: Option<warpui::EntityId>,
     },
-    /// 用户从 SSH 管理器树点击 server / 双击 / 右键 "编辑" → 主窗口应在中央
-    /// 区开/聚焦 `SshServerPane`(具体 `WorkspaceView::open_ssh_server`)。
+    /// User clicks a server in the SSH manager tree / double-clicks / right-clicks "Edit" → the main window should open/focus
+    /// `SshServerPane` in the central area (specifically `WorkspaceView::open_ssh_server`).
     OpenSshServerEditor {
         node_id: String,
     },
-    /// 用户从 SSH 管理器右键 "连接" → 主窗口在新 terminal pane 跑 `ssh ...`
-    /// 并启动 SecretInjector(Commit 3 实施;当前为占位事件)。
+    /// User right-clicks "Connect" in the SSH manager → the main window runs `ssh ...` in a new terminal pane
+    /// and starts SecretInjector (implemented in Commit 3; currently a placeholder event).
     OpenSshTerminal {
         node_id: String,
         server: warp_ssh_manager::SshServerInfo,
     },
-    /// 用户从 SSH 管理器右键 "SFTP 浏览" → 主窗口开 SFTP 文件浏览器 pane。
+    /// User right-clicks "SFTP Browse" in the SSH manager → the main window opens an SFTP file browser pane.
     OpenSftpPane {
         node_id: String,
         server: warp_ssh_manager::SshServerInfo,

@@ -522,12 +522,12 @@ pub struct LLMPreferences {
     // from the base LLM for the active profile. This means that if the user selects the
     // profile's default model and changes their profile, the model will update to that profile's default.
     base_llm_for_terminal_view: HashMap<EntityId, LLMId>,
-    /// Per-terminal reasoning effort 选择(由输入框 picker 驱动)。
-    /// session-only,不写 settings.toml。键缺失时用 `last_used_reasoning` 兜底,
-    /// 再缺失则用 `default_reasoning_for(api_type, model_id)`。
+    /// Per-terminal reasoning effort selection (driven by the input box picker).
+    /// session-only, not written to settings.toml. When the key is missing, falls back to
+    /// `last_used_reasoning`, and if still missing uses `default_reasoning_for(api_type, model_id)`.
     reasoning_effort_per_terminal: HashMap<EntityId, crate::settings::ReasoningEffortSetting>,
-    /// 记忆"上次某 (api_type, model) 用过的档位",做 UX 软记忆。
-    /// session-only。
+    /// Remembers "the tier last used for a given (api_type, model)" as a soft UX memory.
+    /// session-only.
     last_used_reasoning: HashMap<
         (crate::settings::AgentProviderApiType, String),
         crate::settings::ReasoningEffortSetting,
@@ -536,19 +536,19 @@ pub struct LLMPreferences {
 
 impl LLMPreferences {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
-        // BYOP-only 模式: picker 完全由用户配置的 agent_providers 填充,
-        // 完全不再消费上游云端模型列表。
-        // 缓存(MODELS_BY_FEATURE_CACHE_KEY)也跳过 — 启动时直接从 settings 重建。
+        // BYOP-only mode: the picker is populated entirely from the user-configured
+        // agent_providers, and no longer consumes the upstream cloud model list at all.
+        // The cache (MODELS_BY_FEATURE_CACHE_KEY) is also skipped — rebuilt directly from settings at startup.
         let models_by_feature = crate::ai::agent_providers::build_byop_models_by_feature(&*ctx);
 
-        // 监听 settings.agent_providers 变更 → 重建 byop 模型列表。
+        // Listen for settings.agent_providers changes → rebuild the byop model list.
         ctx.subscribe_to_model(
             &crate::settings::AISettings::handle(ctx),
             |me, _event, ctx| {
                 me.refresh_byop_models(ctx);
             },
         );
-        // 监听 secrets 变更(API key 增删) → 重建,因为合法性依赖 api_key 是否存在。
+        // Listen for secrets changes (API key add/remove) → rebuild, since validity depends on whether the api_key exists.
         ctx.subscribe_to_model(
             &crate::ai::agent_providers::AgentProviderSecrets::handle(ctx),
             |me, _event, ctx| {
@@ -630,9 +630,9 @@ impl LLMPreferences {
 
     /// Returns `LLMInfo` for the currently selected LLM to be used for Agent Mode.
     ///
-    /// 优先级:terminal-view override > AISettings.byop_last_used_model_id(全局
-    /// 最近使用 — picker 切换后立即写入,新 tab/重启沿用)> profile.base_model >
-    /// default_llm_info()。
+    /// Priority: terminal-view override > AISettings.byop_last_used_model_id (global
+    /// most-recently-used — written immediately after a picker switch, carried over to new tabs/restarts) > profile.base_model >
+    /// default_llm_info().
     fn get_preferred_base_model(
         &self,
         app: &AppContext,
@@ -647,7 +647,7 @@ impl LLMPreferences {
             }
         }
 
-        // BYOP picker last_used 比 profile 默认更贴近用户最新意图。
+        // BYOP picker last_used is closer to the user's latest intent than the profile default.
         let last_used = crate::settings::AISettings::as_ref(app)
             .byop_last_used_model_id
             .to_string();
@@ -676,10 +676,10 @@ impl LLMPreferences {
         self.get_preferred_coding_model(app, terminal_view_id)
     }
 
-    /// 返回当前用于"会话标题生成"的 LLM。
+    /// Returns the LLM currently used for "conversation title generation".
     ///
-    /// 优先级:profile 显式设置的 `title_model` → 否则 fallback 到 `base_model`(active)。
-    /// 候选集合复用 `get_base_llm_choices_for_agent_mode()`。
+    /// Priority: the profile's explicitly set `title_model` → otherwise fall back to `base_model` (active).
+    /// The candidate set reuses `get_base_llm_choices_for_agent_mode()`.
     pub fn get_active_title_model<'a>(
         &'a self,
         app: &'a AppContext,
@@ -696,7 +696,7 @@ impl LLMPreferences {
         self.get_preferred_base_model(app, terminal_view_id)
     }
 
-    /// 默认 title 模型 — 没有独立设置时使用,与 base 模型一致。
+    /// Default title model — used when there is no separate setting; same as the base model.
     pub fn get_default_title_model<'a>(
         &'a self,
         app: &'a AppContext,
@@ -705,10 +705,10 @@ impl LLMPreferences {
         self.get_preferred_base_model(app, terminal_view_id)
     }
 
-    /// 返回当前用于"主动式 AI"(prompt suggestions / NLD / relevant files)的 LLM。
+    /// Returns the LLM currently used for "proactive AI" (prompt suggestions / NLD / relevant files).
     ///
-    /// 优先级:profile 显式设置的 `active_ai_model` → 否则 fallback 到 `base_model`(active)。
-    /// 候选集合复用 `get_base_llm_choices_for_agent_mode()`。
+    /// Priority: the profile's explicitly set `active_ai_model` → otherwise fall back to `base_model` (active).
+    /// The candidate set reuses `get_base_llm_choices_for_agent_mode()`.
     pub fn get_active_ai_model<'a>(
         &'a self,
         app: &'a AppContext,
@@ -725,7 +725,7 @@ impl LLMPreferences {
         self.get_preferred_base_model(app, terminal_view_id)
     }
 
-    /// 默认 active AI 模型 — 没有独立设置时使用,与 base 模型一致。
+    /// Default active AI model — used when there is no separate setting; same as the base model.
     pub fn get_default_active_ai_model<'a>(
         &'a self,
         app: &'a AppContext,
@@ -734,9 +734,9 @@ impl LLMPreferences {
         self.get_preferred_base_model(app, terminal_view_id)
     }
 
-    /// 返回当前用于"Next Command"(灰色补全/zero-state 建议)的 LLM。
+    /// Returns the LLM currently used for "Next Command" (gray completion / zero-state suggestions).
     ///
-    /// 优先级:profile 显式设置的 `next_command_model` → 否则 fallback 到 `base_model`(active)。
+    /// Priority: the profile's explicitly set `next_command_model` → otherwise fall back to `base_model` (active).
     pub fn get_active_next_command_model<'a>(
         &'a self,
         app: &'a AppContext,
@@ -753,7 +753,7 @@ impl LLMPreferences {
         self.get_preferred_base_model(app, terminal_view_id)
     }
 
-    /// 默认 next command 模型 — 没有独立设置时使用,与 base 模型一致。
+    /// Default next command model — used when there is no separate setting; same as the base model.
     pub fn get_default_next_command_model<'a>(
         &'a self,
         app: &'a AppContext,
@@ -935,8 +935,8 @@ impl LLMPreferences {
             ctx.emit(LLMPreferencesEvent::UpdatedActiveAgentModeLLM);
         }
 
-        // 始终写 byop_last_used_model_id(即便 changed=false 也覆盖一遍,统一新 tab 行为)。
-        // picker 显式切换 = 用户最强意图,新 tab/重启都应沿用。
+        // Always write byop_last_used_model_id (overwrite even when changed=false, to unify new-tab behavior).
+        // An explicit picker switch = the user's strongest intent; new tabs/restarts should all carry it over.
         use warp_core::errors::report_if_error;
         let llm_id_str = preferred_llm_id.as_str().to_owned();
         crate::settings::AISettings::handle(ctx).update(ctx, |settings, ctx| {
@@ -1024,15 +1024,15 @@ impl LLMPreferences {
         *last_update.popup_visibility_state.lock() = UpdatePopupVisibilityState::Hidden;
     }
 
-    /// BYOP-only 模式: picker 完全由本地 `agent_providers` 填充,不再去 warp 后端拉模型。
-    /// 这两个 refresh 函数保留签名供既有调用点(NetworkOnline / AuthComplete / TeamsChanged)
-    /// 触发,但内部 noop。
+    /// BYOP-only mode: the picker is populated entirely from the local `agent_providers`, and no longer fetches models from the warp backend.
+    /// These two refresh functions keep their signatures so existing call sites (NetworkOnline / AuthComplete / TeamsChanged)
+    /// can trigger them, but they are internally a no-op.
     pub fn refresh_authed_models(&self, _ctx: &mut ModelContext<Self>) {}
 
     fn refresh_public_models(&self, _ctx: &mut ModelContext<Self>) {}
 
-    /// 从 settings.agent_providers + AgentProviderSecrets 重建 `models_by_feature`,
-    /// 在 settings 或 secrets 变化时调用。
+    /// Rebuilds `models_by_feature` from settings.agent_providers + AgentProviderSecrets,
+    /// called when settings or secrets change.
     pub fn refresh_byop_models(&mut self, ctx: &mut ModelContext<Self>) {
         let new = crate::ai::agent_providers::build_byop_models_by_feature(&*ctx);
         if new != self.models_by_feature {
@@ -1188,8 +1188,8 @@ impl LLMPreferences {
         }
     }
 
-    /// 获取指定 terminal-view 当前的 reasoning effort 选择。
-    /// 优先级: per-terminal 选择 > last-used (api_type, model) > variants 表的默认档 > Auto。
+    /// Gets the current reasoning effort selection for the given terminal-view.
+    /// Priority: per-terminal selection > last-used (api_type, model) > default tier from the variants table > Auto.
     pub fn get_reasoning_effort(
         &self,
         terminal_view_id: Option<EntityId>,
@@ -1211,9 +1211,9 @@ impl LLMPreferences {
             .unwrap_or(crate::settings::ReasoningEffortSetting::Auto)
     }
 
-    /// 设置指定 terminal-view 的 reasoning effort,同时更新 last-used 记忆,
-    /// 并把 (api_type, model) → effort 映射立即写入 AISettings 持久化层
-    /// (新 tab / 重启都会读到最新值)。
+    /// Sets the reasoning effort for the given terminal-view, also updating the last-used memory,
+    /// and immediately writes the (api_type, model) → effort mapping into the AISettings persistence layer
+    /// (new tabs / restarts will read the latest value).
     pub fn set_reasoning_effort(
         &mut self,
         terminal_view_id: EntityId,
@@ -1227,7 +1227,7 @@ impl LLMPreferences {
         self.last_used_reasoning
             .insert((api_type, model_id.to_owned()), effort);
 
-        // 同步写 AISettings.byop_last_used_reasoning(per-(api_type, model))。
+        // Synchronously write AISettings.byop_last_used_reasoning (per-(api_type, model)).
         use warp_core::errors::report_if_error;
         let key = crate::settings::BYOPLastUsedReasoningMap::make_key(api_type, model_id);
         crate::settings::AISettings::handle(ctx).update(ctx, |settings, ctx| {
@@ -1247,7 +1247,7 @@ pub enum LLMPreferencesEvent {
     UpdatedAvailableLLMs,
     UpdatedActiveAgentModeLLM,
     UpdatedActiveCodingLLM,
-    /// 当前 terminal-view 的 reasoning effort 改变(picker 选了新档)。
+    /// The current terminal-view's reasoning effort changed (the picker selected a new tier).
     UpdatedReasoningEffort,
 }
 

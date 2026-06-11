@@ -1,7 +1,8 @@
-//! SFTP 文件浏览器真实弹窗集成测试
+//! Integration tests for the SFTP file browser in a real popup window.
 //!
-//! 使用 Builder/TestStep/Driver 模式，在真实窗口中打开 SFTP 面板，
-//! 验证面板渲染、标题、关闭、标签切换等交互行为。
+//! Uses the Builder/TestStep/Driver pattern to open the SFTP panel in a real
+//! window and verify panel rendering, title, close, tab switching, and other
+//! interaction behavior.
 //! author: logic
 //! date: 2026-05-30
 
@@ -11,27 +12,30 @@ use warp::integration_testing::sftp;
 use warp::integration_testing::sftp::{ConnectionState, Dialog, SftpBrowserAction};
 use warp::integration_testing::terminal::wait_until_bootstrapped_single_pane_for_tab;
 use warp::integration_testing::view_getters::{pane_group_view, workspace_view};
-use warpui::{async_assert, async_assert_eq, integration::AssertionCallback, integration::StepDataMap, integration::TestStep, TypedActionView};
+use warpui::{
+    async_assert, async_assert_eq, integration::AssertionCallback, integration::StepDataMap,
+    integration::TestStep, TypedActionView,
+};
 
 use super::{new_builder, Builder};
 
-/// 断言 SFTP 浏览器视图存在且可访问
+/// Asserts the SFTP browser view exists and is accessible.
 ///
-/// 不依赖固定 pane index，通过 view 类型查找 SftpBrowserView。
-/// 接受所有连接状态，仅验证视图存在。
+/// Does not depend on a fixed pane index; looks up SftpBrowserView by view type.
+/// Accepts all connection states, only verifying that the view exists.
 /// author: logic
 /// date: 2026-05-31
 fn assert_sftp_browser_view_exists() -> AssertionCallback {
     Box::new(move |app, window_id| {
         let view = sftp::sftp_browser_view(app, window_id);
         view.read(app, |_v, _| {
-            // 视图成功获取即证明 SFTP 面板存在
+            // Successfully getting the view proves the SFTP panel exists.
             warpui::integration::AssertionOutcome::Success
         })
     })
 }
 
-/// 打开 SFTP 面板（使用测试 node_id）
+/// Opens the SFTP panel (using a test node_id).
 fn open_sftp_pane(app: &mut warpui::App) {
     let window_id = app.read(|ctx| {
         ctx.windows()
@@ -46,7 +50,7 @@ fn open_sftp_pane(app: &mut warpui::App) {
     });
 }
 
-/// 验证 SFTP 面板在真实窗口中打开并显示正确标题
+/// Verifies the SFTP panel opens in a real window and displays the correct title.
 pub fn test_sftp_pane_opens_in_workspace() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -75,7 +79,7 @@ pub fn test_sftp_pane_opens_in_workspace() -> Builder {
         )
 }
 
-/// 验证 SFTP 面板获取焦点后键盘事件正常工作
+/// Verifies keyboard events work correctly after the SFTP panel gains focus.
 pub fn test_sftp_pane_focus_and_keyboard() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -94,21 +98,20 @@ pub fn test_sftp_pane_focus_and_keyboard() -> Builder {
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify pane still exists")
-                .add_assertion(|app, window_id| {
-                    let pane_group = pane_group_view(app, window_id, 0);
-                    pane_group.read(app, |pane_group, _ctx| {
-                        async_assert_eq!(
-                            pane_group.pane_count(),
-                            2,
-                            "SFTP pane should still be visible"
-                        )
-                    })
-                }),
+            TestStep::new("Verify pane still exists").add_assertion(|app, window_id| {
+                let pane_group = pane_group_view(app, window_id, 0);
+                pane_group.read(app, |pane_group, _ctx| {
+                    async_assert_eq!(
+                        pane_group.pane_count(),
+                        2,
+                        "SFTP pane should still be visible"
+                    )
+                })
+            }),
         )
 }
 
-/// 验证关闭 SFTP 面板后回到单面板
+/// Verifies that closing the SFTP panel returns to a single pane.
 pub fn test_sftp_pane_close() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -122,19 +125,14 @@ pub fn test_sftp_pane_close() -> Builder {
                 .set_post_step_pause(std::time::Duration::from_secs(2)),
         )
         .with_step(
-            TestStep::new("Verify 2 panes")
-                .add_assertion(|app, window_id| {
-                    let pane_group = pane_group_view(app, window_id, 0);
-                    pane_group.read(app, |pane_group, _ctx| {
-                        async_assert_eq!(
-                            pane_group.pane_count(),
-                            2,
-                            "Should have 2 panes"
-                        )
-                    })
-                }),
+            TestStep::new("Verify 2 panes").add_assertion(|app, window_id| {
+                let pane_group = pane_group_view(app, window_id, 0);
+                pane_group.read(app, |pane_group, _ctx| {
+                    async_assert_eq!(pane_group.pane_count(), 2, "Should have 2 panes")
+                })
+            }),
         )
-        // 遍历所有可见面板，找到非 terminal 面板（即 SFTP）并关闭
+        // Iterate over all visible panes, find the non-terminal pane (i.e. SFTP), and close it.
         .with_step(
             TestStep::new("Close SFTP pane via pane group")
                 .with_action(|app, window_id, _| {
@@ -145,7 +143,7 @@ pub fn test_sftp_pane_close() -> Builder {
                         let ids = pane_group.visible_pane_ids();
                         ids.into_iter()
                             .find(|id| !terminal_ids.contains(id))
-                            .expect("应存在一个非 terminal 面板（SFTP）")
+                            .expect("a non-terminal pane (SFTP) should exist")
                     });
                     pg.update(app, |pane_group, ctx| {
                         pane_group.close_pane(sftp_pane_id, ctx);
@@ -154,21 +152,20 @@ pub fn test_sftp_pane_close() -> Builder {
                 .set_post_step_pause(std::time::Duration::from_secs(1)),
         )
         .with_step(
-            TestStep::new("Verify back to single pane")
-                .add_assertion(|app, window_id| {
-                    let pane_group = pane_group_view(app, window_id, 0);
-                    pane_group.read(app, |pane_group, _ctx| {
-                        async_assert_eq!(
-                            pane_group.visible_pane_count(),
-                            1,
-                            "Should have 1 visible pane after closing SFTP"
-                        )
-                    })
-                }),
+            TestStep::new("Verify back to single pane").add_assertion(|app, window_id| {
+                let pane_group = pane_group_view(app, window_id, 0);
+                pane_group.read(app, |pane_group, _ctx| {
+                    async_assert_eq!(
+                        pane_group.visible_pane_count(),
+                        1,
+                        "Should have 1 visible pane after closing SFTP"
+                    )
+                })
+            }),
         )
 }
 
-/// 验证切换标签后 SFTP 面板状态
+/// Verifies the SFTP panel state after switching tabs.
 pub fn test_sftp_pane_tab_switch() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -181,7 +178,7 @@ pub fn test_sftp_pane_tab_switch() -> Builder {
                 .with_action(|app, _, _| open_sftp_pane(app))
                 .set_post_step_pause(std::time::Duration::from_secs(2)),
         )
-        // 切换到其他标签
+        // Switch to another tab.
         .with_step(
             TestStep::new("Switch tab with Ctrl+Tab")
                 .with_keystrokes(&["ctrl-tab"])
@@ -193,20 +190,16 @@ pub fn test_sftp_pane_tab_switch() -> Builder {
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify SFTP pane still visible")
-                .add_assertion(|app, window_id| {
-                    let pane_group = pane_group_view(app, window_id, 0);
-                    pane_group.read(app, |pane_group, _ctx| {
-                        async_assert!(
-                            pane_group.pane_count() >= 1,
-                            "Should have at least 1 pane"
-                        )
-                    })
-                }),
+            TestStep::new("Verify SFTP pane still visible").add_assertion(|app, window_id| {
+                let pane_group = pane_group_view(app, window_id, 0);
+                pane_group.read(app, |pane_group, _ctx| {
+                    async_assert!(pane_group.pane_count() >= 1, "Should have at least 1 pane")
+                })
+            }),
         )
 }
 
-/// 验证 SFTP 面板在连接失败状态下正确渲染
+/// Verifies the SFTP panel renders correctly when the connection has failed.
 pub fn test_sftp_pane_disconnected_render() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -236,26 +229,27 @@ pub fn test_sftp_pane_disconnected_render() -> Builder {
 }
 
 // ============================================================
-// Mock 后端 UI 集成测试
+// Mock backend UI integration tests
 // ============================================================
 
-/// 打开 SFTP 面板并注入 mock 后端的通用步骤
+/// Common step that opens the SFTP panel and injects a mock backend.
 fn open_sftp_with_mock_step(
     files: &'static [(&'static str, &'static [u8])],
 ) -> warpui::integration::TestStep {
-    // 使用 TestStep::new 而非 new_step_with_default_assertions，
-    // 因为打开 SFTP 面板后 pane 布局发生变化（SFTP 可能排在 pane_index=0），
-    // 默认断言在 pane_index=0 查找 terminal_view 会 panic。
+    // Use TestStep::new rather than new_step_with_default_assertions, because
+    // opening the SFTP panel changes the pane layout (SFTP may end up at
+    // pane_index=0), and the default assertion would panic looking for a
+    // terminal_view at pane_index=0.
     TestStep::new("Open SFTP pane with mock backend")
         .with_action(move |app, _, step_data: &mut StepDataMap| {
             let (_, temp_dir) = sftp::open_sftp_pane_with_mock(app, files);
-            // 将 temp_dir 存入 StepDataMap 以保持生命周期
+            // Store temp_dir in the StepDataMap to keep it alive.
             step_data.insert("sftp_mock", temp_dir);
         })
         .set_post_step_pause(std::time::Duration::from_secs(2))
 }
 
-/// 验证 mock 后端连接成功，SFTP 浏览器处于 Connected 状态
+/// Verifies the mock backend connects successfully and the SFTP browser is in the Connected state.
 pub fn test_sftp_mock_backend_connected() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -274,7 +268,7 @@ pub fn test_sftp_mock_backend_connected() -> Builder {
                     view.read(app, |v, _| {
                         async_assert!(
                             matches!(v.connection_state(), ConnectionState::Connected),
-                            "应处于 Connected 状态"
+                            "should be in the Connected state"
                         )
                     })
                 })
@@ -284,14 +278,14 @@ pub fn test_sftp_mock_backend_connected() -> Builder {
                         async_assert_eq!(
                             v.entries().len(),
                             2,
-                            "应列出 2 个条目（docs 目录 + readme.txt）"
+                            "should list 2 entries (docs directory + readme.txt)"
                         )
                     })
                 }),
         )
 }
 
-/// 点击工具栏刷新按钮，验证条目重新加载
+/// Clicks the toolbar refresh button and verifies entries are reloaded.
 pub fn test_sftp_toolbar_refresh() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -299,30 +293,29 @@ pub fn test_sftp_toolbar_refresh() -> Builder {
             false.to_string(),
         )]))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_step(open_sftp_with_mock_step(&[
-            ("file1.txt", b"content1"),
-        ]))
+        .with_step(open_sftp_with_mock_step(&[("file1.txt", b"content1")]))
         .with_step(
             TestStep::new("Click refresh button")
                 .with_click_on_saved_position("sftp_btn:refresh")
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify entries still present after refresh")
-                .add_assertion(|app, window_id| {
+            TestStep::new("Verify entries still present after refresh").add_assertion(
+                |app, window_id| {
                     let view = sftp::sftp_browser_view(app, window_id);
                     view.read(app, |v, _| {
                         async_assert_eq!(
                             v.entries().len(),
                             1,
-                            "刷新后条目应仍存在"
+                            "entries should still be present after refresh"
                         )
                     })
-                }),
+                },
+            ),
         )
 }
 
-/// 点击新建文件夹按钮，验证对话框打开
+/// Clicks the new folder button and verifies the dialog opens.
 pub fn test_sftp_toolbar_new_folder() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -337,20 +330,19 @@ pub fn test_sftp_toolbar_new_folder() -> Builder {
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify CreateFolder dialog is open")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            matches!(v.dialog(), Some(Dialog::CreateFolder { .. })),
-                            "应打开新建文件夹对话框"
-                        )
-                    })
-                }),
+            TestStep::new("Verify CreateFolder dialog is open").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(
+                        matches!(v.dialog(), Some(Dialog::CreateFolder { .. })),
+                        "the new folder dialog should open"
+                    )
+                })
+            }),
         )
 }
 
-/// 点击上传按钮，验证不 panic
+/// Clicks the upload button and verifies it does not panic.
 pub fn test_sftp_toolbar_upload() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -365,20 +357,21 @@ pub fn test_sftp_toolbar_upload() -> Builder {
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify view still stable after upload click")
-                .add_assertion(|app, window_id| {
+            TestStep::new("Verify view still stable after upload click").add_assertion(
+                |app, window_id| {
                     let view = sftp::sftp_browser_view(app, window_id);
                     view.read(app, |v, _| {
                         async_assert!(
                             matches!(v.connection_state(), ConnectionState::Connected),
-                            "点击上传后应仍为 Connected"
+                            "should still be Connected after clicking upload"
                         )
                     })
-                }),
+                },
+            ),
         )
 }
 
-/// 点击上级目录按钮，验证导航回退
+/// Clicks the parent directory button and verifies navigation goes back.
 pub fn test_sftp_toolbar_up() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -386,43 +379,43 @@ pub fn test_sftp_toolbar_up() -> Builder {
             false.to_string(),
         )]))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_step(open_sftp_with_mock_step(&[
-            ("subdir/file.txt", b"content"),
-        ]))
-        // 进入子目录
+        .with_step(open_sftp_with_mock_step(&[("subdir/file.txt", b"content")]))
+        // Enter the subdirectory.
         .with_step(
             TestStep::new("Enter subdirectory")
                 .with_action(|app, window_id, _| {
                     let view = sftp::sftp_browser_view(app, window_id);
                     view.update(app, |v, ctx| {
-                        v.handle_action(&SftpBrowserAction::OpenEntry(
-                            v.entries().iter().position(|e| e.name == "subdir").unwrap(),
-                        ), ctx);
+                        v.handle_action(
+                            &SftpBrowserAction::OpenEntry(
+                                v.entries().iter().position(|e| e.name == "subdir").unwrap(),
+                            ),
+                            ctx,
+                        );
                     });
                 })
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
-        // 点击上级目录按钮
+        // Click the parent directory button.
         .with_step(
             TestStep::new("Click up button")
                 .with_click_on_saved_position("sftp_btn:up")
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify navigated back to root")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            v.entries().iter().any(|e| e.name == "subdir"),
-                            "回到上级后应看到 subdir 目录"
-                        )
-                    })
-                }),
+            TestStep::new("Verify navigated back to root").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(
+                        v.entries().iter().any(|e| e.name == "subdir"),
+                        "the subdir directory should be visible after going back up"
+                    )
+                })
+            }),
         )
 }
 
-/// 点击文件行，验证选中状态
+/// Clicks a file row and verifies the selected state.
 pub fn test_sftp_click_file_row_selects() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -440,20 +433,19 @@ pub fn test_sftp_click_file_row_selects() -> Builder {
                 .set_post_step_pause(std::time::Duration::from_millis(300)),
         )
         .with_step(
-            TestStep::new("Verify file is selected")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            v.selected().contains(&0),
-                            "第一个文件应被选中"
-                        )
-                    })
-                }),
+            TestStep::new("Verify file is selected").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(
+                        v.selected().contains(&0),
+                        "the first file should be selected"
+                    )
+                })
+            }),
         )
 }
 
-/// 右键点击文件行，验证上下文菜单打开
+/// Right-clicks a file row and verifies the context menu opens.
 pub fn test_sftp_right_click_opens_menu() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -461,29 +453,26 @@ pub fn test_sftp_right_click_opens_menu() -> Builder {
             false.to_string(),
         )]))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_step(open_sftp_with_mock_step(&[
-            ("menu_file.txt", b"content"),
-        ]))
+        .with_step(open_sftp_with_mock_step(&[("menu_file.txt", b"content")]))
         .with_step(
             TestStep::new("Right-click on file row")
                 .with_right_click_on_saved_position("sftp_row:0")
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify context menu is open")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            v.context_menu().is_some(),
-                            "右键菜单应已打开"
-                        )
-                    })
-                }),
+            TestStep::new("Verify context menu is open").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(
+                        v.context_menu().is_some(),
+                        "the context menu should be open"
+                    )
+                })
+            }),
         )
 }
 
-/// 右键菜单 → 点击删除 → 确认
+/// Context menu -> click delete -> confirm.
 pub fn test_sftp_ctx_menu_delete() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -491,57 +480,53 @@ pub fn test_sftp_ctx_menu_delete() -> Builder {
             false.to_string(),
         )]))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_step(open_sftp_with_mock_step(&[
-            ("to_delete.txt", b"delete me"),
-        ]))
-        // 右键打开菜单
+        .with_step(open_sftp_with_mock_step(&[("to_delete.txt", b"delete me")]))
+        // Right-click to open the menu.
         .with_step(
             TestStep::new("Right-click on file")
                 .with_right_click_on_saved_position("sftp_row:0")
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
-        // 点击删除菜单项
+        // Click the delete menu item.
         .with_step(
             TestStep::new("Click delete in context menu")
                 .with_click_on_saved_position("sftp_ctx:delete")
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
-        // 验证删除确认对话框
+        // Verify the delete confirmation dialog.
         .with_step(
-            TestStep::new("Verify delete confirm dialog")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            matches!(v.dialog(), Some(Dialog::DeleteConfirm { .. })),
-                            "应打开删除确认对话框"
-                        )
-                    })
-                }),
+            TestStep::new("Verify delete confirm dialog").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(
+                        matches!(v.dialog(), Some(Dialog::DeleteConfirm { .. })),
+                        "the delete confirmation dialog should open"
+                    )
+                })
+            }),
         )
-        // 点击确认
+        // Click confirm.
         .with_step(
             TestStep::new("Click confirm button")
                 .with_click_on_saved_position("sftp_btn:dialog_confirm")
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
-        // 验证条目已删除
+        // Verify the entry has been deleted.
         .with_step(
-            TestStep::new("Verify file deleted")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert_eq!(
-                            v.entries().len(),
-                            0,
-                            "删除后应无条目"
-                        )
-                    })
-                }),
+            TestStep::new("Verify file deleted").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert_eq!(
+                        v.entries().len(),
+                        0,
+                        "there should be no entries after deletion"
+                    )
+                })
+            }),
         )
 }
 
-/// 右键菜单 → 重命名
+/// Context menu -> rename.
 pub fn test_sftp_ctx_menu_rename() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -549,9 +534,7 @@ pub fn test_sftp_ctx_menu_rename() -> Builder {
             false.to_string(),
         )]))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_step(open_sftp_with_mock_step(&[
-            ("old_name.txt", b"content"),
-        ]))
+        .with_step(open_sftp_with_mock_step(&[("old_name.txt", b"content")]))
         .with_step(
             TestStep::new("Right-click on file")
                 .with_right_click_on_saved_position("sftp_row:0")
@@ -563,20 +546,19 @@ pub fn test_sftp_ctx_menu_rename() -> Builder {
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify rename dialog is open")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            matches!(v.dialog(), Some(Dialog::Rename { .. })),
-                            "应打开重命名对话框"
-                        )
-                    })
-                }),
+            TestStep::new("Verify rename dialog is open").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(
+                        matches!(v.dialog(), Some(Dialog::Rename { .. })),
+                        "the rename dialog should open"
+                    )
+                })
+            }),
         )
 }
 
-/// 面包屑导航 — 点击根目录
+/// Breadcrumb navigation -- click the root directory.
 pub fn test_sftp_breadcrumb_root_click() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -584,10 +566,8 @@ pub fn test_sftp_breadcrumb_root_click() -> Builder {
             false.to_string(),
         )]))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_step(open_sftp_with_mock_step(&[
-            ("subdir/file.txt", b"content"),
-        ]))
-        // 进入子目录
+        .with_step(open_sftp_with_mock_step(&[("subdir/file.txt", b"content")]))
+        // Enter the subdirectory.
         .with_step(
             TestStep::new("Enter subdirectory")
                 .with_action(|app, window_id, _| {
@@ -599,32 +579,34 @@ pub fn test_sftp_breadcrumb_root_click() -> Builder {
                 })
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
-        // 点击面包屑根 "/" 导航回根目录
+        // Click the breadcrumb root "/" to navigate back to the root directory.
         .with_step(
             TestStep::new("Navigate to root via breadcrumb")
                 .with_action(|app, window_id, _| {
                     let view = sftp::sftp_browser_view(app, window_id);
                     view.update(app, |v, ctx| {
-                        v.handle_action(&SftpBrowserAction::NavigateTo(std::path::PathBuf::from("/")), ctx);
+                        v.handle_action(
+                            &SftpBrowserAction::NavigateTo(std::path::PathBuf::from("/")),
+                            ctx,
+                        );
                     });
                 })
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify navigated to root")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            v.entries().iter().any(|e| e.name == "subdir"),
-                            "回到根目录后应看到 subdir"
-                        )
-                    })
-                }),
+            TestStep::new("Verify navigated to root").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(
+                        v.entries().iter().any(|e| e.name == "subdir"),
+                        "subdir should be visible after returning to the root directory"
+                    )
+                })
+            }),
         )
 }
 
-/// 键盘 Backspace 返回上级
+/// Keyboard Backspace navigates to the parent directory.
 pub fn test_sftp_keyboard_backspace_up() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -632,10 +614,8 @@ pub fn test_sftp_keyboard_backspace_up() -> Builder {
             false.to_string(),
         )]))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_step(open_sftp_with_mock_step(&[
-            ("subdir/file.txt", b"x"),
-        ]))
-        // 进入子目录
+        .with_step(open_sftp_with_mock_step(&[("subdir/file.txt", b"x")]))
+        // Enter the subdirectory.
         .with_step(
             TestStep::new("Enter subdirectory")
                 .with_action(|app, window_id, _| {
@@ -647,27 +627,26 @@ pub fn test_sftp_keyboard_backspace_up() -> Builder {
                 })
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
-        // 按 Backspace
+        // Press Backspace.
         .with_step(
             TestStep::new("Press Backspace to go up")
                 .with_keystrokes(&["backspace"])
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify back at root")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            v.entries().iter().any(|e| e.name == "subdir"),
-                            "Backspace 后应回到上级看到 subdir"
-                        )
-                    })
-                }),
+            TestStep::new("Verify back at root").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(
+                        v.entries().iter().any(|e| e.name == "subdir"),
+                        "after Backspace, subdir should be visible in the parent directory"
+                    )
+                })
+            }),
         )
 }
 
-/// 键盘 Delete 删除选中条目
+/// Keyboard Delete removes the selected entry.
 pub fn test_sftp_keyboard_delete() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -675,10 +654,8 @@ pub fn test_sftp_keyboard_delete() -> Builder {
             false.to_string(),
         )]))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_step(open_sftp_with_mock_step(&[
-            ("del_target.txt", b"x"),
-        ]))
-        // 选中第一个条目
+        .with_step(open_sftp_with_mock_step(&[("del_target.txt", b"x")]))
+        // Select the first entry.
         .with_step(
             TestStep::new("Select first entry")
                 .with_action(|app, window_id, _| {
@@ -689,27 +666,26 @@ pub fn test_sftp_keyboard_delete() -> Builder {
                 })
                 .set_post_step_pause(std::time::Duration::from_millis(300)),
         )
-        // 按 Delete
+        // Press Delete.
         .with_step(
             TestStep::new("Press Delete key")
                 .with_keystrokes(&["delete"])
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify delete confirm dialog")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            matches!(v.dialog(), Some(Dialog::DeleteConfirm { .. })),
-                            "Delete 键应触发删除确认对话框"
-                        )
-                    })
-                }),
+            TestStep::new("Verify delete confirm dialog").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(
+                        matches!(v.dialog(), Some(Dialog::DeleteConfirm { .. })),
+                        "the Delete key should trigger the delete confirmation dialog"
+                    )
+                })
+            }),
         )
 }
 
-/// 键盘 Escape 关闭对话框
+/// Keyboard Escape closes the dialog.
 pub fn test_sftp_keyboard_escape_close_dialog() -> Builder {
     new_builder()
         .with_user_defaults(HashMap::from([(
@@ -717,10 +693,8 @@ pub fn test_sftp_keyboard_escape_close_dialog() -> Builder {
             false.to_string(),
         )]))
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        .with_step(open_sftp_with_mock_step(&[
-            ("file.txt", b"x"),
-        ]))
-        // 打开新建文件夹对话框
+        .with_step(open_sftp_with_mock_step(&[("file.txt", b"x")]))
+        // Open the new folder dialog.
         .with_step(
             TestStep::new("Open new folder dialog")
                 .with_action(|app, window_id, _| {
@@ -732,30 +706,25 @@ pub fn test_sftp_keyboard_escape_close_dialog() -> Builder {
                 .set_post_step_pause(std::time::Duration::from_millis(300)),
         )
         .with_step(
-            TestStep::new("Verify dialog open")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(v.dialog().is_some(), "对话框应已打开")
-                    })
-                }),
+            TestStep::new("Verify dialog open").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(v.dialog().is_some(), "the dialog should be open")
+                })
+            }),
         )
-        // 按 Escape 关闭
+        // Press Escape to close.
         .with_step(
             TestStep::new("Press Escape to close")
                 .with_keystrokes(&["escape"])
                 .set_post_step_pause(std::time::Duration::from_millis(500)),
         )
         .with_step(
-            TestStep::new("Verify dialog closed")
-                .add_assertion(|app, window_id| {
-                    let view = sftp::sftp_browser_view(app, window_id);
-                    view.read(app, |v, _| {
-                        async_assert!(
-                            v.dialog().is_none(),
-                            "Escape 后对话框应关闭"
-                        )
-                    })
-                }),
+            TestStep::new("Verify dialog closed").add_assertion(|app, window_id| {
+                let view = sftp::sftp_browser_view(app, window_id);
+                view.read(app, |v, _| {
+                    async_assert!(v.dialog().is_none(), "the dialog should close after Escape")
+                })
+            }),
         )
 }

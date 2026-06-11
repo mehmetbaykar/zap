@@ -49,8 +49,8 @@ pub(super) fn input_context_for_request(
     is_user_query: bool,
     context_model: &BlocklistAIContextModel,
     active_session: &ActiveSession,
-    // 保留参数:多个上层调用方的签名暂不动;list_skills 不再需要会话 id 去重,
-    // 但其他潜在用法可能仍需要 → 留 _ 前缀避免 unused 警告。
+    // Retained parameter: several upstream callers' signatures are left unchanged for now; list_skills no longer needs the conversation id for dedup,
+    // but other potential uses may still need it → keep the _ prefix to avoid an unused warning.
     _conversation_id: Option<AIConversationId>,
     additional_context: Vec<AIAgentContext>,
     app: &AppContext,
@@ -66,9 +66,9 @@ pub(super) fn input_context_for_request(
     }
 
     if FeatureFlag::ListSkills.is_enabled() {
-        // 项目去云端后,system prompt 每轮在客户端完整重渲(BYOP 无状态),
-        // skills 必须每轮全量送达,不再做差量。空列表时也不 push,保持
-        // context 紧凑(模板侧 `{% if skills %}` 守卫即可正常省略 section)。
+        // After the project moved off the cloud, the system prompt is fully re-rendered on the client every round (BYOP is stateless),
+        // so skills must be delivered in full every round, with no incremental diffing. When the list is empty it is not pushed, keeping
+        // the context compact (the template-side `{% if skills %}` guard omits the section normally).
         let skills = list_skills(
             active_session.current_working_directory().map(Path::new),
             app,
@@ -283,8 +283,8 @@ pub(crate) fn plan_attachment_for_reference(
     None
 }
 
-/// 从 ObjectStoreModel 中按 UID 和类型取对象 payload。
-/// 找不到对象时返回 None。
+/// Fetches an object payload from ObjectStoreModel by UID and type.
+/// Returns None when the object is not found.
 fn get_object_attachment_payload(
     uid: &str,
     object_type: ObjectType,

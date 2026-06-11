@@ -434,21 +434,20 @@ impl CLISubagentView {
                 c.get_task(&task_id)
                     .and_then(|t| t.last_exchange().map(|e| e.id))
                     .or_else(|| {
-                        // Zap BYOP fallback:agent 自起 LRC 时
-                        // `cli_controller::FinishedAction` 通过
-                        // `create_silent_cli_subagent_task_for_conversation` 真实创建
-                        // subtask 但暂未给它 append exchange(没新 query 触发
-                        // `update_for_new_request_input`),用 root task 的 last
-                        // exchange 占位。后续用户 follow-up query 路由到此 task →
-                        // `AppendedExchange` → 上面的订阅(line 365-394)会自动
-                        // replace model 到真实 exchange,所以占位只在窗口创建瞬间
-                        // 短暂存在,UX 上不可见。
+                        // Zap BYOP fallback: when an agent launches an LRC itself,
+                        // `cli_controller::FinishedAction` actually creates a subtask via
+                        // `create_silent_cli_subagent_task_for_conversation` but has not yet appended an
+                        // exchange to it (no new query triggered `update_for_new_request_input`), so the root task's last
+                        // exchange is used as a placeholder. A subsequent user follow-up query routed to this task →
+                        // `AppendedExchange` → the subscription above (line 365-394) automatically
+                        // replaces the model with the real exchange, so the placeholder only briefly exists at the moment the window is created,
+                        // invisible in the UX.
                         let fallback = c.root_task_exchanges().last().map(|e| e.id);
                         if fallback.is_some() {
                             log::warn!(
-                                "[byop] CLISubagentView::new task={task_id:?} 暂无 \
-                                 exchange,fallback 到 root_task last_exchange;\
-                                 等待 AppendedExchange 触发 replace。"
+                                "[byop] CLISubagentView::new task={task_id:?} has no \
+                                 exchange yet, falling back to root_task last_exchange; \
+                                 waiting for AppendedExchange to trigger replace."
                             );
                         }
                         fallback

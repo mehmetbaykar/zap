@@ -14,13 +14,13 @@ use crate::terminal::writeable_pty::Message;
 
 struct ChildExitSender {
     sender: mio_channel::Sender<Message>,
-    // Shell 进程句柄,callback 触发时用来读 GetExitCodeProcess。
-    // HANDLE 仅在 callback 中只读使用,所有权仍在 PseudoConsoleChild。
+    // Shell process handle, read in the callback to call GetExitCodeProcess.
+    // The HANDLE is only used read-only inside the callback; ownership stays in PseudoConsoleChild.
     child_handle: HANDLE,
 }
 
-// Safety: HANDLE 是裸指针,跨线程只读使用 GetExitCodeProcess 是安全的;真正的
-// 句柄关闭仍由 PseudoConsoleChild::Drop 处理。
+// Safety: HANDLE is a raw pointer; cross-thread read-only use with GetExitCodeProcess is safe.
+// The actual handle close is still done by PseudoConsoleChild::Drop.
 unsafe impl Send for ChildExitSender {}
 unsafe impl Sync for ChildExitSender {}
 
@@ -38,8 +38,8 @@ extern "system" fn child_exit_callback(ctx: *mut c_void, timed_out: bool) {
         return;
     }
 
-    // 读取 shell 进程退出码并打日志,用于排查"opencode 等 TUI 退出后 shell
-    // 也跟着死"这类问题(对照 Windows Terminal 行为时定位根因)。
+    // Read the shell process exit code and log it, to debug issues like "the shell
+    // dies after a TUI such as opencode exits" (pinpointing the root cause against Windows Terminal behavior).
     let mut exit_code: u32 = 0;
     let exit_code_log = match unsafe { GetExitCodeProcess(event_tx.child_handle, &mut exit_code) } {
         Ok(()) => format!("exit_code={exit_code} (0x{exit_code:08X})"),

@@ -1,8 +1,9 @@
-//! `candidates::CandidatesViewModel::rows()` 的纯函数单测。
+//! Pure-function unit tests for `candidates::CandidatesViewModel::rows()`.
 //!
-//! 这里只验"状态 → 行列表"的映射;真实 IO(`load_candidates`)、warpui
-//! runtime 都不参与。覆盖矩阵:状态 5 种(未加载 / NotFound / Error /
-//! Empty / 非空 Loaded)× 折叠 2 种 × `added_aliases` 命中/未命中。
+//! Here we only verify the "state → row list" mapping; real IO
+//! (`load_candidates`) and the warpui runtime are not involved. Coverage matrix:
+//! 5 states (not loaded / NotFound / Error / Empty / non-empty Loaded) × 2
+//! collapsed states × `added_aliases` hit/miss.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -10,8 +11,8 @@ use std::path::PathBuf;
 use warp_ssh_manager::SshConfigCandidate;
 
 use super::{
-    CandidateRow, CandidatesViewModel, fake_load_result_error, fake_load_result_loaded,
-    fake_load_result_not_found,
+    fake_load_result_error, fake_load_result_loaded, fake_load_result_not_found, CandidateRow,
+    CandidatesViewModel,
 };
 
 fn cand(alias: &str) -> SshConfigCandidate {
@@ -36,7 +37,7 @@ fn full_cand() -> SshConfigCandidate {
 
 #[test]
 fn rows_when_state_is_none_is_empty() {
-    // 模型刚创建、还没 refresh —— panel 据此完全不渲染区段。
+    // Model just created, not refreshed yet — the panel renders no section at all based on this.
     let vm = CandidatesViewModel::new();
     assert_eq!(vm.rows(), Vec::<CandidateRow>::new());
 }
@@ -131,7 +132,7 @@ fn rows_when_loaded_non_empty_returns_header_plus_one_per_candidate() {
 
 #[test]
 fn rows_marks_added_when_alias_in_added_set() {
-    // PRODUCT.md decision E:已导入 → `added=true`,UI 显示 "Added" 徽章。
+    // PRODUCT.md decision E: already imported → `added=true`, UI shows the "Added" badge.
     let mut added = HashSet::new();
     added.insert("b".to_string());
     let vm = CandidatesViewModel::with_state(
@@ -177,8 +178,9 @@ fn rows_propagates_all_candidate_fields() {
             assert_eq!(hostname.as_deref(), Some("prod.example.com"));
             assert_eq!(user.as_deref(), Some("alice"));
             assert_eq!(*port, Some(2222));
-            // PathBuf::display() 在跨平台上分隔符可能不同 —— 用 contains 而不是
-            // 字面相等,断言关键路径段在里面就够。
+            // PathBuf::display() may use a different separator across platforms —
+            // use contains rather than literal equality; asserting the key path
+            // segment is present is enough.
             assert!(identity_file.as_deref().unwrap().contains("id_ed25519"));
             assert!(!*added);
         }
@@ -188,7 +190,7 @@ fn rows_propagates_all_candidate_fields() {
 
 #[test]
 fn rows_when_collapsed_returns_header_only() {
-    // 折叠后 body(NotFound / Empty / Error / Candidate) 全部不渲染。
+    // After collapsing, the body (NotFound / Empty / Error / Candidate) is not rendered at all.
     let vm = CandidatesViewModel::with_state(
         Some(fake_load_result_loaded(
             "/home/u/.ssh/config",
@@ -230,40 +232,42 @@ fn path_display_reflects_state_path() {
     );
     assert_eq!(vm.path_display().as_deref(), Some("/etc/ssh/config"));
 
-    // 状态为空时 path_display 返回 None
+    // When the state is empty, path_display returns None
     let empty = CandidatesViewModel::new();
     assert!(empty.path_display().is_none());
 }
 
-// ---- 显式 state=None 场景测试 ----
-// `refresh()` 在"自动发现关闭"时把 `state` 设为 `None`，效果与未初始化一致。
-// 以下测试用 `with_state(None, …)` 显式构造该状态，验证各公开方法的预期行为。
-// 注意：这些测试不经过 `refresh()` 路径，仅验证 `state = None` 时的输出。
+// ---- Explicit state=None scenario tests ----
+// `refresh()` sets `state` to `None` when "auto-discovery is off", with the same
+// effect as being uninitialized. The tests below use `with_state(None, …)` to
+// construct that state explicitly and verify the expected behavior of each
+// public method. Note: these tests do not go through the `refresh()` path; they
+// only verify the output when `state = None`.
 
 #[test]
 fn rows_empty_when_explicit_state_none() {
-    // state = None → rows 返回空 Vec, panel 据此不渲染 Candidates 区段。
+    // state = None → rows returns an empty Vec; the panel renders no Candidates section based on this.
     let vm = CandidatesViewModel::with_state(None, HashSet::new(), true);
     assert_eq!(vm.rows(), Vec::<CandidateRow>::new());
 }
 
 #[test]
 fn find_candidate_returns_none_when_explicit_state_none() {
-    // state = None → find_candidate 始终返回 None。
+    // state = None → find_candidate always returns None.
     let vm = CandidatesViewModel::with_state(None, HashSet::new(), true);
     assert!(vm.find_candidate("any-host").is_none());
 }
 
 #[test]
 fn path_display_returns_none_when_explicit_state_none() {
-    // state = None → path_display 返回 None。
+    // state = None → path_display returns None.
     let vm = CandidatesViewModel::with_state(None, HashSet::new(), true);
     assert!(vm.path_display().is_none());
 }
 
 #[test]
 fn added_aliases_still_works_when_state_loaded() {
-    // 开启自动发现时,on_tree_changed 正确更新 added_aliases。
+    // When auto-discovery is on, on_tree_changed correctly updates added_aliases.
     let mut added = HashSet::new();
     added.insert("web-server".to_string());
     let vm = CandidatesViewModel::with_state(
@@ -275,7 +279,7 @@ fn added_aliases_still_works_when_state_loaded() {
         true,
     );
     let rows = vm.rows();
-    // 第 0 行是 Header,第 1.. 是 Candidate
+    // Row 0 is the Header, rows 1.. are Candidates
     match &rows[1] {
         CandidateRow::Candidate { alias, added, .. } => {
             assert_eq!(alias, "web-server");
@@ -294,7 +298,7 @@ fn added_aliases_still_works_when_state_loaded() {
 
 #[test]
 fn rows_when_collapsed_with_not_found_returns_header_only() {
-    // 折叠 + NotFound 状态 → 只返回 Header,body 不渲染。
+    // Collapsed + NotFound state → returns only the Header, body not rendered.
     let vm = CandidatesViewModel::with_state(
         Some(fake_load_result_not_found("/home/u/.ssh/config")),
         HashSet::new(),
@@ -314,7 +318,7 @@ fn rows_when_collapsed_with_not_found_returns_header_only() {
 
 #[test]
 fn rows_when_collapsed_with_error_returns_header_only() {
-    // 折叠 + Error 状态 → 只返回 Header。
+    // Collapsed + Error state → returns only the Header.
     let vm = CandidatesViewModel::with_state(
         Some(fake_load_result_error("/home/u/.ssh/config", "io error")),
         HashSet::new(),
@@ -332,9 +336,10 @@ fn rows_when_collapsed_with_error_returns_header_only() {
     ));
 }
 
-// ---- refresh() 设置分支测试 ----
-// 以下测试通过 warpui runtime 真正调用 `refresh()`，验证自动发现开关的设置分支。
-// 与上方 `with_state(None, …)` 测试不同，这里经过 `refresh()` 的真实路径。
+// ---- refresh() setting-branch tests ----
+// The tests below actually call `refresh()` through the warpui runtime to verify
+// the setting branch of the auto-discovery toggle. Unlike the `with_state(None,
+// …)` tests above, these go through the real `refresh()` path.
 
 #[test]
 fn refresh_clears_state_when_auto_discovery_disabled() {
@@ -346,12 +351,12 @@ fn refresh_clears_state_when_auto_discovery_disabled() {
     App::test((), |mut app| async move {
         initialize_settings_for_tests(&mut app);
 
-        // 关闭自动发现
+        // Turn off auto-discovery
         SshSettings::handle(&app).update(&mut app, |s, ctx| {
             s.enable_ssh_auto_discovery.set_value(false, ctx).unwrap();
         });
 
-        // 用预加载的候选数据创建模型（模拟"曾经开启并加载过"的场景）
+        // Create the model with preloaded candidate data (simulating the "was once enabled and loaded" scenario)
         let handle = app.add_model(|_| {
             CandidatesViewModel::with_state(
                 Some(fake_load_result_loaded(
@@ -363,12 +368,12 @@ fn refresh_clears_state_when_auto_discovery_disabled() {
             )
         });
 
-        // refresh → 自动发现关闭 → state 被置 None
+        // refresh → auto-discovery off → state is set to None
         handle.update(&mut app, |vm, ctx| {
             vm.refresh(ctx);
         });
 
-        // rows() 返回空，面板据此不渲染 Candidates 区段
+        // rows() returns empty; the panel renders no Candidates section based on this
         handle.read(&app, |vm, _| {
             assert_eq!(vm.rows(), Vec::<CandidateRow>::new());
         });

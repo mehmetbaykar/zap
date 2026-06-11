@@ -1,29 +1,29 @@
-//! 把单条 `AIAgentInput::UserQuery` 自带的附件类 `AIAgentContext` 渲染为
-//! 发往上游模型的 user message 内容(text 前缀 + binary 多模态部件)。
+//! Renders the attachment-type `AIAgentContext` carried by a single `AIAgentInput::UserQuery`
+//! into the user message content sent to the upstream model (text prefix + binary multimodal parts).
 //!
-//! ## 与 warp 自家路径的对齐
+//! ## Alignment with warp's own path
 //!
-//! warp 自家协议下,这些附件走 `api::InputContext` 的 `executed_shell_commands /
-//! selected_text / files / images` 字段(见 `app/src/ai/agent/api/convert_to.rs`
-//! `convert_context`)。BYOP 直接对接 OpenAI / Anthropic / Gemini / Ollama 兼容
-//! `/chat/completions`,没有 `InputContext` 这层结构,只能把数据嵌进 user message。
+//! Under warp's own protocol, these attachments go through `api::InputContext`'s `executed_shell_commands /
+//! selected_text / files / images` fields (see `app/src/ai/agent/api/convert_to.rs`
+//! `convert_context`). BYOP connects directly to OpenAI / Anthropic / Gemini / Ollama-compatible
+//! `/chat/completions`, which has no `InputContext` layer, so the data can only be embedded in the user message.
 //!
-//! 字段严格对齐 warp protobuf,不引入协议外字段:
+//! Fields strictly align with the warp protobuf, introducing no fields outside the protocol:
 //!
-//! | 类型             | warp protobuf 字段                                          |
+//! | Type             | warp protobuf fields                                        |
 //! |------------------|-------------------------------------------------------------|
 //! | `Block`          | command / output / exit_code / command_id / is_auto_attached / started_ts / finished_ts |
 //! | `SelectedText`   | text                                                        |
-//! | `File`(text)    | file_name / content / line_range                            |
-//! | `File`(binary)  | file_name / data / mime_type(P1 binary 通道)              |
-//! | `Image`          | mime_type / file_name / data(P1 binary 通道)              |
+//! | `File` (text)    | file_name / content / line_range                            |
+//! | `File` (binary)  | file_name / data / mime_type (P1 binary channel)            |
+//! | `Image`          | mime_type / file_name / data (P1 binary channel)            |
 //!
-//! ## 作用域:per-input,不影响 system prompt
+//! ## Scope: per-input, doesn't affect the system prompt
 //!
-//! - 这些附件只注入 user message,不进 system prompt
-//! - 历史轮的 `referenced_attachments` 会从持久化 message 重新渲染,避免 BYOP 多轮丢上下文
-//! - env / git / skills / project_rules / codebase / current_time 这些**环境型** context
-//!   仍由 `prompt_renderer` 渲染进 system,与本模块互不重叠
+//! - These attachments are injected only into the user message, not the system prompt
+//! - Historical turns' `referenced_attachments` are re-rendered from the persisted message, to avoid BYOP losing context across turns
+//! - **environment-type** context like env / git / skills / project_rules / codebase / current_time
+//!   is still rendered into the system by `prompt_renderer`, not overlapping with this module
 
 use std::collections::HashMap;
 
@@ -34,25 +34,25 @@ use crate::ai::block_context::BlockContext;
 use ai::agent::action_result::{AnyFileContent, FileContext};
 use warp_multi_agent_api as api;
 
-/// `collect_user_attachments` 返回的双通道结果。
+/// The dual-channel result returned by `collect_user_attachments`.
 ///
-/// - `prefix`: 文本前缀块,prepend 到 user message text。包含 block / selected_text /
-///   text-like file 的内联 XML,以及 binary 附件的占位提示(让 LLM 能引用文件名)。
-/// - `binaries`: 需要作为 `ContentPart::Binary` 注入到多模态 message 的附件
-///   (image / PDF / audio)。caller(chat_stream.rs)会按 model capability 过滤后
-///   决定是否切到 `MessageContent::Parts`。
+/// - `prefix`: a text prefix block, prepended to the user message text. Contains the inline XML of
+///   block / selected_text / text-like files, plus placeholder hints for binary attachments (so the LLM can reference filenames).
+/// - `binaries`: attachments that need to be injected as `ContentPart::Binary` into a multimodal message
+///   (image / PDF / audio). The caller (chat_stream.rs) filters by model capability and then
+///   decides whether to switch to `MessageContent::Parts`.
 #[derive(Debug, Default, Clone)]
 pub struct UserAttachments {
     pub prefix: Option<String>,
     pub binaries: Vec<UserBinary>,
 }
 
-/// 一条 binary 附件,等价于 genai `Binary::from_base64` 的输入三元组。
+/// A single binary attachment, equivalent to the input triple of genai `Binary::from_base64`.
 #[derive(Debug, Clone)]
 pub struct UserBinary {
     pub name: String,
     pub content_type: String,
-    /// base64 编码后的数据(无 `data:` 前缀)。
+    /// The base64-encoded data (without the `data:` prefix).
     pub data: String,
 }
 
@@ -62,11 +62,11 @@ impl UserAttachments {
     }
 }
 
-/// 渲染单条 UserQuery 的附件 context 为「文本前缀 + binary 部件」。
+/// Renders a single UserQuery's attachment context into "text prefix + binary parts".
 ///
-/// 调用方应:
-/// 1. 把 `prefix` prepend 到 user query 文本前(中间留空行)
-/// 2. 按 model capability 过滤 `binaries`,有保留时切 `MessageContent::Parts`
+/// The caller should:
+/// 1. Prepend `prefix` before the user query text (with a blank line in between)
+/// 2. Filter `binaries` by model capability; when any remain, switch to `MessageContent::Parts`
 pub fn collect_user_attachments(ctx: &[AIAgentContext]) -> UserAttachments {
     let mut blocks: Vec<&BlockContext> = Vec::new();
     let mut selected_texts: Vec<&str> = Vec::new();
@@ -83,7 +83,7 @@ pub fn collect_user_attachments(ctx: &[AIAgentContext]) -> UserAttachments {
                 AnyFileContent::BinaryContent(_) => binary_files.push(f),
             },
             AIAgentContext::Image(img) => images.push(img),
-            // 环境型 context 由 prompt_renderer 处理,不进 user message。
+            // environment-type context is handled by prompt_renderer and doesn't enter the user message.
             AIAgentContext::Directory { .. }
             | AIAgentContext::ExecutionEnvironment(_)
             | AIAgentContext::CurrentTime { .. }
@@ -124,26 +124,26 @@ pub fn collect_user_attachments(ctx: &[AIAgentContext]) -> UserAttachments {
         out.prefix = Some(prefix);
     }
 
-    // ----- binaries(供 caller 按 capability 过滤后注入 ContentPart::Binary) -----
+    // ----- binaries (for the caller to inject as ContentPart::Binary after capability filtering) -----
     for img in &images {
         out.binaries.push(UserBinary {
             name: img.file_name.clone(),
             content_type: img.mime_type.clone(),
-            // ImageContext.data 已经是 base64 字符串(`process_non_image_files` 兄弟路径
-            // `read_and_process_images_async` 在 PendingAttachment::Image 入队时就完成了 encoding)
+            // ImageContext.data is already a base64 string (the sibling path of `process_non_image_files`,
+            // `read_and_process_images_async`, completes encoding when enqueuing PendingAttachment::Image)
             data: img.data.to_string(),
         });
     }
     for f in &binary_files {
         if let AnyFileContent::BinaryContent(bytes) = &f.content {
-            // 空 BinaryContent 表示"上层故意没读 bytes"(.exe / 超大文件 / 非多模态
-            // mime),只走 placeholder XML 路径,不送 ContentPart::Binary。
+            // empty BinaryContent means "the upper layer deliberately didn't read the bytes" (.exe / very large file / non-multimodal
+            // mime); it only goes through the placeholder XML path and doesn't send ContentPart::Binary.
             if bytes.is_empty() {
                 continue;
             }
             let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-            // 用 file_name 上的扩展名猜 mime;`mime_guess` 与 process_non_image_files
-            // 走的是同一套规则,这里再算一遍是因为 FileContext 不保存 mime。
+            // guess the mime from the extension on file_name; `mime_guess` follows the same rules as process_non_image_files,
+            // and we recompute it here because FileContext doesn't store the mime.
             let mime = mime_guess::from_path(&f.file_name)
                 .first_or_octet_stream()
                 .to_string();
@@ -196,14 +196,14 @@ pub fn render_api_referenced_attachments(
     Some(out)
 }
 
-/// 兼容旧调用方:仅取 prefix 文本。新代码请用 `collect_user_attachments`。
+/// Compatibility for old callers: takes only the prefix text. New code should use `collect_user_attachments`.
 #[cfg(test)]
 pub fn render_user_attachments(ctx: &[AIAgentContext]) -> Option<String> {
     collect_user_attachments(ctx).prefix
 }
 
 // ---------------------------------------------------------------------------
-// 子渲染器
+// Sub-renderers
 // ---------------------------------------------------------------------------
 
 fn render_block(out: &mut String, b: &BlockContext) {
@@ -538,23 +538,23 @@ fn render_file_text(out: &mut String, f: &FileContext) {
     out.push_str("  </file>\n");
 }
 
-/// Binary 文件 prefix 占位:让 LLM 知道有这个文件、完整路径与 mime,可以决定:
-/// - 是直接读 ContentPart::Binary(模型支持 + bytes 已上传)
-/// - 还是用 read_files / shell 工具按 path 自行处理(.exe / .zip / 超大文件)
+/// Binary file prefix placeholder: lets the LLM know this file exists, with its full path and mime, so it can decide:
+/// - whether to read it directly via ContentPart::Binary (model supports it + bytes uploaded)
+/// - or to handle it by path using the read_files / shell tools (.exe / .zip / very large files)
 ///
-/// 实际 bytes 通过 caller 端 `MessageContent::Parts` 走 ContentPart::Binary,
-/// 这里**不**重复贴 base64(避免双倍 token + 不少模型对超长 base64 解析慢)。
+/// The actual bytes go through ContentPart::Binary via the caller's `MessageContent::Parts`,
+/// so we do **not** re-paste the base64 here (to avoid doubling tokens + many models being slow to parse very long base64).
 fn render_file_binary_placeholder(out: &mut String, f: &FileContext) {
     use std::fmt::Write;
     let path = xml_attr(&f.file_name);
-    // mime 通过 mime_guess 从文件名/扩展名推,跟 process_non_image_files 一致。
+    // the mime is inferred from the filename/extension via mime_guess, consistent with process_non_image_files.
     let mime = mime_guess::from_path(&f.file_name)
         .first_or_octet_stream()
         .to_string();
     let size = match &f.content {
         AnyFileContent::BinaryContent(bytes) if !bytes.is_empty() => Some(bytes.len()),
-        // bytes 为空(超大文件 / 非多模态 binary)→ size 未知,不输出 size 属性,
-        // 让 AI 用 read_files / Get-Item 之类自己查。
+        // empty bytes (very large file / non-multimodal binary) → size unknown, don't emit the size attribute,
+        // letting the AI look it up itself with read_files / Get-Item or the like.
         _ => None,
     };
     if let Some(size) = size {
@@ -572,7 +572,7 @@ fn render_file_binary_placeholder(out: &mut String, f: &FileContext) {
     }
 }
 
-/// Image prefix 占位:与 binary file 同语义,实际数据通过 ContentPart::Binary 进多模态。
+/// Image prefix placeholder: same semantics as a binary file; the actual data enters the multimodal message via ContentPart::Binary.
 fn render_image_placeholder(out: &mut String, img: &ImageContext) {
     use std::fmt::Write;
     let _ = writeln!(
@@ -584,7 +584,7 @@ fn render_image_placeholder(out: &mut String, img: &ImageContext) {
 }
 
 // ---------------------------------------------------------------------------
-// XML 转义
+// XML escaping
 // ---------------------------------------------------------------------------
 
 fn xml_text(s: &str) -> String {

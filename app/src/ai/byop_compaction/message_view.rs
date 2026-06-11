@@ -1,16 +1,16 @@
-//! 把 warp `api::Message` 序列适配为 [`MessageRef`] trait,供 [`super::algorithm`] 操作。
+//! Adapts the warp `api::Message` sequence to the [`MessageRef`] trait for [`super::algorithm`] to operate on.
 //!
-//! ## 与 opencode `MessageV2.WithParts` 的语义映射
+//! ## Semantic mapping to opencode `MessageV2.WithParts`
 //!
-//! opencode:一条 user/assistant message 含多个 parts(text/tool/file/...);
-//! warp:一条 protobuf `api::Message` 是细粒度的(UserQuery / AgentReasoning / AgentOutput / ToolCall / ToolCallResult 各自独立)。
+//! opencode: a single user/assistant message contains multiple parts (text/tool/file/...);
+//! warp: a single protobuf `api::Message` is fine-grained (UserQuery / AgentReasoning / AgentOutput / ToolCall / ToolCallResult are each independent).
 //!
-//! 本投影**一对一**把 warp 的每条 `api::Message` 视为一个 `MessageRef`,
-//! turn 检测仍按 user message 边界切 — 一个 user message 后跟连续的非 user message 就是一个 turn。
-//! 这不影响 [`super::algorithm::turns`] / [`super::algorithm::select`] 算法的正确性。
+//! This projection treats each warp `api::Message` as a `MessageRef` **one-to-one**,
+//! with turn detection still cutting on user message boundaries — a user message followed by consecutive non-user messages is one turn.
+//! This does not affect the correctness of the [`super::algorithm::turns`] / [`super::algorithm::select`] algorithms.
 //!
-//! prune 决策针对 `Role::Tool`(ToolCallResult)— 每条 ToolCallResult 自己是一个候选。
-//! 调用方需提前把 conversation 内所有 ToolCall 的 `tool_call_id → tool_name` 索引到 [`ToolNameLookup`]。
+//! Prune decisions target `Role::Tool` (ToolCallResult) — each ToolCallResult is itself a candidate.
+//! The caller must index `tool_call_id → tool_name` for all ToolCalls in the conversation into [`ToolNameLookup`] beforehand.
 
 use std::collections::HashMap;
 
@@ -19,12 +19,12 @@ use warp_multi_agent_api as api;
 use super::algorithm::{MessageRef, Role, ToolOutputRef};
 use super::state::CompactionState;
 
-/// `tool_call_id → tool_name` 索引,投影时用于:
-/// 1. 给 ToolCallResult 标注 tool_name(用于 PRUNE_PROTECTED_TOOLS 判断)
-/// 2. 让 prune 决策跳过 protected 工具(如 `skill`)
+/// `tool_call_id → tool_name` index, used during projection to:
+/// 1. Annotate each ToolCallResult with tool_name (for the PRUNE_PROTECTED_TOOLS check)
+/// 2. Let prune decisions skip protected tools (such as `skill`)
 pub type ToolNameLookup = HashMap<String, String>;
 
-/// 给定一组 tasks,提取所有 ToolCall 的 `(tool_call_id, tool_name)` 对。
+/// Given a set of tasks, extracts the `(tool_call_id, tool_name)` pairs for all ToolCalls.
 pub fn build_tool_name_lookup<'a, I>(messages: I) -> ToolNameLookup
 where
     I: IntoIterator<Item = &'a api::Message>,
@@ -32,7 +32,7 @@ where
     let mut out = ToolNameLookup::new();
     for msg in messages {
         if let Some(api::message::Message::ToolCall(tc)) = &msg.message {
-            // 直接用 protobuf tool_call.tool 的 enum variant 名
+            // Use the enum variant name of the protobuf tool_call.tool directly
             let name = tool_name_for(tc).unwrap_or_default();
             out.insert(tc.tool_call_id.clone(), name);
         }
@@ -40,11 +40,11 @@ where
     out
 }
 
-/// 从 protobuf ToolCall 拿"工具名"。
+/// Gets the "tool name" from a protobuf ToolCall.
 ///
-/// 本投影只需要识别 [`PRUNE_PROTECTED_TOOLS`](`super::consts::PRUNE_PROTECTED_TOOLS`) 里的工具
-/// (目前只有 "skill",对应 warp 的 `Tool::ReadSkill`),其他工具返回空串 — 在 prune 决策里
-/// 空串不匹配任何 protected entry,行为正确(允许被 prune)。
+/// This projection only needs to recognize tools in [`PRUNE_PROTECTED_TOOLS`](`super::consts::PRUNE_PROTECTED_TOOLS`)
+/// (currently only "skill", corresponding to warp's `Tool::ReadSkill`); other tools return an empty string — in prune decisions
+/// the empty string matches no protected entry, which is the correct behavior (allowed to be pruned).
 fn tool_name_for(tc: &api::message::ToolCall) -> Option<String> {
     use api::message::tool_call::Tool;
     let t = tc.tool.as_ref()?;
@@ -55,7 +55,7 @@ fn tool_name_for(tc: &api::message::ToolCall) -> Option<String> {
     Some(s.to_string())
 }
 
-/// 单条 `api::Message` 的视图。
+/// A view of a single `api::Message`.
 #[derive(Clone, Copy)]
 pub struct WarpMessageView<'a> {
     pub msg: &'a api::Message,
@@ -63,7 +63,7 @@ pub struct WarpMessageView<'a> {
     pub tool_names: &'a ToolNameLookup,
 }
 
-/// 估算单条 message 的 token 占用 — 累加可见文本字符数 / 4。
+/// Estimates the token usage of a single message — sum of visible text character count / 4.
 fn estimate_message(msg: &api::Message) -> usize {
     use super::token::estimate;
     use api::message::Message as M;
@@ -76,8 +76,8 @@ fn estimate_message(msg: &api::Message) -> usize {
             M::AgentReasoning(r) => r.reasoning.chars().count(),
             M::ToolCall(_) => msg.server_message_data.chars().count().max(64),
             M::ToolCallResult(tcr) => {
-                // 优先用 result oneof 的 estimate;fallback 用 server_message_data。
-                // 简化:都按字符数算,result.estimate 走 Debug repr。
+                // Prefer the estimate from the result oneof; fall back to server_message_data.
+                // Simplification: both are computed by character count, with result.estimate using the Debug repr.
                 let from_oneof = tcr
                     .result
                     .as_ref()
@@ -90,7 +90,7 @@ fn estimate_message(msg: &api::Message) -> usize {
             _ => 0,
         })
         .unwrap_or(0);
-    // 与 opencode 同算法:chars / 4 round。
+    // Same algorithm as opencode: chars / 4 round.
     estimate(&" ".repeat(chars))
 }
 
@@ -107,13 +107,13 @@ impl<'a> MessageRef for WarpMessageView<'a> {
         match &self.msg.message {
             Some(M::UserQuery(_)) => Role::User,
             Some(M::ToolCallResult(_)) => Role::Tool,
-            // AgentOutput / AgentReasoning / ToolCall / 其他 → Assistant
+            // AgentOutput / AgentReasoning / ToolCall / others → Assistant
             _ => Role::Assistant,
         }
     }
 
     fn is_compaction_marker(&self) -> bool {
-        // 只有 user 消息且带 compaction_trigger marker 才算
+        // Only counts for a user message that carries a compaction_trigger marker
         if self.role() != Role::User {
             return false;
         }
@@ -124,7 +124,7 @@ impl<'a> MessageRef for WarpMessageView<'a> {
     }
 
     fn is_summary(&self) -> bool {
-        // 只有 assistant message 才能是摘要
+        // Only an assistant message can be a summary
         if self.role() != Role::Assistant {
             return false;
         }
@@ -152,7 +152,7 @@ impl<'a> MessageRef for WarpMessageView<'a> {
             .marker(&self.msg.id)
             .and_then(|m| m.tool_output_compacted_at)
             .is_some();
-        // output_size 复用 estimate_message — ToolCallResult 路径会走 result/server_message_data 的字符数
+        // output_size reuses estimate_message — the ToolCallResult path uses the character count of result/server_message_data
         let output_size = estimate_message(self.msg);
         vec![ToolOutputRef {
             call_id: tcr.tool_call_id.clone(),
@@ -164,8 +164,8 @@ impl<'a> MessageRef for WarpMessageView<'a> {
     }
 }
 
-/// 把一组 messages 投影成 `Vec<WarpMessageView>`,按 timestamp 升序排序 —
-/// 与 [`crate::ai::agent_providers::chat_stream::build_chat_request`] 的排序保持一致。
+/// Projects a set of messages into a `Vec<WarpMessageView>`, sorted in ascending timestamp order —
+/// consistent with the ordering in [`crate::ai::agent_providers::chat_stream::build_chat_request`].
 pub fn project<'a>(
     messages: &'a [&'a api::Message],
     state: &'a CompactionState,

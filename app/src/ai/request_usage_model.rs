@@ -1,22 +1,22 @@
-//! Zap(Phase 3c 子任务 A1):本地化为永远"无限额"stub。
+//! Zap (Phase 3c subtask A1): localized into an always-"unlimited" stub.
 //!
-//! 历史职责:warp.dev 服务端 RPC 驱动的"每月 AI 请求配额"模型。
-//! Zap 走 BYOP(Bring Your Own Provider),用户自己付钱给 LLM 提供商,
-//! 永远不应该被云端"剩余请求数 / 升级 CTA / 购买额外 credits"等概念约束。
+//! Historical responsibility: the warp.dev server-RPC-driven "monthly AI request quota" model.
+//! Zap uses BYOP (Bring Your Own Provider); the user pays the LLM provider themselves
+//! and should never be constrained by cloud concepts like "remaining request count / upgrade CTA / buying extra credits".
 //!
-//! 写入约束:
-//! * 30+ UI 订阅点(`subscribe_to_model(&AIRequestUsageModel::handle(ctx), ...)`)
-//!   保留,只是事件不再被任何路径触发 → 订阅回调成为永远静默的 no-op。
-//! * 外溢使用 `RequestLimitInfo` / `RequestUsageInfo` / `BonusGrant` /
+//! Write-domain constraints:
+//! * 30+ UI subscription sites (`subscribe_to_model(&AIRequestUsageModel::handle(ctx), ...)`)
+//!   are kept, except the event is no longer triggered by any path → the subscription callbacks become forever-silent no-ops.
+//! * Files that spill over using `RequestLimitInfo` / `RequestUsageInfo` / `BonusGrant` /
 //!   `BonusGrantScope` / `RequestLimitRefreshDuration` /
 //!   `BuyCreditsBannerDisplayState` / `AIRequestUsageModelEvent` /
-//!   `AMBIENT_AGENT_TRIAL_CREDIT_THRESHOLD` 的文件(`workspaces/gql_convert.rs`、
-//!   `ai_assistant/requests.rs`、`ai_assistant/mod.rs`、
-//!   `settings/ai.rs`、`settings/ai_tests.rs`、`workspace/bonus_grant_notification_model.rs`、
-//!   `settings_view/ai_page.rs`、
-//!   `terminal/view/ambient_agent/first_time_setup.rs`、`agent_view/agent_message_bar.rs`)
-//!   不在本任务写入域内 → 必须在 stub 内继续保留这些类型定义与等价构造能力,
-//!   只剥离 RPC / 缓存 / 计量等业务逻辑。
+//!   `AMBIENT_AGENT_TRIAL_CREDIT_THRESHOLD` (`workspaces/gql_convert.rs`,
+//!   `ai_assistant/requests.rs`, `ai_assistant/mod.rs`,
+//!   `settings/ai.rs`, `settings/ai_tests.rs`, `workspace/bonus_grant_notification_model.rs`,
+//!   `settings_view/ai_page.rs`,
+//!   `terminal/view/ambient_agent/first_time_setup.rs`, `agent_view/agent_message_bar.rs`)
+//!   are outside this task's write domain → these type definitions and equivalent construction capabilities must remain in the stub,
+//!   only stripping the RPC / caching / metering business logic.
 
 use crate::{server_time::ServerTimestamp, workspaces::workspace::WorkspaceUid};
 use chrono::{DateTime, Utc};
@@ -30,10 +30,10 @@ pub enum BonusGrantType {
     Any,
 }
 
-/// Threshold of ambient-only credits at which we surface upgrade/CTA UI。
+/// Threshold of ambient-only credits at which we surface upgrade/CTA UI.
 ///
-/// Zap:本地化场景下永远不会触达(因 `ambient_only_credits_remaining` 恒为 `None`),
-/// 仍保留常量定义以兼容外部 import。
+/// Zap: in the localized scenario this is never reached (since `ambient_only_credits_remaining` is always `None`),
+/// but the constant definition is kept for compatibility with external imports.
 pub const AMBIENT_AGENT_TRIAL_CREDIT_THRESHOLD: i32 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,9 +70,9 @@ pub enum RequestLimitRefreshDuration {
     EveryTwoWeeks,
 }
 
-/// 历史:服务端下发的"每月请求额度"快照。
-/// Zap:仅作为类型壳保留(`AISettings::update_quota_info` / `ai_assistant/requests.rs`
-/// 等写入域外文件还会构造此结构)。`AIRequestUsageModel` 不再持有 / 缓存 / 更新它。
+/// Historical: the "monthly request quota" snapshot pushed by the server.
+/// Zap: kept only as a type shell (write-domain-external files such as `AISettings::update_quota_info` / `ai_assistant/requests.rs`
+/// still construct this struct). `AIRequestUsageModel` no longer holds / caches / updates it.
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct RequestLimitInfo {
     pub limit: usize,
@@ -96,7 +96,7 @@ fn default_voice_requests_limit() -> usize {
 }
 
 impl Default for RequestLimitInfo {
-    /// Zap:无云端配额,默认值视为"无限额"。
+    /// Zap: no cloud quota, so the default value is treated as "unlimited".
     fn default() -> Self {
         Self {
             limit: usize::MAX,
@@ -124,23 +124,23 @@ impl RequestLimitInfo {
     }
 }
 
-/// 历史:服务端 `getRequestLimitInfo` 返回的聚合结构。
-/// Zap:仅作为类型壳保留(`ai_assistant/requests.rs` 仍会构造此类型)。
-/// `AIRequestUsageModel` 不再消费它。
+/// Historical: the aggregate struct returned by the server's `getRequestLimitInfo`.
+/// Zap: kept only as a type shell (`ai_assistant/requests.rs` still constructs this type).
+/// `AIRequestUsageModel` no longer consumes it.
 pub struct RequestUsageInfo {
     pub request_limit_info: RequestLimitInfo,
     pub bonus_grants: Vec<BonusGrant>,
 }
 
-/// Zap:Model 不再持有任何状态。
+/// Zap: the Model no longer holds any state.
 pub struct AIRequestUsageModel;
 
 impl Entity for AIRequestUsageModel {
     type Event = AIRequestUsageModelEvent;
 }
 
-/// Zap:保留 enum 定义以兼容订阅回调 `match` 模式;
-/// `AIRequestUsageModel` 本地化后不再 emit 任何变体 → 所有订阅回调成为静默 no-op。
+/// Zap: the enum definition is kept for compatibility with subscription callback `match` patterns;
+/// after localization `AIRequestUsageModel` no longer emits any variant → all subscription callbacks become silent no-ops.
 pub enum AIRequestUsageModelEvent {
     RequestUsageUpdated,
     RequestBonusRefunded {
@@ -164,42 +164,42 @@ impl AIRequestUsageModel {
         None
     }
 
-    /// Zap:无云后端,no-op。
+    /// Zap: no cloud backend, no-op.
     pub fn refresh_request_usage_async(&mut self, _ctx: &mut ModelContext<Self>) {}
 
-    /// Zap(本地化):永远返回 true,BYOP 本地运行不受云端限额约束。
+    /// Zap (localization): always returns true; BYOP local runs are not constrained by cloud quotas.
     pub fn has_requests_remaining(&self) -> bool {
         true
     }
 
-    /// Zap(本地化):永远返回 true。
-    /// AI 可用性仅取决于用户是否配置了 API key(由 `ApiKeyManager` 独立控制),
-    /// 不该被 `request_limit_info` 等云端计量组件决定。
+    /// Zap (localization): always returns true.
+    /// AI availability depends solely on whether the user has configured an API key (controlled independently by `ApiKeyManager`),
+    /// and should not be determined by cloud metering components such as `request_limit_info`.
     pub fn has_any_ai_remaining(&self, _ctx: &AppContext) -> bool {
         true
     }
 
-    /// Zap(本地化):无云端计量,固定返回 0。
+    /// Zap (localization): no cloud metering, always returns 0.
     pub fn requests_used(&self) -> usize {
         0
     }
 
-    /// Zap(本地化):无云端计量,固定返回 0.0。
+    /// Zap (localization): no cloud metering, always returns 0.0.
     pub fn request_percentage_used(&self) -> f32 {
         0.0
     }
 
-    /// Zap(本地化):无云端 limit,固定返回 `usize::MAX`。
+    /// Zap (localization): no cloud limit, always returns `usize::MAX`.
     pub fn request_limit(&self) -> usize {
         usize::MAX
     }
 
-    /// Zap(本地化):远期 placeholder 时间。
+    /// Zap (localization): a far-future placeholder time.
     pub fn next_refresh_time(&self) -> DateTime<Utc> {
         Utc::now() + chrono::Duration::days(365)
     }
 
-    /// Zap(本地化):永远无限制。
+    /// Zap (localization): always unlimited.
     pub fn is_unlimited(&self) -> bool {
         true
     }
@@ -208,27 +208,27 @@ impl AIRequestUsageModel {
         "monthly".to_string()
     }
 
-    /// Zap(本地化):本地用户不存在 bonus grants。
+    /// Zap (localization): local users have no bonus grants.
     pub fn bonus_grants(&self) -> &[BonusGrant] {
         &[]
     }
 
-    /// Zap(本地化):本地用户没有 ambient-only credits 概念。
+    /// Zap (localization): local users have no ambient-only credits concept.
     pub fn ambient_only_credits_remaining(&self) -> Option<i32> {
         None
     }
 
-    /// Zap(本地化):本地用户没有 workspace bonus credits 概念。
+    /// Zap (localization): local users have no workspace bonus credits concept.
     pub fn total_workspace_bonus_credits_remaining(&self, _uid: WorkspaceUid) -> i32 {
         0
     }
 
-    /// Zap(本地化):本地用户没有 workspace bonus credits 概念。
+    /// Zap (localization): local users have no workspace bonus credits concept.
     pub fn total_current_workspace_bonus_credits_remaining(&self, _ctx: &AppContext) -> i32 {
         0
     }
 
-    /// Zap(本地化):购买额外 credits 业务不适用。
+    /// Zap (localization): the buy-extra-credits business does not apply.
     pub fn compute_buy_addon_credits_banner_display_state(
         &self,
         _ctx: &AppContext,
@@ -236,13 +236,13 @@ impl AIRequestUsageModel {
         BuyCreditsBannerDisplayState::Hidden
     }
 
-    /// Zap(本地化):no-op。
+    /// Zap (localization): no-op.
     pub fn dismiss_buy_credits_banner(&mut self, _ctx: &mut ModelContext<Self>) {}
 
-    /// Zap(本地化):no-op。
+    /// Zap (localization): no-op.
     pub fn enable_buy_credits_banner(&mut self, _ctx: &mut ModelContext<Self>) {}
 
-    /// Zap(本地化):语音输入不受云端额度限制,永远返回 true。
+    /// Zap (localization): voice input is not constrained by cloud quotas; always returns true.
     pub fn can_request_voice(&self) -> bool {
         true
     }

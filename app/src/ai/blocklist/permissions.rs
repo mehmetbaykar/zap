@@ -1152,9 +1152,9 @@ impl BlocklistAIPermissions {
         terminal_view_id: Option<EntityId>,
         ctx: &AppContext,
     ) -> bool {
-        // openWarp 改:auto-approve(ctrl+shift+i)只对 shell/编辑等执行类工具自动通过,
-        // ask_user_question 永远要求弹给用户,避免模型问问题被静默吞掉。
-        // 仅显式选 `Never` 才跳过。
+        // openWarp change: auto-approve (ctrl+shift+i) only auto-passes execution-class tools like shell/edit,
+        // while ask_user_question always requires prompting the user, to avoid the model's questions being silently swallowed.
+        // Only an explicit `Never` selection skips it.
         let _ = conversation_id;
         match self.get_ask_user_question_setting(ctx, terminal_view_id) {
             AskUserQuestionPermission::Never => false,

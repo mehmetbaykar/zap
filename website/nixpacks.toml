@@ -1,5 +1,5 @@
-# 强制 nixpacks 使用 Node 20(默认 18 已 EOL,被 nixpkgs 移除)
-# 顺带固定 bun 作为包管理器
+# Force nixpacks to use Node 20 (the default 18 is EOL and was removed from nixpkgs)
+# Also pin bun as the package manager
 
 [phases.setup]
 nixPkgs = ["nodejs_20", "bun"]
@@ -11,5 +11,5 @@ cmds = ["bun install --frozen-lockfile"]
 cmds = ["bun run build"]
 
 [start]
-# Astro 静态产物 → 用 serve 起 dist/
+# Astro static output → serve dist/ with serve
 cmd = "bunx serve dist -l tcp://0.0.0.0:${PORT:-3000}"

@@ -9,16 +9,17 @@ use windows_result::HRESULT;
 
 pub struct RegistryBackedPreferences {
     app_key_path: String,
-    /// 缓存 `HKCU\Software\Zap\<channel>` 注册表 Key 句柄。
+    /// Caches the `HKCU\Software\Zap\<channel>` registry Key handle.
     ///
-    /// Zap 启动时会顺序调用 ~100 个 setting 的 `read_value`,
-    /// 每次都走 `CURRENT_USER.create(...)` 打开/创建 Key 是 ~3ms 的同步系统调用,
-    /// 累计 300ms+(占冷启动 `READ_USER_DEFAULTS_AND_INITIALIZE_SETTINGS` 阶段大头)。
-    /// 这里把第一次成功打开的 Key 缓存下来,后续读直接复用,省掉 N-1 次系统调用。
+    /// At startup, Zap sequentially calls `read_value` for ~100 settings, and
+    /// opening/creating the Key via `CURRENT_USER.create(...)` each time is a ~3ms
+    /// synchronous system call, adding up to 300ms+ (the bulk of the cold-start
+    /// `READ_USER_DEFAULTS_AND_INITIALIZE_SETTINGS` phase). Here we cache the first
+    /// successfully opened Key and reuse it for subsequent reads, saving N-1 system calls.
     ///
-    /// 用 `Mutex<Option<Key>>` 而不是 `OnceLock`,因为 `windows_registry::Key`
-    /// 没实现 `Clone`,需要可变锁来 `replace`/`take`;同时 `read_value` 接口是
-    /// `&self`,无法用 `RefCell`(需要 Sync)。
+    /// We use `Mutex<Option<Key>>` rather than `OnceLock` because `windows_registry::Key`
+    /// doesn't implement `Clone`, so a mutable lock is needed to `replace`/`take`; at the
+    /// same time the `read_value` interface takes `&self`, so `RefCell` won't work (Sync is required).
     cached_key: Mutex<Option<Key>>,
 }
 
@@ -29,8 +30,8 @@ impl RegistryBackedPreferences {
     /// Construct a separate registry path for each channel (stable, dev, local, etc.)
     pub fn new(app_name: &str) -> Self {
         let app_key_path = WARP_REGISTRY_BASE_PATH.to_owned() + app_name;
-        // 启动时就预热 Key,让第一次 setting 读取也避开同步系统调用。
-        // 预热失败不为错:`with_warp_registry` 会在需要时重试。
+        // Prewarm the Key at startup so the first setting read also avoids a synchronous system call.
+        // A failed prewarm is not an error: `with_warp_registry` will retry when needed.
         let initial_key = CURRENT_USER
             .create(app_key_path.clone())
             .inspect_err(|e| {
@@ -43,16 +44,17 @@ impl RegistryBackedPreferences {
         }
     }
 
-    /// 用回调操作缓存的 Zap 注册表 Key。第一次会 `CURRENT_USER.create(...)`,
-    /// 后续直接复用。如果 Key 锁中毒(之前 panic),fallback 到一次性 create
-    /// 而不缓存 —— 行为退化但不会进一步 panic。
+    /// Operate on the cached Zap registry Key via a callback. The first call runs
+    /// `CURRENT_USER.create(...)`, and subsequent calls reuse it directly. If the Key
+    /// lock is poisoned (a prior panic), fall back to a one-shot create without caching —
+    /// behavior degrades but won't panic further.
     fn with_warp_registry<R>(
         &self,
         f: impl FnOnce(&Key) -> Result<R, super::Error>,
     ) -> Result<R, super::Error> {
         let mut guard = match self.cached_key.lock() {
             Ok(g) => g,
-            // Mutex 中毒:走一次性 create 路径,不缓存,行为等价原版。
+            // Mutex poisoned: take the one-shot create path, without caching, behaving like the original.
             Err(_) => {
                 let key = CURRENT_USER
                     .create(self.app_key_path.clone())
@@ -74,7 +76,7 @@ impl RegistryBackedPreferences {
             *guard = Some(key);
         }
 
-        // 此时 guard 必然 Some;unwrap 安全。
+        // At this point guard is necessarily Some; unwrap is safe.
         f(guard.as_ref().expect("cached_key must be Some after init"))
     }
 }

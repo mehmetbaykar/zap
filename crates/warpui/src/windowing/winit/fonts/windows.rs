@@ -14,8 +14,8 @@ use owned_ttf_parser::OwnedFace;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// 返回用于偏置 DirectWrite Han 字形回退的 BCP-47 locale 字符串。
-/// 与当前 UI locale 同步(由 `app::i18n` 通过 `crate::set_ui_locale` 设置)。
+/// Returns the BCP-47 locale string used to bias DirectWrite Han glyph fallback.
+/// Stays in sync with the current UI locale (set by `app::i18n` via `crate::set_ui_locale`).
 fn current_fallback_locale() -> String {
     crate::current_ui_locale()
 }
@@ -171,10 +171,11 @@ impl TextLayoutSystem {
 
         let locale = current_fallback_locale();
 
-        // 按 locale 优先的 CJK 系统字体:DirectWrite 的 IDWriteFontFallback 在 Windows 英文 / 开发环境
-        // 下不参考 locale 解决 Han 字形歧义,默认返回 Microsoft YaHei,导致日文 UI 反倒拿到简体字字形。
-        // 因此对共享 CJK Han 字符,我们在 DirectWrite 回退之前先 prepend 当前 locale 对应的系统字体
-        // (例如 ja-* → Yu Gothic UI)。
+        // Locale-prioritized CJK system fonts: in English / dev Windows environments,
+        // DirectWrite's IDWriteFontFallback does not consult the locale to resolve Han glyph
+        // ambiguity and defaults to Microsoft YaHei, so a Japanese UI ends up getting Simplified
+        // Chinese glyphs. Therefore, for shared CJK Han characters, we prepend the system font for
+        // the current locale before the DirectWrite fallback (e.g. ja-* → Yu Gothic UI).
         let mut fallback_font_vec: Vec<FontId> = Vec::new();
         if crate::is_shared_cjk_han(character) {
             for family in preferred_cjk_families_for_locale(&locale) {
@@ -222,33 +223,41 @@ impl TextLayoutSystem {
         Ok(fallback_font_vec)
     }
 
-    /// 启动期预热当前 UI locale 偏好的 CJK 字体族(`preferred_cjk_families_for_locale`),
-    /// 在 `FontDB` 构造后立即同步调用一次。
+    /// Prewarms the CJK font families preferred by the current UI locale
+    /// (`preferred_cjk_families_for_locale`), called synchronously once right after `FontDB` is
+    /// constructed.
     ///
-    /// 修复 zerx-lab/warp#68 「启动后中文字体渲染出错,关闭面板重开才好」的回归:
-    /// PR #62 在 `get_fallback_fonts_for_character` 中按 locale prepend 系统 CJK 字体到
-    /// cosmic-text 的回退链;但首屏首次触发 CJK 回退时,`SystemSource::select_family_by_name`
-    /// 在 Windows DirectWrite cold path 下偶发拿不到字体,prepend 段为空,回退落到
-    /// `IDWriteFontFallback::MapCharacters` 的 cold 输出(可能给出非 locale 偏好的家族)。
-    /// 一旦该结果写入 cosmic-text 的 `font_codepoint_support_info_cache` /
-    /// `shape_run_cache`(FontSystem 实例级、locale 不变不会失效),后续渲染会一直复用错误回退,
-    /// 直到面板销毁/字号/font_id 变化绕过 cache key 才会重走一次。
+    /// Fixes the zerx-lab/warp#68 regression ("Chinese fonts render incorrectly after startup,
+    /// fixed only by closing and reopening the panel"): PR #62 prepends locale-based system CJK
+    /// fonts to cosmic-text's fallback chain in `get_fallback_fonts_for_character`; but when CJK
+    /// fallback is first triggered on the first frame, `SystemSource::select_family_by_name`
+    /// occasionally fails to get a font on the Windows DirectWrite cold path, the prepended segment
+    /// is empty, and fallback lands on the cold output of `IDWriteFontFallback::MapCharacters`
+    /// (which may return a non-locale-preferred family). Once that result is written into
+    /// cosmic-text's `font_codepoint_support_info_cache` / `shape_run_cache` (FontSystem
+    /// instance-level, not invalidated while the locale is unchanged), subsequent renders keep
+    /// reusing the wrong fallback, and it is only redone once when a panel teardown / font-size /
+    /// font_id change bypasses the cache key.
     ///
-    /// 预热在这里同步把 preferred 家族灌进 fontdb(`insert_font` 走
-    /// `loaded_fonts` 按 `(path, index)` 去重,后续 `get_fallback_fonts_for_character` 命中时
-    /// 直接返回已存在的 `FontId`,不会重复加载),消除 cold path 的不确定性。
+    /// Prewarming here synchronously loads the preferred families into fontdb (`insert_font` dedups
+    /// via `loaded_fonts` by `(path, index)`, so a later hit in `get_fallback_fonts_for_character`
+    /// returns the existing `FontId` directly without reloading), removing the cold path's
+    /// nondeterminism.
     ///
-    /// 性能开销:启动期一次性构造 `SystemSource`,并 select、load、insert 一个
-    /// preferred family。`load_font_from_handle` 走 font_kit Path 句柄转 `OwnedFace`,
-    /// fontdb 内部 mmap lazily。在 Windows 11 + 装机自带 YaHei UI 上实测不过数毫秒,
-    /// 且净收益为正 —— 之前 `get_fallback_fonts_for_character` 每次 CJK 字符 cache miss
-    /// 都会新建一次 `SystemSource` 并重新 select/load,预热后这条路径首屏即命中已加载 FontId。
+    /// Performance cost: a one-time `SystemSource` construction at startup, plus select, load, and
+    /// insert of one preferred family. `load_font_from_handle` converts a font_kit Path handle into
+    /// an `OwnedFace`, and fontdb mmaps lazily internally. On Windows 11 with the preinstalled
+    /// YaHei UI, this measured at no more than a few milliseconds, and the net benefit is positive
+    /// — previously `get_fallback_fonts_for_character` created a new `SystemSource` and re-ran
+    /// select/load on every CJK-character cache miss, whereas after prewarming this path hits an
+    /// already-loaded FontId on the first frame.
     ///
-    /// 非 CJK locale 也会预热 Windows 默认简中 UI 字体族,保证英文 UI 下的中文文件名
-    /// 等普通 `Text` 元素首帧就有可用 Han 字形,且不需要枚举全部系统字体。
+    /// Non-CJK locales also prewarm the default Windows Simplified Chinese UI font family, ensuring
+    /// that ordinary `Text` elements such as Chinese file names under an English UI have usable Han
+    /// glyphs on the first frame, without enumerating all system fonts.
     ///
-    /// 失败(系统未装该 family / 句柄加载失败)只记 warn,不影响启动 —— 此时退化到
-    /// DirectWrite 默认回退。
+    /// Failure (the family is not installed / handle load failed) only logs a warning and does not
+    /// affect startup — in that case it degrades to the DirectWrite default fallback.
     pub(crate) fn warm_up_preferred_cjk_families(&self) {
         let locale = current_fallback_locale();
         let families = preferred_cjk_families_for_locale(&locale);
@@ -259,7 +268,7 @@ impl TextLayoutSystem {
         let mut warmed_any = false;
         for family in families {
             let Ok(fam) = source.select_family_by_name(family) else {
-                // 系统未装该 family(例如纯净版 Windows 11 可能没有 SimSun) —— 继续试下一个。
+                // The family is not installed on this system (e.g. a clean Windows 11 may not have SimSun) — keep trying the next one.
                 continue;
             };
             let mut family_loaded = false;
@@ -272,21 +281,22 @@ impl TextLayoutSystem {
                     }
                     Err(err) => {
                         log::debug!(
-                            "warm_up_preferred_cjk_families: 跳过 {family:?} 的一个 face: {err:?}"
+                            "warm_up_preferred_cjk_families: skipping a face of {family:?}: {err:?}"
                         );
                     }
                 }
             }
             if family_loaded {
                 warmed_any = true;
-                // 与 `get_fallback_fonts_for_character` 的「一个 family 命中即 break」行为对齐,
-                // 避免预热超过实际回退会使用的字体集合。
+                // Align with the "break once one family hits" behavior of
+                // `get_fallback_fonts_for_character`, to avoid prewarming more than the font set
+                // that fallback would actually use.
                 break;
             }
         }
         if !warmed_any {
             log::warn!(
-                "warm_up_preferred_cjk_families: locale={locale:?} 下未能预热任何 CJK family ({families:?}) —— 首屏 CJK 回退将走 DirectWrite cold path"
+                "warm_up_preferred_cjk_families: failed to prewarm any CJK family ({families:?}) for locale={locale:?} —— first-frame CJK fallback will take the DirectWrite cold path"
             );
         }
     }
@@ -337,10 +347,11 @@ fn load_font_from_handle(
     }
 }
 
-/// 提取 BCP-47 标签的主语言子标签(primary subtag),已统一 ASCII 小写。
-/// 例如 `ja-jp` → `ja`、`zh-hant-tw` → `zh`、`kok-in` → `kok`。
-/// 用于精确判断主语言,避免 `starts_with("ko")` 这类前缀匹配把
-/// `kok-IN`(孔卡尼语)误判为韩文,或 `zha-CN`(壮语)误判为中文。
+/// Extracts the primary subtag of a BCP-47 tag, normalized to ASCII lowercase.
+/// For example `ja-jp` → `ja`, `zh-hant-tw` → `zh`, `kok-in` → `kok`.
+/// Used to determine the primary language precisely, avoiding prefix matches like
+/// `starts_with("ko")` that would misjudge `kok-IN` (Konkani) as Korean, or `zha-CN`
+/// (Zhuang) as Chinese.
 fn primary_subtag(lower: &str) -> &str {
     lower.split(['-', '_']).next().unwrap_or("")
 }
@@ -362,12 +373,14 @@ const JAPANESE_CJK_FAMILIES: &[&str] = &[
 ];
 const KOREAN_CJK_FAMILIES: &[&str] = &["Malgun Gothic", "Gulim", "Dotum"];
 
-/// 按 locale 优先返回 Windows 系统 CJK 字体族(按优先级)。
-/// 用于覆盖 DirectWrite 不参考 locale 的 Han 回退。
+/// Returns the Windows system CJK font families preferred for a locale (in priority order).
+/// Used to override DirectWrite's locale-agnostic Han fallback.
 ///
-/// 路由同时识别 BCP-47 region 子标签(zh-TW / zh-HK / zh-MO)和 script 子标签
-/// (zh-Hant / zh-Hans,可带 region:zh-Hant-TW 等),调用方无需事先规范化 tag。
-/// 非 CJK locale 使用简中字体族作为稳定兜底,避免英文 UI 下中文文件名首帧缺字。
+/// The routing recognizes both BCP-47 region subtags (zh-TW / zh-HK / zh-MO) and script subtags
+/// (zh-Hant / zh-Hans, optionally with a region: zh-Hant-TW, etc.), so the caller does not need to
+/// normalize the tag beforehand. Non-CJK locales use the Simplified Chinese font families as a
+/// stable fallback, avoiding missing glyphs for Chinese file names on the first frame under an
+/// English UI.
 fn preferred_cjk_families_for_locale(locale: &str) -> &'static [&'static str] {
     let lower = locale.to_ascii_lowercase();
     match primary_subtag(&lower) {
@@ -379,10 +392,10 @@ fn preferred_cjk_families_for_locale(locale: &str) -> &'static [&'static str] {
     }
 }
 
-/// `lower`(已 ASCII 小写化的 BCP-47 标签)是否指向繁体中文。
-/// 同时匹配 region 形式(zh-tw / zh-hk / zh-mo)和 script 子标签形式
-/// (zh-hant、zh-hant-tw、zh-foo-hant 等)。要求连字符边界,
-/// 避免 `zh-hansolo` 之类意外匹配。
+/// Whether `lower` (an ASCII-lowercased BCP-47 tag) points to Traditional Chinese.
+/// Matches both the region form (zh-tw / zh-hk / zh-mo) and the script subtag form
+/// (zh-hant, zh-hant-tw, zh-foo-hant, etc.). Requires hyphen boundaries to avoid
+/// accidental matches like `zh-hansolo`.
 fn is_zh_traditional(lower: &str) -> bool {
     if primary_subtag(lower) != "zh" {
         return false;
@@ -390,7 +403,7 @@ fn is_zh_traditional(lower: &str) -> bool {
     if lower.starts_with("zh-tw") || lower.starts_with("zh-hk") || lower.starts_with("zh-mo") {
         return true;
     }
-    // 遍历主标签后的连字符子标签。
+    // Iterate over the hyphen-separated subtags after the primary tag.
     lower.split('-').skip(1).any(|sub| sub == "hant")
 }
 

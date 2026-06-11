@@ -1,1 +1,1 @@
-// openWarp 已移除代码库 embedding 索引,原索引同步 telemetry 不再注册。
+// openWarp has removed codebase embedding indexing, so the original index-sync telemetry is no longer registered.

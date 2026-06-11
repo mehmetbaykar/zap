@@ -21,8 +21,8 @@ use crate::settings_view::{SettingsAction as SettingsTabAction, SettingsSection}
 use crate::tab::{NewSessionMenuItem, SelectedTabColor};
 use crate::tab_configs::TabConfig;
 use crate::terminal::available_shells::AvailableShell;
-use crate::terminal::CLIAgent;
 use crate::terminal::view::inline_banner::ZeroStatePromptSuggestionType;
+use crate::terminal::CLIAgent;
 use crate::themes::theme::AnsiColorIdentifier;
 use crate::themes::theme_chooser::ThemeChooserMode;
 use crate::workflows::{WorkflowSelectionSource, WorkflowSource, WorkflowType};
@@ -141,15 +141,15 @@ pub enum WorkspaceAction {
     AddTerminalTab {
         hide_homepage: bool,
     },
-    /// 在当前 tab 中央开新 terminal pane,执行 `ssh user@host`(openWarp 独有)。
-    /// 由 SshServerView 的 Connect 按钮 / SshManagerPanel 右键"连接" 触发。
+    /// Open a new terminal pane in the center of the current tab and run `ssh user@host` (openWarp only).
+    /// Triggered by SshServerView's Connect button / SshManagerPanel right-click "Connect".
     OpenSshTerminal {
         node_id: String,
         server: warp_ssh_manager::SshServerInfo,
     },
-    /// 打开/关闭左侧 panel 的 SSH 管理器视图(openWarp 独有)。
+    /// Open/close the SSH manager view in the left panel (openWarp only).
     ToggleSshManager,
-    /// 打开/关闭左侧 panel 的 Skill 管理器视图(openWarp 独有)。
+    /// Open/close the Skill manager view in the left panel (openWarp only).
     ToggleSkillManager,
     AddTabWithShell {
         shell: AvailableShell,
@@ -173,7 +173,7 @@ pub enum WorkspaceAction {
     SelectNewSessionMenuItem(NewSessionMenuItem),
     AutoupdateFailureLink,
     ApplyUpdate,
-    // 去中心化分支:`LogOut` 已删除。
+    // Decentralized branch: `LogOut` has been removed.
     CopyVersion(&'static str),
     DownloadNewVersion,
     ConfigureKeybindingSettings {
@@ -203,7 +203,7 @@ pub enum WorkspaceAction {
         mode: PaletteMode,
         source: PaletteSource,
     },
-    // 去中心化分支:`ShowUpgrade` / `ShowReferralSettingsPage` 已删除。
+    // Decentralized branch: `ShowUpgrade` / `ShowReferralSettingsPage` have been removed.
     JoinSlack,
     ViewUserDocs,
     ViewLatestChangelog,
@@ -286,7 +286,7 @@ pub enum WorkspaceAction {
     CopyAccessTokenToClipboard,
     DismissWorkspaceBanner(WorkspaceBanner),
     /// An action only registered in dev and local builds, which crashes the
-    /// 调用后立即触发 app crash。
+    /// Triggers an app crash immediately when called.
     Crash,
     /// An action only registered in dev and local builds, which triggers a
     /// panic immediately when called.
@@ -318,7 +318,7 @@ pub enum WorkspaceAction {
     ShowHeaderToolbarContextMenu {
         position: Vector2F,
     },
-    // 去中心化分支:`Reauth` / `SignupAnonymousUser` / `SignInAnonymousWebUser` 已删除。
+    // Decentralized branch: `Reauth` / `SignupAnonymousUser` / `SignInAnonymousWebUser` have been removed.
     OpenLink(String),
     /// On WASM, opens a given URL in the desktop Zap app (if installed) or redirects to download page.
     #[cfg(target_family = "wasm")]
@@ -375,7 +375,7 @@ pub enum WorkspaceAction {
         /// The type of zero state prompt suggestion to start with (optional).
         zero_state_prompt_suggestion_type: Option<ZeroStatePromptSuggestionType>,
     },
-    // 去中心化分支:`AttemptLoginGatedAIUpgrade` 已删除。
+    // Decentralized branch: `AttemptLoginGatedAIUpgrade` has been removed.
     /// Dismisses the Wayland crash recovery banner and opens a link to our docs page with more
     /// information.
     #[cfg(target_os = "linux")]
@@ -387,8 +387,8 @@ pub enum WorkspaceAction {
     },
     OpenAIFactCollection,
     OpenMCPServerCollection,
-    // Zap Wave 7-3:`OpenEnvironmentManagementPane` WorkspaceAction 随 ambient-agent UI
-    // 子系统物理删。
+    // Zap Wave 7-3: the `OpenEnvironmentManagementPane` WorkspaceAction was physically removed
+    // along with the ambient-agent UI subsystem.
     ToggleAIDocumentPane {
         document_id: AIDocumentId,
         document_version: AIDocumentVersion,
@@ -877,8 +877,8 @@ impl WorkspaceAction {
             FileRenamed { .. } => false, // File rename doesn't change workspace state
             #[cfg(feature = "local_fs")]
             FileDeleted { .. } => false, // File deletion doesn't change workspace state
-            // Zap Wave 7-3:`OpenEnvironmentManagementPane` WorkspaceAction 随 ambient-agent UI
-            // 子系统物理删。
+            // Zap Wave 7-3: the `OpenEnvironmentManagementPane` WorkspaceAction was physically removed
+            // along with the ambient-agent UI subsystem.
             #[cfg(target_os = "linux")]
             DismissWaylandCrashRecoveryBannerAndOpenLink => false,
             #[cfg(target_family = "wasm")]

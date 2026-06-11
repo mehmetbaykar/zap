@@ -307,10 +307,11 @@ pub struct BlockList {
     /// boolean `false`.
     in_flight_in_band_command_count: usize,
 
-    /// SSH subshell-bootstrap 刚完成、active block prompt 还没到达时按 Ctrl+L 会出现
-    /// sum tree 堆积 height=0 block 导致 gap 无法收缩的 bug。在这种状态下收到
-    /// `clear_visible_screen` 调用会记下 pending,等下一次 `precmd` (代表远端
-    /// prompt 已重画) 时再真正执行。
+    /// Pressing Ctrl+L right after SSH subshell-bootstrap finishes but before the active block
+    /// prompt has arrived triggers a bug where the sum tree accumulates height=0 blocks and the
+    /// gap cannot shrink. In that state, a `clear_visible_screen` call is recorded as pending and
+    /// only actually executed on the next `precmd` (which means the remote prompt has been
+    /// repainted).
     pending_clear_visible_screen: bool,
 
     /// The most recently received populated Precmd payload.
@@ -855,21 +856,24 @@ impl BlockList {
 
     /// Clears the visible screen--moving everything that's currently visible into scrollback.
     pub fn clear_visible_screen(&mut self) {
-        // 问题背景:在 SSH subshell-bootstrap 刚完成、active block 还没绘出 prompt
-        // (`height=0` + `state=BeforeExecution` + 未 started)的瞬间按 Ctrl+L,gap 会被
-        // 插在这个 0 高度的 active block 之前/之后。随后远端高频派发 in-band
-        // generator 命令,每个都会 `command_finished` → `create_new_block` 推出一个
-        // 新 active block,那个新 active block 也是 "刚创建、height=0、prompt 未到"
-        // 状态。结果 sum tree 末尾 堆了一排 height=0 的 hidden/空 block,他们之前
-        // 还是那个整屏高的 gap,用户实际的输入 block 被推到 gap 之后很远的
-        // 地方。但 gap 只能随 "gap 之后总高度" 的增量收缩,而那些 0 高度 block
-        // 贡献不了增量,导致 gap 无法被收缩 → 用户输入的命令 block 始终在屏幕外。
+        // Background: pressing Ctrl+L the instant SSH subshell-bootstrap finishes but the active
+        // block has not drawn its prompt yet (`height=0` + `state=BeforeExecution` + not started)
+        // causes the gap to be inserted before/after this 0-height active block. The remote then
+        // dispatches in-band generator commands at high frequency, each of which does
+        // `command_finished` → `create_new_block` and pushes out a new active block, and that new
+        // active block is also in the "just created, height=0, prompt not arrived" state. The
+        // result is a row of height=0 hidden/empty blocks piled at the end of the sum tree, with
+        // the full-screen-height gap before them, so the user's actual input block gets pushed far
+        // past the gap. But the gap can only shrink with the increment of "total height after the
+        // gap", and those 0-height blocks contribute no increment, so the gap cannot shrink → the
+        // user's command block stays off-screen forever.
         //
-        // 修复:如果 active block 还没准备好且此刻仍有 in-band 命令在飞(height=0 +
-        // BeforeExecution + !in_band 本身 + in_flight_in_band_command_count > 0),
-        // 记下 pending。等下次 `precmd` 到达 (意味着远端 prompt 已重画、active
-        // block 有真正内容) 时再执行清屏。本地常态(无 in-band 命令在飞)不进
-        // 该分支,避免本地 Ctrl+L 被误拦。
+        // Fix: if the active block is not ready and there are still in-band commands in flight
+        // (height=0 + BeforeExecution + not in_band itself + in_flight_in_band_command_count > 0),
+        // record it as pending. Execute the clear only when the next `precmd` arrives (meaning the
+        // remote prompt has been repainted and the active block has real content). The local
+        // common case (no in-band commands in flight) does not enter this branch, avoiding
+        // wrongly intercepting local Ctrl+L.
         if self.should_defer_clear_for_unprepared_active_block() {
             log::info!(
                 "[ctrl-l] deferring clear_visible_screen until active block has a prompt; \
@@ -883,21 +887,25 @@ impl BlockList {
         self.do_clear_visible_screen();
     }
 
-    /// active block 是否是"刚创建、prompt 还没到"的状态。这种状态下不应该允许
-    /// `clear_visible_screen` 走进去,否则会在 sum tree 上留下一排 height=0 block。
+    /// Whether the active block is in the "just created, prompt not arrived" state. In this state
+    /// `clear_visible_screen` should not be allowed to proceed, otherwise it leaves a row of
+    /// height=0 blocks on the sum tree.
     ///
-    /// 注意:仅当 in-band 命令仍在飞行(典型如 SSH subshell-bootstrap 期间高频派发的
-    /// generator)时才走 defer 路径。否则 `height=0 + BeforeExecution + !in_band` 实际是
-    /// 本地 shell 空 prompt 等待用户输入的**默认态**,会把所有本地 Ctrl+L 误拦截、
-    /// 设成 pending 后永远等不到 precmd 兜底,表现为本地清屏失效(SSH 远端反而正常,
-    /// 因其 active block 已绘出远端 prompt,height > 0 直接绕过此判定)。
+    /// Note: only take the defer path when in-band commands are still in flight (typically the
+    /// generator dispatched at high frequency during SSH subshell-bootstrap). Otherwise
+    /// `height=0 + BeforeExecution + !in_band` is actually the **default** state of a local shell
+    /// with an empty prompt waiting for user input, which would wrongly intercept every local
+    /// Ctrl+L, set pending, and then never get the precmd fallback, appearing as local clear-screen
+    /// failure (the SSH remote, conversely, works fine because its active block has drawn the
+    /// remote prompt, height > 0 bypasses this check directly).
     fn should_defer_clear_for_unprepared_active_block(&self) -> bool {
         if self.in_flight_in_band_command_count == 0 {
             return false;
         }
         let block = self.active_block();
-        // height=0 代表尚未绘出 prompt;BeforeExecution 代表还没开始执行;
-        // 不取 `started()` 是因为他看的是命令是否开始,与 prompt 到达状态不同步。
+        // height=0 means the prompt has not been drawn yet; BeforeExecution means execution has
+        // not started yet; we don't use `started()` because it tracks whether the command started,
+        // which is out of sync with the prompt-arrival state.
         block.height(&self.agent_view_state) == Lines::zero()
             && matches!(block.state(), BlockState::BeforeExecution)
             && !block.is_in_band_command_block()
@@ -923,16 +931,19 @@ impl BlockList {
         // If the active block has not started (e.g. the user pressed ctrl-l)--insert the gap
         // _before_ the active block so the next command the user executes is after the gap.
         //
-        // 例外:in-band 命令(例如 SSH subshell-bootstrap 之后远端高频派发的 generator)会
-        // 临时"借身"用户的 active block,把 `is_for_in_band_command` 置 true 并启动它。
-        // 这种 block 在 UI 上是隐藏的(`should_hide_block` → `height()=0`)。如果 Ctrl+L
-        // 命中这个 in-flight 窗口,按 "started 分支" 把 gap 插到该 block 之后,后续
-        // `command_finished` → `create_new_block` 会绕过 `update_live_block_height` 的 gap
-        // 收缩,导致 model 中 gap 之前全是 height=0 的 hidden block,`max_scroll_top=0`,
-        // input 框被 layout 到屏幕顶部、下方一大片空白 gap → 视觉上 "input 不见了"。
+        // Exception: an in-band command (e.g. the generator dispatched at high frequency by the
+        // remote after SSH subshell-bootstrap) temporarily "borrows" the user's active block,
+        // setting `is_for_in_band_command` to true and starting it. Such a block is hidden in the
+        // UI (`should_hide_block` → `height()=0`). If Ctrl+L hits this in-flight window, the
+        // "started branch" inserts the gap after that block, and the subsequent
+        // `command_finished` → `create_new_block` bypasses the gap shrink in
+        // `update_live_block_height`, leaving everything before the gap in the model as height=0
+        // hidden blocks, `max_scroll_top=0`, the input box laid out at the top of the screen with
+        // a large empty gap below it → visually "the input has disappeared".
         //
-        // 把 in-band 借身 block 视作未 started,gap 插到该 block 之前,正好等价于把它当作
-        // "还在等用户输入" 的状态,与产品语义一致。
+        // Treating the in-band borrowed block as not started, so the gap is inserted before that
+        // block, is exactly equivalent to treating it as "still waiting for user input", which is
+        // consistent with the product semantics.
         let active_block_started =
             self.active_block().started() && !self.active_block().is_in_band_command_block();
         let gap_height = if let Some(height) = self.next_gap_height() {
@@ -3826,9 +3837,10 @@ impl ansi::Handler for BlockList {
                 .send_terminal_event(TerminalEvent::BootstrapPrecmdDone);
         }
 
-        // 如果之前 Ctrl+L 被延迟了 (active block 当时 prompt 还没到),现在远端
-        // prompt 已重画,可以真正清一次屏。如果 active block 仍然不合适 (例如
-        // 连续 in-band 命令 还在跑) 则保持 pending,下一次 precmd 再试。
+        // If a previous Ctrl+L was deferred (the active block's prompt had not arrived at the
+        // time) and the remote prompt has now been repainted, we can actually clear the screen
+        // once. If the active block is still unsuitable (e.g. consecutive in-band commands are
+        // still running), keep it pending and retry on the next precmd.
         if self.pending_clear_visible_screen
             && !self.should_defer_clear_for_unprepared_active_block()
         {

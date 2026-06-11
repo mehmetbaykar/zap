@@ -1,6 +1,6 @@
--- SQLite 不支持 DROP COLUMN(老版本),通过重建表回滚字段。
--- 备份表必须严格复刻 up.sql(`2026-05-04-120000_add_ssh_manager_tables`)
--- 中 ssh_servers 的列定义,包含所有 NOT NULL 约束。
+-- Older SQLite versions do not support DROP COLUMN, so roll back the fields by rebuilding the table.
+-- The backup table must exactly replicate the ssh_servers column definitions from up.sql
+-- (`2026-05-04-120000_add_ssh_manager_tables`), including all NOT NULL constraints.
 CREATE TABLE ssh_servers_backup (
   node_id           TEXT PRIMARY KEY NOT NULL REFERENCES ssh_nodes(id) ON DELETE CASCADE,
   host              TEXT NOT NULL,

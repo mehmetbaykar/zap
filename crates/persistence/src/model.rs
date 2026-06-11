@@ -14,9 +14,9 @@ use super::schema::{
     generic_string_objects, ignored_suggestions, mcp_environment_variables,
     mcp_server_installations, mcp_server_panes, notebook_panes, notebooks, object_actions,
     object_metadata, object_permissions, pane_branches, pane_leaves, pane_nodes, panels,
-    project_rules, projects, server_experiments, settings_panes, ssh_nodes, ssh_servers,
-    sync_meta, tabs, team_members, team_settings, teams, terminal_panes, user_profiles,
-    welcome_panes, windows, workflow_panes, workflows, workspace_teams, workspaces,
+    project_rules, projects, server_experiments, settings_panes, ssh_nodes, ssh_servers, sync_meta,
+    tabs, team_members, team_settings, teams, terminal_panes, user_profiles, welcome_panes,
+    windows, workflow_panes, workflows, workspace_teams, workspaces,
 };
 
 #[derive(Insertable)]
@@ -1421,7 +1421,7 @@ pub struct SshNodeRow {
     pub sort_order: i32,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
-    /// 仅对 folder 有意义;server 永远是 false。
+    /// Only meaningful for a folder; always false for a server.
     pub is_collapsed: bool,
 }
 

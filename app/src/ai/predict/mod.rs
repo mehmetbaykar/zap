@@ -5,7 +5,7 @@
 pub(crate) mod generate_ai_input_suggestions;
 pub(crate) mod generate_am_query_suggestions;
 pub mod next_command_model;
-// Zap(Wave 3-2):`predict_am_queries` API 模块已物理删 — 原 `ServerApi::predict_am_queries`
-// 0 外部消费已同步删除；FeatureFlag::PredictAMQueries / terminal/input.rs 中
-// `predict_am_queries_future_handle` 仅作为控制开关/句柄代号保留，不再需要该模块。
+// Zap (Wave 3-2): the `predict_am_queries` API module is physically removed — the original `ServerApi::predict_am_queries`
+// with 0 external consumers was removed in tandem; FeatureFlag::PredictAMQueries / the
+// `predict_am_queries_future_handle` in terminal/input.rs are kept only as a control switch / handle alias, and the module is no longer needed.
 pub mod prompt_suggestions;

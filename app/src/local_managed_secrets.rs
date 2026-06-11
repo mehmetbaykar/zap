@@ -1,8 +1,9 @@
-//! Zap 本地 managed-secrets client。
+//! Zap local managed-secrets client.
 //!
-//! Zap 上游这里原本通过 server_api 调云端接口维护团队/用户托管密钥。
-//! Zap 保留 `warp_managed_secrets` crate 供本地功能复用,但所有云端托管密钥
-//! 动作都不可达:查询返回空集合,写动作和 OIDC token 颁发返回 disabled 错误。
+//! In upstream Warp, this maintained team/user managed secrets by calling cloud endpoints via
+//! server_api. Zap keeps the `warp_managed_secrets` crate for local feature reuse, but all cloud
+//! managed-secret actions are unreachable: queries return empty collections, and write actions and
+//! OIDC token issuance return a disabled error.
 
 use std::collections::HashMap;
 

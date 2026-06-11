@@ -1,12 +1,13 @@
 ---
 import LandingLayout from '../layouts/LandingLayout.astro';
-// CHANGELOG.md 在 website 目录根(由 prebuild/predev 脚本从仓库根同步而来),
-// 通过 Vite ?raw import 静态内联。放在 website 内部是为了让 Dokploy/nixpacks
-// 这类只把 website/ 作为构建上下文的部署环境也能找到文件。
+// CHANGELOG.md lives at the website root (synced from the repo root by the
+// prebuild/predev scripts) and is inlined statically via a Vite ?raw import.
+// Keeping it inside website/ lets deploy environments like Dokploy/nixpacks —
+// which use website/ as the build context — still find the file.
 import changelogRaw from '../../CHANGELOG.md?raw';
 
 type BulletNode = {
-  text: string;       // 已经渲染好的 HTML(粗体、code、链接)
+  text: string;       // already-rendered HTML (bold, code, links)
   children: BulletNode[];
 };
 
@@ -16,9 +17,9 @@ type ReleaseEntry = {
   bullets: BulletNode[];
 };
 
-// 渲染行内 markdown:**bold**、`code`、[text](url)
-// 注意:用字符类 [<] / [>] 替代裸 < / >,避免 esbuild 在 frontmatter 中
-// 把 RegExp 字面量误判为 JSX 标签开闭。
+// Render inline markdown: **bold**, `code`, [text](url)
+// Note: use the character classes [<] / [>] instead of bare < / > so esbuild
+// doesn't mistake the RegExp literals for JSX tag open/close in the frontmatter.
 function renderInline(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -29,7 +30,7 @@ function renderInline(text: string): string {
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 }
 
-// 解析 CHANGELOG.md
+// Parse CHANGELOG.md
 function parseChangelog(raw: string): ReleaseEntry[] {
   const lines = raw.split('\n');
   const releases: ReleaseEntry[] = [];
@@ -81,19 +82,15 @@ const releases = parseChangelog(changelogRaw);
 ---
 <LandingLayout
   title="Zap · Changelog"
-  description="Zap 各个发布版本的功能更新与改动记录"
+  description="Feature updates and changes across Zap releases"
 >
   <main class="changelog-shell">
     <header class="changelog-hero wrap">
       <div class="feat-eyebrow">
-        <span data-lang="en">CHANGELOG</span><span data-lang="zh">更新日志</span><span data-lang="ja">変更履歴</span>
+        <span>CHANGELOG</span>
       </div>
-      <h1 data-lang="en">Changelog</h1>
-      <h1 data-lang="zh">更新日志</h1>
-      <h1 data-lang="ja">変更履歴</h1>
-      <p class="lede" data-lang="en">Notable changes shipped across Zap preview and OSS releases. Sourced from <code>CHANGELOG.md</code> in the repo.</p>
-      <p class="lede" data-lang="zh">Zap 各个 preview / OSS 版本中值得关注的改动,源自仓库根目录的 <code>CHANGELOG.md</code>。</p>
-      <p class="lede" data-lang="ja">Zap の preview / OSS リリースで導入された主要な変更です。リポジトリの <code>CHANGELOG.md</code> から生成しています。</p>
+      <h1>Changelog</h1>
+      <p class="lede">Notable changes shipped across Zap preview and OSS releases. Sourced from <code>CHANGELOG.md</code> in the repo.</p>
     </header>
 
     <div class="changelog-wrap wrap">
@@ -115,15 +112,13 @@ const releases = parseChangelog(changelogRaw);
     </div>
 
     <div class="changelog-foot wrap">
-      <p class="muted" data-lang="en">Looking for the full git history? Browse the <a href="https://github.com/zerx-lab/zap/commits/main" target="_blank" rel="noopener">commits on GitHub</a>.</p>
-      <p class="muted" data-lang="zh">需要完整 git 历史?请查看 <a href="https://github.com/zerx-lab/zap/commits/main" target="_blank" rel="noopener">GitHub 上的 commits</a>。</p>
-      <p class="muted" data-lang="ja">完全な git 履歴は <a href="https://github.com/zerx-lab/zap/commits/main" target="_blank" rel="noopener">GitHub の commits</a> をご覧ください。</p>
+      <p class="muted">Looking for the full git history? Browse the <a href="https://github.com/zerx-lab/zap/commits/main" target="_blank" rel="noopener">commits on GitHub</a>.</p>
     </div>
   </main>
 </LandingLayout>
 
 <style is:global>
-  /* Changelog 页面:Cursor 时间轴布局 */
+  /* Changelog page: Cursor-style timeline layout */
   .changelog-shell { padding: 64px 0 80px; }
 
   .changelog-hero { max-width: 880px; padding-top: 24px; padding-bottom: 48px; border-bottom: 1px solid var(--line); margin-bottom: 56px; }

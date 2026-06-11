@@ -9,8 +9,8 @@ use super::{
     about_page::AboutPageView,
     ai_page::{AISettingsPageAction, AISettingsPageView},
     appearance_page::AppearanceSettingsPageView,
-    code_page::CodeSettingsPageView,
     cloud_sync_page::CloudSyncPageView,
+    code_page::CodeSettingsPageView,
     features_page::FeaturesPageView,
     keybindings::KeybindingsView,
     mcp_servers_page::MCPServersSettingsPageView,
@@ -100,18 +100,18 @@ pub enum SettingsPageViewHandle {
     Keybindings(ViewHandle<KeybindingsView>),
     About(ViewHandle<AboutPageView>),
     Code(ViewHandle<CodeSettingsPageView>),
-    // Zap Wave 3-1:`OzCloudAPIKeys` variant 随 `platform_page` 一同物理删。
-    // 云端 API key 管理 UI 完全代表 Zap Inc 云端账号,与 BYOP 无关。
-    // Zap Wave 6-8:`SharedBlocks` / `Referrals` variant 随 `ShowBlocksView` /
-    // `ReferralsPageView` 与对应 ServerApi client trait 物理删。
-    // Zap Wave 7-3:`CloudEnvironments` variant 随 ambient-agent UI 子系统物理删。
+    // Zap Wave 3-1: the `OzCloudAPIKeys` variant was physically removed along with `platform_page`.
+    // The cloud API key management UI entirely represents the Zap Inc cloud account and is unrelated to BYOP.
+    // Zap Wave 6-8: the `SharedBlocks` / `Referrals` variants were physically removed along with `ShowBlocksView` /
+    // `ReferralsPageView` and the corresponding ServerApi client traits.
+    // Zap Wave 7-3: the `CloudEnvironments` variant was physically removed along with the ambient-agent UI subsystem.
     Warpify(ViewHandle<WarpifyPageView>),
     AI(ViewHandle<AISettingsPageView>),
     MCPServers(ViewHandle<MCPServersSettingsPageView>),
     ZapDrive(ViewHandle<WarpDriveSettingsPageView>),
-    /// 全局 HTTP 代理设置页。
+    /// Global HTTP proxy settings page.
     Network(ViewHandle<NetworkPageView>),
-    /// 云同步设置页。
+    /// Cloud sync settings page.
     CloudSync(ViewHandle<CloudSyncPageView>),
 }
 
@@ -124,9 +124,9 @@ impl SettingsPageViewHandle {
             Keybindings(view_handle) => ChildView::new(view_handle).finish(),
             About(view_handle) => ChildView::new(view_handle).finish(),
             Code(view_handle) => ChildView::new(view_handle).finish(),
-            // Zap Wave 3-1:`OzCloudAPIKeys` arm 随 `platform_page` 一同物理删。
-            // Zap Wave 6-8:`SharedBlocks` / `Referrals` arm 随 variant 物理删。
-            // Zap Wave 7-3:`CloudEnvironments` arm 随 ambient-agent UI 一同物理删。
+            // Zap Wave 3-1: the `OzCloudAPIKeys` arm was physically removed along with `platform_page`.
+            // Zap Wave 6-8: the `SharedBlocks` / `Referrals` arms were physically removed along with the variants.
+            // Zap Wave 7-3: the `CloudEnvironments` arm was physically removed along with the ambient-agent UI.
             Warpify(view_handle) => ChildView::new(view_handle).finish(),
             AI(view_handle) => ChildView::new(view_handle).finish(),
             MCPServers(view_handle) => ChildView::new(view_handle).finish(),
@@ -193,8 +193,8 @@ impl SettingsPage {
 pub enum SettingsPageEvent {
     FocusModal,
     Pane(PaneEventWrapper),
-    // Zap Wave 7-3:`EnvironmentSetupModeSelectorToggled` /
-    // `AgentAssistedEnvironmentModalToggled` 随 ambient-agent UI 子系统物理删。
+    // Zap Wave 7-3: `EnvironmentSetupModeSelectorToggled` /
+    // `AgentAssistedEnvironmentModalToggled` were physically removed along with the ambient-agent UI subsystem.
 }
 
 /// Wrapper for pane events to avoid circular dependency with pane module.
@@ -278,10 +278,14 @@ pub fn build_sub_header(
     let color = color_override.unwrap_or(appearance.theme().active_ui_text_color());
     Container::new(
         Align::new(
-            Text::new_inline(text_name, appearance.ui_font_family(), appearance.ui_font_heading_3())
-                .with_style(Properties::default().weight(Weight::Bold))
-                .with_color(color.into())
-                .finish(),
+            Text::new_inline(
+                text_name,
+                appearance.ui_font_family(),
+                appearance.ui_font_heading_3(),
+            )
+            .with_style(Properties::default().weight(Weight::Bold))
+            .with_color(color.into())
+            .finish(),
         )
         .left()
         .finish(),
@@ -299,9 +303,13 @@ pub fn render_sub_header_with_description(
             .with_child(build_sub_header(appearance, text_name, None).finish())
             .with_child(
                 Align::new(
-                    Text::new(description, appearance.ui_font_family(), appearance.ui_font_body())
-                        .with_color(appearance.theme().nonactive_ui_text_color().into())
-                        .finish(),
+                    Text::new(
+                        description,
+                        appearance.ui_font_family(),
+                        appearance.ui_font_body(),
+                    )
+                    .with_color(appearance.theme().nonactive_ui_text_color().into())
+                    .finish(),
                 )
                 .left()
                 .finish(),
@@ -321,10 +329,14 @@ pub fn render_sub_sub_header(
     let mut sub_sub_header = Flex::row().with_child(
         Container::new(
             Align::new(
-                Text::new_inline(text_name, appearance.ui_font_family(), appearance.ui_font_body())
-                    .with_style(Properties::default().weight(Weight::Semibold))
-                    .with_color(appearance.theme().active_ui_text_color().into())
-                    .finish(),
+                Text::new_inline(
+                    text_name,
+                    appearance.ui_font_family(),
+                    appearance.ui_font_body(),
+                )
+                .with_style(Properties::default().weight(Weight::Semibold))
+                .with_color(appearance.theme().active_ui_text_color().into())
+                .finish(),
             )
             .left()
             .finish(),
@@ -645,8 +657,12 @@ pub fn render_body_item_label_internal<T: Clone + Action>(
             ToggleState::Disabled => appearance.theme().disabled_ui_text_color(),
         },
     };
-    let label_text = Text::new_inline(label_text, appearance.ui_font_family(), appearance.ui_font_body())
-        .with_color(label_color.into());
+    let label_text = Text::new_inline(
+        label_text,
+        appearance.ui_font_family(),
+        appearance.ui_font_body(),
+    )
+    .with_color(label_color.into());
     if let Some(icon) = label_icon {
         label.add_child(
             Container::new(
@@ -836,13 +852,17 @@ pub fn render_dropdown_item_label(
     color_override: Option<Fill>,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
-    let label = Text::new(label_text, appearance.ui_font_family(), appearance.ui_font_body())
-        .with_color(
-            color_override
-                .unwrap_or(appearance.theme().active_ui_text_color())
-                .into(),
-        )
-        .finish();
+    let label = Text::new(
+        label_text,
+        appearance.ui_font_family(),
+        appearance.ui_font_body(),
+    )
+    .with_color(
+        color_override
+            .unwrap_or(appearance.theme().active_ui_text_color())
+            .into(),
+    )
+    .finish();
     let label = if let Some(secondary_text) = secondary_text {
         let warp_theme = appearance.theme();
         let secondary_text_child = appearance
@@ -1326,8 +1346,9 @@ impl<V: warpui::View> PageType<V> {
         }
     }
 
-    /// 取出当前 page 的滚动状态 handle(垂直、水平),用于 rebuild 时跨实例保留滚动位置。
-    /// `Monolith` 的 scroll state 是可选的,这里只在两个非空 handle 都存在时返回。
+    /// Retrieves the current page's scroll state handles (vertical, horizontal), used to preserve the
+    /// scroll position across instances during a rebuild.
+    /// `Monolith`'s scroll state is optional; this returns only when both non-empty handles exist.
     pub(super) fn scroll_states(
         &self,
     ) -> Option<(ClippedScrollStateHandle, ClippedScrollStateHandle)> {
@@ -1354,7 +1375,7 @@ impl<V: warpui::View> PageType<V> {
         }
     }
 
-    /// 用旧 page 的 scroll handle 替换当前 page 的内部 handle,保留滚动位置。
+    /// Replaces the current page's internal handles with the old page's scroll handles, preserving the scroll position.
     pub(super) fn replace_scroll_states(
         &mut self,
         v: ClippedScrollStateHandle,

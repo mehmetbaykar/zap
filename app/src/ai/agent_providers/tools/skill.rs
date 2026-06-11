@@ -1,23 +1,23 @@
-//! `read_skill`:读取 Zap 的 Skill markdown 模板。
+//! `read_skill`: reads Zap's Skill markdown templates.
 //!
-//! Skill 是用户/项目预定义的可复用工作流(`SKILL.md` 文件 + 可选元数据)。
-//! 模型读 skill 后能按用户期望的步骤推进任务。warp 自家维护一个 `SkillManager`
-//! 索引所有可用 skill,既可以用 name(frontmatter `name` 字段)也可以用绝对路径或
-//! bundled id 引用。
+//! A Skill is a reusable workflow predefined by the user/project (a `SKILL.md` file + optional metadata).
+//! After reading a skill, the model can advance the task following the steps the user expects. warp maintains a `SkillManager`
+//! that indexes all available skills, referenceable by name (the frontmatter `name` field), absolute path, or
+//! bundled id.
 //!
-//! ## 入参契约
+//! ## Input contract
 //!
-//! BYOP 路径暴露 `name` 字段,值取自 system prompt `<available_skills><skill><name>`。
-//! `from_args` 把 name 装入 proto 的 `SkillReference::SkillPath` 槽位(不改 proto),
-//! 由 `read_skill` executor 在 cache miss 时先按 name 反查到真实 SKILL.md 绝对路径
-//! 再读盘。这条 fallback 也兼容模型万一直接传绝对路径或 bundled 形式
-//! `@warp-skill:<id>` 的旧写法。
+//! The BYOP path exposes the `name` field, whose value is taken from the system prompt `<available_skills><skill><name>`.
+//! `from_args` loads the name into the proto's `SkillReference::SkillPath` slot (without changing the proto),
+//! and on a cache miss the `read_skill` executor first reverse-looks-up the real SKILL.md absolute path by name
+//! and then reads from disk. This fallback also handles the case where the model directly passes an absolute path or the old bundled form
+//! `@warp-skill:<id>`.
 //!
-//! ## 使用建议(写到 description)
+//! ## Usage advice (written into the description)
 //!
-//! 模型可在以下场景主动调:
-//! - 用户提到 skill 名 / 文件名 / 路径
-//! - 任务匹配某 skill 描述(如"做 PR review" 触发 `review` skill)
+//! The model can proactively call it in the following scenarios:
+//! - the user mentions a skill name / file name / path
+//! - the task matches some skill's description (e.g. "do a PR review" triggers the `review` skill)
 
 use anyhow::Result;
 use serde::Deserialize;
@@ -37,7 +37,7 @@ fn parameters() -> Value {
         "properties": {
             "name": {
                 "type": "string",
-                "description": "Skill 名称(与 system prompt 内 <available_skills><skill><name> 字段完全一致)。"
+                "description": "The skill name (exactly matching the <available_skills><skill><name> field in the system prompt)."
             }
         },
         "required": ["name"],
@@ -48,8 +48,8 @@ fn parameters() -> Value {
 fn from_args(args: &str) -> Result<api::message::tool_call::Tool> {
     use api::message::tool_call::read_skill::SkillReference;
     let parsed: Args = serde_json::from_str(args)?;
-    // 复用 proto 的 `SkillPath` 槽位携带 name(避免 proto schema 变更);
-    // executor 端在 cache miss 时按 name 反查真实 SKILL.md 路径。
+    // reuse the proto's `SkillPath` slot to carry the name (to avoid a proto schema change);
+    // on the executor side, on a cache miss it reverse-looks-up the real SKILL.md path by name.
     Ok(api::message::tool_call::Tool::ReadSkill(
         api::message::tool_call::ReadSkill {
             skill_reference: Some(SkillReference::SkillPath(parsed.name)),
@@ -67,8 +67,8 @@ fn result_to_json(result: &api::message::tool_call_result::Result) -> Option<Val
     };
     let value = match &r.result {
         Some(SR::Success(s)) => {
-            // FileContent { file_path, content, line_range } 直接是单个 message
-            // 不是 oneof,无须解包 inner content。
+            // FileContent { file_path, content, line_range } is directly a single message,
+            // not a oneof, so there's no need to unwrap inner content.
             let (path, content) = s
                 .content
                 .as_ref()

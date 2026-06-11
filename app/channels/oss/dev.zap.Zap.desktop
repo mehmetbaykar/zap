@@ -7,10 +7,10 @@ Type=Application
 Name=Zap
 GenericName=TerminalEmulator
 
-# `zap` 在 deb/rpm 包里是 /opt/zap/zap-oss 的 symlink,
-# 在 arch 包里是 /usr/bin/zap wrapper script —— 三者都在 PATH 上能直接调用。
-# AppImage 打包时 bundle_appimage 会用 sed 把这一行替换为 `Exec=zap-oss %U`,
-# 直接指向 AppImage 内部的二进制。
+# In deb/rpm packages `zap` is a symlink to /opt/zap/zap-oss,
+# and in arch packages it is the /usr/bin/zap wrapper script — all three are on PATH and directly callable.
+# When building an AppImage, bundle_appimage uses sed to replace this line with `Exec=zap-oss %U`,
+# pointing directly at the binary inside the AppImage.
 Exec=zap %U
 StartupWMClass=dev.zap.Zap
 

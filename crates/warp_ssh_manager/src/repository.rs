@@ -1,8 +1,8 @@
-//! Diesel CRUD over `ssh_nodes` + `ssh_servers`。返回的全部是 `crate::types`
-//! 里的 plain 数据结构,把 ORM 细节挡在 crate 边界内。
+//! Diesel CRUD over `ssh_nodes` + `ssh_servers`. Everything returned is a plain data structure
+//! from `crate::types`, keeping ORM details behind the crate boundary.
 //!
-//! 所有写操作都把 sort_order 默认放在同 parent 下当前最大 +1,UI 不关心顺序时
-//! 直接 append。move_node 调用方负责传新的 sort_order。
+//! All write operations default sort_order to the current max under the same parent +1; when the UI does not care about ordering
+//! it simply appends. The caller of move_node is responsible for passing the new sort_order.
 
 use chrono::Utc;
 use diesel::prelude::*;
@@ -12,7 +12,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::types::{AuthType, NodeKind, SshNode, SshServerInfo};
-use persistence::model::{NewSshNode, NewSshServer, NewSyncMeta, SshNodeRow, SshServerRow, SyncMetaRow};
+use persistence::model::{
+    NewSshNode, NewSshServer, NewSyncMeta, SshNodeRow, SshServerRow, SyncMetaRow,
+};
 use persistence::schema::{ssh_nodes, ssh_servers, sync_meta};
 
 #[derive(Debug, Error)]
@@ -25,12 +27,12 @@ pub enum SshRepositoryError {
     InvalidEnum { column: &'static str, value: String },
 }
 
-/// 数据访问层。每个方法都接受 `&mut SqliteConnection`,调用方持有连接,
-/// 这样事务边界由调用方决定(典型 UI 模型层每次操作开一个新事务)。
+/// Data access layer. Every method takes a `&mut SqliteConnection`; the caller holds the connection,
+/// so transaction boundaries are decided by the caller (typically the UI model layer opens a new transaction per operation).
 pub struct SshRepository;
 
 impl SshRepository {
-    /// 列所有节点(folder + server),不含详情。调用方排成树。
+    /// List all nodes (folder + server), without details. The caller arranges them into a tree.
     pub fn list_nodes(conn: &mut SqliteConnection) -> Result<Vec<SshNode>, SshRepositoryError> {
         let rows: Vec<SshNodeRow> = ssh_nodes::table
             .order((ssh_nodes::parent_id.asc(), ssh_nodes::sort_order.asc()))
@@ -145,8 +147,8 @@ impl SshRepository {
         Ok(())
     }
 
-    /// 删除节点,ON DELETE CASCADE 会同步删 children + ssh_servers 行。
-    /// 调用方负责清 keychain 里对应的 secret。
+    /// Delete a node; ON DELETE CASCADE also removes its children + ssh_servers rows.
+    /// The caller is responsible for clearing the corresponding secret in the keychain.
     pub fn delete_node(
         conn: &mut SqliteConnection,
         node_id: &str,
@@ -159,7 +161,7 @@ impl SshRepository {
         Ok(())
     }
 
-    /// 同时支持改 parent + 改顺序。new_parent_id=None 表示移到 root。
+    /// Supports changing both parent and order. new_parent_id=None means move to root.
     pub fn move_node(
         conn: &mut SqliteConnection,
         node_id: &str,
@@ -180,8 +182,8 @@ impl SshRepository {
         Ok(())
     }
 
-    /// 将节点移动到目标 parent 的末尾(new_parent_id=None 表示移到 root)。
-    /// 自动计算 sort_order 为目标 parent 下当前最大值 +1，排除自身避免同父节点移动时跳号。
+    /// Move a node to the end of the target parent (new_parent_id=None means move to root).
+    /// sort_order is computed automatically as the current max under the target parent +1, excluding the node itself to avoid gaps when moving within the same parent.
     pub fn move_node_to_end(
         conn: &mut SqliteConnection,
         node_id: &str,
@@ -201,8 +203,8 @@ impl SshRepository {
         Ok(())
     }
 
-    /// 更新单个 folder 的折叠状态。Server 节点也允许设(虽然 UI 不用),
-    /// 简化调用方逻辑。
+    /// Update the collapsed state of a single folder. Server nodes are also allowed to be set (even though the UI does not use it),
+    /// to simplify caller logic.
     pub fn set_collapsed(
         conn: &mut SqliteConnection,
         node_id: &str,
@@ -220,12 +222,12 @@ impl SshRepository {
         Ok(())
     }
 
-    /// 递增同步版本号
+    /// Increment the sync version number
     pub fn increment_sync_version(conn: &mut SqliteConnection) -> Result<i64, SshRepositoryError> {
         SyncMetaRepository::increment_sync_version(conn)
     }
 
-    /// 把所有 folder 节点的 `is_collapsed` 一次性设成给定值。
+    /// Set `is_collapsed` on all folder nodes to the given value in one shot.
     pub fn set_all_folders_collapsed(
         conn: &mut SqliteConnection,
         collapsed: bool,
@@ -268,7 +270,7 @@ fn next_sort_order(
     Ok(max.unwrap_or(-1) + 1)
 }
 
-/// 计算目标 parent 下的下一个 sort_order，排除指定节点（避免同父节点移动时跳号）。
+/// Compute the next sort_order under the target parent, excluding the given node (to avoid gaps when moving within the same parent).
 fn next_sort_order_excluding(
     conn: &mut SqliteConnection,
     parent_id: Option<&str>,
@@ -328,11 +330,11 @@ fn server_from_row(r: SshServerRow) -> Result<SshServerInfo, SshRepositoryError>
     })
 }
 
-/// 同步元数据仓库，管理 sync_meta 表中的版本号和同步记录
+/// Sync metadata repository; manages the version number and sync records in the sync_meta table
 pub struct SyncMetaRepository;
 
 impl SyncMetaRepository {
-    /// 获取同步版本号
+    /// Get the sync version number
     pub fn get_sync_version(conn: &mut SqliteConnection) -> Result<i64, SshRepositoryError> {
         let row: Option<SyncMetaRow> = sync_meta::table
             .find("sync_version")
@@ -341,7 +343,7 @@ impl SyncMetaRepository {
         Ok(row.and_then(|r| r.value.parse().ok()).unwrap_or(0))
     }
 
-    /// 递增同步版本号并返回新值
+    /// Increment the sync version number and return the new value
     pub fn increment_sync_version(conn: &mut SqliteConnection) -> Result<i64, SshRepositoryError> {
         let current = Self::get_sync_version(conn)?;
         let new_version = current + 1;
@@ -355,8 +357,11 @@ impl SyncMetaRepository {
         Ok(new_version)
     }
 
-    /// 设置同步版本号
-    pub fn set_sync_version(conn: &mut SqliteConnection, version: i64) -> Result<(), SshRepositoryError> {
+    /// Set the sync version number
+    pub fn set_sync_version(
+        conn: &mut SqliteConnection,
+        version: i64,
+    ) -> Result<(), SshRepositoryError> {
         let val = version.to_string();
         diesel::replace_into(sync_meta::table)
             .values(NewSyncMeta {
@@ -367,7 +372,7 @@ impl SyncMetaRepository {
         Ok(())
     }
 
-    /// 获取上次同步时间
+    /// Get the last sync time
     pub fn get_last_sync_time(conn: &mut SqliteConnection) -> Result<String, SshRepositoryError> {
         let row: Option<SyncMetaRow> = sync_meta::table
             .find("last_sync_time")
@@ -376,8 +381,10 @@ impl SyncMetaRepository {
         Ok(row.map(|r| r.value).unwrap_or_default())
     }
 
-    /// 获取上次同步平台
-    pub fn get_last_sync_platform(conn: &mut SqliteConnection) -> Result<String, SshRepositoryError> {
+    /// Get the last sync platform
+    pub fn get_last_sync_platform(
+        conn: &mut SqliteConnection,
+    ) -> Result<String, SshRepositoryError> {
         let row: Option<SyncMetaRow> = sync_meta::table
             .find("last_sync_platform")
             .first(conn)
@@ -385,7 +392,7 @@ impl SyncMetaRepository {
         Ok(row.map(|r| r.value).unwrap_or_default())
     }
 
-    /// 更新同步元数据
+    /// Update the sync metadata
     pub fn update_sync_meta(
         conn: &mut SqliteConnection,
         last_time: &str,
@@ -393,16 +400,22 @@ impl SyncMetaRepository {
     ) -> Result<(), SshRepositoryError> {
         diesel::replace_into(sync_meta::table)
             .values(&[
-                NewSyncMeta { key: "last_sync_time", value: last_time },
-                NewSyncMeta { key: "last_sync_platform", value: last_platform },
+                NewSyncMeta {
+                    key: "last_sync_time",
+                    value: last_time,
+                },
+                NewSyncMeta {
+                    key: "last_sync_platform",
+                    value: last_platform,
+                },
             ])
             .execute(conn)?;
         Ok(())
     }
 }
 
-/// 测试用:把 SSH 相关 migrations 全部跑一遍在内存 SQLite。新增 migration
-/// 时这里要追加 include_str!。
+/// For tests: run all SSH-related migrations against an in-memory SQLite. When adding a new migration,
+/// append an include_str! here.
 #[cfg(test)]
 pub(crate) fn setup_in_memory() -> SqliteConnection {
     use diesel::connection::SimpleConnection;
@@ -418,9 +431,7 @@ pub(crate) fn setup_in_memory() -> SqliteConnection {
         include_str!(
             "../../persistence/migrations/2026-05-23-140000_add_startup_command_and_notes/up.sql"
         ),
-        include_str!(
-            "../../persistence/migrations/2026-05-24-150000_add_sync_meta/up.sql"
-        ),
+        include_str!("../../persistence/migrations/2026-05-24-150000_add_sync_meta/up.sql"),
     ] {
         conn.batch_execute(up).unwrap();
     }
@@ -433,7 +444,7 @@ mod tests {
 
     fn sample_server(name: &str) -> SshServerInfo {
         SshServerInfo {
-            node_id: String::new(), // 由 create_server 分配
+            node_id: String::new(), // assigned by create_server
             host: format!("{name}.example.com"),
             port: 22,
             username: "root".into(),
@@ -494,7 +505,7 @@ mod tests {
         assert_eq!(b.sort_order, 1);
         assert_eq!(c.sort_order, 2);
 
-        // 不同 parent 各自从 0 开始
+        // different parents each start from 0
         let child = SshRepository::create_folder(&mut conn, Some(&a.id), "child").unwrap();
         assert_eq!(child.sort_order, 0);
     }
@@ -557,13 +568,13 @@ mod tests {
         assert!(matches!(err, SshRepositoryError::NotFound(_)));
     }
 
-    // ---- SyncMetaRepository 测试 ----
+    // ---- SyncMetaRepository tests ----
 
     #[test]
     fn sync_meta_get_version_default() {
         let mut conn = setup_in_memory();
         let version = SyncMetaRepository::get_sync_version(&mut conn).unwrap();
-        assert_eq!(version, 0, "无数据时 sync_version 应为 0");
+        assert_eq!(version, 0, "sync_version should be 0 when there is no data");
     }
 
     #[test]
@@ -609,8 +620,14 @@ mod tests {
     fn sync_meta_update_and_read() {
         let mut conn = setup_in_memory();
         SyncMetaRepository::update_sync_meta(&mut conn, "2026-05-26T10:00:00Z", "github").unwrap();
-        assert_eq!(SyncMetaRepository::get_last_sync_time(&mut conn).unwrap(), "2026-05-26T10:00:00Z");
-        assert_eq!(SyncMetaRepository::get_last_sync_platform(&mut conn).unwrap(), "github");
+        assert_eq!(
+            SyncMetaRepository::get_last_sync_time(&mut conn).unwrap(),
+            "2026-05-26T10:00:00Z"
+        );
+        assert_eq!(
+            SyncMetaRepository::get_last_sync_platform(&mut conn).unwrap(),
+            "github"
+        );
     }
 
     #[test]
@@ -618,8 +635,14 @@ mod tests {
         let mut conn = setup_in_memory();
         SyncMetaRepository::update_sync_meta(&mut conn, "t1", "gitee").unwrap();
         SyncMetaRepository::update_sync_meta(&mut conn, "t2", "github").unwrap();
-        assert_eq!(SyncMetaRepository::get_last_sync_time(&mut conn).unwrap(), "t2");
-        assert_eq!(SyncMetaRepository::get_last_sync_platform(&mut conn).unwrap(), "github");
+        assert_eq!(
+            SyncMetaRepository::get_last_sync_time(&mut conn).unwrap(),
+            "t2"
+        );
+        assert_eq!(
+            SyncMetaRepository::get_last_sync_platform(&mut conn).unwrap(),
+            "github"
+        );
     }
 
     #[test]
@@ -630,20 +653,27 @@ mod tests {
         assert_eq!(SyncMetaRepository::get_sync_version(&mut conn).unwrap(), 10);
     }
 
-    // ---- 折叠操作不应递增 sync_version ----
+    // ---- collapse operations should not increment sync_version ----
 
     #[test]
     fn set_collapsed_does_not_increment_sync_version() {
         let mut conn = setup_in_memory();
         let folder = SshRepository::create_folder(&mut conn, None, "F").unwrap();
-        // create_folder 会递增一次，重置为 0 再测试
+        // create_folder increments once; reset to 0 before testing
         SyncMetaRepository::set_sync_version(&mut conn, 0).unwrap();
 
         SshRepository::set_collapsed(&mut conn, &folder.id, true).unwrap();
-        assert_eq!(SyncMetaRepository::get_sync_version(&mut conn).unwrap(), 0,
-            "set_collapsed 不应递增 sync_version");
+        assert_eq!(
+            SyncMetaRepository::get_sync_version(&mut conn).unwrap(),
+            0,
+            "set_collapsed should not increment sync_version"
+        );
 
-        let node = SshRepository::list_nodes(&mut conn).unwrap().into_iter().next().unwrap();
+        let node = SshRepository::list_nodes(&mut conn)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
         assert!(node.is_collapsed);
     }
 
@@ -655,8 +685,11 @@ mod tests {
         SyncMetaRepository::set_sync_version(&mut conn, 0).unwrap();
 
         SshRepository::set_collapsed(&mut conn, &folder.id, false).unwrap();
-        assert_eq!(SyncMetaRepository::get_sync_version(&mut conn).unwrap(), 0,
-            "set_collapsed(false) 不应递增 sync_version");
+        assert_eq!(
+            SyncMetaRepository::get_sync_version(&mut conn).unwrap(),
+            0,
+            "set_collapsed(false) should not increment sync_version"
+        );
     }
 
     #[test]
@@ -667,8 +700,11 @@ mod tests {
         SyncMetaRepository::set_sync_version(&mut conn, 0).unwrap();
 
         SshRepository::set_all_folders_collapsed(&mut conn, true).unwrap();
-        assert_eq!(SyncMetaRepository::get_sync_version(&mut conn).unwrap(), 0,
-            "set_all_folders_collapsed 不应递增 sync_version");
+        assert_eq!(
+            SyncMetaRepository::get_sync_version(&mut conn).unwrap(),
+            0,
+            "set_all_folders_collapsed should not increment sync_version"
+        );
 
         let nodes = SshRepository::list_nodes(&mut conn).unwrap();
         assert!(nodes.iter().all(|n| n.is_collapsed));
@@ -696,27 +732,26 @@ mod tests {
         assert_eq!(SyncMetaRepository::get_sync_version(&mut conn).unwrap(), 3);
     }
 
-    // ---- move_node_to_end 测试 ----
+    // ---- move_node_to_end tests ----
 
     #[test]
     fn move_node_to_end_from_folder_a_to_folder_b() {
         let mut conn = setup_in_memory();
         let a = SshRepository::create_folder(&mut conn, None, "A").unwrap();
         let b = SshRepository::create_folder(&mut conn, None, "B").unwrap();
-        let srv = SshRepository::create_server(
-            &mut conn,
-            Some(&a.id),
-            "srv1",
-            &sample_server("srv1"),
-        )
-        .unwrap();
+        let srv =
+            SshRepository::create_server(&mut conn, Some(&a.id), "srv1", &sample_server("srv1"))
+                .unwrap();
 
         SshRepository::move_node_to_end(&mut conn, &srv.id, Some(&b.id)).unwrap();
 
         let nodes = SshRepository::list_nodes(&mut conn).unwrap();
         let moved = nodes.iter().find(|n| n.id == srv.id).unwrap();
         assert_eq!(moved.parent_id.as_deref(), Some(b.id.as_str()));
-        assert_eq!(moved.sort_order, 0, "B 下无其他子节点,sort_order 应为 0");
+        assert_eq!(
+            moved.sort_order, 0,
+            "B has no other children, sort_order should be 0"
+        );
     }
 
     #[test]
@@ -735,27 +770,22 @@ mod tests {
 
         let nodes = SshRepository::list_nodes(&mut conn).unwrap();
         let moved = nodes.iter().find(|n| n.id == srv.id).unwrap();
-        assert!(moved.parent_id.is_none(), "移到 root 后 parent_id 应为 None");
+        assert!(
+            moved.parent_id.is_none(),
+            "after moving to root, parent_id should be None"
+        );
     }
 
     #[test]
     fn move_node_to_end_appends_after_existing_children() {
         let mut conn = setup_in_memory();
         let folder = SshRepository::create_folder(&mut conn, None, "F").unwrap();
-        let _s1 = SshRepository::create_server(
-            &mut conn,
-            Some(&folder.id),
-            "s1",
-            &sample_server("s1"),
-        )
-        .unwrap();
-        let _s2 = SshRepository::create_server(
-            &mut conn,
-            Some(&folder.id),
-            "s2",
-            &sample_server("s2"),
-        )
-        .unwrap();
+        let _s1 =
+            SshRepository::create_server(&mut conn, Some(&folder.id), "s1", &sample_server("s1"))
+                .unwrap();
+        let _s2 =
+            SshRepository::create_server(&mut conn, Some(&folder.id), "s2", &sample_server("s2"))
+                .unwrap();
 
         let other = SshRepository::create_folder(&mut conn, None, "Other").unwrap();
         let srv = SshRepository::create_server(
@@ -770,7 +800,10 @@ mod tests {
 
         let nodes = SshRepository::list_nodes(&mut conn).unwrap();
         let moved = nodes.iter().find(|n| n.id == srv.id).unwrap();
-        assert_eq!(moved.sort_order, 2, "F 下已有 2 个子节点,新节点 sort_order 应为 2");
+        assert_eq!(
+            moved.sort_order, 2,
+            "F already has 2 children, the new node's sort_order should be 2"
+        );
         assert_eq!(moved.parent_id.as_deref(), Some(folder.id.as_str()));
     }
 
@@ -778,19 +811,17 @@ mod tests {
     fn move_node_to_end_empty_target_folder() {
         let mut conn = setup_in_memory();
         let folder = SshRepository::create_folder(&mut conn, None, "Empty").unwrap();
-        let srv = SshRepository::create_server(
-            &mut conn,
-            None,
-            "srv1",
-            &sample_server("srv1"),
-        )
-        .unwrap();
+        let srv =
+            SshRepository::create_server(&mut conn, None, "srv1", &sample_server("srv1")).unwrap();
 
         SshRepository::move_node_to_end(&mut conn, &srv.id, Some(&folder.id)).unwrap();
 
         let nodes = SshRepository::list_nodes(&mut conn).unwrap();
         let moved = nodes.iter().find(|n| n.id == srv.id).unwrap();
-        assert_eq!(moved.sort_order, 0, "空 folder 下 sort_order 应为 0");
+        assert_eq!(
+            moved.sort_order, 0,
+            "sort_order should be 0 in an empty folder"
+        );
         assert_eq!(moved.parent_id.as_deref(), Some(folder.id.as_str()));
     }
 
@@ -800,7 +831,7 @@ mod tests {
         let err = SshRepository::move_node_to_end(&mut conn, "nonexistent", None).unwrap_err();
         assert!(
             matches!(err, SshRepositoryError::NotFound(_)),
-            "不存在的节点应返回 NotFound 错误"
+            "a nonexistent node should return a NotFound error"
         );
     }
 
@@ -822,7 +853,7 @@ mod tests {
         assert_eq!(
             SyncMetaRepository::get_sync_version(&mut conn).unwrap(),
             1,
-            "move_node_to_end 应递增 sync_version"
+            "move_node_to_end should increment sync_version"
         );
     }
 }

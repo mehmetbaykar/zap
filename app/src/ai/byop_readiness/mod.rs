@@ -1,7 +1,7 @@
-//! BYOP 请求发送前的工具调用就绪性分类。
+//! Tool-call readiness classification before sending a BYOP request.
 //!
-//! 这个模块只处理已经投影出来的安全元数据,不读取原始 prompt、工具参数或工具输出,
-//! 也不修改 controller、serializer 或 conversation 状态。
+//! This module only handles already-projected safe metadata; it does not read the raw prompt, tool arguments, or tool output,
+//! nor does it modify the controller, serializer, or conversation state.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -369,14 +369,14 @@ impl ProjectionItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RepairSource {
-    /// 用户通过 fork(/fork、rewind)从 source conversation 派生新 conversation 时,
-    /// 由 `byop_fork_repair_state_json` 为被丢弃的 tool result 记录的修复来源。
+    /// The repair source recorded by `byop_fork_repair_state_json` for tool results that were dropped
+    /// when the user derives a new conversation from a source conversation via fork (/fork, rewind).
     ForkedHistory,
-    /// 旧版客户端写入但当前协议无法回放的 tool result 缺口在恢复时记录的修复来源。
-    /// 见 `specs/byop-placeholder-tool-results/ISSUES.md` BYOP-PR-6:目前未在恢复路径中产生此 variant,
-    /// 老 BYOP conversation 中无法解释的缺口默认按 corrupted history 阻断处理。
-    /// **不要随意删除该 variant**:持久化 sidecar 中可能反序列化出 `restored_legacy_history`,
-    /// 删除会破坏 Sidecar 格式兼容性。
+    /// The repair source recorded during restore for tool-result gaps written by older clients that the current protocol cannot replay.
+    /// See `specs/byop-placeholder-tool-results/ISSUES.md` BYOP-PR-6: this variant is currently not produced on the restore path,
+    /// and unexplained gaps in old BYOP conversations are by default blocked as corrupted history.
+    /// **Do not casually delete this variant**: the persisted sidecar may deserialize `restored_legacy_history`,
+    /// and deleting it would break Sidecar format compatibility.
     RestoredLegacyHistory,
 }
 
@@ -1085,9 +1085,9 @@ impl<'a> Classifier<'a> {
     }
 
     fn handle_tool_result(&mut self, result: ProjectedToolResult) -> Option<ReadinessState> {
-        // 把"是否归属当前 active group"的判断与"修改 active_call 状态"分成两步,
-        // 先通过不可变借用筛选,失败则直接走 unattached 路径,
-        // 通过后再获取可变借用,避免 expect/unwrap 出现在生产路径上。
+        // Split the "does it belong to the current active group" check and the "modify active_call state" step into two phases:
+        // first filter via an immutable borrow, and if that fails go straight down the unattached path;
+        // only after passing acquire a mutable borrow, to avoid expect/unwrap on the production path.
         match self.active_group.as_ref() {
             Some(active_group)
                 if result.task_id == active_group.task_id
@@ -1224,10 +1224,10 @@ impl<'a> Classifier<'a> {
     }
 
     fn mark_stale_repair_records_for_visible_gap(&mut self, key: &ToolCallKey) {
-        // Repair record 的授权语义要求 task_id + assistant_tool_call_message_id + tool_call_id
-        // 三字段完全相等;但当出现真实可见 gap(即同 `tool_call_id` 已被当前对话历史明确标记缺失)时,
-        // 任何"同 tool_call_id 但来自其他 (task_id, assistant_message_id)"的 repair record 都不再适用,
-        // 标记为 stale 以便上层在 diagnostics 中提示该 record 已被忽略。
+        // The authorization semantics of a repair record require task_id + assistant_tool_call_message_id + tool_call_id
+        // to all be exactly equal; but when there is a real visible gap (i.e. the same `tool_call_id` has already been explicitly marked missing by the current conversation history),
+        // any repair record with the "same tool_call_id but from a different (task_id, assistant_message_id)" no longer applies,
+        // so mark it stale so the upper layer can indicate in diagnostics that the record was ignored.
         for (index, record) in self.context.repair_records.iter().enumerate() {
             if record.key.tool_call_id == key.tool_call_id && record.key != *key {
                 self.stale_repair_indices.insert(index);

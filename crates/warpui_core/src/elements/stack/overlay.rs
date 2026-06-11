@@ -32,8 +32,9 @@ impl Element for Overlay {
     }
 
     fn paint(&mut self, origin: Vector2F, ctx: &mut PaintContext, app: &AppContext) {
-        // 如果已在 overlay 层中（由 Stack 通过 start_overlay_layer 创建），
-        // 直接绘制子元素，避免嵌套 overlay 层导致 is_covered 误判。
+        // If we're already in an overlay layer (created by Stack via start_overlay_layer),
+        // paint the child directly to avoid nesting overlay layers, which would cause
+        // is_covered to misjudge occlusion.
         let already_in_overlay = matches!(ctx.scene.z_index(), ZIndex::Overlay(_));
         if already_in_overlay {
             self.child.paint(origin, ctx, app);

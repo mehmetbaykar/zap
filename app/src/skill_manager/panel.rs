@@ -30,14 +30,15 @@ use crate::view_components::dropdown::{Dropdown, DropdownItem};
 const PANEL_PADDING: f32 = 8.0;
 const ROW_PADDING_VERTICAL: f32 = 5.0;
 const ROW_PADDING_HORIZONTAL: f32 = 8.0;
-// filter tab:保持紧凑高度,用 12px 字号 + 强对比激活态撑起可读性,
-// 避免被外壳 ClippedScrollable 拦截点击事件。
+// filter tab: keep a compact height, using a 12px font size + a high-contrast active state to
+// maintain readability, and avoid having clicks intercepted by the outer ClippedScrollable shell.
 const FILTER_BUTTON_HEIGHT: f32 = 24.0;
 const FILTER_BUTTON_HORIZONTAL_PADDING: f32 = 8.0;
 const FILTER_BUTTON_CORNER_RADIUS: f32 = 4.0;
-// 来源 tab 平铺显示的最大数量;超过则折叠为「全部 + 来源下拉」。
-// 取 4:典型侧栏宽度下「全部」加约 4 个短来源名仍可平铺。布局引擎是单遍保留树,
-// 无法按实测像素宽度自适应折叠,故以来源数量作为折叠阈值。
+// The maximum number of source tabs to display inline; above this they collapse into an
+// "All + source dropdown". Chosen as 4: at a typical sidebar width, "All" plus about 4 short source
+// names can still tile inline. The layout engine is a single-pass retained tree and cannot collapse
+// adaptively by measured pixel width, so the number of sources is used as the collapse threshold.
 const FILTER_TABS_INLINE_MAX: usize = 4;
 
 #[derive(Clone, Debug)]
@@ -55,7 +56,8 @@ pub struct SkillManagerPanel {
     selected_path: Option<PathBuf>,
     provider_filter: Option<SkillProvider>,
     query_editor: ViewHandle<EditorView>,
-    // 折叠态(来源数 > FILTER_TABS_INLINE_MAX)收纳各来源 tab 的「来源」下拉。
+    // The "source" dropdown that holds the per-source tabs in the collapsed state (source count >
+    // FILTER_TABS_INLINE_MAX).
     source_dropdown: ViewHandle<Dropdown<SkillManagerPanelAction>>,
     filter_mouse_states: RefCell<HashMap<Option<SkillProvider>, MouseStateHandle>>,
     row_mouse_states: RefCell<HashMap<PathBuf, MouseStateHandle>>,
@@ -66,7 +68,10 @@ impl SkillManagerPanel {
     pub fn new(ctx: &mut ViewContext<Self>) -> Self {
         let query_editor = ctx.add_typed_action_view(|ctx| {
             let options = EditorOptions {
-                text: TextOptions::ui_text(Some(Appearance::as_ref(ctx).ui_font_subheading()), Appearance::as_ref(ctx)),
+                text: TextOptions::ui_text(
+                    Some(Appearance::as_ref(ctx).ui_font_subheading()),
+                    Appearance::as_ref(ctx),
+                ),
                 propagate_and_no_op_vertical_navigation_keys:
                     PropagateAndNoOpNavigationKeys::AtBoundary,
                 propagate_horizontal_navigation_keys: PropagateHorizontalNavigationKeys::Always,
@@ -108,19 +113,22 @@ impl SkillManagerPanel {
                 let query = me.query(ctx);
                 let items = Self::filter_inventory(&inventory, &query, me.provider_filter);
                 me.scroll_selected_path_into_view(&items);
-                // 来源集合随 inventory 变化,重建折叠态下拉的选项与选中态。
+                // The source set changes with the inventory, so rebuild the collapsed-state
+                // dropdown's options and selected state.
                 me.rebuild_source_dropdown(ctx);
                 ctx.notify();
             }
         });
 
-        // 折叠态使用的「来源」下拉。由本面板的 ViewContext 创建,其派发的
-        // SelectProviderFilter 会冒泡回本面板的 handle_action。
+        // The "source" dropdown used in the collapsed state. Created by this panel's ViewContext;
+        // the SelectProviderFilter it dispatches bubbles back to this panel's handle_action.
         let source_dropdown = ctx.add_typed_action_view(|ctx| {
             let mut dropdown = Dropdown::new(ctx);
-            // 下拉头紧贴文本宽度,与左侧「全部」按钮并排,不撑满整行。
+            // The dropdown head hugs the text width, sitting next to the left "All" button instead
+            // of filling the whole row.
             dropdown.set_main_axis_size(MainAxisSize::Min, ctx);
-            // 选中「全部」项时,闭合态显示「来源」占位,避免与左侧独立「全部」按钮重复。
+            // When the "All" item is selected, the closed state shows a "source" placeholder, to
+            // avoid duplicating the separate "All" button on the left.
             let all_label = crate::t!("skill-manager-filter-all").to_string();
             let source_label = crate::t!("skill-manager-filter-provider").to_string();
             dropdown.set_menu_header_text_override(move |label| {
@@ -146,10 +154,11 @@ impl SkillManagerPanel {
         me
     }
 
-    /// 重建「来源」下拉的选项与选中态。
+    /// Rebuild the "source" dropdown's options and selected state.
     ///
-    /// 首项「全部」对应清空过滤(index 0),其余项依次对应当前 inventory 中存在的
-    /// 各 provider。选中态由 `provider_filter` 驱动,与左侧「全部」按钮保持一致。
+    /// The first item "All" corresponds to clearing the filter (index 0), and the remaining items
+    /// correspond in order to the providers present in the current inventory. The selected state is
+    /// driven by `provider_filter`, kept consistent with the left "All" button.
     fn rebuild_source_dropdown(&mut self, ctx: &mut ViewContext<Self>) {
         let inventory = SkillManager::as_ref(ctx).list_skill_inventory(ctx);
         let providers = Self::providers_in_inventory(&inventory);
@@ -165,7 +174,7 @@ impl SkillManagerPanel {
             ));
         }
 
-        // 首项「全部」占据 index 0,故命中的 provider 需 +1。
+        // The first item "All" occupies index 0, so the matched provider needs +1.
         let selected_index = match self.provider_filter {
             None => 0,
             Some(filter) => providers
@@ -312,7 +321,8 @@ impl SkillManagerPanel {
         let action = SkillManagerPanelAction::SelectProviderFilter(provider);
 
         Hoverable::new(state, move |mouse| {
-            // 文字用 Flex::row + CrossAxisAlignment::Center 垂直居中于固定行高里。
+            // The text uses Flex::row + CrossAxisAlignment::Center to be vertically centered within
+            // the fixed row height.
             let label_row = Flex::row()
                 .with_main_axis_size(MainAxisSize::Min)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -330,7 +340,8 @@ impl SkillManagerPanel {
                     FILTER_BUTTON_CORNER_RADIUS,
                 )));
             if is_active {
-                // 激活态使用 fg_overlay_4 让对比更强,避免快速切换时看不出选中变化。
+                // The active state uses fg_overlay_4 for stronger contrast, so the selection change
+                // is visible even during fast switching.
                 button = button.with_background(internal_colors::fg_overlay_4(theme));
             } else if mouse.is_hovered() {
                 button = button.with_background(internal_colors::fg_overlay_2(theme));
@@ -351,14 +362,16 @@ impl SkillManagerPanel {
         providers: &[SkillProvider],
         appearance: &Appearance,
     ) -> Box<dyn Element> {
-        // 来源过多时折叠为「全部 + 来源下拉」,避免窄侧栏放不下被裁断。
+        // When there are too many sources, collapse into "All + source dropdown", to avoid a narrow
+        // sidebar being unable to fit them and clipping them.
         if providers.len() > FILTER_TABS_INLINE_MAX {
             return self.render_collapsed_filter_rows(appearance);
         }
 
         let active_filter = self.provider_filter;
 
-        // 使用 MainAxisSize::Max 让过滤标签行填满面板宽度,消除右侧留白。
+        // Use MainAxisSize::Max so the filter tab row fills the panel width, eliminating whitespace
+        // on the right.
         let mut filter_buttons = Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -379,16 +392,19 @@ impl SkillManagerPanel {
             ));
         }
 
-        // 不再外套 ClippedScrollable / 外壳容器:
-        // 1. 横向滚动容器会拦截 mouse-down 用于拖拽判定,导致快速切换 tab 时点击响应延迟。
-        // 2. 平铺态 provider 数 ≤ FILTER_TABS_INLINE_MAX,侧栏宽度可容纳;
-        //    更多来源走折叠下拉分支。
+        // No longer wrapped in a ClippedScrollable / shell container:
+        // 1. A horizontal scroll container intercepts mouse-down for drag detection, causing a delay
+        //    in click response when switching tabs quickly.
+        // 2. In the inline state the provider count is <= FILTER_TABS_INLINE_MAX, which fits the
+        //    sidebar width; more sources go through the collapsed dropdown branch.
         Clipped::new(filter_buttons.finish()).finish()
     }
 
-    /// 折叠态过滤行:左侧「全部」快捷按钮 + 右侧「来源 ▾」下拉。
+    /// Collapsed-state filter row: an "All" shortcut button on the left + a "source ▾" dropdown on
+    /// the right.
     ///
-    /// 绝不外套 `Clipped`:下拉展开的菜单是定位 overlay,被裁剪会丢失。
+    /// Never wrap in `Clipped`: the dropdown's expanded menu is a positioned overlay and would be
+    /// lost if clipped.
     fn render_collapsed_filter_rows(&self, appearance: &Appearance) -> Box<dyn Element> {
         Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
@@ -478,8 +494,9 @@ impl SkillManagerPanel {
             } else {
                 None
             };
-            // 外层 Flex::row 使用 MainAxisSize::Max 填满面板宽度,
-            // 避免 Container 收缩到内容自然宽度导致高亮区域右侧留白。
+            // The outer Flex::row uses MainAxisSize::Max to fill the panel width, to avoid the
+            // Container shrinking to the content's natural width and leaving whitespace on the right
+            // of the highlight area.
             let content = Flex::row()
                 .with_main_axis_size(MainAxisSize::Max)
                 .with_cross_axis_alignment(CrossAxisAlignment::Start)
@@ -577,7 +594,8 @@ impl TypedActionView for SkillManagerPanel {
                     return;
                 }
                 self.provider_filter = *provider;
-                // 同步折叠态下拉的选中项:点击左侧「全部」按钮时下拉并不知情。
+                // Sync the collapsed-state dropdown's selected item: when the left "All" button is
+                // clicked, the dropdown is otherwise unaware.
                 self.rebuild_source_dropdown(ctx);
                 ctx.notify();
             }

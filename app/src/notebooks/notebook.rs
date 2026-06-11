@@ -52,8 +52,7 @@ use crate::{
     cmd_or_ctrl_shift,
     drive::{
         drive_helpers::has_feature_gated_anonymous_user_reached_notebook_limit,
-        export::ExportManager, items::WarpDriveItemId, ObjectTypeAndId,
-        ZapDriveObjectSettings,
+        export::ExportManager, items::WarpDriveItemId, ObjectTypeAndId, ZapDriveObjectSettings,
     },
     editor::{
         EditOrigin, EditorView, Event as EditorEvent, InteractionState,
@@ -600,8 +599,9 @@ impl NotebookView {
                     .id()
                     .and_then(SyncId::into_server)
                 {
-                    // TODO(zap-cloud-removal Phase 5): 同上,sharing UI 已退役,
-                    // notebook 的 ShareableObject 注入移除;cloud_object 退役时清理 id 流程。
+                    // TODO(zap-cloud-removal Phase 5): same as above, the sharing UI has been
+                    // retired and the notebook's ShareableObject injection removed; clean up the
+                    // id flow when cloud_object is retired.
                     let _ = id;
                 }
             }
@@ -1612,8 +1612,8 @@ impl NotebookView {
         self.set_title(&notebook.model().title, ctx);
         self.set_content(&notebook, ctx);
 
-        // TODO(zap-cloud-removal Phase 5): sharing UI 已退役,notebook
-        // ShareableObject 注入移除;cloud_object server_id 路径保留待 Phase 5。
+        // TODO(zap-cloud-removal Phase 5): the sharing UI has been retired and the notebook
+        // ShareableObject injection removed; the cloud_object server_id path is kept until Phase 5.
         let _ = notebook.id;
 
         self.active_notebook_data.update(ctx, |data, ctx| {
@@ -1853,11 +1853,7 @@ impl NotebookView {
         // Load the server's version of the notebook now that the object store has been updated.
         // This will also switch back to edit mode if there isn't an active editor.
         if let Some(notebook) = ObjectStoreModel::as_ref(ctx).get_notebook(&id) {
-            self.load(
-                notebook.clone(),
-                &ZapDriveObjectSettings::default(),
-                ctx,
-            );
+            self.load(notebook.clone(), &ZapDriveObjectSettings::default(), ctx);
         }
         ctx.notify();
     }

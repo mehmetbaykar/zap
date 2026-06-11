@@ -25,8 +25,8 @@ use crate::{
     view_components::{Dropdown, DropdownItem},
 };
 
-// 字面量已迁移到 Fluent:`settings-external-editor-tabbed-header` /
-// `settings-external-editor-tabbed-desc`。
+// The literals have been migrated to Fluent: `settings-external-editor-tabbed-header` /
+// `settings-external-editor-tabbed-desc`.
 
 #[derive(Debug, Clone)]
 pub enum ExternalEditorAction {
@@ -362,9 +362,7 @@ impl View for ExternalEditorView {
             crate::t!("settings-external-editor-prefer-markdown"),
             Some(AdditionalInfo {
                 mouse_state: self.markdown_viewer_mouse_state.clone(),
-                on_click_action: Some(ExternalEditorAction::OpenUrl(
-                    "".to_string(),
-                )),
+                on_click_action: Some(ExternalEditorAction::OpenUrl("".to_string())),
                 secondary_text: None,
                 tooltip_override_text: None,
             }),

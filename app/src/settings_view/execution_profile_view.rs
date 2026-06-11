@@ -123,7 +123,7 @@ impl View for ExecutionProfileView {
             .map(|info| info.display_name.clone())
             .unwrap_or_else(|| crate::t!("settings-exec-profile-auto"));
 
-        // title 模型 fallback 到 base 的显示名,与 base 一致表示"未独立设置"。
+        // The title model falls back to the base model's display name; matching base means "not set independently".
         let title_model = profile
             .title_model
             .as_ref()
@@ -136,7 +136,7 @@ impl View for ExecutionProfileView {
                     .clone()
             });
 
-        // active AI 模型(prompt suggestions / NLD / relevant files 用),fallback 到 base。
+        // The active AI model (used for prompt suggestions / NLD / relevant files), falls back to base.
         let active_ai_model = profile
             .active_ai_model
             .as_ref()
@@ -149,7 +149,7 @@ impl View for ExecutionProfileView {
                     .clone()
             });
 
-        // Next Command 模型(灰色补全 / zero-state 建议),fallback 到 base。
+        // The Next Command model (grey completions / zero-state suggestions), falls back to base.
         let next_command_model = profile
             .next_command_model
             .as_ref()
@@ -177,14 +177,18 @@ impl View for ExecutionProfileView {
                         .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
                         .with_cross_axis_alignment(CrossAxisAlignment::Center)
                         .with_child(
-                            Text::new(profile.display_name(), appearance.ui_font_family(), appearance.ui_font_subheading())
-                                .with_style(Properties::default().weight(Weight::Medium))
-                                .with_color(if is_any_ai_enabled {
-                                    appearance.theme().active_ui_text_color().into()
-                                } else {
-                                    appearance.theme().disabled_ui_text_color().into()
-                                })
-                                .finish(),
+                            Text::new(
+                                profile.display_name(),
+                                appearance.ui_font_family(),
+                                appearance.ui_font_subheading(),
+                            )
+                            .with_style(Properties::default().weight(Weight::Medium))
+                            .with_color(if is_any_ai_enabled {
+                                appearance.theme().active_ui_text_color().into()
+                            } else {
+                                appearance.theme().disabled_ui_text_color().into()
+                            })
+                            .finish(),
                         )
                         .with_child(self.edit_button.as_ref(app).render(app))
                         .finish(),
@@ -499,13 +503,17 @@ where
                 .map(|item| {
                     Container::new(
                         Container::new(
-                            Text::new(item, appearance.ui_font_family(), appearance.ui_font_footnote())
-                                .with_color(if is_ai_enabled {
-                                    appearance.theme().active_ui_text_color().into()
-                                } else {
-                                    appearance.theme().disabled_ui_text_color().into()
-                                })
-                                .finish(),
+                            Text::new(
+                                item,
+                                appearance.ui_font_family(),
+                                appearance.ui_font_footnote(),
+                            )
+                            .with_color(if is_ai_enabled {
+                                appearance.theme().active_ui_text_color().into()
+                            } else {
+                                appearance.theme().disabled_ui_text_color().into()
+                            })
+                            .finish(),
                         )
                         .with_background(appearance.theme().surface_2())
                         .with_border(
@@ -558,16 +566,20 @@ fn render_allowlist_denylist_row(
             )
             .with_child(
                 Container::new(
-                    Text::new(label, appearance.ui_font_family(), appearance.ui_font_body())
-                        .with_color(if is_ai_enabled {
-                            appearance
-                                .theme()
-                                .sub_text_color(appearance.theme().surface_1())
-                                .into()
-                        } else {
-                            appearance.theme().disabled_ui_text_color().into()
-                        })
-                        .finish(),
+                    Text::new(
+                        label,
+                        appearance.ui_font_family(),
+                        appearance.ui_font_body(),
+                    )
+                    .with_color(if is_ai_enabled {
+                        appearance
+                            .theme()
+                            .sub_text_color(appearance.theme().surface_1())
+                            .into()
+                    } else {
+                        appearance.theme().disabled_ui_text_color().into()
+                    })
+                    .finish(),
                 )
                 .with_margin_right(8.)
                 .finish(),
@@ -661,28 +673,36 @@ fn render_model_line_with_icon(
             )
             .with_child(
                 Container::new(
-                    Text::new(label, appearance.ui_font_family(), appearance.ui_font_body())
-                        .with_color(if is_ai_enabled {
-                            appearance
-                                .theme()
-                                .sub_text_color(appearance.theme().surface_1())
-                                .into()
-                        } else {
-                            appearance.theme().disabled_ui_text_color().into()
-                        })
-                        .finish(),
+                    Text::new(
+                        label,
+                        appearance.ui_font_family(),
+                        appearance.ui_font_body(),
+                    )
+                    .with_color(if is_ai_enabled {
+                        appearance
+                            .theme()
+                            .sub_text_color(appearance.theme().surface_1())
+                            .into()
+                    } else {
+                        appearance.theme().disabled_ui_text_color().into()
+                    })
+                    .finish(),
                 )
                 .with_margin_right(8.)
                 .finish(),
             )
             .with_child(
-                Text::new(model_name, appearance.ui_font_family(), appearance.ui_font_body())
-                    .with_color(if is_ai_enabled {
-                        appearance.theme().active_ui_text_color().into()
-                    } else {
-                        appearance.theme().disabled_ui_text_color().into()
-                    })
-                    .finish(),
+                Text::new(
+                    model_name,
+                    appearance.ui_font_family(),
+                    appearance.ui_font_body(),
+                )
+                .with_color(if is_ai_enabled {
+                    appearance.theme().active_ui_text_color().into()
+                } else {
+                    appearance.theme().disabled_ui_text_color().into()
+                })
+                .finish(),
             )
             .finish(),
     )
@@ -722,28 +742,36 @@ fn render_permission_line_with_icon(
         )
         .with_child(
             Container::new(
-                Text::new(label, appearance.ui_font_family(), appearance.ui_font_body())
-                    .with_color(if is_ai_enabled {
-                        appearance
-                            .theme()
-                            .sub_text_color(appearance.theme().surface_1())
-                            .into()
-                    } else {
-                        appearance.theme().disabled_ui_text_color().into()
-                    })
-                    .finish(),
+                Text::new(
+                    label,
+                    appearance.ui_font_family(),
+                    appearance.ui_font_body(),
+                )
+                .with_color(if is_ai_enabled {
+                    appearance
+                        .theme()
+                        .sub_text_color(appearance.theme().surface_1())
+                        .into()
+                } else {
+                    appearance.theme().disabled_ui_text_color().into()
+                })
+                .finish(),
             )
             .with_margin_right(8.)
             .finish(),
         )
         .with_child(
-            Text::new(permission_text, appearance.ui_font_family(), appearance.ui_font_body())
-                .with_color(if is_ai_enabled {
-                    appearance.theme().active_ui_text_color().into()
-                } else {
-                    appearance.theme().disabled_ui_text_color().into()
-                })
-                .finish(),
+            Text::new(
+                permission_text,
+                appearance.ui_font_family(),
+                appearance.ui_font_body(),
+            )
+            .with_color(if is_ai_enabled {
+                appearance.theme().active_ui_text_color().into()
+            } else {
+                appearance.theme().disabled_ui_text_color().into()
+            })
+            .finish(),
         )
         .finish()
 }

@@ -19,7 +19,6 @@ use watcher::HomeDirectoryWatcher;
 
 use super::settings::initialize_settings_for_tests;
 use crate::ai::agent_providers::AgentProviderSecrets;
-use crate::settings::CloudSyncTokenStore;
 use crate::ai::blocklist::BlocklistAIPermissions;
 use crate::ai::blocklist::SerializedBlockListItem;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
@@ -29,6 +28,7 @@ use crate::auth::AuthManager;
 use crate::auth::AuthStateProvider;
 use crate::changelog_model::ChangelogModel;
 use crate::pricing::PricingInfoModel;
+use crate::settings::CloudSyncTokenStore;
 use crate::suggestions::ignored_suggestions_model::IgnoredSuggestionsModel;
 use crate::terminal::view::inline_banner::ByoLlmAuthBannerSessionState;
 use crate::undo_close::UndoCloseStack;
@@ -93,7 +93,7 @@ pub fn initialize_app_for_terminal_view(app: &mut App) {
     app.add_singleton_model(RepoMetadataModel::new);
     app.add_singleton_model(FileSearchModel::new);
     app.add_singleton_model(|_| GitStatusUpdateModel::new());
-    // Zap:RepoOutlines 已删除,不再注册。
+    // Zap: RepoOutlines has been removed, so it is no longer registered.
     app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
     app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
     app.add_singleton_model(SkillManager::new);

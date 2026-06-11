@@ -374,10 +374,11 @@ impl RemoteServerClient {
         }
     }
 
-    /// Zap:列举远端主机上某个目录的直接子项。
+    /// Zap: lists the immediate children of a directory on the remote host.
     ///
-    /// 终端文件链接检测用它精确校验远端路径形态(本地会话靠
-    /// `fs::metadata` 做这件事,远端文件不在本地磁盘上)。
+    /// Terminal file-link detection uses it to precisely validate the shape of
+    /// a remote path (local sessions do this via `fs::metadata`; remote files
+    /// are not on the local disk).
     pub async fn list_directory(&self, path: String) -> Result<ListDirectoryResponse, ClientError> {
         let request_id = RequestId::new();
         let msg = ClientMessage {
@@ -510,9 +511,11 @@ impl RemoteServerClient {
 
     /// Sends a buffer edit notification to the remote host.
     ///
-    /// Zap:与其它 fire-and-forget 通知不同,buffer 编辑投递失败必须上报。
-    /// `outbound_tx` 关闭(连接已死)时若静默吞掉,本地 buffer 会继续推进而
-    /// daemon 收不到编辑,造成不可见的失步。失败返回 `Err` 让调用方处理。
+    /// Zap: unlike other fire-and-forget notifications, a failed buffer edit
+    /// delivery must be reported. If it is silently swallowed when
+    /// `outbound_tx` is closed (the connection is dead), the local buffer keeps
+    /// advancing while the daemon never receives the edit, causing an invisible
+    /// desync. On failure, return `Err` for the caller to handle.
     pub fn send_buffer_edit(
         &self,
         path: String,

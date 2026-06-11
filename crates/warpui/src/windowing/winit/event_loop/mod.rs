@@ -757,16 +757,20 @@ impl EventLoop {
                 });
             }
             Event::UserEvent(CustomEvent::ActiveCursorPositionUpdated) => {
-                // 关键:不要用 `self.ime_enabled` 守卫这个调用。
+                // Important: do NOT guard this call with `self.ime_enabled`.
                 //
-                // 在 Windows 上,winit 仅在收到 `WM_IME_STARTCOMPOSITION` 时才派发 `Ime::Enabled`,
-                // 此时 IMM 已经在同一条消息处理中读取过 COMPOSITIONFORM/CANDIDATEFORM,
-                // 异步等到 `Ime::Enabled` 才第一次 `ImmSetCompositionWindow` 已经赶不上 Win11
-                // 微软拼音渲染候选窗,导致候选窗落到屏幕右下角"输入工具箱"默认位置。
+                // On Windows, winit only dispatches `Ime::Enabled` when it receives
+                // `WM_IME_STARTCOMPOSITION`, by which point IMM has already read
+                // COMPOSITIONFORM/CANDIDATEFORM within that same message handling. Waiting
+                // asynchronously for `Ime::Enabled` to call `ImmSetCompositionWindow` for the first
+                // time is too late for Win11's Microsoft Pinyin to render the candidate window,
+                // which causes the candidate window to land in its default "input toolbox" position
+                // at the bottom-right of the screen.
                 //
-                // 因此焦点/光标移动一旦触发 `ActiveCursorPositionUpdated`,无论 IME 是否处于
-                // composition 状态,都要把当前光标矩形推给 IMM,让下一次 composition 启动时
-                // IMM 上下文里已经有正确的位置。
+                // Therefore, whenever a focus/cursor move triggers `ActiveCursorPositionUpdated`,
+                // push the current cursor rectangle to IMM regardless of whether the IME is in
+                // composition, so that the correct position is already in the IMM context the next
+                // time composition starts.
                 self.update_ime_position();
             }
             Event::UserEvent(CustomEvent::AboutToSleep) => {
@@ -1535,7 +1539,7 @@ impl EventLoop {
         match event {
             winit::event::Ime::Enabled => {
                 self.ime_enabled = true;
-                // 新一轮 composition 上下文,清掉上次 preedit 的去重基准。
+                // New composition context, so clear the dedup baseline from the last preedit.
                 self.last_preedit = None;
                 self.ui_app
                     .update(|ctx| ctx.report_active_cursor_position_update());
@@ -1545,11 +1549,12 @@ impl EventLoop {
                     return;
                 }
 
-                // KDE Plasma 6 (Wayland) 下,update_ime_position 发出的 set_ime_cursor_area commit
-                // 会促使输入法重新回送同一段(焦点切换时通常为空)的 preedit;若每次都派发
-                // SetMarkedText 并重定位,就会形成 preedit <-> 重定位的自激循环(上游
-                // warpdotdev/warp#11013:SetMarkedText 被刷屏约 7 万次后崩溃)。对与上一次完全
-                // 相同的 preedit 直接早退,断开这个环。
+                // On KDE Plasma 6 (Wayland), the set_ime_cursor_area commit emitted by
+                // update_ime_position prompts the IME to re-send the same preedit (usually empty
+                // when focus changes); if we dispatch SetMarkedText and reposition every time, this
+                // forms a self-sustaining preedit <-> reposition loop (upstream
+                // warpdotdev/warp#11013: a crash after SetMarkedText is spammed ~70,000 times).
+                // Early-return on a preedit identical to the previous one to break this loop.
                 if self
                     .last_preedit
                     .as_ref()
@@ -1578,13 +1583,14 @@ impl EventLoop {
                 });
                 drop(window_callbacks);
 
-                // composition 期间光标会因为预编辑文本插入、换行而移动,需要持续把最新的
-                // 矩形推给 IMM,否则候选窗会停留在 composition 起始位置(在某些 IME 上会
-                // 表现为候选窗与当前输入位置错位)。
+                // During composition the cursor moves as preedit text is inserted and wrapped, so
+                // we must keep pushing the latest rectangle to IMM; otherwise the candidate window
+                // stays at the composition start position (which, on some IMEs, shows up as the
+                // candidate window being misaligned with the current input position).
                 self.update_ime_position();
             }
             winit::event::Ime::Commit(chars) => {
-                // composition 已提交,清掉去重基准,避免下一轮起始 preedit 被误判为重复。
+                // Composition has been committed, so clear the dedup baseline to avoid the next composition's initial preedit being misjudged as a duplicate.
                 self.last_preedit = None;
 
                 let Some(window_state) = self.state.windows.get_mut(&winit_window_id) else {

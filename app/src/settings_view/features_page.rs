@@ -45,14 +45,14 @@ use crate::settings::{
     AliasExpansionEnabled, AliasExpansionSettings, AppEditorSettings, AtContextMenuInTerminalMode,
     AutocompleteSymbols, AutosuggestionKeybindingHint, CodeSettings, CommandCorrections,
     CompletionsOpenWhileTyping, CopyOnSelect, CtrlTabBehavior, DefaultSessionMode,
-    EnableSshAutoDiscovery, EnableSlashCommandsInTerminal, EnableSshWrapper,
-    ErrorUnderliningEnabled, ExtraMetaKeys,
-    GPUSettings, GlobalHotkeyMode, InputSettings, InputSettingsChangedEvent,
-    LinuxSelectionClipboard, MiddleClickPasteEnabled, MouseScrollMultiplier, PreferLowPowerGPU,
-    PreferencesSettings, PreferredGraphicsBackend, QuakeModeSettings, ScrollSettings,
-    SelectionSettings, ShowAutosuggestionIgnoreButton, ShowTerminalInputMessageBar, SshSettings,
-    SyntaxHighlighting, TabBehavior, VimModeEnabled, VimStatusBar, VimUnnamedSystemClipboard,
-    DEFAULT_QUAKE_MODE_SIZE_PERCENTAGES, QUAKE_WINDOW_AUTOHIDE_SUPPORTED,
+    EnableSlashCommandsInTerminal, EnableSshAutoDiscovery, EnableSshWrapper,
+    ErrorUnderliningEnabled, ExtraMetaKeys, GPUSettings, GlobalHotkeyMode, InputSettings,
+    InputSettingsChangedEvent, LinuxSelectionClipboard, MiddleClickPasteEnabled,
+    MouseScrollMultiplier, PreferLowPowerGPU, PreferencesSettings, PreferredGraphicsBackend,
+    QuakeModeSettings, ScrollSettings, SelectionSettings, ShowAutosuggestionIgnoreButton,
+    ShowTerminalInputMessageBar, SshSettings, SyntaxHighlighting, TabBehavior, VimModeEnabled,
+    VimStatusBar, VimUnnamedSystemClipboard, DEFAULT_QUAKE_MODE_SIZE_PERCENTAGES,
+    QUAKE_WINDOW_AUTOHIDE_SUPPORTED,
 };
 use crate::terminal::alt_screen_reporting::{
     AltScreenReporting, FocusReportingEnabled, MouseReportingEnabled, ScrollReportingEnabled,
@@ -710,7 +710,7 @@ pub enum FeaturesPageAction {
     ToggleShowAutosuggestionIgnoreButton,
     ToggleAtContextMenuInTerminalMode,
     ToggleSlashCommandsInTerminalMode,
-    // Zap:`ToggleOutlineCodebaseSymbolsForAtContextMenu` 随 outline / RAG 下线删除。
+    // Zap: `ToggleOutlineCodebaseSymbolsForAtContextMenu` was removed along with the outline / RAG retirement.
     ToggleAutoOpenCodeReviewPane,
     ToggleShowTerminalInputMessageLine,
     ToggleAgentInAppNotifications,
@@ -1188,8 +1188,8 @@ impl FeaturesPageAction {
                         .value(),
                 ),
             },
-            // Zap:ToggleOutlineCodebaseSymbolsForAtContextMenu 已下线,
-            // telemetry 分支一并删除。
+            // Zap: ToggleOutlineCodebaseSymbolsForAtContextMenu was retired,
+            // and its telemetry branch was removed along with it.
             Self::MakeWarpDefaultTerminal => TelemetryEvent::FeaturesPageAction {
                 action: "MakeWarpDefaultTerminal".to_string(),
                 value: to_string(DefaultTerminal::as_ref(ctx).is_warp_default()),
@@ -1923,8 +1923,8 @@ impl TypedActionView for FeaturesPageView {
                         .toggle_and_save_value(ctx));
                 });
             }
-            // Zap:`ToggleOutlineCodebaseSymbolsForAtContextMenu` action 随 outline
-            // 下线推退删除。
+            // Zap: the `ToggleOutlineCodebaseSymbolsForAtContextMenu` action was removed
+            // along with the outline retirement.
             ToggleAutoOpenCodeReviewPane => {
                 GeneralSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings
@@ -3373,7 +3373,7 @@ impl FeaturesPageView {
                     .filter(|val| {
                         *val != DefaultSessionMode::DockerSandbox || docker_sandbox_enabled
                     })
-                    // 去中心化分支:不再展示 Oz / Agent 选项。
+                    // Decentralized branch: no longer show the Oz / Agent option.
                     .filter(|val| *val != DefaultSessionMode::AmbientAgent)
                     .map(|val| {
                         DropdownItem::new(
@@ -4313,9 +4313,7 @@ impl SettingsWidget for SessionRestorationWidget {
             crate::t!("settings-features-restore-session"),
             Some(AdditionalInfo {
                 mouse_state: self.additional_info_link.clone(),
-                on_click_action: Some(FeaturesPageAction::OpenUrl(
-                    "".into(),
-                )),
+                on_click_action: Some(FeaturesPageAction::OpenUrl("".into())),
                 secondary_text: None,
                 tooltip_override_text: None,
             }),
@@ -4383,7 +4381,7 @@ impl SettingsWidget for ConversationPersistenceWidget {
     type View = FeaturesPageView;
 
     fn search_terms(&self) -> &str {
-        "persist conversations agent history database save 历史 对话 保存"
+        "persist conversations agent history database save"
     }
 
     fn render(
@@ -4447,9 +4445,7 @@ impl SettingsWidget for SnackbarHeaderWidget {
             crate::t!("settings-features-show-sticky-command-header"),
             Some(AdditionalInfo {
                 mouse_state: self.additional_info_link.clone(),
-                on_click_action: Some(FeaturesPageAction::OpenUrl(
-                    "".into(),
-                )),
+                on_click_action: Some(FeaturesPageAction::OpenUrl("".into())),
                 secondary_text: None,
                 tooltip_override_text: None,
             }),
@@ -4904,9 +4900,7 @@ impl SettingsWidget for SSHWrapperWidget {
             crate::t!("settings-features-ssh-wrapper"),
             Some(AdditionalInfo {
                 mouse_state: self.additional_info_link.clone(),
-                on_click_action: Some(FeaturesPageAction::OpenUrl(
-                    "".into(),
-                )),
+                on_click_action: Some(FeaturesPageAction::OpenUrl("".into())),
                 secondary_text: if view.ssh_wrapper_toggled {
                     Some(crate::t!("settings-features-takes-effect-new-sessions"))
                 } else {
@@ -5382,10 +5376,7 @@ impl SettingsWidget for GlobalHotkeyWidget {
                         ui_builder
                             .link(
                                 crate::t!("settings-features-see-docs"),
-                                Some(
-                                    ""
-                                        .to_owned(),
-                                ),
+                                Some("".to_owned()),
                                 None,
                                 view.button_mouse_states.global_hotkey_link.clone(),
                             )
@@ -6407,10 +6398,7 @@ impl SettingsWidget for MouseReportingWidget {
             crate::t!("settings-features-enable-mouse-reporting"),
             Some(AdditionalInfo {
                 mouse_state: self.additional_info_link.clone(),
-                on_click_action: Some(FeaturesPageAction::OpenUrl(
-                    ""
-                        .into(),
-                )),
+                on_click_action: Some(FeaturesPageAction::OpenUrl("".into())),
                 secondary_text: None,
                 tooltip_override_text: None,
             }),
@@ -6672,9 +6660,7 @@ impl SettingsWidget for SmartSelectWidget {
             crate::t!("settings-features-double-click-smart-selection"),
             Some(AdditionalInfo {
                 mouse_state: self.additional_info_link.clone(),
-                on_click_action: Some(FeaturesPageAction::OpenUrl(
-                    "".into(),
-                )),
+                on_click_action: Some(FeaturesPageAction::OpenUrl("".into())),
                 secondary_text: None,
                 tooltip_override_text: None,
             }),
@@ -6923,9 +6909,7 @@ impl SettingsWidget for WorkflowsInCommandSearch {
             crate::t!("settings-features-show-global-workflows-in-command-search"),
             Some(AdditionalInfo {
                 mouse_state: self.additional_info_link.clone(),
-                on_click_action: Some(FeaturesPageAction::OpenUrl(
-                    "".into(),
-                )),
+                on_click_action: Some(FeaturesPageAction::OpenUrl("".into())),
                 secondary_text: None,
                 tooltip_override_text: None,
             }),

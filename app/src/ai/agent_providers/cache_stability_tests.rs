@@ -1,17 +1,17 @@
-//! Prompt cache 序列化稳定性测试集合(对应文档 P1-8 / P1-9 / P1-13)。
+//! Prompt cache serialization stability test suite (corresponding to docs P1-8 / P1-9 / P1-13).
 //!
-//! Anthropic 文档明确警告:
+//! The Anthropic docs explicitly warn:
 //! > Verify that the keys in your `tool_use` content blocks have stable
 //! > ordering as some languages (for example, Swift, Go) randomize key order
 //! > during JSON conversion, breaking caches
 //!
-//! 这意味着任何 `serde_json::Value` 在 Rust 端的产出**必须**:
-//!   1. 同输入跨调用 byte-equal(确定性)
-//!   2. 不依赖 `HashMap` iterate 顺序
-//!   3. 不依赖外部状态(时间戳、随机、PID 等)
+//! This means any `serde_json::Value` produced on the Rust side **must**:
+//!   1. be byte-equal across calls for the same input (deterministic)
+//!   2. not depend on `HashMap` iteration order
+//!   3. not depend on external state (timestamps, randomness, PID, etc.)
 //!
-//! 这套测试是 Zap 的"防退化护栏"——后续任何修改 prompt
-//! 构造路径的改动只要破坏字节级稳定性,这里就会断言失败。
+//! This test suite is Zap's "anti-regression guardrail" — any later change to the prompt
+//! construction path that breaks byte-level stability will fail an assertion here.
 
 use crate::ai::agent::{MCPContext, MCPServer};
 use api::message;
@@ -21,15 +21,15 @@ use super::chat_stream;
 use super::tools;
 
 // ---------------------------------------------------------------------------
-// P1-8: tool schema 字段顺序稳定性
+// P1-8: tool schema field order stability
 // ---------------------------------------------------------------------------
 
-/// 对 `REGISTRY` 中每个 tool 调 `(parameters)()` 两次,断言 byte-equal。
+/// Calls `(parameters)()` twice for each tool in `REGISTRY`, asserting byte-equal.
 ///
-/// 风险点:tool schema 内嵌的 enum / oneof 内部如果用 `HashMap<String, Schema>`
-/// 转 Value,顺序就乱。`json!({...})` 字面量产出的 `serde_json::Map` 默认按
-/// **insertion order** 保留(`preserve_order` 默认开,见 Cargo.toml),所以
-/// 字面写死的 key 顺序跨调用稳定。这条测试守护这个不变量。
+/// Risk: if the enum / oneof embedded in a tool schema uses `HashMap<String, Schema>`
+/// when converting to Value, the order gets scrambled. The `serde_json::Map` produced by `json!({...})` literals preserves
+/// **insertion order** by default (`preserve_order` is on by default, see Cargo.toml), so
+/// the literally hardcoded key order is stable across calls. This test guards that invariant.
 #[test]
 fn registry_tool_schemas_are_deterministic() {
     for tool in tools::REGISTRY {
@@ -39,14 +39,14 @@ fn registry_tool_schemas_are_deterministic() {
         let j2 = serde_json::to_string(&s2).unwrap();
         assert_eq!(
             j1, j2,
-            "tool `{}` 的 schema 跨调用 byte-equal 必须成立(prompt cache 命中前置)",
+            "tool `{}`'s schema must be byte-equal across calls (prerequisite for a prompt cache hit)",
             tool.name
         );
     }
 }
 
-/// 对 `REGISTRY` 中每个 tool 反复调 50 次,断言所有调用产出 byte-equal。
-/// 防止偶发的 HashMap iterate 顺序漂移(只跑 2 次可能恰巧相同)。
+/// Calls each tool in `REGISTRY` repeatedly 50 times, asserting all calls produce byte-equal output.
+/// Prevents occasional HashMap iteration order drift (running only twice might coincidentally match).
 #[test]
 fn registry_tool_schemas_stable_under_repetition() {
     for tool in tools::REGISTRY {
@@ -55,15 +55,15 @@ fn registry_tool_schemas_stable_under_repetition() {
             let candidate = serde_json::to_string(&(tool.parameters)()).unwrap();
             assert_eq!(
                 baseline, candidate,
-                "tool `{}` 第 {i} 次调用产出与基准不一致(可能存在 HashMap 顺序漂移)",
+                "tool `{}`'s call #{i} output differs from the baseline (HashMap order drift may exist)",
                 tool.name
             );
         }
     }
 }
 
-/// `tools::REGISTRY` 自身顺序静态,但仍验证一遍:
-/// 同一进程内 iterate 多次得到相同的 (name, description) 序列。
+/// `tools::REGISTRY`'s own order is static, but verify it anyway:
+/// iterating multiple times within the same process yields the same (name, description) sequence.
 #[test]
 fn registry_iteration_order_is_stable() {
     let names1: Vec<&str> = tools::REGISTRY.iter().map(|t| t.name).collect();
@@ -72,16 +72,16 @@ fn registry_iteration_order_is_stable() {
 }
 
 // ---------------------------------------------------------------------------
-// P1-9: serialize_outgoing_tool_call 历史回放稳定性
+// P1-9: serialize_outgoing_tool_call historical replay stability
 // ---------------------------------------------------------------------------
 
-/// 模拟一个 Grep 工具调用,验证两次序列化产出 byte-equal。
-/// `serialize_outgoing_tool_call` 在每次 build_chat_request 都会重跑,
-/// 把历史轮的 ToolCall 转成 (name, args Value)。任何 HashMap / 时间相关的
-/// 不稳定就会让 messages 段后半段缓存失效。
+/// Simulates a Grep tool call, verifying that two serializations produce byte-equal output.
+/// `serialize_outgoing_tool_call` reruns on every build_chat_request,
+/// converting historical turns' ToolCall into (name, args Value). Any HashMap / time-related
+/// instability invalidates the cache for the latter half of the messages section.
 ///
-/// 选 Grep 是因为它字段最简单(`queries: Vec<String>`, `path: String`),
-/// 不依赖任何 prost 隐式默认字段。
+/// Grep is chosen because its fields are the simplest (`queries: Vec<String>`, `path: String`),
+/// not depending on any prost implicit default fields.
 #[test]
 fn serialize_grep_tool_call_is_deterministic() {
     let tc = message::ToolCall {
@@ -94,14 +94,17 @@ fn serialize_grep_tool_call_is_deterministic() {
 
     let (n1, v1) = chat_stream::serialize_outgoing_tool_call_for_test(&tc, None, "");
     let (n2, v2) = chat_stream::serialize_outgoing_tool_call_for_test(&tc, None, "");
-    assert_eq!(n1, n2, "tool name 必须一致");
+    assert_eq!(n1, n2, "tool name must be consistent");
     let j1 = serde_json::to_string(&v1).unwrap();
     let j2 = serde_json::to_string(&v2).unwrap();
-    assert_eq!(j1, j2, "同一 ToolCall 跨序列化 byte-equal");
+    assert_eq!(
+        j1, j2,
+        "the same ToolCall is byte-equal across serializations"
+    );
 }
 
-/// Grep `queries` 是 `Vec<String>`,顺序需稳定(Vec 天然稳定,但作为防御断言)。
-/// 这反映了一个更大的规则:任何用户 ToolCall 内的 Vec 字段都必须保留入参顺序。
+/// Grep `queries` is a `Vec<String>`, and its order must be stable (Vec is naturally stable, but this is a defensive assertion).
+/// This reflects a larger rule: any Vec field within a user ToolCall must preserve the input order.
 #[test]
 fn serialize_grep_preserves_queries_order() {
     let tc = message::ToolCall {
@@ -113,13 +116,16 @@ fn serialize_grep_preserves_queries_order() {
     };
     let (_, v) = chat_stream::serialize_outgoing_tool_call_for_test(&tc, None, "");
     let s = serde_json::to_string(&v).unwrap();
-    let pos_z = s.find("zzz").expect("queries 应含 zzz");
-    let pos_a = s.find("aaa").expect("queries 应含 aaa");
-    assert!(pos_z < pos_a, "Vec 顺序必须按入参保留(zzz 先,aaa 后)");
+    let pos_z = s.find("zzz").expect("queries should contain zzz");
+    let pos_a = s.find("aaa").expect("queries should contain aaa");
+    assert!(
+        pos_z < pos_a,
+        "Vec order must be preserved per the input (zzz first, aaa second)"
+    );
 }
 
-/// MCP tool call 含 `prost_types::Struct`,验证序列化稳定。
-/// `prost_types::Struct.fields` 内部用 `BTreeMap`,本身就稳定,这里覆盖一下确认。
+/// An MCP tool call contains `prost_types::Struct`; verify serialization is stable.
+/// `prost_types::Struct.fields` uses a `BTreeMap` internally, which is stable on its own; we cover it here to confirm.
 #[test]
 fn serialize_mcp_tool_call_is_deterministic() {
     use prost_types::{value::Kind, Struct, Value as ProstValue};
@@ -151,7 +157,7 @@ fn serialize_mcp_tool_call_is_deterministic() {
         )),
     };
 
-    // 构造一个 mcp_context 让 sanitize_server_name 能查到 server name
+    // construct an mcp_context so sanitize_server_name can look up the server name
     let ctx = MCPContext {
         #[allow(deprecated)]
         resources: vec![],
@@ -172,30 +178,30 @@ fn serialize_mcp_tool_call_is_deterministic() {
     let j1 = serde_json::to_string(&v1).unwrap();
     let j2 = serde_json::to_string(&v2).unwrap();
     assert_eq!(j1, j2);
-    // BTreeMap 应该按 key 字典序输出(key_a 在 key_z 前)
-    let pos_a = j1.find("key_a").expect("应含 key_a");
-    let pos_z = j1.find("key_z").expect("应含 key_z");
+    // BTreeMap should output by key lexicographic order (key_a before key_z)
+    let pos_a = j1.find("key_a").expect("should contain key_a");
+    let pos_z = j1.find("key_z").expect("should contain key_z");
     assert!(
         pos_a < pos_z,
-        "prost_types::Struct 应按 BTreeMap key 字典序"
+        "prost_types::Struct should follow BTreeMap key lexicographic order"
     );
 }
 
 // ---------------------------------------------------------------------------
-// P1-13: build_tools_array 整体稳定性(配合 P0-3 的 MCP 排序)
+// P1-13: build_tools_array overall stability (in conjunction with P0-3's MCP ordering)
 // ---------------------------------------------------------------------------
 
-/// 端到端断言:同一 `(REGISTRY + 同 mcp_context)` 跑两次 tools 数组拼接,
-/// 字符串 byte-equal。这覆盖了 prompt 中 tools 数组的关键稳定性约束
-/// (Anthropic 文档:tool definitions 改动 → 全部 cache 失效)。
+/// End-to-end assertion: running the tools-array assembly twice for the same `(REGISTRY + same mcp_context)`
+/// yields a byte-equal string. This covers the key stability constraint of the tools array in the prompt
+/// (Anthropic docs: any change to tool definitions → all caches invalidated).
 ///
-/// 不直接调 `build_tools_array(params: &RequestParams)` 是因为 `RequestParams`
-/// 字段太多构造门槛高;这里复刻它对 REGISTRY 与 mcp 部分的核心拼接逻辑。
+/// It doesn't call `build_tools_array(params: &RequestParams)` directly because `RequestParams`
+/// has too many fields, raising the construction barrier; here it replicates the core assembly logic for the REGISTRY and mcp parts.
 #[test]
 fn full_tools_array_serialization_is_stable() {
     let assemble = || -> String {
         let mut buf = String::new();
-        // 内置 tools(REGISTRY iterate 顺序静态)
+        // built-in tools (REGISTRY iteration order is static)
         for t in tools::REGISTRY {
             buf.push_str(t.name);
             buf.push('|');
@@ -205,16 +211,19 @@ fn full_tools_array_serialization_is_stable() {
             buf.push_str(&serde_json::to_string(&schema).unwrap());
             buf.push('\n');
         }
-        // MCP tools(已在 build_mcp_tool_defs 内排序,无 ctx 时为空)
+        // MCP tools (already sorted inside build_mcp_tool_defs; empty when there's no ctx)
         buf
     };
     let a = assemble();
     let b = assemble();
     assert_eq!(a.len(), b.len());
-    assert_eq!(a, b, "tools array 序列化结果跨调用必须 byte-equal");
+    assert_eq!(
+        a, b,
+        "the tools array serialization result must be byte-equal across calls"
+    );
 }
 
-/// 带 MCP server 的端到端拼接稳定性(对接 P0-3 排序保证)。
+/// End-to-end assembly stability with an MCP server (connecting to the P0-3 ordering guarantee).
 #[test]
 fn full_tools_array_with_mcp_is_stable() {
     use rmcp::model::{AnnotateAble, RawResource, Tool as McpTool};
@@ -246,7 +255,7 @@ fn full_tools_array_with_mcp_is_stable() {
         tools: vec![],
         servers: vec![server_a.clone()],
     };
-    // 同 ctx 重新构造一次(servers Vec 顺序相同):
+    // reconstruct the same ctx once more (the servers Vec order is identical):
     let ctx2 = MCPContext {
         #[allow(deprecated)]
         resources: vec![],
@@ -279,9 +288,17 @@ fn full_tools_array_with_mcp_is_stable() {
 
     let a = assemble(&ctx1);
     let b = assemble(&ctx2);
-    assert_eq!(a, b, "含 MCP 的 tools array 跨调用必须 byte-equal");
-    // 验证 MCP tools 按 function_name 字典序(alpha 在 zeta 前)
-    let pos_alpha = a.find("mcp__server-a__alpha").expect("应含 alpha");
-    let pos_zeta = a.find("mcp__server-a__zeta").expect("应含 zeta");
-    assert!(pos_alpha < pos_zeta, "P0-3 排序保证 alpha < zeta");
+    assert_eq!(
+        a, b,
+        "the tools array with MCP must be byte-equal across calls"
+    );
+    // verify MCP tools follow function_name lexicographic order (alpha before zeta)
+    let pos_alpha = a
+        .find("mcp__server-a__alpha")
+        .expect("should contain alpha");
+    let pos_zeta = a.find("mcp__server-a__zeta").expect("should contain zeta");
+    assert!(
+        pos_alpha < pos_zeta,
+        "the P0-3 ordering guarantees alpha < zeta"
+    );
 }

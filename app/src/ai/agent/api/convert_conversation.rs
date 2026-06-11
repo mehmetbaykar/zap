@@ -588,7 +588,7 @@ pub(crate) fn convert_tool_call_result_to_input(
             })
         }
         Some(ToolCallResultType::UploadFileArtifact(_)) => {
-            // Upload artifact 已物理切除,云端 result 直接丢弃
+            // Upload artifact has been physically excised; the cloud result is simply discarded
             let _ = tool_call_id;
             let _ = task_id;
             let _ = context;
@@ -1176,11 +1176,11 @@ pub(crate) fn convert_tool_call_result_to_input(
         }
         Some(ToolCallResultType::UseComputer(_))
         | Some(ToolCallResultType::RequestComputerUseResult(_)) => {
-            // Computer Use 已被移除,历史记录中遇到这两类 result 直接忽略。
+            // Computer Use has been removed; these two kinds of results are simply ignored when encountered in history.
             None
         }
         Some(ToolCallResultType::FetchConversation(_)) => {
-            // 云端工具已物理切除
+            // The cloud tool has been physically excised
             None
         }
         Some(ToolCallResultType::Server(_)) => {
@@ -1194,7 +1194,7 @@ pub(crate) fn convert_tool_call_result_to_input(
         }
         Some(ToolCallResultType::Subagent(_)) => None,
         Some(ToolCallResultType::StartAgent(_)) | Some(ToolCallResultType::StartAgentV2(_)) => {
-            // 云端工具已物理切除
+            // The cloud tool has been physically excised
             None
         }
         Some(ToolCallResultType::AskUserQuestion(result)) => {
@@ -1237,7 +1237,7 @@ pub(crate) fn convert_tool_call_result_to_input(
             })
         }
         Some(ToolCallResultType::SendMessageToAgent(_)) => {
-            // 云端工具已物理切除
+            // The cloud tool has been physically excised
             None
         }
         // Deprecated/unused result types.
@@ -1322,7 +1322,7 @@ fn create_cancelled_result_for_tool_call(
             )
         }
         ToolType::UseComputer(_) | ToolType::RequestComputerUse(_) => {
-            // Computer Use 已被移除,转换路径不应再被命中。
+            // Computer Use has been removed; this conversion path should no longer be hit.
             return None;
         }
         ToolType::FetchConversation(_) => return None,

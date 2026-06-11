@@ -52,9 +52,9 @@ impl SuggestNewConversationExecutor {
 
         let message_id = message_id.clone();
         let receiver = self.suggest_new_conversation_result_rx.clone().1;
-        // Zap:没有"开新对话?"确认弹窗 view 组件,调用 fast-fail Reject 防止
-        // BYOP loop 永挂等 receiver。模型看到 Rejected 即可,不影响主流程。
-        // 同步往 channel 发一次 Reject,后面 receiver.recv() 立即拿到。
+        // Zap: there is no "start a new conversation?" confirmation dialog view component, so this calls a fast-fail Reject to prevent
+        // the BYOP loop from hanging forever waiting on the receiver. The model just sees Rejected, which doesn't affect the main flow.
+        // Synchronously send one Reject to the channel so the subsequent receiver.recv() gets it immediately.
         let _ = self
             .suggest_new_conversation_result_rx
             .0

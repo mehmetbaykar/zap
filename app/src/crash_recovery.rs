@@ -51,7 +51,8 @@ struct CrashRecoveryProcess {
     consecutive_errors_per_window: HashMap<WindowId, usize>,
     /// The number of successful frames drawn per window.
     successful_frames_per_window: HashMap<WindowId, usize>,
-    /// 当前窗口最近的渲染成功/失败序列;连续失败过多时写入本地日志后退出。
+    /// The recent render success/failure sequence for the current window; when there are too many
+    /// consecutive failures, write to the local log and then exit.
     sequence_of_renders_per_window: HashMap<WindowId, Vec<DrawFrameResult>>,
     is_alive: bool,
 }
@@ -107,7 +108,8 @@ impl CrashRecoveryProcess {
                     "Failed to render a frame {NUM_DRAW_ERRORS_BEFORE_EXITING} times in a row; exiting..."
                 );
 
-            // 退出前停止本地崩溃报告进程,避免留下后台子进程。
+            // Stop the local crash reporting process before exiting, to avoid leaving a background
+            // child process behind.
             #[cfg(feature = "crash_reporting")]
             crate::crash_reporting::uninit_crash_reporting();
 

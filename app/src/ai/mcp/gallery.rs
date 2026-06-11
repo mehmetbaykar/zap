@@ -96,11 +96,11 @@ pub struct MCPGalleryManager {
 
 impl MCPGalleryManager {
     pub fn new(_ctx: &mut ModelContext<Self>) -> Self {
-        // Zap(本地化,Phase 2d-2):原订阅 `UpdateManager` 的 `MCPGalleryUpdated` 事件
-        // 于云端 fetch 后分发 gallery items。本地化后云端对象 fetch/fan-in 已删除，
-        // 本 Phase 保持 gallery 为空并解除订阅 ——
-        // gallery 在本地永远为空,由 `MCPServersListPageView` 渲染为空画布,本地 MCP 走 `file_based_manager`
-        // 读 `~/.warp/mcp.json` 与 `~/.claude/...`,不受影响。
+        // Zap (localization, Phase 2d-2): this originally subscribed to `UpdateManager`'s `MCPGalleryUpdated` event
+        // to distribute gallery items after a cloud fetch. After localization, the cloud object fetch/fan-in is removed,
+        // and this Phase keeps the gallery empty and unsubscribes ——
+        // the gallery is always empty locally and is rendered as an empty canvas by `MCPServersListPageView`; local MCP goes through `file_based_manager`
+        // reading `~/.warp/mcp.json` and `~/.claude/...`, unaffected.
         Self {
             gallery_items: Default::default(),
             templatable_mcp_servers: Default::default(),

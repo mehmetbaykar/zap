@@ -1,17 +1,17 @@
-//! `ProjectRulesPersister` — 项目规则(WARP.md / AGENTS.md)持久化桥。
+//! `ProjectRulesPersister` — persistence bridge for project rules (WARP.md / AGENTS.md).
 //!
-//! 这个 thin singleton model 的责任只有两件:
+//! This thin singleton model has only two responsibilities:
 //!
-//! 1. 订阅 [`ProjectContextModel`] 的 [`KnownRulesChanged`] 事件,把
-//!    `discovered_rules` / `deleted_rules` 转成 [`ModelEvent::UpsertProjectRules`] /
-//!    [`ModelEvent::DeleteProjectRules`] 写到 SQLite `project_rules` 表;
-//! 2. 订阅 [`DetectedRepositories`] 的 `DetectedGitRepo` 事件,在用户进入新 git
-//!    仓库时触发 [`ProjectContextModel::index_and_store_rules`] 扫描 WARP.md /
-//!    AGENTS.md。
+//! 1. Subscribe to [`ProjectContextModel`]'s [`KnownRulesChanged`] event, converting
+//!    `discovered_rules` / `deleted_rules` into [`ModelEvent::UpsertProjectRules`] /
+//!    [`ModelEvent::DeleteProjectRules`] written to the SQLite `project_rules` table;
+//! 2. Subscribe to [`DetectedRepositories`]'s `DetectedGitRepo` event, triggering
+//!    [`ProjectContextModel::index_and_store_rules`] to scan WARP.md / AGENTS.md when the user enters a new git
+//!    repository.
 //!
-//! 这两条逻辑历史上挂在 `PersistedWorkspace::new` 内,与 LSP 启用持久化和"已访问
-//! git 仓库历史"紧紧耦合。LSP + workspace 历史下线后这条桥必须独立活下来,
-//! 否则 project rules 不再写盘 / 不再随 cd 自动扫描。
+//! These two pieces of logic historically lived inside `PersistedWorkspace::new`, tightly coupled to LSP-enabled persistence and the "visited
+//! git repository history". After LSP + workspace history were decommissioned this bridge must survive independently,
+//! otherwise project rules would no longer be written to disk / no longer auto-scanned on cd.
 
 use std::sync::mpsc::SyncSender;
 
@@ -21,9 +21,9 @@ use warpui::{Entity, ModelContext, SingletonEntity};
 
 use crate::persistence::ModelEvent;
 
-/// 详见模块级文档。
+/// See the module-level documentation for details.
 pub struct ProjectRulesPersister {
-    /// 写入 SQLite 的 channel,`None` 表示当前构建未启用持久化。
+    /// The channel for writing to SQLite; `None` means the current build does not have persistence enabled.
     persistence_tx: Option<SyncSender<ModelEvent>>,
 }
 
@@ -34,9 +34,9 @@ impl Entity for ProjectRulesPersister {
 impl SingletonEntity for ProjectRulesPersister {}
 
 impl ProjectRulesPersister {
-    /// 注册两个订阅:
-    /// - `ProjectContextModel` → 把 rule delta 转成 SQLite ModelEvent;
-    /// - `DetectedRepositories` → 进入 git 仓库时触发 rule 扫描。
+    /// Registers two subscriptions:
+    /// - `ProjectContextModel` → converts rule deltas into SQLite ModelEvents;
+    /// - `DetectedRepositories` → triggers a rule scan when entering a git repository.
     pub fn new(
         persistence_tx: Option<SyncSender<ModelEvent>>,
         ctx: &mut ModelContext<Self>,
@@ -70,7 +70,7 @@ impl ProjectRulesPersister {
 
             for event in events {
                 if let Err(err) = tx.send(event) {
-                    log::warn!("ProjectRulesPersister: 写入 SQLite 失败: {err}");
+                    log::warn!("ProjectRulesPersister: Failed to write to SQLite: {err}");
                 }
             }
         });
@@ -87,7 +87,7 @@ impl ProjectRulesPersister {
         Self { persistence_tx }
     }
 
-    /// 仅用于测试:不绑定持久化 channel,也不订阅任何 model。
+    /// For tests only: does not bind a persistence channel, nor subscribe to any model.
     #[cfg(test)]
     pub fn new_for_test(_ctx: &mut ModelContext<Self>) -> Self {
         Self {

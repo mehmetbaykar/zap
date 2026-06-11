@@ -3,8 +3,8 @@ use crate::ui::theme::mock_terminal_colors;
 use warpui::color::ColorU;
 
 fn mock_appearance() -> Appearance {
-    use crate::ui::theme::Details;
     use super::super::theme::Fill;
+    use crate::ui::theme::Details;
 
     let theme = WarpTheme::new(
         Fill::Solid(ColorU::from_u32(0x000000ff)),
@@ -29,8 +29,8 @@ fn mock_appearance() -> Appearance {
     )
 }
 
-/// 作者: logic
-/// UI 字体大小语义化方法测试
+/// Author: logic
+/// Tests for the semantic UI font-size methods.
 #[test]
 fn test_semantic_font_sizes_at_default() {
     let appearance = mock_appearance();
@@ -48,8 +48,8 @@ fn test_semantic_font_sizes_at_default() {
     assert_eq!(appearance.ui_font_hero(), 36.0);
 }
 
-/// 作者: logic
-/// 验证 header_font_size 和 overline_font_size 也随 ui_font_size 缩放
+/// Author: logic
+/// Verifies that header_font_size and overline_font_size also scale with ui_font_size.
 #[test]
 fn test_header_and_overline_font_size_scaling() {
     let appearance = mock_appearance();
@@ -57,8 +57,8 @@ fn test_header_and_overline_font_size_scaling() {
     assert_eq!(appearance.overline_font_size(), 10.0);
 }
 
-/// 作者: logic
-/// 设置 ui_font_size 为最小值后验证比例缩放
+/// Author: logic
+/// Verifies proportional scaling after setting ui_font_size to the minimum value.
 #[test]
 fn test_semantic_font_sizes_at_minimum() {
     let mut appearance = mock_appearance();
@@ -79,8 +79,8 @@ fn test_semantic_font_sizes_at_minimum() {
     assert_eq!(appearance.overline_font_size(), 8.0 * 10.0 / 12.0);
 }
 
-/// 作者: logic
-/// 验证最大值 (20.0) 时的缩放
+/// Author: logic
+/// Verifies scaling at the maximum value (20.0).
 #[test]
 fn test_semantic_font_sizes_at_maximum() {
     let mut appearance = mock_appearance();
@@ -94,15 +94,15 @@ fn test_semantic_font_sizes_at_maximum() {
     assert_eq!(appearance.ui_font_display(), 20.0 * 24.0 / 12.0);
 }
 
-/// 作者: logic
-/// 验证默认值常量
+/// Author: logic
+/// Verifies the default-value constant.
 #[test]
 fn test_default_constants() {
     assert_eq!(DEFAULT_UI_FONT_SIZE, 12.0);
 }
 
-/// 作者: logic
-/// 验证 ui_font_body 等于 ui_font_size（1:1 比例）
+/// Author: logic
+/// Verifies that ui_font_body equals ui_font_size (a 1:1 ratio).
 #[test]
 fn test_ui_font_body_equals_base() {
     let mut appearance = mock_appearance();
@@ -117,8 +117,8 @@ fn test_ui_font_body_equals_base() {
     }
 }
 
-/// 作者: logic
-/// 验证各语义化方法保持严格的大小层级关系
+/// Author: logic
+/// Verifies that each semantic method preserves a strict size hierarchy.
 #[test]
 fn test_semantic_font_size_ordering() {
     let mut appearance = mock_appearance();
@@ -136,10 +136,18 @@ fn test_semantic_font_size_ordering() {
         let display = appearance.ui_font_display();
         let hero = appearance.ui_font_hero();
 
-        assert!(overline <= footnote, "overline <= footnote at base={}", size);
+        assert!(
+            overline <= footnote,
+            "overline <= footnote at base={}",
+            size
+        );
         assert!(footnote <= body, "footnote <= body at base={}", size);
         assert!(body <= body_large, "body <= body_large at base={}", size);
-        assert!(body_large <= subheading, "body_large <= subheading at base={}", size);
+        assert!(
+            body_large <= subheading,
+            "body_large <= subheading at base={}",
+            size
+        );
         assert!(subheading <= h3, "subheading <= h3 at base={}", size);
         assert!(h3 <= h2, "h3 <= h2 at base={}", size);
         assert!(h2 <= h1, "h2 <= h1 at base={}", size);
@@ -148,38 +156,58 @@ fn test_semantic_font_size_ordering() {
     }
 }
 
-/// 作者: logic
-/// 验证 dropdown 顶栏高度公式在默认字号 (12) 时为 30.0
+/// Author: logic
+/// Verifies that the dropdown top-bar height formula yields 30.0 at the default font size (12).
 #[test]
 fn test_dropdown_top_bar_height_at_default() {
     let appearance = mock_appearance();
     assert_eq!(appearance.dropdown_top_bar_height(), 30.0);
 }
 
-/// 作者: logic
-/// 验证 dropdown 顶栏高度随字号线性缩放且不低于 30.0
+/// Author: logic
+/// Verifies that the dropdown top-bar height scales linearly with the font size and never drops below 30.0.
 #[test]
 fn test_dropdown_top_bar_height_scaling() {
     let mut appearance = mock_appearance();
 
     appearance.set_ui_font_size_test(8.0);
-    assert_eq!(appearance.dropdown_top_bar_height(), 30.0, "min size should clamp to 30.0");
+    assert_eq!(
+        appearance.dropdown_top_bar_height(),
+        30.0,
+        "min size should clamp to 30.0"
+    );
 
     appearance.set_ui_font_size_test(10.0);
-    assert_eq!(appearance.dropdown_top_bar_height(), 30.0, "size 10: 10*2.5=25, clamped to 30.0");
+    assert_eq!(
+        appearance.dropdown_top_bar_height(),
+        30.0,
+        "size 10: 10*2.5=25, clamped to 30.0"
+    );
 
     appearance.set_ui_font_size_test(12.0);
-    assert_eq!(appearance.dropdown_top_bar_height(), 30.0, "size 12: 12*2.5=30, exactly 30.0");
+    assert_eq!(
+        appearance.dropdown_top_bar_height(),
+        30.0,
+        "size 12: 12*2.5=30, exactly 30.0"
+    );
 
     appearance.set_ui_font_size_test(16.0);
-    assert_eq!(appearance.dropdown_top_bar_height(), 40.0, "size 16: 16*2.5=40");
+    assert_eq!(
+        appearance.dropdown_top_bar_height(),
+        40.0,
+        "size 16: 16*2.5=40"
+    );
 
     appearance.set_ui_font_size_test(20.0);
-    assert_eq!(appearance.dropdown_top_bar_height(), 50.0, "size 20: 20*2.5=50");
+    assert_eq!(
+        appearance.dropdown_top_bar_height(),
+        50.0,
+        "size 20: 20*2.5=50"
+    );
 }
 
-/// 作者: logic
-/// 验证 dropdown 顶栏高度永远不低于 30.0
+/// Author: logic
+/// Verifies that the dropdown top-bar height is never below 30.0.
 #[test]
 fn test_dropdown_top_bar_height_never_below_minimum() {
     let mut appearance = mock_appearance();
@@ -193,8 +221,8 @@ fn test_dropdown_top_bar_height_never_below_minimum() {
     }
 }
 
-/// 作者: logic
-/// 验证 dropdown 顶栏高度在边界字号 (8.0 和 20.0) 下的值
+/// Author: logic
+/// Verifies the dropdown top-bar height values at the boundary font sizes (8.0 and 20.0).
 #[test]
 fn test_dropdown_top_bar_height_at_boundaries() {
     let mut appearance = mock_appearance();

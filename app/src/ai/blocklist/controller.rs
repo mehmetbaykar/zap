@@ -89,11 +89,12 @@ pub struct SessionContext {
     session_type: Option<SessionType>,
     shell: Option<ShellLaunchData>,
     current_working_directory: Option<String>,
-    /// Zap:legacy SSH session(用户在本地 PTY 手敲 `ssh xxx@yyy`,
-    /// 远端没装 warp shell hook)的连接信息。`session_type` 仍是 `Local`,
-    /// 但 PTY 实际跑在远端,需要在 prompt 里告知 LLM,否则模型默认在本地 OS。
+    /// Zap: connection info for a legacy SSH session (the user typed `ssh xxx@yyy` by hand in a
+    /// local PTY, and the remote has no warp shell hook installed). `session_type` is still `Local`,
+    /// but the PTY actually runs on the remote, so the LLM must be told in the prompt; otherwise the
+    /// model assumes the local OS.
     ssh_connection_info: Option<InteractiveSshCommand>,
-    /// 是否为 legacy SSH 会话(`IsLegacySSHSession::Yes`)。
+    /// Whether this is a legacy SSH session (`IsLegacySSHSession::Yes`).
     is_legacy_ssh: bool,
 }
 
@@ -144,14 +145,14 @@ impl SessionContext {
         matches!(self.session_type, Some(SessionType::WarpifiedRemote { .. }))
     }
 
-    /// Zap:legacy SSH 连接信息(host/port),仅在 `is_legacy_ssh()` 为 true 时有意义。
+    /// Zap: legacy SSH connection info (host/port), meaningful only when `is_legacy_ssh()` is true.
     pub fn ssh_connection_info(&self) -> Option<&InteractiveSshCommand> {
         self.ssh_connection_info.as_ref()
     }
 
-    /// Zap:本会话是否为 legacy SSH(用户手敲 ssh,远端无 warp hook)。
-    /// 这种会话 `session_type` 仍是 `Local`,但 PTY 实际跑在远端,
-    /// `host_info`/`shell` 等画像反映的是本地客户端而非远端 shell。
+    /// Zap: whether this session is legacy SSH (the user typed ssh by hand, remote has no warp hook).
+    /// Such a session's `session_type` is still `Local`, but the PTY actually runs on the remote,
+    /// so the `host_info`/`shell` profile reflects the local client rather than the remote shell.
     pub fn is_legacy_ssh(&self) -> bool {
         self.is_legacy_ssh
     }
@@ -216,10 +217,11 @@ struct RequestConversationSnapshot {
     agent_name: Option<String>,
 }
 
-/// preflight 在每轮迭代里只修复"一种类型"的问题(已持久化结果回收 / 当前输入结果 / finished
-/// results / cancellation result),正常一轮请求最多涉及 2~3 种,但极端并发或一次累积多 task 的
-/// 结果时需要更多轮才能收敛。这里保留较小的上界以便在真正的死循环时尽早返回 blocked,而不是
-/// 静默自旋。
+/// In each iteration preflight only fixes "one type" of problem (persisted result reclamation /
+/// current input result / finished results / cancellation result). A normal request involves at most
+/// 2~3 types, but extreme concurrency or accumulating results for many tasks at once may need more
+/// iterations to converge. A small upper bound is kept here so that in a true infinite loop we return
+/// blocked early rather than spin silently.
 const BYOP_PREFLIGHT_MAX_ITERATIONS: usize = 6;
 
 impl RequestInput {
@@ -382,15 +384,15 @@ pub struct BlocklistAIController {
             Option<PassiveSuggestionTrigger>,
         )>,
     >,
-    /// BYOP 请求因 readiness 报 PendingToolResults 被暂存的 RequestInput,
-    /// 等同 conversation 的 live action 完成、触发 FinishedAction 后由
-    /// `flush_pending_byop_request_after_finished_action` 取出并重发,
-    /// 避免用户提交的 prompt 被静默丢弃。
-    /// 每个 conversation 最多保留 1 条;用户后续直接提交新请求会覆盖。
+    /// A RequestInput stashed because a BYOP request reported PendingToolResults from readiness;
+    /// once the conversation's live action completes and triggers FinishedAction,
+    /// `flush_pending_byop_request_after_finished_action` takes it out and resends it,
+    /// so a prompt submitted by the user isn't silently dropped.
+    /// At most 1 is kept per conversation; a later direct submission of a new request overwrites it.
     pending_byop_requests: HashMap<AIConversationId, PendingByopRequest>,
 }
 
-/// 见 `pending_byop_requests`。
+/// See `pending_byop_requests`.
 struct PendingByopRequest {
     request_input: RequestInput,
     query_metadata: Option<RequestMetadata>,
@@ -564,8 +566,9 @@ impl BlocklistAIController {
             } else {
                 FollowUpTrigger::Auto
             };
-            // 优先重发被 readiness 暂存的 BYOP 请求(其中含用户的原始 prompt);
-            // 没有则走原 follow-up 路径(只发 finished_action_results)。
+            // Prefer resending the BYOP request stashed by readiness (which contains the user's
+            // original prompt); if there is none, take the original follow-up path (sending only
+            // finished_action_results).
             if me.flush_pending_byop_request_after_finished_action(*conversation_id, ctx) {
                 return;
             }
@@ -846,9 +849,10 @@ impl BlocklistAIController {
                 continue;
             }
 
-            // openWarp 本地化:plan 只存本地 SQLite。会话恢复时如果 plan 不在内存中,
-            // 从 attachment 携带的 content 重建。title 从 attachment 调用方没携带,
-            // 先用默认 planning 标题占位；apply_persisted_content 恢复时会被 SQLite 中存的 title 覆盖。
+            // openWarp localization: plans are stored only in local SQLite. On session restore, if the
+            // plan isn't in memory, rebuild it from the content carried by the attachment. The caller
+            // doesn't carry a title in the attachment, so use the default planning title as a
+            // placeholder for now; on restore, apply_persisted_content overwrites it with the title stored in SQLite.
             AIDocumentModel::handle(ctx).update(ctx, |model, model_ctx| {
                 model.create_document_with_id(
                     document_id,
@@ -1511,10 +1515,11 @@ impl BlocklistAIController {
         self.pending_passive_follow_ups.remove(&conversation_id);
     }
 
-    /// 当 conversation 的 live action 完成时,如果该 conversation 之前有 BYOP 请求因
-    /// readiness 报 PendingToolResults 被暂存,优先重发该请求(以便用户的原始 prompt 不被丢失),
-    /// 并把 action 完成产出的 finished_action_results 合入同一个 RequestInput,避免发出两次请求。
-    /// 返回 true 表示已消费 pending 请求并尝试发送;false 表示没有 pending 请求需要 flush。
+    /// When a conversation's live action completes, if that conversation previously had a BYOP
+    /// request stashed because readiness reported PendingToolResults, prefer resending that request
+    /// (so the user's original prompt isn't lost), and merge the finished_action_results produced by
+    /// the completed action into the same RequestInput, to avoid sending two requests.
+    /// Returns true if a pending request was consumed and a send was attempted; false if there was no pending request to flush.
     fn flush_pending_byop_request_after_finished_action(
         &mut self,
         conversation_id: AIConversationId,
@@ -1567,8 +1572,9 @@ impl BlocklistAIController {
             is_queued_prompt,
             ctx,
         ) {
-            // 二次失败时不再循环排队:若仍报 Pending,Err 已被 send_request_input 内部重新
-            // 写入 pending_byop_requests;若是其它错误则按 controller 已有路径处理。
+            // Don't loop-requeue on a second failure: if it still reports Pending, the Err has already
+            // been re-written into pending_byop_requests inside send_request_input; if it's some other
+            // error, handle it via the controller's existing path.
             if e.downcast_ref::<PendingByopToolResultsError>().is_none() {
                 log::error!("[byop-readiness] failed to flush pending BYOP request: {e:?}");
             }
@@ -2017,7 +2023,7 @@ impl BlocklistAIController {
         } else {
             log::warn!(
                 "[byop-diag] LRC detected but byop_get_running_command_for_lrc \
-                 returned None (active_block 状态不符)"
+                 returned None (active_block state mismatch)"
             );
         }
     }
@@ -2448,12 +2454,13 @@ impl BlocklistAIController {
         tool_calls: &[crate::ai::byop_readiness::ToolCallRef],
         ctx: &mut ModelContext<Self>,
     ) -> anyhow::Result<usize> {
-        // `ToolCallKey` 是三元组(task_id + assistant_tool_call_message_id + tool_call_id),
-        // 但 BYOP `AIAgentActionResult` 与持久化的 `ToolCallResult` 协议层只携带 (task_id, tool_call_id),
-        // 没有显式的 assistant_tool_call_message_id 反向引用。为了对齐 readiness 模块的 ToolCallKey
-        // 语义,这里用 (task_id, tool_call_id) 作为外层匹配键,同时记录 readiness 期望的
-        // assistant_tool_call_message_id 集合;在协议假设(同 conversation 内 tool_call_id 唯一)
-        // 被打破时只记 warn 而不阻断,避免因边界场景导致用户流程卡死。
+        // `ToolCallKey` is a triple (task_id + assistant_tool_call_message_id + tool_call_id),
+        // but the BYOP `AIAgentActionResult` and the persisted `ToolCallResult` protocol layer only
+        // carry (task_id, tool_call_id), with no explicit back-reference to assistant_tool_call_message_id.
+        // To align with the readiness module's ToolCallKey semantics, we use (task_id, tool_call_id) as
+        // the outer match key while also recording the set of assistant_tool_call_message_id values
+        // readiness expects; when the protocol assumption (tool_call_id is unique within a conversation)
+        // is broken, we only log a warn rather than block, to avoid stalling the user flow in edge cases.
         let mut wanted: HashMap<(String, String), HashSet<String>> = HashMap::new();
         for tool_call in tool_calls {
             wanted
@@ -2478,9 +2485,10 @@ impl BlocklistAIController {
         let mut grouped_messages: HashMap<TaskId, Vec<warp_multi_agent_api::Message>> =
             HashMap::new();
         let mut keys_to_remove = HashSet::new();
-        // 已经被持久化过的 cancellation result 也算"有进展",
-        // 否则当 readiness 仍报 NeedsCancellationCommit 但 request_input 中已无对应 entry 时,
-        // 会被错误判定为零进展而阻断;实际上下一轮 readiness 会自然 converge。
+        // An already-persisted cancellation result also counts as "progress";
+        // otherwise, when readiness still reports NeedsCancellationCommit but request_input no longer
+        // has a matching entry, it would be wrongly judged as zero progress and block; in reality the
+        // next readiness round converges naturally.
         let mut already_persisted = 0usize;
 
         for input in request_input.all_inputs() {
@@ -2534,9 +2542,11 @@ impl BlocklistAIController {
         tool_call_id: &str,
         ctx: &mut ModelContext<Self>,
     ) -> bool {
-        // 持久化 protobuf `ToolCallResult` 协议只携带 `tool_call_id`,没有 assistant_message_id 反向引用,
-        // 因此最严格的匹配只能做到 (task_id, tool_call_id) 二元组。外层 `get_task(&task_id)` 已经
-        // 把搜索范围隔离到目标 task,这里再额外校验一次 `msg.task_id`,以防未来调用方拿到非隔离视图。
+        // The persisted protobuf `ToolCallResult` protocol only carries `tool_call_id`, with no
+        // back-reference to assistant_message_id, so the strictest match possible is the
+        // (task_id, tool_call_id) pair. The outer `get_task(&task_id)` already isolates the search
+        // scope to the target task; here we additionally re-check `msg.task_id`, in case a future
+        // caller obtains a non-isolated view.
         let task_id_owned = TaskId::new(task_id.to_owned());
         BlocklistAIHistoryModel::as_ref(ctx)
             .conversation(&conversation_id)
@@ -2721,8 +2731,8 @@ impl BlocklistAIController {
         {
             handle.abort();
         }
-        // 新一轮请求开始,先丢掉之前因 readiness Pending 暂存的旧请求;
-        // 如果本次 preflight 又遇到 PendingToolResults,下面会重新写回。
+        // A new request round begins, so first drop any old request previously stashed due to a
+        // readiness Pending; if this preflight again hits PendingToolResults, it's re-written below.
         self.pending_byop_requests.remove(&conversation_id);
 
         // Make sure there's no existing response stream for the conversation. If
@@ -2788,8 +2798,9 @@ impl BlocklistAIController {
                         .as_deref()
                         .unwrap_or("unknown")
                 );
-                // 把用户的输入暂存,等 conversation 内的 live action 完成、触发 FinishedAction
-                // 后,在 `flush_pending_byop_request_after_finished_action` 中重发,避免静默丢失。
+                // Stash the user's input; once the conversation's live action completes and triggers
+                // FinishedAction, resend it in `flush_pending_byop_request_after_finished_action`, to
+                // avoid silently losing it.
                 self.pending_byop_requests.insert(
                     conversation_id,
                     PendingByopRequest {
@@ -2822,9 +2833,11 @@ impl BlocklistAIController {
                     ctx,
                 );
             }
-            // 持久化路径失败(shared session 不可保存、settings 关闭持久化、SQLite sender 不可用
-            // 或 channel 满)时,原本会作为通用 anyhow::Error 冒泡到调用方被 log::error! 静默吞掉,
-            // 用户看不到任何反馈。这里把它也走 blocked request UI 路径,让用户能看到失败原因。
+            // When the persistence path fails (shared session can't be saved, settings disable
+            // persistence, the SQLite sender is unavailable, or the channel is full), this would
+            // originally bubble up to the caller as a generic anyhow::Error and be silently swallowed
+            // by log::error!, with no feedback to the user. Here we also route it through the blocked
+            // request UI path so the user can see the failure reason.
             if let Some(persistence_err) =
                 error.downcast_ref::<crate::ai::agent::conversation::UpdateConversationError>()
             {
@@ -3203,7 +3216,7 @@ impl BlocklistAIController {
                                         );
                                     }
                                 }
-                                // Zap BYOP 本地会话压缩:在 stream finished 前拿 summarization 标志
+                                // Zap BYOP local session compaction: grab the summarization flag before stream finished
                                 let summarize_overflow =
                                     response_stream.as_ref(ctx).summarization_overflow();
                                 self.handle_response_stream_finished(
@@ -3237,9 +3250,9 @@ impl BlocklistAIController {
                     }
                     Err(e) => {
                         if matches!(e.as_ref(), AIApiError::QuotaLimit) {
-                            // Zap(Phase 3c A1):删除
-                            // `AIRequestUsageModel::enable_buy_credits_banner` 调用。
-                            // 本地化后 BYOP 场景下不存在"购买额外 credits"业务。
+                            // Zap (Phase 3c A1): removed the
+                            // `AIRequestUsageModel::enable_buy_credits_banner` call.
+                            // After localization there is no "buy extra credits" business in the BYOP scenario.
                         }
 
                         let mut renderable_error: RenderableAIError = e.as_ref().into();
@@ -3298,9 +3311,10 @@ impl BlocklistAIController {
                 let mut was_passive_request = false;
                 let mut is_any_exchange_unfinished = false;
                 let mut actions_to_queue = vec![];
-                // Zap BYOP:收集本轮新加 message id,稍后用于在 EMPTY 分支检测
-                // synthetic invalid_arguments 错误标记。**只看本轮 added** 才能避免
-                // 在历史里反复命中导致 auto-resume 死循环(标记一旦持久化就永远在)。
+                // Zap BYOP: collect the message ids added this round, used later in the EMPTY branch
+                // to detect the synthetic invalid_arguments error marker. **Looking only at this
+                // round's added ids** avoids repeatedly matching markers in history and causing an
+                // auto-resume infinite loop (once a marker is persisted it stays forever).
                 let mut newly_added_message_ids: std::collections::HashSet<MessageId> =
                     std::collections::HashSet::new();
 
@@ -3364,12 +3378,13 @@ impl BlocklistAIController {
                             .join(", "),
                         conversation_id,
                     );
-                    // Zap:LRC tag-in 首轮自动授权 agent 工具执行。
+                    // Zap: on the first LRC tag-in round, automatically authorize agent tool execution.
                     //
-                    // 触发条件:发起本轮请求时 active_block 处于
-                    // InteractionMode::User { did_user_tag_in_agent: true }。不能用当前
-                    // active_block 的 monitored metadata 兜底,否则同一 CLI subagent 会话里的
-                    // 后续普通请求也会被自动确认,导致确认 UI 不显示。
+                    // Trigger condition: at the time this round's request is sent, active_block is in
+                    // InteractionMode::User { did_user_tag_in_agent: true }. The current active_block's
+                    // monitored metadata can't be used as a fallback, otherwise subsequent ordinary
+                    // requests in the same CLI subagent session would also be auto-confirmed, causing
+                    // the confirmation UI not to show.
                     let auto_accept_for_lrc_tag_in =
                         response_stream.as_ref(ctx).is_lrc_tag_in_request();
                     if auto_accept_for_lrc_tag_in {
@@ -3387,23 +3402,26 @@ impl BlocklistAIController {
                         );
                     });
                 } else {
-                    // Zap BYOP:from_args 解析失败时,chat_stream 走 fallback emit
-                    // carrier ToolCall(tool=None) + synthetic error ToolCallResult(result=None,
-                    // server_message_data 是 invalid_arguments JSON)。两者都走 NoClientRepresentation,
-                    // 不入 actions_to_queue,exchange 静默结束 → 模型永远收不到错误反馈,
-                    // 用户必须手动再发消息才能让模型重试。
+                    // Zap BYOP: when from_args parsing fails, chat_stream takes the fallback and emits
+                    // a carrier ToolCall(tool=None) + a synthetic error ToolCallResult(result=None,
+                    // server_message_data is invalid_arguments JSON). Both go through
+                    // NoClientRepresentation and aren't added to actions_to_queue, so the exchange ends
+                    // silently → the model never receives the error feedback, and the user must manually
+                    // send another message to make the model retry.
                     //
-                    // 检测最近 ~16 条 messages 是否含 BYOP synthetic 错误标记;有的话复用
-                    // line 2695+ 的 auto-resume 路径触发重发,让模型立即基于 error tool_result
-                    // 修正参数重试。`can_attempt_resume_on_error=false` 防 LLM 持续输出坏 args 导致死循环。
-                    // 只在本轮新加的 messages 里查找 synthetic 错误标记,避免历史持久化的
-                    // 同标记反复命中导致死循环。
-                    // Zap BYOP:没有进入 AIAgentAction 队列的 synthetic
-                    // ToolCallResult 需要 auto-resume,否则 exchange 静默结束,模型卡死等结果。
-                    // 1. invalid_arguments — from_args 解析失败兜底(原始)。
-                    // 2. _byop_intercepted — todowrite / webfetch / websearch 等本地拦截
-                    //    工具结果。这类工具不走 protobuf executor,直接合成 result,
-                    //    没有 AIAgentAction 入队。
+                    // Check whether the most recent ~16 messages contain a BYOP synthetic error marker;
+                    // if so, reuse the auto-resume path at line 2695+ to trigger a resend, so the model
+                    // immediately fixes the arguments based on the error tool_result and retries.
+                    // `can_attempt_resume_on_error=false` prevents an infinite loop if the LLM keeps
+                    // emitting bad args. Search only the messages added this round for the synthetic
+                    // error marker, to avoid the same persisted marker in history matching repeatedly
+                    // and causing an infinite loop.
+                    // Zap BYOP: synthetic ToolCallResults that didn't enter the AIAgentAction queue
+                    // need auto-resume, otherwise the exchange ends silently and the model hangs waiting for a result.
+                    // 1. invalid_arguments — the from_args parse-failure fallback (original).
+                    // 2. _byop_intercepted — locally intercepted tool results like todowrite / webfetch /
+                    //    websearch. Such tools don't go through the protobuf executor; the result is
+                    //    synthesized directly, with no AIAgentAction enqueued.
                     let needs_byop_local_resume = conversation.all_tasks().any(|task| {
                         task.messages().any(|msg| {
                             newly_added_message_ids.contains(&MessageId::new(msg.id.clone()))
@@ -3495,10 +3513,10 @@ impl BlocklistAIController {
                     stream_id,
                     conversation_id,
                 });
-                // Zap(Phase 3c A1):删除
-                // `AIRequestUsageModel::refresh_request_usage_async` 与
-                // `maybe_refresh_ai_overages` 调用。两者本质都是服务端计量同步 RPC，
-                // 本地化后无作用。
+                // Zap (Phase 3c A1): removed the
+                // `AIRequestUsageModel::refresh_request_usage_async` and
+                // `maybe_refresh_ai_overages` calls. Both are essentially server-side metering sync
+                // RPCs and have no effect after localization.
             }
         }
     }
@@ -3521,9 +3539,10 @@ impl BlocklistAIController {
         });
     }
 
-    // Zap(Phase 3c A1):删除 `maybe_refresh_ai_overages` 函数。
-    // 原实现是“本地 limit 耗尽时从服务端拉取最新 overage 状态”的调优路径，
-    // BYOP 本地化后既无 limit 也无 overage，函数本体与唯一调用点都需要一起删除。
+    // Zap (Phase 3c A1): removed the `maybe_refresh_ai_overages` function.
+    // The original implementation was a tuning path that "fetched the latest overage state from the
+    // server when the local limit was exhausted"; after BYOP localization there is neither a limit
+    // nor an overage, so the function body and its sole call site both needed to be removed together.
 
     pub(super) fn handle_response_stream_finished(
         &mut self,
@@ -3534,8 +3553,8 @@ impl BlocklistAIController {
         summarize_overflow: Option<bool>,
         ctx: &mut ModelContext<Self>,
     ) {
-        // Zap BYOP 本地会话压缩:在 token_usage move 进下面 closure 前先聚合,
-        // 用于 auto overflow 检查(后面 Done 分支用)。
+        // Zap BYOP local session compaction: aggregate before token_usage is moved into the closure
+        // below, for the auto overflow check (used later in the Done branch).
         let aggregate_token_count: usize = finished_event
             .token_usage
             .iter()
@@ -3561,7 +3580,7 @@ impl BlocklistAIController {
         let history_model = BlocklistAIHistoryModel::handle(ctx);
         match finished_event.reason {
             Some(warp_multi_agent_api::response_event::stream_finished::Reason::Done(_)) | None => {
-                // Zap BYOP 本地会话压缩 - 写回 summary
+                // Zap BYOP local session compaction - write back the summary
                 if let Some(overflow) = summarize_overflow {
                     let compaction_cfg = crate::ai::byop_compaction::CompactionConfig::from_settings(ctx);
                     history_model.update(ctx, |history_model, _ctx| {
@@ -3583,8 +3602,8 @@ impl BlocklistAIController {
                     );
                 });
 
-                // Zap BYOP 本地会话压缩 - auto overflow 触发(对齐 opencode `processor.ts:395-403`)
-                // 仅在本流不是摘要本身时检查,防止递归。
+                // Zap BYOP local session compaction - auto overflow trigger (aligned with opencode `processor.ts:395-403`)
+                // Checked only when this stream isn't the summary itself, to prevent recursion.
                 if summarize_overflow.is_none() {
                     let aggregate_count = aggregate_token_count;
                     if aggregate_count > 0 {
@@ -3600,9 +3619,10 @@ impl BlocklistAIController {
                                 "[byop-compaction] auto overflow detected: tokens={aggregate_count} usable={}",
                                 crate::ai::byop_compaction::usable(&cfg, model_limit)
                             );
-                            // 通过 SlashCommandRequest::Summarize 触发(与 /compact-and 同链路);
-                            // overflow=true → chat_stream 拼摘要请求时携带 overflow 标记,
-                            // commit_summarization 写回时也以 overflow=true 落 state(便于 UI 区分)。
+                            // Triggered via SlashCommandRequest::Summarize (same chain as /compact-and);
+                            // overflow=true → chat_stream carries the overflow flag when assembling the
+                            // summary request, and commit_summarization also writes back state with
+                            // overflow=true (to make it easy for the UI to distinguish).
                             self.send_slash_command_request(
                                 crate::ai::blocklist::controller::SlashCommandRequest::Summarize {
                                     prompt: None,
@@ -3871,21 +3891,23 @@ fn get_running_command(terminal_model: &TerminalModel) -> Option<RunningCommand>
     })
 }
 
-/// Zap BYOP 专用:LRC tag-in / agent-monitored 场景下提取 RunningCommand。
+/// Zap BYOP-specific: extracts the RunningCommand in LRC tag-in / agent-monitored scenarios.
 ///
-/// 上游 `get_running_command` 在 `is_agent_monitoring()` 时返回 None — 因为 Zap 自家
-/// 路径下 LRC 已 spawn cli subagent 后,server 端持久该状态,后续轮 client 不必重发
-/// running_command。但 BYOP 直连模型无服务端持久,**每轮都要把当前 PTY grid 内容
-/// 重新带给模型**(否则模型只能看到首轮 grid_contents 之后的盲区)。
+/// Upstream `get_running_command` returns None when `is_agent_monitoring()` — because on Zap's own
+/// path, once the LRC has spawned a cli subagent the server persists that state, so subsequent rounds
+/// don't need the client to resend running_command. But the BYOP direct-to-model path has no
+/// server-side persistence, so **every round must re-carry the current PTY grid contents to the
+/// model** (otherwise the model only sees a blind spot after the first round's grid_contents).
 ///
-/// 条件放宽为 `is_agent_in_control_or_tagged_in()` — 覆盖:
-///   - tag-in:`InteractionMode::User { did_user_tag_in_agent: true }`(spawn 前)
-///   - monitored:`InteractionMode::Agent { ... }`(spawn 后)
+/// The condition is relaxed to `is_agent_in_control_or_tagged_in()` — covering:
+///   - tag-in: `InteractionMode::User { did_user_tag_in_agent: true }` (before spawn)
+///   - monitored: `InteractionMode::Agent { ... }` (after spawn)
 ///
-/// 提取逻辑严格对齐上游:alt-screen 时取 `terminal_model.alt_screen().grid_handler()`
-/// 而不是 `active_block.output_grid()`(后者在 alt-screen 期间是空的,
-/// 不要再用 `output_to_string_force_full_grid_contents()`,那条路在 nvim 等 TUI 下
-/// 会得到空字符串导致 `<attached_running_command>` 块为空,模型抱怨"看不到 command_id")。
+/// The extraction logic strictly aligns with upstream: in alt-screen, take
+/// `terminal_model.alt_screen().grid_handler()` rather than `active_block.output_grid()` (the latter
+/// is empty during alt-screen; don't use `output_to_string_force_full_grid_contents()` either, since
+/// in TUIs like nvim that path yields an empty string, leaving the `<attached_running_command>` block
+/// empty and the model complaining that it "can't see the command_id").
 fn byop_get_running_command_for_lrc(terminal_model: &TerminalModel) -> Option<RunningCommand> {
     let active_block = terminal_model.block_list().active_block();
     if !active_block.is_active_and_long_running() {

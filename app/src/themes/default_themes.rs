@@ -715,7 +715,8 @@ pub(super) fn adeberry() -> WarpTheme {
     )
 }
 
-// 16 色 ANSI 与背景/前景对齐 WezTerm 默认配色；强调色 #52AD70 为本项目自选，非 WezTerm 规范色。
+// The 16 ANSI colors and the background/foreground are aligned with WezTerm's default palette; the
+// accent color #52AD70 is this project's own choice, not a WezTerm standard color.
 pub(super) fn wezterm_classic() -> WarpTheme {
     WarpTheme::new(
         Fill::Solid(ColorU::from_u32(0x000000FF)),

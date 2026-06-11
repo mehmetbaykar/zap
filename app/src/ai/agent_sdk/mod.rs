@@ -177,9 +177,7 @@ fn run_agent(
             Ok(())
         }
         AgentCommand::Profile(sub) => profiles::run(ctx, global_options, sub),
-        AgentCommand::List(_) => Err(anyhow::anyhow!(
-            "Agent skill listing is disabled in Zap"
-        )),
+        AgentCommand::List(_) => Err(anyhow::anyhow!("Agent skill listing is disabled in Zap")),
     }
 }
 
@@ -500,8 +498,8 @@ impl AgentDriverRunner {
 
     /// Creates local driver task state for a new agent run.
     ///
-    /// Zap 本地运行不会创建远端 ambient-agent task 记录。
-    /// driver 保持 `task_id` 为 `None`,下游会自然跳过远端任务分支。
+    /// Zap local runs do not create a remote ambient-agent task record.
+    /// The driver keeps `task_id` as `None`, and downstream naturally skips the remote-task branch.
     async fn initialize_new_task(
         driver_options: &mut AgentDriverOptions,
     ) -> Result<(), AgentDriverError> {

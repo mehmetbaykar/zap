@@ -1,7 +1,7 @@
-//! `RunShellCommand` 适配。
+//! `RunShellCommand` adaptation.
 //!
-//! warp 中对应 `api::message::tool_call::Tool::RunShellCommand`,
-//! 执行后 result 是 `ToolCallResultType::RunShellCommand(RunShellCommandResult)`。
+//! Corresponds to `api::message::tool_call::Tool::RunShellCommand` in warp,
+//! and after execution the result is `ToolCallResultType::RunShellCommand(RunShellCommandResult)`.
 
 use anyhow::Result;
 use serde::Deserialize;
@@ -19,9 +19,9 @@ struct Args {
     uses_pager: bool,
     #[serde(default)]
     is_risky: bool,
-    /// `None`(缺省 / true)= 等命令完成后再返回;`Some(false)` = 启动后立刻返回
-    /// 一个 LongRunningCommandSnapshot,后续可用 read/write_to_long_running_*
-    /// 工具继续交互(适合 dev server / tail -f 类持续运行命令)。
+    /// `None` (default / true) = return after the command completes; `Some(false)` = return immediately after starting
+    /// with a LongRunningCommandSnapshot, after which read/write_to_long_running_*
+    /// tools can continue interacting (suitable for continuously running commands like a dev server / tail -f).
     #[serde(default)]
     wait_until_complete: Option<bool>,
 }
@@ -32,26 +32,26 @@ fn parameters() -> Value {
         "properties": {
             "command": {
                 "type": "string",
-                "description": "要执行的 shell 命令(完整命令行)。"
+                "description": "The shell command to execute (the full command line)."
             },
             "is_read_only": {
                 "type": "boolean",
-                "description": "命令是否仅读取信息、不修改文件系统/外部状态(true 时无需用户确认)。",
+                "description": "Whether the command only reads information and doesn't modify the filesystem/external state (when true, no user confirmation is needed).",
                 "default": false
             },
             "uses_pager": {
                 "type": "boolean",
-                "description": "命令是否会触发 pager(less/more 等)。建议 false,可附加 | cat 之类避免阻塞。",
+                "description": "Whether the command triggers a pager (less/more, etc.). Recommended false; you can append something like | cat to avoid blocking.",
                 "default": false
             },
             "is_risky": {
                 "type": "boolean",
-                "description": "命令是否危险(rm -rf、改全局配置等)。设为 true 让用户更醒目地确认。",
+                "description": "Whether the command is dangerous (rm -rf, changing global config, etc.). Set true to make the user confirm more prominently.",
                 "default": false
             },
             "wait_until_complete": {
                 "type": "boolean",
-                "description": "默认 true(等命令结束才返回,适合一次性命令)。dev server / 后台进程 / tail -f / 交互 REPL 这类不会自然退出的命令必须设为 false,否则当前 turn 会卡死永远等不到结果。设 false 后会立刻返回 LongRunningCommandSnapshot,后续 turn 用 read/write_to_long_running_shell_command 继续交互。",
+                "description": "Defaults to true (return only after the command ends, suitable for one-off commands). Commands that don't exit naturally, like a dev server / background process / tail -f / interactive REPL, must be set to false, otherwise the current turn hangs forever waiting for a result. After setting false, it returns a LongRunningCommandSnapshot immediately, and later turns continue interacting with read/write_to_long_running_shell_command.",
                 "default": true
             }
         },
@@ -63,8 +63,8 @@ fn parameters() -> Value {
 fn from_args(args: &str) -> Result<api::message::tool_call::Tool> {
     use api::message::tool_call::run_shell_command::WaitUntilCompleteValue;
     let parsed: Args = serde_json::from_str(args)?;
-    // None 时显式默认成 true(等命令完成才返回),避免 controller 端的隐式默认行为
-    // 在不同 warp 版本/路径下出现歧义。模型若想要长运行模式必须显式传 false。
+    // When None, explicitly default to true (return only after the command completes), to avoid the controller's implicit default behavior
+    // being ambiguous across different warp versions/paths. If the model wants long-running mode it must explicitly pass false.
     let wait_until_complete_value = Some(WaitUntilCompleteValue::WaitUntilComplete(
         parsed.wait_until_complete.unwrap_or(true),
     ));
@@ -95,8 +95,8 @@ fn result_to_json(result: &api::message::tool_call_result::Result) -> Option<Val
             "exit_code": f.exit_code,
             "output": f.output,
         }),
-        // 长运行命令: 启动了但还没结束。把 snapshot 暴露给模型,这样模型可以
-        // 决定是继续读 (read_shell_command_output) 还是写 (write_to_long_running_*)。
+        // Long-running command: started but not yet finished. Expose the snapshot to the model so the model can
+        // decide whether to continue reading (read_shell_command_output) or writing (write_to_long_running_*).
         Some(ShellR::LongRunningCommandSnapshot(s)) => json!({
             "status": "running",
             "command": r.command,

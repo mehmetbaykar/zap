@@ -1,6 +1,5 @@
 ---
 import '../styles/landing.css';
-import I18nScript from '../components/I18nScript.astro';
 import Banner from '../components/Banner.astro';
 import LandingNav from '../components/LandingNav.astro';
 import LandingFooter from '../components/LandingFooter.astro';
@@ -27,7 +26,7 @@ const {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <Analytics />
-    {/* FOUC 防护:在页面渲染前先设好 theme 与 locale */}
+    {/* FOUC guard: set the theme before the page renders */}
     <script is:inline>
       (function () {
         try {
@@ -38,24 +37,11 @@ const {
           }
           document.documentElement.setAttribute('data-theme', theme);
         } catch (_) {}
-        try {
-          var lc = localStorage.getItem('zap:locale');
-          if (!lc) {
-            var nav = (navigator.language || 'en').toLowerCase();
-            lc = nav.startsWith('zh') ? 'zh' : nav.startsWith('ja') ? 'ja' : 'en';
-          }
-          document.documentElement.setAttribute('data-locale', lc);
-        } catch (_) {}
       })();
     </script>
   </head>
-  <body data-locale="en">
-    <I18nScript />
-    <Banner
-      en="Early development · An independent product built on Warp · Not affiliated with Warp Inc."
-      zh="早期开发阶段 · 基于 Warp 构建的独立产品 · 与 Warp Inc. 无隶属关系"
-      ja="初期開発段階 · Warp を基にした独立プロダクト · Warp Inc. とは無関係"
-    />
+  <body>
+    <Banner text="Early development · An independent product built on Warp · Not affiliated with Warp Inc." />
     <LandingNav />
 
     <slot />
@@ -63,74 +49,9 @@ const {
     <LandingFooter />
 
     <script>
-      // 语言切换、页内导航、标签页、复制按钮与滚动渐显
+      // In-page navigation, tabs, copy buttons and scroll fade-in.
       (function () {
-        const htmlLang: Record<string, string> = { en: 'en', zh: 'zh-CN', ja: 'ja' };
-        function normalizeLocale(value: string | null) {
-          const tag = String(value || '').toLowerCase();
-          if (tag.startsWith('zh')) return 'zh';
-          if (tag.startsWith('ja')) return 'ja';
-          if (tag.startsWith('en')) return 'en';
-          return htmlLang[tag] ? tag : null;
-        }
-        function applyLocale(l: string) {
-          const locale = normalizeLocale(l) || 'en';
-          document.body.dataset.locale = locale;
-          document.documentElement.lang = htmlLang[locale] || 'en';
-          document.querySelectorAll<HTMLElement>('[data-set-lang]').forEach((option) => {
-            const active = option.getAttribute('data-set-lang') === locale;
-            option.classList.toggle('active', active);
-            option.setAttribute('aria-selected', String(active));
-          });
-        }
-        function closeLocaleMenus() {
-          document.querySelectorAll<HTMLElement>('[data-locale-options]').forEach((menu) => {
-            menu.hidden = true;
-          });
-          document.querySelectorAll<HTMLElement>('[data-locale-trigger]').forEach((trigger) => {
-            trigger.setAttribute('aria-expanded', 'false');
-          });
-          document.querySelectorAll<HTMLElement>('[data-locale-menu]').forEach((menu) => {
-            menu.removeAttribute('data-open');
-          });
-        }
-        function setLocale(l: string) {
-          // 仅在用户显式选择语言时持久化;自动检测应在后续访问继续跟随系统/浏览器。
-          const locale = normalizeLocale(l) || 'en';
-          localStorage.setItem('zap:locale', locale);
-          applyLocale(locale);
-        }
-        const initialLocale = (document.body.dataset.locale as string) || 'en';
-        applyLocale(initialLocale);
-        document.querySelectorAll<HTMLElement>('[data-locale-menu]').forEach((menu) => {
-          const trigger = menu.querySelector<HTMLButtonElement>('[data-locale-trigger]');
-          const options = menu.querySelector<HTMLElement>('[data-locale-options]');
-          if (!trigger || !options) return;
-          trigger.addEventListener('click', (event) => {
-            event.stopPropagation();
-            const shouldOpen = options.hidden;
-            closeLocaleMenus();
-            options.hidden = !shouldOpen;
-            trigger.setAttribute('aria-expanded', String(shouldOpen));
-            if (shouldOpen) menu.setAttribute('data-open', 'true');
-          });
-          menu.querySelectorAll<HTMLButtonElement>('[data-set-lang]').forEach((option) => {
-            option.addEventListener('click', (event) => {
-              event.stopPropagation();
-              setLocale(option.getAttribute('data-set-lang') || 'en');
-              closeLocaleMenus();
-            });
-          });
-        });
-        document.addEventListener('click', (event) => {
-          const target = event.target as Element | null;
-          if (!target?.closest('[data-locale-menu]')) closeLocaleMenus();
-        });
-        document.addEventListener('keydown', (event) => {
-          if (event.key === 'Escape') closeLocaleMenus();
-        });
-
-        // 顶部导航滚动阴影
+        // Top nav scroll shadow
         const navEl = document.querySelector('header.nav');
         function onScroll() {
           if (navEl) navEl.classList.toggle('scrolled', window.scrollY > 8);
@@ -138,7 +59,7 @@ const {
         document.addEventListener('scroll', onScroll, { passive: true });
         onScroll();
 
-        // 主题切换
+        // Theme toggle
         function applyTheme(theme) {
           document.documentElement.setAttribute('data-theme', theme);
           try { localStorage.setItem('zap:theme', theme); } catch (_) {}
@@ -150,7 +71,7 @@ const {
           });
         });
 
-        // 移动端导航开关
+        // Mobile nav toggle
         const toggle = document.querySelector<HTMLButtonElement>('.nav-toggle');
         const links = document.getElementById('primary-nav');
         if (toggle && links) {
@@ -166,7 +87,7 @@ const {
           );
         }
 
-        // 页内平滑滚动
+        // In-page smooth scroll
         document.querySelectorAll<HTMLAnchorElement>('a[href^="#"]').forEach((a) => {
           a.addEventListener('click', (e) => {
             const id = a.getAttribute('href')?.slice(1);
@@ -177,7 +98,7 @@ const {
           });
         });
 
-        // 服务商标签页与动画轨道
+        // Provider tabs and animated rail
         document.querySelectorAll<HTMLElement>('.prov-tabs').forEach((tabs) => {
           const rail = tabs.querySelector<HTMLElement>('[data-prov-rail]');
           const moveRail = (b: HTMLButtonElement) => {
@@ -206,7 +127,7 @@ const {
           });
         });
 
-        // 安装方式标签页
+        // Install method tabs
         document.querySelectorAll<HTMLElement>('.install-tabs').forEach((tabs) => {
           tabs.querySelectorAll<HTMLButtonElement>('button').forEach((b) => {
             b.addEventListener('click', () => {
@@ -220,13 +141,13 @@ const {
           });
         });
 
-        // 复制按钮
+        // Copy buttons
         document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((btn) => {
           btn.addEventListener('click', () => {
             const pre = btn.closest('.pre-wrap, .code-card')?.querySelector<HTMLElement>('pre.code');
             if (pre && navigator.clipboard) navigator.clipboard.writeText(pre.innerText);
             const prev = btn.textContent;
-            btn.textContent = document.body.dataset.locale === 'zh' ? '已复制' : document.body.dataset.locale === 'ja' ? 'コピー済み' : 'Copied';
+            btn.textContent = 'Copied';
             btn.classList.add('copied');
             setTimeout(() => {
               btn.textContent = prev;
@@ -235,7 +156,7 @@ const {
           });
         });
 
-        // 滚动渐显
+        // Scroll fade-in
         const io = new IntersectionObserver(
           (entries) => {
             entries.forEach((e) => {

@@ -1,0 +1,65 @@
+name: Watch Upstream
+
+# Watches the upstream source repo (zerx-lab/zap) for new commits and opens or
+# refreshes a tracking issue when this fork falls behind. It deliberately does
+# NOT auto-merge: this fork is English-only and has diverged from upstream, so
+# each sync needs a quick conflict check and a re-run of the Chinese->English
+# pass on any newly added Chinese before you publish.
+#
+# The release flow this enables:
+#   1. This job notices upstream moved and opens an "Upstream sync" issue.
+#   2. Locally: `git fetch upstream && git merge upstream/main`, resolve any
+#      conflicts, then re-run the de-Chinese migration on newly added Chinese.
+#   3. Push a `v*` tag -> the "Zap Release" workflow builds a Developer ID
+#      signed + notarized DMG and publishes it to this repo's Releases.
+#   4. Your installed Zap auto-updates silently from those releases.
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # daily at 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  UPSTREAM_REPO: zerx-lab/zap
+  UPSTREAM_BRANCH: main
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork (full history)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" 2>/dev/null || \
+            git remote set-url upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --quiet upstream "${UPSTREAM_BRANCH}"
+
+      - name: Measure how far behind upstream we are
+        id: drift
+        run: |
+          behind="$(git rev-list --count "HEAD..upstream/${UPSTREAM_BRANCH}")"
+          echo "behind=${behind}" >> "$GITHUB_OUTPUT"
+          git log --oneline -20 "HEAD..upstream/${UPSTREAM_BRANCH}" > drift.txt || true
+          echo "Fork is ${behind} commits behind ${UPSTREAM_REPO}@${UPSTREAM_BRANCH}."
+
+      - name: Open or refresh the upstream-sync issue
+        if: steps.drift.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="Upstream sync: ${{ steps.drift.outputs.behind }} commits behind ${UPSTREAM_REPO}"
+          body="$(printf 'New commits on `%s@%s`.\n\nRecent upstream commits:\n```\n%s\n```\n\n**To sync:**\n1. `git fetch upstream && git merge upstream/%s`\n2. Resolve conflicts; re-run the Chinese->English migration on any new Chinese.\n3. Push a `v*` tag -> the "Zap Release" workflow builds a Developer ID signed + notarized DMG and publishes it.\n4. Your installed Zap auto-updates from the new release.' "$UPSTREAM_REPO" "$UPSTREAM_BRANCH" "$(cat drift.txt)" "$UPSTREAM_BRANCH")"
+          existing="$(gh issue list --state open --search "Upstream sync in:title" --json number --jq '.[0].number')"
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

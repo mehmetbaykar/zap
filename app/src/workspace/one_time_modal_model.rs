@@ -1,7 +1,7 @@
 use super::hoa_onboarding;
 use crate::auth::{AuthManager, AuthManagerEvent};
 use crate::channel::{Channel, ChannelState};
-// Zap(本地化,Phase 5):`PreferencesSyncer` 已物理删除。
+// Zap (localization, Phase 5): `PreferencesSyncer` has been physically removed.
 use crate::settings::CodeSettings;
 use crate::terminal::general_settings::GeneralSettings;
 use settings::Setting as _;
@@ -98,11 +98,7 @@ impl OneTimeModalModel {
         }
     }
 
-    fn set_zap_launch_modal_open(
-        &mut self,
-        is_open: bool,
-        ctx: &mut ModelContext<Self>,
-    ) -> bool {
+    fn set_zap_launch_modal_open(&mut self, is_open: bool, ctx: &mut ModelContext<Self>) -> bool {
         if self.is_zap_launch_modal_open != is_open {
             self.is_zap_launch_modal_open = is_open;
             ctx.emit(OneTimeModalEvent::VisibilityChanged { is_open });

@@ -1,29 +1,29 @@
-//! 工具参数容错层。
+//! Tool argument fault-tolerance layer.
 //!
-//! 部分 BYOP 模型(尤其 DeepSeek reasoner、某些 OSS 模型)在 tool_calls 的
-//! `arguments` 里会把 boolean 写成 `"true"`/`"false"`、把数字写成字符串、把
-//! array/object 整个 JSON.stringify 一次。`from_args` 用 serde 严格解,这类
-//! 输入会直接 reject,UI 端表现为"工具偶发故障"。
+//! Some BYOP models (especially DeepSeek reasoner and certain OSS models) write, in the `arguments` of
+//! their tool_calls, booleans as `"true"`/`"false"`, numbers as strings, and
+//! JSON.stringify an entire array/object once. `from_args` parses strictly with serde, and such
+//! input is rejected outright, appearing on the UI side as an "occasional tool malfunction".
 //!
-//! 本模块只在 `from_args` 第一次失败后才被调用:读 `parameters()` schema,
-//! 按 schema 声明的类型,把 JSON Value 里的 string 强转回目标类型。覆盖:
+//! This module is only called after `from_args` fails the first time: it reads the `parameters()` schema,
+//! and per the type declared in the schema, coerces strings in the JSON Value back to the target type. Covering:
 //!
-//! | schema type | 模型返回 | 修正为 |
+//! | schema type | model returns | corrected to |
 //! |---|---|---|
 //! | boolean | "true"/"True"/"1"/"yes" | true |
 //! | boolean | "false"/"False"/"0"/"no" | false |
 //! | integer | "42" / 42.0 | 42 |
 //! | number | "3.14" | 3.14 |
 //! | string | 42 / true | "42" / "true" |
-//! | array | "[\"a\"]"(JSON 字符串) | ["a"] |
-//! | object | "{\"k\":1}"(JSON 字符串) | {"k":1} |
+//! | array | "[\"a\"]" (JSON string) | ["a"] |
+//! | object | "{\"k\":1}" (JSON string) | {"k":1} |
 //!
-//! 不能 coerce 的字段保留原值,让原始解析错误透出。
+//! Fields that can't be coerced keep their original value, letting the original parse error surface.
 
 use serde_json::{Number, Value};
 
-/// 尝试根据 schema 修正 args JSON。返回 `Some(coerced_string)` 表示至少做了一次
-/// 类型转换;返回 `None` 表示输入根本解不出 JSON 或没有任何字段需要 coerce。
+/// Tries to fix the args JSON per the schema. Returns `Some(coerced_string)` if at least one
+/// type conversion was made; returns `None` if the input can't be parsed as JSON at all or no field needs coercion.
 pub fn coerce_args_against_schema(args_str: &str, schema: &Value) -> Option<String> {
     let mut value: Value = serde_json::from_str(args_str).ok()?;
     let mut changed = false;
@@ -36,7 +36,7 @@ pub fn coerce_args_against_schema(args_str: &str, schema: &Value) -> Option<Stri
 
 fn coerce_value(value: &mut Value, schema: &Value, changed: &mut bool) {
     let Some(ty) = schema.get("type").and_then(|t| t.as_str()) else {
-        // schema 没标 type:对象类型尝试递归 properties,否则放弃。
+        // schema has no type marked: for object types try recursing into properties, otherwise give up.
         if let Some(props) = schema.get("properties") {
             coerce_object(value, props, schema, changed);
         }
@@ -45,7 +45,7 @@ fn coerce_value(value: &mut Value, schema: &Value, changed: &mut bool) {
 
     match ty {
         "object" => {
-            // 模型把整个 object 字符串化的情况:解一层后再继续。
+            // the case where the model stringified the entire object: parse one layer and continue.
             if let Some(s) = value.as_str() {
                 if let Ok(parsed) = serde_json::from_str::<Value>(s) {
                     if parsed.is_object() {
@@ -147,7 +147,7 @@ fn coerce_object(value: &mut Value, props: &Value, parent_schema: &Value, change
             coerce_value(field, prop_schema, changed);
         }
     }
-    // additionalProperties: schema 也有可能描述未列在 properties 中的字段。
+    // additionalProperties: the schema may also describe fields not listed in properties.
     if let Some(additional) = parent_schema
         .get("additionalProperties")
         .filter(|v| v.is_object())

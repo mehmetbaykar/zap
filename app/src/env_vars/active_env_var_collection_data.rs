@@ -43,10 +43,12 @@ pub struct ActiveEnvVarCollectionData {
 
 impl ActiveEnvVarCollectionData {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
-        // Zap:原 `UpdateManager` 订阅用于接收云端同步完成事件(Create/Update/Trash
-        // /Untrash::Success),无云 = 永不触发;`trash_object`/`untrash_object` 已本地化
-        // 不 emit `ObjectOperationComplete`。Phase 2c‑1 删除订阅 + handler。
-        // `ObjectStoreModel` 订阅保留(本地对象变更仍需 breadcrumbs 刷新)。
+        // Zap: the original `UpdateManager` subscription received cloud sync-complete events
+        // (Create/Update/Trash/Untrash::Success); no cloud = never triggered. `trash_object` /
+        // `untrash_object` have been localized to not emit `ObjectOperationComplete`. Phase 2c-1
+        // removed the subscription + handler.
+        // The `ObjectStoreModel` subscription is kept (local object changes still need breadcrumbs
+        // to refresh).
         let object_store_model = ObjectStoreModel::handle(ctx);
 
         ctx.subscribe_to_model(&object_store_model, |me, event, ctx| {

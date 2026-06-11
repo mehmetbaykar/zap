@@ -1,6 +1,7 @@
 // Suppress warnings about rustdoc style.
 #![allow(clippy::doc_lazy_continuation)]
-// 上游 Zap 裁剪后遗留的孤儿代码暂时保留,统一抑制 dead_code 告警。
+// Orphan code left over after trimming upstream Warp is kept for now; suppress dead_code warnings
+// uniformly.
 #![allow(dead_code)]
 
 mod ai;
@@ -150,7 +151,7 @@ use code::editor_management::CodeManager;
 use code::opened_files::OpenedFilesModel;
 use code_review::GlobalCodeReviewModel;
 use quit_warning::UnsavedStateSummary;
-// Zap(本地化,Phase 4):`ServerVoiceTranscriber` 原用于默认 VoiceTranscriber 注入,现走 `VoiceTranscriber::disabled()`,同名 import 暂收。
+// Zap (localization, Phase 4): `ServerVoiceTranscriber` was originally used for the default VoiceTranscriber injection; it now uses `VoiceTranscriber::disabled()`, so the same-named import is dropped for now.
 #[cfg(feature = "local_fs")]
 use settings::import::model::ImportedConfigModel;
 use voice::transcriber::VoiceTranscriber;
@@ -433,7 +434,7 @@ impl LaunchMode {
         }
     }
 
-    /// 是否需要在 `init_common` 初始化本地 crash reporting。
+    /// Whether local crash reporting needs to be initialized in `init_common`.
     #[cfg_attr(not(feature = "crash_reporting"), allow(dead_code))]
     fn needs_crash_reporting(&self) -> bool {
         match self {
@@ -525,13 +526,16 @@ fn apply_scroll_multiplier(event: &mut Event, app: &AppContext) {
 
 /// Runs the app. If a subcommand was requested, it'll be run instead of the main application.
 pub fn run() -> Result<()> {
-    // POSIX locale 兜底:在 LANG/LC_* 全部未设置时,给依赖这些环境变量的 C/Rust 库
-    // (chrono 数字格式化、libc strftime 等) 一个合理的 UTF-8 默认值。Windows 上特意跳过
-    // —— Windows API (`GetUserPreferredUILanguages`) 才是 UI locale 的真实来源,这里
-    // 强制 `LANG=en_US.UTF-8` 会让 `DesktopLanguageRequester` 不论用户选什么 UI 语言
-    // 都返回 en,进而把 CJK Han 字形回退打偏 (日文 UI 反倒拿到简体字字形)。
-    // macOS 如果桌面打开 Bundle 也是没有环境变量的, 但它的 `DesktopLanguageRequester`
-    // 如果设置了 `LANG` 环境变量会直接返回该值而不询问系统, 因此同样需要跳过。
+    // POSIX locale fallback: when LANG/LC_* are all unset, give C/Rust libraries that depend on
+    // these environment variables (chrono number formatting, libc strftime, etc.) a reasonable
+    // UTF-8 default. Deliberately skipped on Windows -- the Windows API
+    // (`GetUserPreferredUILanguages`) is the real source of the UI locale, and forcing
+    // `LANG=en_US.UTF-8` here would make `DesktopLanguageRequester` return en regardless of which
+    // UI language the user selects, which then biases the CJK Han glyph fallback (a Japanese UI
+    // would instead get Simplified Chinese glyph shapes).
+    // On macOS, a Bundle opened from the desktop also has no environment variables, but its
+    // `DesktopLanguageRequester` returns the value of the `LANG` environment variable directly
+    // without asking the system if it is set, so it needs to be skipped as well.
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     if std::env::var_os("LANG").is_none()
         && std::env::var_os("LC_ALL").is_none()
@@ -543,8 +547,8 @@ pub fn run() -> Result<()> {
     // Perform any necessary platform-specific initialization.
     platform::init();
 
-    // i18n 必须早于 UI 任何 t!() 调用初始化;先按系统 locale,后续 settings 加载完会用
-    // LanguageSettings 覆盖。OnceLock 重入安全。
+    // i18n must be initialized before any UI t!() call; first follow the system locale, and once
+    // settings finish loading it will be overridden by LanguageSettings. OnceLock is reentrant-safe.
     i18n::init(None);
 
     // Ensure feature flags are initialized before parsing command-line arguments.
@@ -748,11 +752,12 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
 
     init_common(&launch_mode, Some(&mut timer))?;
 
-    // SQLite 预热:在 app_builder.run() 调用之前就在后台线程起 init_db()
-    // (连接 + migration),让 SQLite 初始化与后续的 winit / wgpu 初始化
-    // 并发。主线程走到 persistence::initialize 时会接走预热连接。
-    // 仅 LaunchMode::App 需要(CLI / Worker / Test 走另外路径,这些不调用
-    // initialize_app 里的 persistence::initialize)。
+    // SQLite prewarm: start init_db() (connection + migration) on a background thread before
+    // app_builder.run() is called, so SQLite initialization runs concurrently with the subsequent
+    // winit / wgpu initialization. When the main thread reaches persistence::initialize it takes
+    // over the prewarmed connection.
+    // Only LaunchMode::App needs this (CLI / Worker / Test take other paths and don't call the
+    // persistence::initialize inside initialize_app).
     if matches!(launch_mode, LaunchMode::App { .. }) {
         log::info!("Triggering SQLite prewarm in background...");
         crate::persistence::prewarm_db_in_background();
@@ -769,7 +774,8 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
         web_intent_parser::set_context_flags_from_current_url();
     }
 
-    // 收集 app 初始化前发生的 run_internal() 错误,等本地 crash reporting 初始化后再写日志。
+    // Collect run_internal() errors that occur before app initialization, and write them to the log
+    // after local crash reporting is initialized.
     #[cfg_attr(
         not(all(
             feature = "release_bundle",
@@ -1008,8 +1014,9 @@ fn initialize_app(
     ctx: &mut warpui::AppContext,
     pre_init_errors: impl IntoIterator<Item = anyhow::Error>,
 ) -> Option<AppState> {
-    // 警告:这里在 crash_reporting::init 之前发生的错误只能落本地日志。
-    // 此处只应初始化 crash-reporting 依赖;其他工作失败时应写入 pre_init_errors。
+    // Warning: errors that occur here, before crash_reporting::init, can only go to the local log.
+    // Only crash-reporting dependencies should be initialized here; other work that fails should be
+    // written into pre_init_errors.
     let data_domain = ChannelState::data_domain();
 
     // Register an implementation of the secure storage service.
@@ -1061,10 +1068,12 @@ fn initialize_app(
 
     let update_http_client = Arc::new(http_client::Client::new());
 
-    // Zap:保留 AuthStateProvider singleton 仅用于遗留调用点读取本地占位用户态。
+    // Zap: keep the AuthStateProvider singleton only for legacy call sites to read the local
+    // placeholder user state.
     ctx.add_singleton_model(|_ctx| AuthStateProvider::new(auth_state.clone()));
 
-    // Zap Wave 3-1:AuthManager 已本地化为 stub,不再注入 server_api / auth_client。
+    // Zap Wave 3-1: AuthManager has been localized to a stub and no longer injects server_api /
+    // auth_client.
     ctx.add_singleton_model(AuthManager::new);
 
     ctx.add_singleton_model(|_ctx| GPUState::new());
@@ -1076,9 +1085,9 @@ fn initialize_app(
     let (sqlite_data, writer_handles) = persistence::initialize(ctx);
     timer.mark_interval_end("SQLITE_INITIALIZED");
 
-    // SSH 管理器在主写线程外开自己的写连接(WAL + busy_timeout 保证安全)。
-    // 必须在 persistence::initialize 跑完 migration 之后才设路径,否则首个
-    // SshManager 操作可能撞 missing-table。
+    // The SSH manager opens its own write connection outside the main writer thread (WAL +
+    // busy_timeout ensure safety). The path must be set only after persistence::initialize has run
+    // migrations, otherwise the first SshManager operation may hit a missing table.
     warp_ssh_manager::set_database_path(persistence::database_file_path());
 
     let persistence_writer = PersistenceWriter::new(writer_handles);
@@ -1187,15 +1196,16 @@ fn initialize_app(
         manager
     });
 
-    // 自定义 Agent Provider 的 API key 由独立单例存到 secure storage,
-    // 与 ApiKeyManager (BYOK 转发给 warp-server) 解耦。
+    // The custom Agent Provider's API key is stored in secure storage by a separate singleton,
+    // decoupled from ApiKeyManager (BYOK forwarding to warp-server).
     ctx.add_singleton_model(crate::ai::agent_providers::AgentProviderSecrets::new);
 
-    // Issue #72: 全局 HTTP 代理的 Basic Auth 密码走 OS 密钥库。
-    // 注册后立即 reapply,让 settings::init 阶段以空串占位的全局 slot 被真实密码覆盖。
+    // Issue #72: the Basic Auth password for the global HTTP proxy goes through the OS keychain.
+    // Reapply immediately after registration, so the global slot that settings::init placeholdered
+    // with an empty string is overwritten by the real password.
     ctx.add_singleton_model(crate::settings::network_secrets::ProxyCredentials::new);
     crate::settings::reapply_network_settings_preserving_password(ctx);
-    // 订阅密码变更(UI 写入时),同步重推全局 slot。
+    // Subscribe to password changes (when the UI writes them) and re-push the global slot in sync.
     ctx.subscribe_to_model(
         &crate::settings::network_secrets::ProxyCredentials::handle(ctx),
         |_model, _event, ctx| {
@@ -1205,7 +1215,7 @@ fn initialize_app(
 
     ctx.add_singleton_model(AntivirusInfo::new);
 
-    // 云同步 Token 走 OS 密钥库，不落 TOML。
+    // The cloud sync token goes through the OS keychain, not TOML.
     ctx.add_singleton_model(crate::settings::CloudSyncTokenStore::new);
 
     cfg_if::cfg_if! {
@@ -1229,10 +1239,11 @@ fn initialize_app(
     ctx.set_default_binding_validator(is_binding_cross_platform);
 
     if FeatureFlag::Autoupdate.is_enabled() {
-        // 原:同步调用 remove_old_executable() 清理上一次 auto-update 遗留的旧
-        // 可执行文件。改:丢到 background_executor,跨平台路径当中只有 macOS
-        // 实际要做事(Linux/Windows 是 noop),在 macOS 上也只是 fs::remove_dir_all,
-        // 与主线程后续逻辑零依赖。失败原本就只是 log::error,后台跳不会丢信息。
+        // Originally: synchronously call remove_old_executable() to clean up the old executable left
+        // over from the last auto-update. Changed: move it to the background_executor; across
+        // platforms only macOS actually does work (Linux/Windows are no-ops), and even on macOS it
+        // is just fs::remove_dir_all, with zero dependency on subsequent main-thread logic. The
+        // failure was already just a log::error, so moving it to the background loses no information.
         ctx.background_executor()
             .spawn(async {
                 if let Err(e) = autoupdate::remove_old_executable() {
@@ -1281,8 +1292,8 @@ fn initialize_app(
     ctx.add_singleton_model(|_ctx| SyncedInputState::new());
 
     ctx.add_singleton_model(remote_server::manager::RemoteServerManager::new);
-    // Zap Wave 6-1:`remote_server::wire_auth_token_rotation(ctx)` 调用随
-    // server API token rotation 事件 + `wire_auth_token_rotation` 函数本体一同物理删。
+    // Zap Wave 6-1: the `remote_server::wire_auth_token_rotation(ctx)` call was physically deleted
+    // along with the server API token rotation event + the `wire_auth_token_rotation` function body.
 
     log::info!(
         "Starting warp with channel state {} and version {:?}",
@@ -1320,8 +1331,9 @@ fn initialize_app(
     let user_is_logged_in = auth_state.is_logged_in();
 
     if user_is_logged_in {
-        // Zap 本地 auth facade 在 `AuthState::initialize` 时已把身份快照装载完毕。
-        // 启动阶段不再额外触发一次云端 token refresh / auth refresh。
+        // The Zap local auth facade has already loaded the identity snapshot during
+        // `AuthState::initialize`. The startup phase no longer triggers an extra cloud token refresh
+        // / auth refresh.
 
         // Set the first frame callback to record the app's startup time.
         // This is only sent for logged-in users so that new users don't skew performance metrics.
@@ -1330,8 +1342,8 @@ fn initialize_app(
         ctx.on_first_frame_drawn(move |ctx| {
             let timing_data = IntervalTimer::handle(ctx).update(ctx, |timer, _| {
                 timer.mark_interval_end("FIRST_FRAME_DRAWN");
-                // 本地调优出口:WARP_STARTUP_TRACE=1 时把完整启动时序表打到 stderr。
-                // 不影响遥测逻辑,仅为开发者使用。
+                // Local tuning hook: when WARP_STARTUP_TRACE=1, print the full startup timing table
+                // to stderr. Does not affect telemetry logic; for developer use only.
                 timer.print_trace_to_stderr_if_enabled();
                 timer.compute_stats()
             });
@@ -1369,8 +1381,9 @@ fn initialize_app(
         // If the app was opened while logged out, record an event for measuring new users.
         // This is sent immediately in case they quit the app on the signup screen.
         send_telemetry_sync_from_app_ctx!(TelemetryEvent::LoggedOutStartup, ctx);
-        // 未登录用户也需要能查看启动时序(BYOP 场景占多数),在首帧后
-        // 打一次 WARP_STARTUP_TRACE 表。不发任何遥测,不影响逻辑。
+        // Logged-out users also need to be able to view the startup timing (most cases are BYOP);
+        // print the WARP_STARTUP_TRACE table once after the first frame. Sends no telemetry, does
+        // not affect logic.
         ctx.on_first_frame_drawn(move |ctx| {
             IntervalTimer::handle(ctx).update(ctx, |timer, _| {
                 timer.mark_interval_end("FIRST_FRAME_DRAWN");
@@ -1477,8 +1490,8 @@ fn initialize_app(
     ai::blocklist::block::status_bar::init(ctx);
     drive::index::init(ctx);
     ai_assistant::panel::init(ctx);
-    // Zap Wave 7-2:`settings_view::update_environment_form::init` 随 cloud ambient agent
-    // 主体子系统物理删。
+    // Zap Wave 7-2: `settings_view::update_environment_form::init` was physically deleted along with
+    // the cloud ambient agent main subsystem.
     env_vars::env_var_collection_block::init(ctx);
     terminal::ssh::install_tmux::init(ctx);
     terminal::ssh::warpify::init(ctx);
@@ -1494,7 +1507,7 @@ fn initialize_app(
 
     timer.mark_interval_end("SUBSYSTEM_INITS_DONE");
 
-    // 后台检测系统安装的 CLI agent，不阻塞 UI
+    // Detect system-installed CLI agents in the background, without blocking the UI
     crate::terminal::CLIAgent::refresh_install_cache();
 
     let display_count = ctx.windows().display_count();
@@ -1521,9 +1534,9 @@ fn initialize_app(
     ctx.add_singleton_model(FileModel::new);
     ctx.add_singleton_model(|ctx| {
         let model = GlobalBufferModel::new(ctx);
-        // 客户端 app:订阅 RemoteServerManager 的 buffer push 事件。daemon 不做
-        // 这一步(daemon 不注册 RemoteServerManager),所以这段不能放进
-        // GlobalBufferModel::new。RemoteServerManager 已在前面注册过。
+        // Client app: subscribe to RemoteServerManager's buffer push events. The daemon does not do
+        // this step (the daemon doesn't register RemoteServerManager), so this can't go inside
+        // GlobalBufferModel::new. RemoteServerManager was already registered earlier.
         #[cfg(feature = "local_tty")]
         if FeatureFlag::SshRemoteServer.is_enabled() {
             GlobalBufferModel::subscribe_to_remote_server_manager(ctx);
@@ -1536,9 +1549,10 @@ fn initialize_app(
     #[cfg(feature = "voice_input")]
     ctx.add_singleton_model(voice_input::VoiceInput::new);
     ctx.add_singleton_model(|_| {
-        // Zap(本地化,Phase 4):原默认注入 `ServerVoiceTranscriber` 走云端 Wispr STT。
-        // 本地化场景下云端语音转写不可用,改为 `disabled()` 让上层 `transcriber()` 返 None,
-        // 语音输入 UI 变为只采集不转写(后续接入本地 STT 补上)。
+        // Zap (localization, Phase 4): the original default injected `ServerVoiceTranscriber` using
+        // cloud Wispr STT. In the localized scenario cloud voice transcription is unavailable, so
+        // it's changed to `disabled()` to make the upper-layer `transcriber()` return None, and the
+        // voice input UI becomes capture-only without transcription (local STT to be added later).
         VoiceTranscriber::disabled()
     });
 
@@ -1561,10 +1575,11 @@ fn initialize_app(
         )
     });
 
-    // Zap(Wave 4):SyncQueue 整删后,不再有 `unsynced_actions` /
-    // `objects_with_pending_changes` 跟踪;本地写入即“完成”。
+    // Zap (Wave 4): after SyncQueue was fully deleted, there is no longer `unsynced_actions` /
+    // `objects_with_pending_changes` tracking; a local write is itself "complete".
     let _ = (&object_store_model, &object_actions);
-    // 保留 `ObjectTypeAndId` import 供同 crate 其他模块按 `crate::` 路径访问。
+    // Keep the `ObjectTypeAndId` import so other modules in the same crate can access it via the
+    // `crate::` path.
     let _: Option<ObjectTypeAndId> = None;
 
     timer.mark_interval_end("CLOUD_MODEL_INITIALIZED");
@@ -1576,7 +1591,8 @@ fn initialize_app(
     {
         let (restored, failed_to_restore) =
             RestoredAgentConversations::new(multi_agent_conversations);
-        // 把无法转换的持久化会话从 sqlite 中清理掉,避免每次启动都重复尝试 + 打 warn
+        // Clean up un-convertible persisted sessions from sqlite, to avoid retrying + warning on
+        // every startup
         if !failed_to_restore.is_empty() {
             if let Some(sender) =
                 crate::global_resource_handles::GlobalResourceHandlesProvider::as_ref(ctx)
@@ -1599,8 +1615,8 @@ fn initialize_app(
     }
     ctx.add_singleton_model(|_| CLIAgentSessionsModel::new());
     ctx.add_singleton_model(BlocklistAIPermissions::new);
-    // 通知中心单例 model:必须排在 BlocklistAIHistoryModel
-    // 和 CLIAgentSessionsModel 之后注册,因为构造时会订阅这两个 model。
+    // Notification-center singleton model: must be registered after BlocklistAIHistoryModel and
+    // CLIAgentSessionsModel, because its constructor subscribes to those two models.
     ctx.add_singleton_model(crate::notifications::model::NotificationsModel::new);
 
     ctx.add_singleton_model(|_| UserProfiles::new(restored_user_profiles));
@@ -1609,12 +1625,14 @@ fn initialize_app(
 
     ctx.add_singleton_model(|_| AudibleBell::new());
 
-    // Zap:UpdateManager 只负责本地 cloud object 的内存/SQLite 同步,不再注入云端 client。
+    // Zap: UpdateManager only handles the in-memory/SQLite sync of local cloud objects, and no
+    // longer injects a cloud client.
     ctx.add_singleton_model(|ctx| UpdateManager::new(persistence_writer.sender(), ctx));
 
     let toml_file_path = settings::user_preferences_toml_file_path();
-    // Zap(本地化,Phase 5):`PreferencesSyncer` 已物理删除。原同步器负责本地
-    // settings.toml 与云端 preferences 双向同步,本地化场景下只保留本地 toml 加载。
+    // Zap (localization, Phase 5): `PreferencesSyncer` has been physically deleted. The original
+    // syncer handled two-way sync between the local settings.toml and cloud preferences; in the
+    // localized scenario only local toml loading is kept.
     let _ = toml_file_path;
     let _ = startup_toml_parse_error_for_syncer;
 
@@ -1668,8 +1686,9 @@ fn initialize_app(
     ctx.add_singleton_model(NotebookKeybindings::new);
     ctx.add_singleton_model(TerminalKeybindings::new);
     ctx.add_singleton_model(|_| ActiveSession::default());
-    // Zap(本地化,Phase 2d-4a-1):原 `Listener` singleton 负责云端 cloud_objects RTC WebSocket,
-    // 2b-1 后 `start_listener` 已是 no-op,本班整个文件与 singleton 注入一起物理删除。
+    // Zap (localization, Phase 2d-4a-1): the original `Listener` singleton handled the cloud
+    // cloud_objects RTC WebSocket; after 2b-1 `start_listener` was already a no-op, and in this
+    // batch the entire file and the singleton injection were physically deleted together.
 
     #[cfg(all(not(target_family = "wasm"), feature = "local_tty"))]
     {
@@ -2023,7 +2042,8 @@ fn app_callbacks(is_integration_test: bool) -> warpui::platform::AppCallbacks {
             ctx.dispatch_global_action("workspace:save_app", &());
         })),
         on_window_moved: Some(Box::new(move |ctx| {
-            // 启动期 winit 会连续触发若干次 move/resize,这阶段的 save_app 没有意义且拖慢启动
+            // During startup, winit fires several move/resize events in a row; save_app during this
+            // phase is pointless and slows startup
             if ctx.windows().stage() == ApplicationStage::Starting {
                 return;
             }
@@ -2265,19 +2285,21 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         flags.extend(features::RELEASE_FLAGS);
     }
 
-    // SSH remote-server:release bundle 走 RELEASE_FLAGS 启用,但 dev 源码构建
-    // (`cargo run`)不是 release bundle,该 flag 会一直关闭 —— 于是 SSH 会话
-    // 永远退回 legacy 路径,remote-server transport 不激活,dev 模式自动构建并
-    // 上传二进制(见 ssh_transport.rs)也就没有机会触发。这里在 debug 构建里
-    // 显式开启,保证开发时能联调远端文件打开 / buffer-sync。Windows 暂不支持
-    // remote-server 二进制,与 RELEASE_FLAGS 的 cfg 保持一致排除掉。
+    // SSH remote-server: the release bundle enables it via RELEASE_FLAGS, but a dev source build
+    // (`cargo run`) is not a release bundle, so the flag stays off -- which means SSH sessions
+    // always fall back to the legacy path, the remote-server transport is not activated, and the
+    // dev-mode auto-build-and-upload of the binary (see ssh_transport.rs) never gets a chance to
+    // trigger. Enable it explicitly in debug builds to ensure remote file open / buffer-sync can be
+    // tested during development. Windows does not yet support the remote-server binary, so it is
+    // excluded to stay consistent with the RELEASE_FLAGS cfg.
     #[cfg(all(debug_assertions, not(windows)))]
     flags.insert(FeatureFlag::SshRemoteServer);
     #[cfg(all(debug_assertions, not(windows)))]
     flags.insert(FeatureFlag::ServerFileBrowser);
 
-    // Issue #72: HTTP 代理设置页面。不走 channel 判断,所有 channel 含 zap-oss
-    // 默认启用,作为企业 VPN / 公司代理场景的基本能力。
+    // Issue #72: the HTTP proxy settings page. Not gated by channel; enabled by default on all
+    // channels including zap-oss, as a basic capability for enterprise VPN / corporate proxy
+    // scenarios.
     flags.insert(FeatureFlag::HttpProxySettings);
 
     let extra_flags: &[FeatureFlag] = &[
@@ -2335,8 +2357,9 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::ShellSelector,
         #[cfg(feature = "block_toolbelt_save_as_workflow")]
         FeatureFlag::BlockToolbeltSaveAsWorkflow,
-        // Zap Wave 7-2:`CloudEnvironments` FeatureFlag 随 cloud ambient agent 主体子系统
-        // 物理删 —— `warp environment` 子命令 + `--environment` 参数同步下线。
+        // Zap Wave 7-2: the `CloudEnvironments` FeatureFlag was physically deleted along with the
+        // cloud ambient agent main subsystem -- the `warp environment` subcommand + the
+        // `--environment` argument were decommissioned in step.
         #[cfg(all(feature = "simulate_github_unauthed", debug_assertions))]
         FeatureFlag::SimulateGithubUnauthed,
         #[cfg(feature = "full_screen_zen_mode")]
@@ -2505,8 +2528,9 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::ServerFileBrowser,
         #[cfg(feature = "allow_ignoring_input_suggestions")]
         FeatureFlag::AllowIgnoringInputSuggestions,
-        // Zap(本地化):ambient agent / agent management view 的云端入口已物理下线。
-        // BYOP agent 本地运行不依赖这些入口。
+        // Zap (localization): the cloud entry points for the ambient agent / agent management view
+        // have been physically decommissioned. BYOP agents running locally do not depend on these
+        // entry points.
         #[cfg(feature = "code_launch_modal")]
         FeatureFlag::CodeLaunchModal,
         #[cfg(feature = "api_key_authentication")]
@@ -2658,10 +2682,11 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
     ];
     flags.extend(extra_flags.iter().copied());
 
-    // 不稳定功能开关:统一通过 `ZAP_UNSTABLE_FEATURES` 环境变量在 release 构建里
-    // 显式启用尚未正式发布的功能。值为逗号分隔的不稳定功能名(snake_case),
-    // 或 `all` / `*` 表示一次性全开;dev 构建已经在 debug_assertions 路径上自动
-    // 启用所有当前不稳定功能,因此此处主要服务于 release 用户。
+    // Unstable feature switches: uniformly use the `ZAP_UNSTABLE_FEATURES` environment variable to
+    // explicitly enable not-yet-released features in release builds. The value is a comma-separated
+    // list of unstable feature names (snake_case), or `all` / `*` to turn them all on at once; dev
+    // builds already auto-enable all current unstable features on the debug_assertions path, so this
+    // mainly serves release users.
     if let Ok(raw) = std::env::var("ZAP_UNSTABLE_FEATURES") {
         let normalized = raw.trim().to_ascii_lowercase();
         let enable_all = matches!(normalized.as_str(), "all" | "*");
@@ -2680,8 +2705,9 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
     flags
 }
 
-/// `ZAP_UNSTABLE_FEATURES` 接受的不稳定功能名 -> FeatureFlag 映射。
-/// 这里登记的功能在 release 构建下默认隐藏,设置对应 token 后才会出现;
-/// dev 构建走 debug_assertions 分支默认启用,无需该变量。
+/// Mapping from the unstable feature names accepted by `ZAP_UNSTABLE_FEATURES` -> FeatureFlag.
+/// The features registered here are hidden by default in release builds and only appear once the
+/// corresponding token is set; dev builds enable them by default via the debug_assertions branch,
+/// with no need for this variable.
 const UNSTABLE_FEATURES: &[(&str, FeatureFlag)] =
     &[("server_file_browser", FeatureFlag::ServerFileBrowser)];

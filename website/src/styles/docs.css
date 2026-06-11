@@ -1,6 +1,6 @@
 /* ============================================================
- * Zap docs — Cursor 风格双主题重构
- * 三栏布局(sidebar / article / toc),跟 landing 同一套 token。
+ * Zap docs — Cursor-style dual-theme rebuild
+ * Three-column layout (sidebar / article / toc), same token set as landing.
  * ============================================================ */
 
 :root,
@@ -299,7 +299,7 @@ header.nav {
     height: 16px;
     display: block;
 }
-/* 仅供屏幕阅读器使用 */
+/* Screen-reader only */
 .sr-only {
     position: absolute;
     width: 1px;
@@ -416,7 +416,7 @@ header.nav {
     }
 }
 
-/* ---------- Docs shell(三栏) ---------- */
+/* ---------- Docs shell (three columns) ---------- */
 .docs-shell {
     display: grid;
     grid-template-columns: 248px minmax(0, 1fr) 220px;
@@ -793,7 +793,7 @@ main.doc code {
     color: var(--ink);
 }
 
-/* ---------- Docs 首页:特性卡片网格 ---------- */
+/* ---------- Docs home: feature card grid ---------- */
 .feat-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -835,7 +835,7 @@ main.doc code {
     margin: 0;
 }
 
-/* ---------- 代码卡(CodeCard) ---------- */
+/* ---------- Code card (CodeCard) ---------- */
 .code-card {
     margin: 18px 0;
     background: var(--bg-2);
@@ -1023,7 +1023,7 @@ pre.code .acc {
     border-color: var(--accent-line);
 }
 
-/* ---------- 表格 ---------- */
+/* ---------- Tables ---------- */
 table.props {
     width: 100%;
     border-collapse: collapse;
@@ -1075,7 +1075,7 @@ table.props td.d {
     color: var(--ink-2);
 }
 
-/* ---------- 上一篇/下一篇 ---------- */
+/* ---------- Previous / Next ---------- */
 .pager {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1167,13 +1167,6 @@ aside.toc {
     font-weight: 500;
 }
 
-/* ---------- i18n 可见性 ---------- */
-body[data-locale="en"] [data-lang]:not([data-lang="en"]),
-body[data-locale="zh"] [data-lang]:not([data-lang="zh"]),
-body[data-locale="ja"] [data-lang]:not([data-lang="ja"]) {
-    display: none;
-}
-
 /* ---------- Scrollbar ---------- */
 * {
     scrollbar-width: thin;
@@ -1200,7 +1193,7 @@ body[data-locale="ja"] [data-lang]:not([data-lang="ja"]) {
     background: transparent;
 }
 
-/* ---------- 搜索弹窗 ---------- */
+/* ---------- Search modal ---------- */
 .search-modal {
     position: fixed;
     inset: 0;
@@ -1256,7 +1249,7 @@ body[data-locale="ja"] [data-lang]:not([data-lang="ja"]) {
     color: var(--ink);
 }
 
-/* ---------- Pagefind UI 主题适配 ---------- */
+/* ---------- Pagefind UI theme adaptation ---------- */
 :root {
     --pagefind-ui-scale: 0.9;
     --pagefind-ui-primary: var(--accent);
@@ -1272,7 +1265,7 @@ body[data-locale="ja"] [data-lang]:not([data-lang="ja"]) {
 }
 
 /* ============================================================
- * 主题切换按钮(docs)
+ * Theme toggle button (docs)
  * ============================================================ */
 .theme-toggle {
     display: inline-flex;

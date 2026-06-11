@@ -1,6 +1,8 @@
-// openWarp(Channel::Oss)autoupdate 走 GitHub Releases API,而非 Zap 官方
-// channel_versions / GCS。本模块只负责"取最新 release 元数据" + "按文件名挑资产";
-// 实际的下载落盘 + 打开目录由 windows.rs / mac.rs 完成。
+// On the Oss channel, autoupdate goes through the GitHub Releases API rather
+// than Zap's official channel_versions / GCS feed. This module is only
+// responsible for "fetching the latest release metadata" + "picking assets by
+// file name"; the actual download-to-disk + opening the directory is handled
+// by windows.rs / mac.rs.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -9,10 +11,11 @@ use anyhow::{Context as _, Result};
 use lazy_static::lazy_static;
 use serde::Deserialize;
 
-const REPO_OWNER: &str = "zerx-lab";
-const REPO_NAME: &str = "warp";
+const REPO_OWNER: &str = "mehmetbaykar";
+const REPO_NAME: &str = "zap";
 
-// GitHub 强制要求 User-Agent;同时显式声明 API 版本避免未来 default 漂移。
+// GitHub requires a User-Agent; we also declare the API version explicitly to
+// avoid drift if the default changes in the future.
 const USER_AGENT: &str = "Zap-Autoupdate";
 const ACCEPT: &str = "application/vnd.github+json";
 const API_VERSION: &str = "2022-11-28";
@@ -31,16 +34,18 @@ pub struct GithubAsset {
     pub name: String,
     pub browser_download_url: String,
     pub size: u64,
-    /// GitHub Releases API(2024.12+)在 asset 元数据里返回的资产摘要,
-    /// 形如 `"sha256:<hex>"`。老 release 没有这个字段时为 None。
+    /// Asset digest returned by the GitHub Releases API (2024.12+) in the asset
+    /// metadata, formatted as `"sha256:<hex>"`. None for older releases that do
+    /// not include this field.
     #[serde(default)]
     pub digest: Option<String>,
 }
 
 impl GithubAsset {
-    /// 解析 `digest` 字段,返回小写的十六进制 SHA-256(64 字符)或 None。
-    /// 当前 GitHub 返回的算法只有 sha256;其他算法直接当作 None 让上层跳过校验,
-    /// 不去做基于未知算法的"绿色通行证"。
+    /// Parse the `digest` field and return the lowercase hex SHA-256 (64 chars),
+    /// or None. GitHub currently only returns the sha256 algorithm; any other
+    /// algorithm is treated as None so the caller skips verification rather than
+    /// granting a "green pass" based on an unknown algorithm.
     pub fn sha256_hex(&self) -> Option<String> {
         let raw = self.digest.as_ref()?;
         let hex = raw.strip_prefix("sha256:")?;
@@ -63,8 +68,10 @@ impl GithubRelease {
 }
 
 lazy_static! {
-    /// 最近一次 fetch 到的 release。fetch_version 写入,download_update 读取。
-    /// 这样 download 阶段不必再次请求 GitHub API,也避免 race(两次请求间 release 翻新)。
+    /// The most recently fetched release. Written by fetch_version, read by
+    /// download_update. This means the download stage does not have to call the
+    /// GitHub API again, and avoids a race (the release being refreshed between
+    /// the two requests).
     static ref LATEST_RELEASE: Mutex<Option<GithubRelease>> = Mutex::new(None);
 }
 
@@ -89,12 +96,12 @@ pub async fn fetch_latest_release(client: &http_client::Client) -> Result<Github
         .timeout(FETCH_TIMEOUT)
         .send()
         .await
-        .context("调用 GitHub Releases API 失败")?
+        .context("failed to call the GitHub Releases API")?
         .error_for_status()
-        .context("GitHub Releases API 返回非 2xx 状态码")?
+        .context("GitHub Releases API returned a non-2xx status code")?
         .json()
         .await
-        .context("解析 GitHub Releases JSON 失败")?;
+        .context("failed to parse the GitHub Releases JSON")?;
     log::info!(
         "GitHub latest release: tag={} assets={}",
         release.tag_name,

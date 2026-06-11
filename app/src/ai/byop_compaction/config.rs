@@ -1,4 +1,4 @@
-//! 压缩配置 — 对齐 opencode `Config.compaction`:
+//! Compaction config — aligned with opencode `Config.compaction`:
 //!
 //! ```ts
 //! compaction: {
@@ -10,22 +10,22 @@
 //! }
 //! ```
 //!
-//! warp 这边把它放在 settings/ai.rs 的 BYOPCompactionSettings,反序列化后转成本结构。
+//! On the warp side it lives in BYOPCompactionSettings in settings/ai.rs, and is converted into this struct after deserialization.
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactionConfig {
-    /// 自动 overflow 触发开关。默认 true。
+    /// Auto overflow trigger switch. Default true.
     pub auto: bool,
-    /// tool output prune 开关。默认 true。
+    /// Tool output prune switch. Default true.
     pub prune: bool,
-    /// 保留最近几个 user turn 作 tail。默认 2。
+    /// How many recent user turns to keep as the tail. Default 2.
     pub tail_turns: usize,
-    /// 强制覆盖 `preserve_recent_budget`(token)。None 则按 opencode 公式算。
+    /// Forcibly overrides `preserve_recent_budget` (tokens). None means compute via the opencode formula.
     pub preserve_recent_tokens: Option<usize>,
-    /// 强制覆盖 `usable()` 中的 reserved buffer(token)。None 则取 min(20_000, max_output)。
+    /// Forcibly overrides the reserved buffer in `usable()` (tokens). None means take min(20_000, max_output).
     pub reserved: Option<usize>,
-    /// 摘要专用 model 引用(可选)。设了用它,没设回退到 conversation 当前 model。
+    /// Summary-specific model reference (optional). If set, use it; if unset, fall back to the conversation's current model.
     pub compaction_model: Option<CompactionModelRef>,
 }
 
@@ -49,7 +49,7 @@ impl Default for CompactionConfig {
 }
 
 impl CompactionConfig {
-    /// 计算实际的 preserve_recent_budget — 对齐 opencode `compaction.ts:134-139`:
+    /// Computes the actual preserve_recent_budget — aligned with opencode `compaction.ts:134-139`:
     /// `cfg.preserve_recent_tokens ?? min(MAX, max(MIN, floor(usable * 0.25)))`
     pub fn preserve_recent_budget(&self, usable_tokens: usize) -> usize {
         use super::consts::{MAX_PRESERVE_RECENT_TOKENS, MIN_PRESERVE_RECENT_TOKENS};
@@ -58,16 +58,16 @@ impl CompactionConfig {
         })
     }
 
-    /// 从 `AISettings` 反序列化(对齐 opencode `Config.compaction.*`)。
+    /// Deserializes from `AISettings` (aligned with opencode `Config.compaction.*`).
     ///
-    /// 字段映射:
+    /// Field mapping:
     /// - `byop_compaction_auto` → `auto`
     /// - `byop_compaction_prune` → `prune`
-    /// - `byop_compaction_tail_turns` → `tail_turns`(0 也保留,意为禁用 tail 切分)
-    /// - `byop_compaction_preserve_recent_tokens` → `preserve_recent_tokens`(0 → None,走公式)
-    /// - `byop_compaction_reserved` → `reserved`(0 → None,走 min(20_000, max_output))
+    /// - `byop_compaction_tail_turns` → `tail_turns` (0 is also kept, meaning disable tail splitting)
+    /// - `byop_compaction_preserve_recent_tokens` → `preserve_recent_tokens` (0 → None, use the formula)
+    /// - `byop_compaction_reserved` → `reserved` (0 → None, use min(20_000, max_output))
     /// - `byop_compaction_model_provider_id` + `byop_compaction_model_id` → `compaction_model`
-    ///   (任一为空 → None,回退到 conversation 当前 model)
+    ///   (if either is empty → None, fall back to the conversation's current model)
     pub fn from_settings(app: &warpui::AppContext) -> Self {
         use crate::settings::AISettings;
         use warpui::SingletonEntity as _;

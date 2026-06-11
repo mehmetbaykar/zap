@@ -1949,7 +1949,7 @@ impl FileTreeView {
         let id_for_drag = id.clone();
         let hoverable = Hoverable::new(render_state.mouse_state.clone(), move |mouse_state| {
             let item_highlight_state = ItemHighlightState::new(is_selected, mouse_state);
-            // 远端文件已支持通过 buffer-sync 协议打开,不再显示「无法打开」提示。
+            // Remote files can now be opened via the buffer-sync protocol, so the "cannot open" hint is no longer shown.
             Self::render_item_with_hover(
                 render_state,
                 appearance,
@@ -1978,7 +1978,7 @@ impl FileTreeView {
                 });
             },
         )
-        // 本地和远端文件都可点击打开,统一用手型光标。
+        // Both local and remote files can be clicked to open, so use the pointing-hand cursor for both.
         .with_cursor(Cursor::PointingHand)
         .finish();
 
@@ -2204,7 +2204,7 @@ impl FileTreeView {
                     let path = metadata.path.to_local_path_lossy();
                     self.open_file(&path, None, ctx);
                 } else {
-                    // 远端文件:走 buffer-sync 协议打开。
+                    // Remote file: open via the buffer-sync protocol.
                     #[cfg(feature = "local_tty")]
                     if let Some(host_id) = root_dir.remote_host_id.clone() {
                         let remote_path = crate::code::buffer_location::RemotePath::new(
@@ -2849,7 +2849,7 @@ pub enum FileTreeEvent {
     CDToDirectory { path: PathBuf },
     #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
     OpenDirectoryInNewTab { path: PathBuf },
-    /// 在远端文件树里点击一个文件时发出,请求以远端 buffer 方式打开它。
+    /// Emitted when a file is clicked in the remote file tree, requesting it be opened as a remote buffer.
     #[cfg_attr(not(feature = "local_tty"), allow(dead_code))]
     OpenRemoteFile {
         remote_path: crate::code::buffer_location::RemotePath,

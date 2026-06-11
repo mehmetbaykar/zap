@@ -183,11 +183,11 @@ fn test_remaining_substitutions() {
 
         assert!(result.is_ok());
 
-        // 基于 argv 构造命令时，每个 token 都是独立参数。
-        // %c → "Zap Test Application"（单个参数，保留空格）
-        // %i → "--icon" 和 "/foo/bar/icon.png"（两个独立参数）
-        // %k → desktop 文件路径
-        // %% → "%"
+        // When building the command from argv, each token is an independent argument.
+        // %c -> "Zap Test Application" (a single argument, preserving the space)
+        // %i -> "--icon" and "/foo/bar/icon.png" (two independent arguments)
+        // %k -> the desktop file path
+        // %% -> "%"
         let cmd = result.unwrap();
         let args: Vec<_> = cmd.get_args().collect();
         assert_eq!(args[0], "Zap Test Application");

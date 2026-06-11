@@ -1,10 +1,8 @@
 use warp_core::ui::builder::MIN_FONT_SIZE;
 
-// 重导出底层 warp_core 定义的 UI 字号常量,
-// 使 `crate::settings::DEFAULT_UI_FONT_SIZE` / `UI_FONT_SIZE_MIN` / `UI_FONT_SIZE_MAX` 仍可用。
-pub use warp_core::ui::appearance::{
-    DEFAULT_UI_FONT_SIZE, UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN,
-};
+// Re-export the UI font-size constants defined in the underlying warp_core,
+// so `crate::settings::DEFAULT_UI_FONT_SIZE` / `UI_FONT_SIZE_MIN` / `UI_FONT_SIZE_MAX` remain available.
+pub use warp_core::ui::appearance::{DEFAULT_UI_FONT_SIZE, UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN};
 use warpui::{fonts::Weight, rendering::ThinStrokes, AppContext, SingletonEntity};
 
 use settings::{

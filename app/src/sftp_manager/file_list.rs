@@ -1,6 +1,6 @@
-//! 文件列表渲染组件
+//! File list rendering component
 //!
-//! 提供文件列表表头和文件行的渲染功能。
+//! Provides rendering for the file list header and file rows.
 //! author: logic
 //! date: 2026-05-26
 
@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
 use warpui::elements::{
-    ConstrainedBox, Container, CrossAxisAlignment, Fill, Flex, Hoverable,
-    MouseStateHandle, ParentElement, SavePosition, Shrinkable, Text,
+    ConstrainedBox, Container, CrossAxisAlignment, Fill, Flex, Hoverable, MouseStateHandle,
+    ParentElement, SavePosition, Shrinkable, Text,
 };
 use warpui::platform::Cursor;
 use warpui::Element;
@@ -19,12 +19,12 @@ use crate::sftp_manager::browser::SftpBrowserAction;
 use crate::sftp_manager::types::{format_size, FileEntry, FileEntryType};
 use crate::ui_components::icons::Icon;
 
-/// 文件大小列宽度
+/// File size column width
 const FILE_SIZE_WIDTH: f32 = 80.0;
-/// 文件日期列宽度
+/// File date column width
 const FILE_DATE_WIDTH: f32 = 120.0;
 
-/// 根据文件条目类型返回对应图标
+/// Return the corresponding icon based on the file entry type
 pub fn file_icon(entry_type: &FileEntryType) -> Icon {
     match entry_type {
         FileEntryType::Directory | FileEntryType::Symlink => Icon::Folder,
@@ -32,7 +32,7 @@ pub fn file_icon(entry_type: &FileEntryType) -> Icon {
     }
 }
 
-/// 渲染单个文件行
+/// Render a single file row
 pub fn render_file_row(
     entry: &FileEntry,
     index: usize,
@@ -46,7 +46,10 @@ pub fn render_file_row(
     } else {
         theme.background().into_solid()
     };
-    let icon_color = if matches!(entry.file_type, FileEntryType::Directory | FileEntryType::Symlink) {
+    let icon_color = if matches!(
+        entry.file_type,
+        FileEntryType::Directory | FileEntryType::Symlink
+    ) {
         theme.accent().into_solid()
     } else {
         theme.sub_text_color(theme.background()).into_solid()
@@ -63,15 +66,17 @@ pub fn render_file_row(
     let bg_fill: Fill = bg_color.into();
 
     Hoverable::new(mouse_handle, move |_| {
-        // 图标
+        // Icon
         let icon_el = ConstrainedBox::new(
-            file_icon(&file_type).to_warpui_icon(icon_color.into()).finish(),
+            file_icon(&file_type)
+                .to_warpui_icon(icon_color.into())
+                .finish(),
         )
         .with_width(16.0)
         .with_height(16.0)
         .finish();
 
-        // 名称
+        // Name
         let name_el = Shrinkable::new(
             1.0,
             Text::new_inline(name.clone(), ui_font, ui_font_size)
@@ -80,7 +85,7 @@ pub fn render_file_row(
         )
         .finish();
 
-        // 大小
+        // Size
         let size_text = if matches!(file_type, FileEntryType::Directory | FileEntryType::Symlink) {
             String::from("--")
         } else {
@@ -94,7 +99,7 @@ pub fn render_file_row(
         .with_width(FILE_SIZE_WIDTH)
         .finish();
 
-        // 修改日期
+        // Modified date
         let date_text = modified.clone().unwrap_or_else(|| String::from("--"));
         let date_el = ConstrainedBox::new(
             Text::new_inline(date_text, ui_font, ui_font_size)
@@ -104,7 +109,7 @@ pub fn render_file_row(
         .with_width(FILE_DATE_WIDTH)
         .finish();
 
-        // 组装行内容
+        // Assemble the row content
         let row_content = Flex::row()
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_spacing(8.0)
@@ -143,7 +148,7 @@ pub fn render_file_row(
     .finish()
 }
 
-/// 渲染文件列表头部
+/// Render the file list header
 pub fn render_header(appearance: &Appearance) -> Box<dyn Element> {
     let theme = appearance.theme();
     let header_color = theme.sub_text_color(theme.background());
@@ -151,7 +156,7 @@ pub fn render_header(appearance: &Appearance) -> Box<dyn Element> {
     let name_el = Shrinkable::new(
         1.0,
         Text::new_inline(
-            String::from("名称"),
+            String::from("Name"),
             appearance.ui_font_family(),
             appearance.ui_font_size(),
         )
@@ -162,7 +167,7 @@ pub fn render_header(appearance: &Appearance) -> Box<dyn Element> {
 
     let size_el = ConstrainedBox::new(
         Text::new_inline(
-            String::from("大小"),
+            String::from("Size"),
             appearance.ui_font_family(),
             appearance.ui_font_size(),
         )
@@ -174,7 +179,7 @@ pub fn render_header(appearance: &Appearance) -> Box<dyn Element> {
 
     let date_el = ConstrainedBox::new(
         Text::new_inline(
-            String::from("修改时间"),
+            String::from("Modified"),
             appearance.ui_font_family(),
             appearance.ui_font_size(),
         )
@@ -186,7 +191,7 @@ pub fn render_header(appearance: &Appearance) -> Box<dyn Element> {
 
     let header_row = Flex::row()
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
-        .with_spacing(24.0) // 图标16 + 间距8
+        .with_spacing(24.0) // icon 16 + spacing 8
         .with_child(name_el)
         .with_child(size_el)
         .with_child(date_el)
@@ -200,7 +205,7 @@ pub fn render_header(appearance: &Appearance) -> Box<dyn Element> {
         .finish()
 }
 
-/// 渲染文件行列表
+/// Render the list of file rows
 pub fn render_file_rows(
     entries: &[FileEntry],
     filtered_indices: &[usize],
@@ -208,8 +213,7 @@ pub fn render_file_rows(
     mouse_handles: &[MouseStateHandle],
     appearance: &Appearance,
 ) -> Box<dyn Element> {
-    let mut col = Flex::column()
-        .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+    let mut col = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
     for &index in filtered_indices {
         let entry = &entries[index];

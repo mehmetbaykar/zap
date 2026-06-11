@@ -2968,8 +2968,8 @@ pub fn render_failed_output(props: FailedOutputProps, app: &AppContext) -> Box<d
 
     let error_text = match props.error {
         RenderableAIError::QuotaLimit => {
-            // Zap(Phase 3c A1):删除 QuotaLimit 中依赖 `AIRequestUsageModel`
-            // 渲染刷新时间的逻辑。本地化后云端额度不适用，仅保留通用错误文案。
+            // Zap (Phase 3c A1): removed the QuotaLimit logic that rendered the refresh time via `AIRequestUsageModel`.
+            // After localization cloud quotas don't apply, so only the generic error message is kept.
             format!("{ERROR_APOLOGY_TEXT}\n\n{INTERNAL_WARP_ERROR}")
         }
         RenderableAIError::ServerOverloaded => {
@@ -3361,10 +3361,10 @@ pub(crate) fn render_debug_footer<V: View>(
     );
     debug_row.add_child(copy_button_with_tooltip);
 
-    // Zap: 不再用 `Expanded` —— alt-screen / 长命令 take-over 场景下,父容器
-    // 沿主轴是 infinite constraint(BYOP error block 渲染路径),`Flex + Expanded`
-    // 直接 panic `flex contains flexible children but has an infinite constraint`。
-    // debug_row 本身宽度由内部 Shrinkable 控制,不需要主动撑满父级。
+    // Zap: no longer uses `Expanded` —— in alt-screen / long-command take-over scenarios, the parent container
+    // has an infinite constraint along the main axis (the BYOP error block render path), so `Flex + Expanded`
+    // directly panics with `flex contains flexible children but has an infinite constraint`.
+    // debug_row's own width is controlled by the inner Shrinkable, so it doesn't need to actively fill the parent.
     if let Some(submit_button) = stacked_submit_button {
         let mut column = Flex::column();
         column.add_child(debug_row.finish());

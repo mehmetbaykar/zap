@@ -38,25 +38,26 @@ pub(super) async fn download_update_and_cleanup(
 
     let channel = ChannelState::channel();
     let installer_file_name = installer_file_name()?;
-    // openWarp:从 GitHub Release 缓存里取真实下载 URL(资产名为 ZapSetup.exe /
-    // ZapSetup-arm64.exe,见 installer_file_name())。其他 channel 走官方 base url。
+    // openWarp: get the real download URL from the GitHub Release cache (asset names are
+    // ZapSetup.exe / ZapSetup-arm64.exe, see installer_file_name()). Other channels use the official
+    // base url.
     let url = if matches!(channel, Channel::Oss) {
         if let Some(release) = github::cached_release() {
             if let Some(found) = release.find_asset(&installer_file_name) {
                 found.browser_download_url.clone()
             } else {
                 log::warn!(
-                    "openWarp: cached release tag {} 没有名为 {installer_file_name} 的资产,回退到 tag URL",
+                    "openWarp: cached release tag {} has no asset named {installer_file_name}, falling back to the tag URL",
                     release.tag_name
                 );
                 format!(
-                    "https://github.com/zerx-lab/warp/releases/download/v{}/{installer_file_name}",
+                    "https://github.com/mehmetbaykar/zap/releases/download/v{}/{installer_file_name}",
                     version_info.version
                 )
             }
         } else {
             format!(
-                "https://github.com/zerx-lab/warp/releases/download/v{}/{installer_file_name}",
+                "https://github.com/mehmetbaykar/zap/releases/download/v{}/{installer_file_name}",
                 version_info.version
             )
         }
@@ -116,21 +117,15 @@ pub(super) async fn download_update_and_cleanup(
             if downloaded - last_reported >= REPORT_BYTES_THRESHOLD
                 || last_reported_at.elapsed() >= REPORT_TIME_THRESHOLD
             {
-                on_progress(DownloadProgress {
-                    downloaded,
-                    total,
-                });
+                on_progress(DownloadProgress { downloaded, total });
                 last_reported = downloaded;
                 last_reported_at = Instant::now();
             }
         }
-        on_progress(DownloadProgress {
-            downloaded,
-            total,
-        });
+        on_progress(DownloadProgress { downloaded, total });
     } else {
-        // 复用之前下载好的同名 installer:不再发起新请求,只补一次进度上报
-        // 让 UI 直接显示 100%。
+        // Reuse the previously downloaded installer with the same name: don't issue a new request,
+        // just send one more progress report so the UI shows 100% directly.
         let downloaded = new_installer
             .as_file_mut()
             .metadata()
@@ -143,9 +138,10 @@ pub(super) async fn download_update_and_cleanup(
         });
     }
 
-    // openWarp:校验 GitHub Release 元数据里的 SHA-256,防御 CDN 中间人/损坏。
-    // 校验失败直接返回 Err,installer 临时文件会随后被 TempPath drop 清理;
-    // 这里故意不把它放到 INSTALLER_PATH(否则后续 relaunch() 可能误用)。
+    // openWarp: verify the SHA-256 from the GitHub Release metadata, to defend against CDN
+    // man-in-the-middle / corruption. On verification failure return Err directly; the installer
+    // temp file is then cleaned up when TempPath drops. We intentionally do not place it at
+    // INSTALLER_PATH here (otherwise a later relaunch() might use it by mistake).
     if matches!(channel, Channel::Oss) {
         let temp_path = new_installer.path().to_path_buf();
         if let Err(e) = super::verify_oss_asset_sha256(&temp_path, &installer_file_name) {
@@ -165,7 +161,7 @@ fn autoupdate_log_file() -> Result<PathBuf> {
 }
 
 /// Checks the autoupdate log file from a previous update attempt.
-/// 记录上一次更新尝试中发现的已知问题。
+/// Records known issues found during the last update attempt.
 /// The log file is renamed after processing to avoid duplicate reports on subsequent launches.
 pub(super) fn check_and_report_update_errors(ctx: &mut AppContext) {
     let log_path = match autoupdate_log_file() {
@@ -227,8 +223,9 @@ pub(super) fn check_and_report_update_errors(ctx: &mut AppContext) {
         crate::send_telemetry_sync_from_app_ctx!(TelemetryEvent::AutoupdateForcekillFailed, ctx);
     }
 
-    // openWarp 不上传 autoupdate 失败日志,仅在本地记录错误计数;完整日志文件会被下方
-    // `.log.reported` 重命名保留,用户/调试需要时直接看本地文件。
+    // openWarp does not upload autoupdate failure logs; it only records an error count locally. The
+    // full log file is preserved by the `.log.reported` rename below, so users/debugging can read
+    // the local file directly when needed.
     #[cfg(feature = "crash_reporting")]
     {
         const IGNOREABLE_ERRORS: &[&[u8]] = &[
@@ -279,12 +276,13 @@ pub(super) fn relaunch() -> Result<()> {
         }
     };
 
-    // openWarp(Channel::Oss):Inno Setup 走"非静默"。不带 /SILENT 让用户看到
-    // 标准安装界面,可以亲眼确认要安装的版本号、目标目录,并通过常规 UI 取消。
-    // 仍然保留 /SP- 跳过"准备完成"确认弹窗;/NORESTART 避免要求重启 Windows;
-    // /update=1 给 Inno 脚本里检测升级模式用。
-    // /NOCLOSEAPPLICATIONS 让 Inno 等当前 Zap 进程自然退出(mutex poll),
-    // 不强制 RestartManager 杀进程。
+    // openWarp (Channel::Oss): Inno Setup runs "non-silent". Without /SILENT, the user sees the
+    // standard install UI, can confirm the version number and target directory for themselves, and
+    // can cancel through the normal UI.
+    // We still keep /SP- to skip the "ready to install" confirmation dialog; /NORESTART to avoid
+    // requiring a Windows restart; /update=1 for the Inno script to detect upgrade mode.
+    // /NOCLOSEAPPLICATIONS lets Inno wait for the current Zap process to exit naturally (mutex
+    // poll), instead of forcing RestartManager to kill the process.
     let mut cmd = Command::new(&installer_path);
     if matches!(channel, Channel::Oss) {
         cmd.args([
@@ -296,7 +294,8 @@ pub(super) fn relaunch() -> Result<()> {
             &format!("/DIR={}", install_dir.display()),
         ]);
     } else {
-        // 官方 channel:维持原"silent + 进度条"行为,自动安装并重启。
+        // Official channel: keep the original "silent + progress bar" behavior, installing and
+        // restarting automatically.
         // The Inno Setup install wizard will run without user input. It will re-launch Zap after
         // installing the update files.
         // https://jrsoftware.org/ishelp/index.php?topic=setupcmdline
@@ -355,8 +354,8 @@ fn app_name_prefix(channel: Channel) -> &'static str {
         Channel::Local => "warp",
         Channel::Integration => "integration",
         Channel::Dev => "WarpDev",
-        // 与 script/windows/bundle.ps1 OSS 分支 INSTALLER_NAME=Zap+Setup 对齐,
-        // 这样 GitHub Release 资产名 ZapSetup.exe 能被 installer_file_name() 正确生成。
+        // Aligned with the script/windows/bundle.ps1 OSS branch INSTALLER_NAME=Zap+Setup, so the
+        // GitHub Release asset name ZapSetup.exe can be generated correctly by installer_file_name().
         Channel::Oss => "Zap",
     }
 }

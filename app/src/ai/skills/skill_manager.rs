@@ -342,16 +342,16 @@ impl SkillManager {
         }
     }
 
-    /// 按 skill name(SKILL.md frontmatter `name` 字段)查最佳匹配。
+    /// Finds the best match by skill name (the `name` field in SKILL.md frontmatter).
     ///
-    /// 用于 BYOP `read_skill` 工具:模型只看得到 system prompt 里的 `<name>`,
-    /// 不知道 SKILL.md 的绝对路径,所以必须支持 name → ParsedSkill 解析。
+    /// Used by the BYOP `read_skill` tool: the model only sees the `<name>` in the system prompt
+    /// and doesn't know the absolute path of SKILL.md, so name → ParsedSkill resolution must be supported.
     ///
-    /// 同名多份时按 [`provider_rank`] 升序取第一(`Agents > Zap > Claude > …`),
-    /// 与 `unique_skills`/`list_skill_inventory` 的优先级保持一致。Bundled skill
-    /// 不进 `skills_by_name` 索引,这里单独遍历兜底。
+    /// When there are multiple with the same name, take the first by ascending [`provider_rank`] (`Agents > Zap > Claude > …`),
+    /// consistent with the priority of `unique_skills`/`list_skill_inventory`. Bundled skills
+    /// are not in the `skills_by_name` index, so they are iterated separately as a fallback.
     pub fn find_skill_by_name(&self, name: &str) -> Option<&ParsedSkill> {
-        // Prefer filesystem skills:同名多份按 provider_rank 选最优。
+        // Prefer filesystem skills: when there are duplicates, pick the best by provider_rank.
         let best_fs_path = self
             .skill_paths_by_name(name)
             .into_iter()
@@ -365,7 +365,7 @@ impl SkillManager {
                 return Some(skill);
             }
         }
-        // Fallback: bundled skills(按 name 而非 id 命中)。
+        // Fallback: bundled skills (matched by name rather than id).
         self.bundled_skills
             .values()
             .map(|bundled| &bundled.skill)

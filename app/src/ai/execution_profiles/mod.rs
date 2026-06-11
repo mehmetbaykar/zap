@@ -132,8 +132,8 @@ impl ComputerUsePermission {
 pub enum AskUserQuestionPermission {
     /// Never pause; skip questions and continue with best judgment.
     Never,
-    /// 在 openWarp 中等同于 `AlwaysAsk`:auto-approve 模式不再静默跳过用户问题,
-    /// 只对 shell/编辑等执行类工具自动通过。变体名保留以兼容已序列化的 profile。
+    /// In openWarp this is equivalent to `AlwaysAsk`: auto-approve mode no longer silently skips user questions,
+    /// and only auto-passes execution-class tools like shell/edit. The variant name is kept for compatibility with serialized profiles.
     #[default]
     AskExceptInAutoApprove,
     /// Always pause and wait for the user to answer before continuing, even in auto-approve mode.
@@ -198,13 +198,13 @@ pub struct AIExecutionProfile {
     pub coding_model: Option<LLMId>,
     pub cli_agent_model: Option<LLMId>,
     pub computer_use_model: Option<LLMId>,
-    /// 用于生成会话标题的模型。`None` 时回退到 `base_model`。
+    /// The model used to generate conversation titles. Falls back to `base_model` when `None`.
     pub title_model: Option<LLMId>,
-    /// 主动式 AI(prompt suggestions / NLD / relevant files)使用的模型。
-    /// `None` 时回退到 `base_model`。建议选小/快/便宜的 BYOP 模型。
+    /// The model used for proactive AI (prompt suggestions / NLD / relevant files).
+    /// Falls back to `base_model` when `None`. A small/fast/cheap BYOP model is recommended.
     pub active_ai_model: Option<LLMId>,
-    /// Next Command(灰色补全/zero-state 建议)使用的模型。
-    /// `None` 时回退到 `base_model`。低延迟敏感,建议选最便宜/最快的 BYOP 模型。
+    /// The model used for Next Command (gray completion / zero-state suggestions).
+    /// Falls back to `base_model` when `None`. Latency-sensitive, so the cheapest/fastest BYOP model is recommended.
     pub next_command_model: Option<LLMId>,
 
     pub context_window_limit: Option<u32>,

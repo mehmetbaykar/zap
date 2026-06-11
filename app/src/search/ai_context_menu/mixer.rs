@@ -18,17 +18,17 @@ pub enum AIContextMenuSearchableAction {
         text: String,
     },
     InsertDriveObject {
-        /// Drive 对象类型(Workflow、Notebook 等)。
+        /// Drive object type (Workflow, Notebook, etc.).
         object_type: ObjectType,
-        /// 要附加的 Drive 对象 UID。
+        /// UID of the Drive object to attach.
         object_uid: String,
-        /// Agent Mode 输入框中展示的 @名称。
+        /// The @name shown in the Agent Mode input field.
         display_name: String,
     },
     InsertPlan {
-        /// 要附加的 AI 文档 UID。
+        /// UID of the AI document to attach.
         ai_document_uid: String,
-        /// Agent Mode 输入框中展示的 @名称。
+        /// The @name shown in the Agent Mode input field.
         display_name: String,
     },
     InsertDiffSet {
@@ -36,9 +36,9 @@ pub enum AIContextMenuSearchableAction {
         diff_mode: DiffMode,
     },
     InsertConversation {
-        /// 要附加的 conversation 标识。
+        /// Identifier of the conversation to attach.
         conversation_id: String,
-        /// Agent Mode 输入框中展示的 @标题。
+        /// The @title shown in the Agent Mode input field.
         title: String,
     },
     InsertSkill {

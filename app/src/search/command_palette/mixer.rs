@@ -74,8 +74,8 @@ pub enum CommandPaletteItemAction {
     },
     /// Start a new AI conversation
     NewConversation,
-    /// 打开 SSH 服务器(openWarp 独有)→ 路由到 WorkspaceAction::OpenSshTerminal
-    /// 走 SecretInjector + 新 tab。
+    /// Open an SSH server (openWarp-only) → routed to WorkspaceAction::OpenSshTerminal
+    /// via SecretInjector + a new tab.
     OpenSshServer {
         node_id: String,
         server: warp_ssh_manager::SshServerInfo,
@@ -203,7 +203,7 @@ pub enum ItemSummary {
     },
     ForkConversation,
     NewConversation,
-    /// SSH 服务器(openWarp 独有)。`node_id` 是 ssh_nodes 表的 UUID。
+    /// SSH server (openWarp-only). `node_id` is the UUID in the ssh_nodes table.
     SshServer {
         node_id: String,
     },

@@ -154,7 +154,8 @@ pub async fn run_ssh_script(socket_path: &Path, script: &str, timeout: Duration)
         .map_err(|e| anyhow!("Script failed: {e}"))
 }
 
-/// 通过既有 ControlMaster socket 上传单个文件到远端。
+/// Uploads a single file to the remote host over the existing ControlMaster
+/// socket.
 pub async fn scp_upload(
     socket_path: &Path,
     local_path: &Path,
@@ -163,8 +164,9 @@ pub async fn scp_upload(
 ) -> Result<()> {
     let output = async {
         Command::new("scp")
-            // -C:压缩传输。dev 模式上传的 remote-server 二进制有数百 MB,
-            // 压缩能大幅缩短上传时间、降低超时风险。
+            // -C: compress the transfer. The remote-server binary uploaded in
+            // dev mode is hundreds of MB; compression greatly shortens upload
+            // time and reduces the risk of timing out.
             .arg("-C")
             .arg("-o")
             .arg(format!("ControlPath={}", socket_path.display()))
