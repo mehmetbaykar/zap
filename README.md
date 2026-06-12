@@ -18,7 +18,7 @@ Zap is an open, local-first terminal with first-class AI and agent support. Plug
 - **Built-in SSH host manager** — manage hosts, configs and sessions inside the terminal, with tmux integration.
 - **Editable system prompts** — minijinja templates rendered on the client.
 - **Rendering fixes** — tuned Markdown pipeline; CJK soft-wrap caret and bold subpixel fixes.
-- **Localized UI** — English / Simplified Chinese / Japanese out of the box, community-extensible.
+- **English UI** — this fork ships an English-only interface.
 - **Privacy defaults** — Cloud Agent / Computer Use / Referral / telemetry off by default.
 
 ## Migrating from OpenWarp or Warp
@@ -36,3 +36,14 @@ See [docs/roadmap.md](docs/roadmap.md).
 
 - [Warp](https://github.com/warpdotdev/warp) — the upstream terminal Zap is built on.
 - [DeepSeek-TUI](https://github.com/Hmbown/DeepSeek-TUI) — first-class CLI agent partner.
+
+## License
+
+Zap is licensed under the [GNU AGPL v3](LICENSE-AGPL); the `warpui_core` and
+`warpui` UI-framework crates are licensed under the [MIT license](LICENSE-MIT).
+Upstream code is Copyright © Denver Technologies, Inc. and contributors. This
+fork was modified in 2026; the complete modification history and corresponding
+source for every release are available in this repository.
+
+This is an independent, unofficial build. It is not affiliated with or endorsed
+by Warp (Denver Technologies, Inc.) or zerx-lab.
