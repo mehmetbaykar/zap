@@ -691,9 +691,21 @@ if [[ $SELFSIGN = true ]]; then
   fi
 elif [[ $CODESIGN = true ]]; then
   if [[ "$ARTIFACT" == app ]]; then
-    echo "Codesigning $BUNDLE_DIR/$WARP_APP_NAME.app..."
-    # Use --deep so we sign bundled frameworks as well
-    codesign --deep -f -o runtime --timestamp -s "$APPLE_TEAM_ID" "$BUNDLE_DIR/$WARP_APP_NAME.app" --entitlements script/Entitlements.plist
+    APP_BUNDLE="$BUNDLE_DIR/$WARP_APP_NAME.app"
+    echo "Codesigning $APP_BUNDLE..."
+    # Sign nested code explicitly (innermost first), then the outer bundle.
+    # The deprecated `codesign --deep` pass fails to apply a secure timestamp
+    # to nested plugins ("A timestamp was expected but was not found" on the
+    # dock tile plugin), and notarization requires timestamps on all code.
+    for NESTED_DIR in "$APP_BUNDLE/Contents/Frameworks" "$APP_BUNDLE/Contents/PlugIns"; do
+      [ -d "$NESTED_DIR" ] || continue
+      for NESTED in "$NESTED_DIR"/*; do
+        [ -e "$NESTED" ] || continue
+        echo "Codesigning nested component $NESTED..."
+        codesign -f -o runtime --timestamp -s "$APPLE_TEAM_ID" "$NESTED"
+      done
+    done
+    codesign -f -o runtime --timestamp -s "$APPLE_TEAM_ID" "$APP_BUNDLE" --entitlements script/Entitlements.plist
   elif [[ "$ARTIFACT" == cli ]]; then
     echo "Codesigning $OUT_DIR/$WARP_BIN..."
     codesign -f -o runtime --timestamp -s "$APPLE_TEAM_ID" "$OUT_DIR/$WARP_BIN" --entitlements script/Entitlements.plist
