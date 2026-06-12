@@ -383,18 +383,22 @@ impl LocalRepoMetadataModel {
             ));
         }
 
+        // Register this path with the watcher if we have one.
+        //
+        // The home directory and its ancestors (e.g. /Users, /) are tracked
+        // WITHOUT a recursive file watcher: registering such a broad root makes
+        // the OS push fsevents from unrelated areas (~/Library/*, photo
+        // libraries, IM caches, ...) into the indexer, leaking user data and
+        // producing endless PermissionDenied noise. Their trees still load
+        // (lazily, one level at a time via index_lazy_loaded_path /
+        // load_directory) — they just don't live-refresh on filesystem changes.
         #[cfg(feature = "local_fs")]
         if is_unsafe_watch_root(&local_path) {
-            return Err(RepoMetadataError::InvalidPath(format!(
-                "Refusing to register {} as a repository root: path is the home directory \
-                 or one of its ancestors, which would recursively watch unrelated user data",
+            log::info!(
+                "Tracking {} without a recursive file watcher (home directory or ancestor)",
                 local_path.display(),
-            )));
-        }
-
-        // Register this path with the watcher if we have one
-        #[cfg(feature = "local_fs")]
-        {
+            );
+        } else {
             if let Some(ref watcher) = self.watcher {
                 let watch_path = local_path.clone();
                 watcher.update(ctx, |watcher, _ctx| {

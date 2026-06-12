@@ -1256,4 +1256,36 @@ Thumbs.db
             assert!(debug_str.contains("StandardizedPath"));
         });
     }
+
+    /// Regression test: the user's home directory must be trackable as a
+    /// lazily-loaded standalone path (listed shallowly, without a recursive
+    /// file watcher). It used to be rejected outright, which left the file
+    /// tree panel permanently empty when the terminal cwd was $HOME.
+    #[test]
+    fn lazy_loaded_home_directory_is_tracked_and_loaded() {
+        let Some(home) = dirs::home_dir() else {
+            // No $HOME (sandboxed CI) — nothing to assert.
+            return;
+        };
+
+        App::test((), |mut app| async move {
+            let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
+            let home_key = StandardizedPath::from_local_canonicalized(&home).unwrap();
+
+            model_handle.update(&mut app, |model, ctx| {
+                model
+                    .index_lazy_loaded_path(&home_key, ctx)
+                    .expect("home directory must be indexable as a lazy-loaded path");
+
+                assert!(model.is_lazy_loaded_path(&home_key));
+                let state = model
+                    .get_repository(&home_key)
+                    .expect("home tree state must be tracked after lazy indexing");
+                assert!(
+                    state.entry.get(&home_key).is_some_and(|e| e.loaded()),
+                    "home root entry must be loaded (first level listed)"
+                );
+            });
+        });
+    }
 }
