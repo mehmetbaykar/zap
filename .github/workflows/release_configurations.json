@@ -7,7 +7,7 @@
             "is_prerelease": false,
             "is_autopush": false,
             "release_base_name": "Zap",
-            "release_body_text": "Zap release (fork of Zap Terminal, oss channel)",
+            "release_body_text": "Independent, unofficial build of Zap (a fork of the AGPL-licensed Warp terminal). Not affiliated with or endorsed by Warp (Denver Technologies, Inc.) or zerx-lab. Source for this exact release is the tagged commit in this repository. Provided as-is, without warranty (AGPL-3.0 §15–16).",
             "changelog_slack_channel": "",
             "gcs_cache_control_value": "",
             "web_gcs_bucket_prefix": ""
