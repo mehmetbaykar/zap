@@ -346,7 +346,7 @@ impl AboutPageWidget {
                 let url = github::cached_release()
                     .map(|r| r.html_url)
                     .unwrap_or_else(|| {
-                        "https://github.com/zerx-lab/warp/releases/latest".to_owned()
+                        "https://github.com/mehmetbaykar/zap/releases/latest".to_owned()
                     });
                 (text, UpdateAction::OpenReleasePage(url))
             }
