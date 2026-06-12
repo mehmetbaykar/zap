@@ -628,7 +628,7 @@ fn arguments_for_session_spawning_command(
                     // `-f no-mark-prompt` disables OSC 133 (the non-standard FinalTerm escape codes).
                     // Fish's implementation of this breaks Zap by emitting `OSC 133 A` but not
                     // `OSC 133 B` afterwards, which we have assumed. This is a temporary workaround.
-                    // See this issue: https://github.com/zerx-lab/warp/issues/7588
+                    // See this issue: upstream issue zerx-lab/warp#7588
                     r#"exec '{}' -f no-mark-prompt --login --init-command '{}'"#,
                     resolved_shell_path,
                     init_shell_script_for_shell(ShellType::Fish, &crate::ASSETS)

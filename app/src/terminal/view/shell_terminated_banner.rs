@@ -216,7 +216,7 @@ impl TerminationType {
                         .build()
                         .on_click(|ctx, _, _| {
                             ctx.dispatch_typed_action(Action::OpenUrl(
-                                "https://github.com/zerx-lab/warp/issues/new/choose".to_string(),
+                                "https://github.com/mehmetbaykar/zap/issues/new/choose".to_string(),
                             ));
                         })
                         .finish(),
@@ -252,7 +252,7 @@ impl TerminationType {
                         .build()
                         .on_click(|ctx, _, _| {
                             ctx.dispatch_typed_action(Action::OpenUrl(
-                                "https://github.com/zerx-lab/warp/issues/new/choose".to_string(),
+                                "https://github.com/mehmetbaykar/zap/issues/new/choose".to_string(),
                             ));
                         })
                         .finish(),

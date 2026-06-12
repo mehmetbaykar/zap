@@ -507,7 +507,7 @@ fn is_intel_uhd_620_adapter_on_windows_with_vulkan_backend(
 /// window decorations (e.g. title bar height). Enabling native window decorations fixes the
 /// alignment.
 ///
-/// See: https://github.com/zerx-lab/warp/issues/6120
+/// See: upstream issue zerx-lab/warp#6120
 pub fn adapter_has_rendering_offset_bug(adapter_info: &wgpu::AdapterInfo) -> bool {
     if !cfg!(windows) {
         return false;
@@ -519,7 +519,7 @@ pub fn adapter_has_rendering_offset_bug(adapter_info: &wgpu::AdapterInfo) -> boo
     }
 
     // Known affected Intel integrated GPU models. This list is based on user reports from
-    // https://github.com/zerx-lab/warp/issues/6120.
+    // upstream issue zerx-lab/warp#6120.
     let affected_models = [
         "Intel(R) HD Graphics 4000",
         "Intel(R) HD Graphics 4400",

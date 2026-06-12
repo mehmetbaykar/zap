@@ -89,11 +89,11 @@ The first preview release of the Zap community fork.
 - **AI**: CJK input classification, reasoning split, BYOP tool_call diagnostics, LRC tag-in synthesizing a virtual subagent + floating-window spawn pipeline
 - **CI**: Release explicitly declares `contents: write` permission to fix 403
 
-[Unreleased]: https://github.com/zerx-lab/warp/compare/v2026.05.06.preview...HEAD
-[v2026.05.06.preview]: https://github.com/zerx-lab/warp/compare/v2026.05.04.preview...v2026.05.06.preview
-[v2026.05.04.preview]: https://github.com/zerx-lab/warp/compare/v2026.05.03.preview.4...v2026.05.04.preview
-[v2026.05.03.preview(.2/.3/.4)]: https://github.com/zerx-lab/warp/compare/v2026.05.02.preview...v2026.05.03.preview.4
-[v2026.05.02.preview]: https://github.com/zerx-lab/warp/compare/v2026.05.01.preview...v2026.05.02.preview
-[v2026.05.01.preview]: https://github.com/zerx-lab/warp/compare/v2026.04.30.oss...v2026.05.01.preview
-[v2026.04.30.oss]: https://github.com/zerx-lab/warp/compare/v2026.04.30.preview...v2026.04.30.oss
-[v2026.04.30.preview]: https://github.com/zerx-lab/warp/releases/tag/v2026.04.30.preview
+[Unreleased]: https://github.com/mehmetbaykar/zap/compare/v2026.05.06.preview...HEAD
+[v2026.05.06.preview]: https://github.com/mehmetbaykar/zap/compare/v2026.05.04.preview...v2026.05.06.preview
+[v2026.05.04.preview]: https://github.com/mehmetbaykar/zap/compare/v2026.05.03.preview.4...v2026.05.04.preview
+[v2026.05.03.preview(.2/.3/.4)]: https://github.com/mehmetbaykar/zap/compare/v2026.05.02.preview...v2026.05.03.preview.4
+[v2026.05.02.preview]: https://github.com/mehmetbaykar/zap/compare/v2026.05.01.preview...v2026.05.02.preview
+[v2026.05.01.preview]: https://github.com/mehmetbaykar/zap/compare/v2026.04.30.oss...v2026.05.01.preview
+[v2026.04.30.oss]: https://github.com/mehmetbaykar/zap/compare/v2026.04.30.preview...v2026.04.30.oss
+[v2026.04.30.preview]: https://github.com/mehmetbaykar/zap/releases/tag/v2026.04.30.preview

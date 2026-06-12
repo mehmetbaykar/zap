@@ -1,6 +1,6 @@
 # gh-110: Import hosts from `~/.ssh/config` into SSH Manager
 
-Tracks: [GitHub issue #110](https://github.com/zerx-lab/zap/issues/110).
+Tracks: upstream issue zerx-lab/zap#110.
 Technical implementation details are in `TECH.md`.
 
 ## 1. Problem

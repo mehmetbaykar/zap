@@ -23,7 +23,7 @@ interface Props {
 
 const { title, lede, section, activeSlug, headings, prev, next } = Astro.props;
 const tocItems = headings.filter((h) => h.depth === 2);
-const repo = 'https://github.com/zerx-lab/zap';
+const repo = 'https://github.com/mehmetbaykar/zap';
 const editUrl = `${repo}/blob/main/website/src/content/docs/${activeSlug}.mdx`;
 ---
 <!doctype html>

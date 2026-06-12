@@ -3,7 +3,7 @@ pkgver=@@PKGVER@@
 pkgrel=@@RELEASE@@
 pkgdesc="Zap, a community fork of the Rust-based Warp terminal"
 arch=('@@ARCH@@')
-url="https://github.com/zerx-lab/warp"
+url="https://github.com/mehmetbaykar/zap"
 license=('custom')
 depends=(
 	'curl'

@@ -52,7 +52,7 @@ flowchart TD
 
 ## Filing a Good Issue
 
-Search [existing issues](https://github.com/zerx-lab/warp/issues) before filing to avoid duplicates. Use the issue templates when filing.
+Search [existing issues](https://github.com/mehmetbaykar/zap/issues) before filing to avoid duplicates. Use the issue templates when filing.
 
 If you're already running Zap, the fastest way to file is the `/feedback` command — it opens a public GitHub issue with relevant context (logs, environment details) automatically attached.
 
@@ -163,4 +163,4 @@ See [`SECURITY.md`](SECURITY.md) for our security disclosure policy and private 
 
 ## Getting Help
 
-- Open a [GitHub issue](https://github.com/zerx-lab/warp/issues) for bugs or feature requests.
+- Open a [GitHub issue](https://github.com/mehmetbaykar/zap/issues) for bugs or feature requests.

@@ -2,7 +2,7 @@
 # Installs the Zap CLI binary on the remote host, used for remote-server-proxy.
 #
 # setup.rs replaces these placeholders at runtime:
-#   {download_base_url}     - e.g. https://github.com/zerx-lab/warp/releases/latest/download
+#   {download_base_url}     - e.g. https://github.com/mehmetbaykar/zap/releases/latest/download
 #   {install_dir}           - e.g. ~/.zap/remote-server
 #   {binary_name}           - e.g. zap-oss
 #   {version_suffix}        - e.g. -v0.2026..., empty when there is no release tag

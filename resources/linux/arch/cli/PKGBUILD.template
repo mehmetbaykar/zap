@@ -3,7 +3,7 @@ pkgver=@@PKGVER@@
 pkgrel=@@RELEASE@@
 pkgdesc="Zap CLI — community fork of Warp's local orchestration platform"
 arch=('@@ARCH@@')
-url="https://github.com/zerx-lab/warp"
+url="https://github.com/mehmetbaykar/zap"
 license=('custom')
 depends=(
 	'curl'

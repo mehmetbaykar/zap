@@ -5,7 +5,7 @@ Depends: zlib1g
 Priority: optional
 Architecture: @@ARCH@@
 Maintainer: Zap Maintainers <zap-maintainers@localhost>
-Homepage: https://github.com/zerx-lab/warp
+Homepage: https://github.com/mehmetbaykar/zap
 Replaces: warp-cli (<< @@VERSION@@)
 Conflicts: warp-cli (<< @@VERSION@@)
 Description: Zap CLI — community fork of Warp's local orchestration platform

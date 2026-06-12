@@ -1,13 +1,13 @@
 blank_issues_enabled: false
 contact_links:
   - name: Zap Issue Search
-    url: https://github.com/zerx-lab/warp/issues?q=is%3Aissue+sort%3Areactions-%2B1-desc
+    url: https://github.com/mehmetbaykar/zap/issues?q=is%3Aissue+sort%3Areactions-%2B1-desc
     about: Search existing Zap bugs and feature requests before opening a new one.
   - name: Zap README
-    url: https://github.com/zerx-lab/warp#readme
+    url: https://github.com/mehmetbaykar/zap#readme
     about: BYOP setup, supported providers, and core features of Zap.
   - name: Zap Docs
-    url: https://github.com/zerx-lab/warp/tree/main/docs
+    url: https://github.com/mehmetbaykar/zap/tree/main/docs
     about: Architecture notes, upstream-sync plan, and design docs in the repo.
   - name: Upstream Zap (reference only)
     url: https://github.com/warpdotdev/warp
