@@ -12,6 +12,14 @@ app/frameworks/**/*.xcframework
 .idea/
 .DS_Store
 *.icloud
+
+# Code-signing secrets — never commit
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+AuthKey_*.p8
+.secrets/
 app/src/server/graphql/schema/generated
 crates/command-signatures-v2/js/build
 crates/command-signatures-v2/js/node_modules

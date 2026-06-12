@@ -636,8 +636,13 @@ if [[ $CODESIGN = true ]]; then
   echo "Starting codesigning..."
 
   if [[ $READ_PASSWORDS_FROM_ENV = true ]]; then
-    if [ -z "$WARP_NOTARIZATION_PASSWORD" ] ; then
-      echo "WARP_NOTARIZATION_PASSWORD must be set for code signing"
+    if [ -z "$WARP_NOTARIZATION_API_KEY" ] ; then
+      echo "WARP_NOTARIZATION_API_KEY (base64-encoded App Store Connect API .p8) must be set for notarization"
+      exit 1
+    fi
+
+    if [ -z "$WARP_NOTARIZATION_KEY_ID" ] || [ -z "$WARP_NOTARIZATION_ISSUER_ID" ] ; then
+      echo "WARP_NOTARIZATION_KEY_ID and WARP_NOTARIZATION_ISSUER_ID must be set for notarization"
       exit 1
     fi
 
@@ -783,8 +788,12 @@ fi
 ##############################
 
 if [[ $CODESIGN = true ]]; then
+  # Authenticate notarytool with an App Store Connect API key (no Apple ID / 2FA).
+  NOTARY_KEY_FILE="$(mktemp -t asc_api_key).p8"
+  echo "$WARP_NOTARIZATION_API_KEY" | base64 -d > "$NOTARY_KEY_FILE"
+
   echo "Uploading $NOTARIZATION_ARTIFACT to Apple for notarization..."
-  xcrun notarytool submit "$NOTARIZATION_ARTIFACT" --apple-id "$WARP_NOTARIZATION_APPLE_ID" --password "$WARP_NOTARIZATION_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+  xcrun notarytool submit "$NOTARIZATION_ARTIFACT" --key "$NOTARY_KEY_FILE" --key-id "$WARP_NOTARIZATION_KEY_ID" --issuer "$WARP_NOTARIZATION_ISSUER_ID" --wait
 
   if [[ $STAPLE_TICKET = true ]]; then
     echo "Attempting to staple the notarization ticket to $NOTARIZATION_ARTIFACT..."
@@ -803,6 +812,8 @@ if [[ $CODESIGN = true ]]; then
   elif [[ "$ARTIFACT" = cli ]]; then
     spctl -a -t open --context context:primary-signature -vv "$OUT_DIR/$WARP_BIN"
   fi
+
+  rm -f "$NOTARY_KEY_FILE"
 fi
 
 

@@ -6,6 +6,12 @@ signed + notarized DMG, publish it to **your** releases, and your installed Zap
 
 This document is the *only* part that needs you. Everything in code is already done.
 
+> **Status: ✅ completed 2026-06-12.** The Developer ID Application certificate was
+> created (valid until June 2031), all 6 repository secrets are set, and
+> notarization authenticates with an App Store Connect API key (no Apple ID
+> password / 2FA in CI). The steps below are kept for reference (e.g. cert
+> renewal in 2031 or key rotation).
+
 ---
 
 ## What was already changed in code (for reference)
@@ -39,10 +45,12 @@ it's free to create:
   base64 -i Developer_ID_Application.p12 | pbcopy
   ```
 
-### 3. Create an app-specific password (for notarization)
-- appleid.apple.com → **Sign-In & Security → App-Specific Passwords → +** → copy it.
+### 3. Create an App Store Connect API key (for notarization)
+- appstoreconnect.apple.com → **Users and Access → Integrations → App Store
+  Connect API → +** → download the `AuthKey_<KEYID>.p8` (one-time download) and
+  note the **Key ID** and **Issuer ID** from the same page. No 2FA needed in CI.
 
-### 4. Add 5 repository secrets
+### 4. Add 6 repository secrets
 In **`mehmetbaykar/zap` → Settings → Secrets and variables → Actions → New repository secret**:
 
 | Secret name | Value |
@@ -50,8 +58,9 @@ In **`mehmetbaykar/zap` → Settings → Secrets and variables → Actions → N
 | `DEVELOPER_ID_CERT_P12_BASE64` | the base64 string from step 2 (paste from clipboard) |
 | `DEVELOPER_ID_CERT_PASSWORD` | the `.p12` export password from step 2 |
 | `CODESIGN_KEYCHAIN_PASSWORD` | any random string (e.g. `openssl rand -hex 16`) |
-| `NOTARIZATION_APPLE_ID` | your Apple ID email |
-| `NOTARIZATION_APP_SPECIFIC_PASSWORD` | the app-specific password from step 3 |
+| `NOTARIZATION_API_KEY_P8_BASE64` | `base64 -i AuthKey_<KEYID>.p8` |
+| `NOTARIZATION_KEY_ID` | the Key ID from step 3 |
+| `NOTARIZATION_ISSUER_ID` | the Issuer ID from step 3 |
 
 ### 5. Fork + push
 - Fork `zerx-lab/zap` to `mehmetbaykar/zap` (GitHub UI, or `gh repo fork zerx-lab/zap --clone=false`).
