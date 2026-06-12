@@ -1,21 +1,18 @@
 # Zap release pipeline — triggered by pushing a tag (v*) on the openWarp branch.
 #
 # Differences from the upstream create_release.yml:
-# - Only macOS arm64 + macOS Intel + Windows x64 + Linux x86_64;
-#   Web/CLI/Universal/Win-arm64 are all dropped
-#   (the two macOS architectures each produce a single-architecture DMG and CLI tarball;
-#    Linux produces AppImage/deb/rpm plus a best-effort Arch package, and does not
-#    publish an upstream Zap repository source or signing key).
+# - Only macOS arm64 (Apple Silicon); Intel/Windows/Linux/Web/CLI/Universal are all dropped.
+#   Produces a single-architecture DMG and CLI tarball.
 # - Single channel: preview (configuration provided by release_configurations.json).
 # - macOS builds are Developer ID signed + notarized (script/bundle --read-passwords-from-env, with the
-#   signing/notarization secrets supplied in the release job); Windows is still unsigned (no SIGN_TOOL_CMD).
+#   signing/notarization secrets supplied in the release job).
 # - No upload to GCS / third-party crash platforms / Slack / changelog, and does not call the channel-versions repository_dispatch.
 # - Reuses ./.github/actions/{prepare_environment,get_channel_config}.
 #
 # Pipeline structure (package first, publish later, to avoid an empty Release):
-#   prepare_metadata → release_{macos,windows,linux} (uploaded as workflow artifacts)
-#                    → publish_release (after all builds succeed, downloads the artifacts and creates the Release)
-# If any build job fails → publish_release is skipped via needs → no Release is left without installers.
+#   prepare_metadata → release_macos (uploaded as workflow artifacts)
+#                    → publish_release (after the build succeeds, downloads the artifacts and creates the Release)
+# If the build job fails → publish_release is skipped via needs → no Release is left without installers.
 
 name: Zap Release
 
@@ -150,8 +147,8 @@ jobs:
     name: Build Release (macOS ${{ matrix.dmg_name_suffix }})
     runs-on: ${{ matrix.runner }}
     needs: prepare_metadata
-    # macos-26 / macos-26-intel (Pro standard) have no sccache, so the full cargo build + bundle + create-dmg
-    # is slow; the Intel build has historically exceeded 180min, so this is relaxed to the GitHub-hosted job 6h execution limit.
+    # macos-26 (Pro standard) has no sccache, so the full cargo build + bundle + create-dmg
+    # is slow; relaxed to the GitHub-hosted job 6h execution limit to be safe.
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -160,9 +157,6 @@ jobs:
           - arch: aarch64
             dmg_name_suffix: arm64
             runner: macos-26 # Pro standard arm64 (M2 Pro)
-          - arch: x86_64
-            dmg_name_suffix: intel
-            runner: macos-26-intel # Pro standard Intel
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -250,261 +244,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  release_windows:
-    name: Build Release (Windows x64)
-    runs-on: windows-latest
-    needs: prepare_metadata
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          ref: ${{ needs.prepare_metadata.outputs.release_branch }}
-
-      - uses: ./.github/actions/prepare_environment
-        with:
-          target_os: windows
-          cache_key: x64
-          is_self_hosted: false
-          install_release_deps: true
-
-      - name: Build binary (unsigned)
-        id: build_binary
-        run: script/bundle -Channel $CHANNEL -skip_build_installer --arch x64
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
-
-      - name: Bundle app (unsigned installer)
-        id: bundle_app
-        run: script/bundle -Channel $CHANNEL -skip_build_binary --arch x64
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: zap-windows-x64
-          path: ${{ steps.bundle_app.outputs.installer_path }}
-          if-no-files-found: error
-          retention-days: 7
-
-  release_linux:
-    name: Build Release (Linux x86_64)
-    runs-on: ubuntu-22.04
-    needs: prepare_metadata
-    # Use 22.04 (glibc 2.35) rather than ubuntu-latest (24.04, glibc 2.39):
-    # the AppImage links against host glibc, so the 22.04 artifact runs on more older distributions
-    # (Debian 11 / Ubuntu 20.04+, etc.).
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          ref: ${{ needs.prepare_metadata.outputs.release_branch }}
-
-      - uses: ./.github/actions/prepare_environment
-        with:
-          target_os: linux
-          is_self_hosted: false
-          install_release_deps: true
-
-      - name: Install extra dependencies for deb/rpm and build
-        run: |
-          sudo apt-get update
-          # The `rpm` package provides /usr/bin/rpmbuild, used by the later RPM packaging step.
-          sudo apt-get install -y libdbus-1-dev fakeroot rpm
-        shell: bash
-
-      - name: Ensure rust target is installed
-        run: rustup target add x86_64-unknown-linux-gnu
-        shell: bash
-
-      - name: Check Linux release compile
-        run: script/bundle --check-only --channel "$CHANNEL" --arch x86_64 --packages appimage,deb
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
-
-      - name: Install linuxdeploy
-        # script/linux/install_linuxdeploy is not called by install_build_deps, so it must be run manually;
-        # it places the linuxdeploy AppImage into ~/.local/bin and adds it to PATH.
-        run: |
-          ./script/linux/install_linuxdeploy
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        shell: bash
-
-      - name: Build AppImage (unsigned)
-        id: bundle_app
-        run: script/bundle --channel "$CHANNEL" --arch x86_64 --packages appimage,deb
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
-          # ubuntu-22.04 has libfuse2 by default but 24.04 does not; enabling EXTRACT_AND_RUN uniformly
-          # makes linuxdeploy/appimagetool not depend on the FUSE kernel module, so it is stable across runner versions.
-          APPIMAGE_EXTRACT_AND_RUN: 1
-
-      # RPM package: reuse `target/release-lto/zap-oss`, already stripped by the previous release-lto step,
-      # instead of running `cargo build` again. `--skip-build` makes `script/bundle` skip compilation and stripping,
-      # going straight to staging (`bundle_install` → copy the binary + resources) + rpmbuild.
-      # Runs on the same ubuntu-22.04 runner as deb, sharing the host-glibc-linked artifacts;
-      # install with RPM 4.13+ on Fedora 26+ / RHEL 8+ (the spec uses boolean dep syntax).
-      # continue-on-error: even if rpmbuild fails it should not block the already-successful AppImage/deb release.
-      - name: Build RPM package (reuse release-lto binary)
-        continue-on-error: true
-        run: script/bundle --skip-build --channel "$CHANNEL" --arch x86_64 --packages rpm
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
-
-      # Arch package: reuse `target/release-lto/zap-oss`, already stripped by the previous release-lto step,
-      # instead of running `cargo build` again for the main binary — `--skip-build` makes `script/bundle` skip compilation and stripping,
-      # going straight to staging (`bundle_install` → copy the binary + resources) + makepkg.
-      #
-      # Why run it in a container: `makepkg` is Arch-specific and the Ubuntu runner does not have it.
-      # The container only installs Arch's own `rust` and `cargo-about`:
-      #   - With SKIP_SETTINGS_SCHEMA=1, `cargo run --bin generate_settings_schema` is no longer run,
-      #     so it does not matter if the container's rustc version differs from the project's pinned version (1.92.x).
-      #   - `cargo about generate` only reads Cargo.lock metadata to generate third-party licenses,
-      #     and does not trigger any Rust code compilation.
-      # makepkg refuses to run as root (EUID==0), so it must switch to a non-root user.
-      # continue-on-error: if the Arch toolchain blows up it does not affect the AppImage/deb release.
-      - name: Build Arch package (reuse release-lto binary)
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          # Use the host runner user's uid/gid to create builder inside the container, avoiding the cost of
-          # chown-ing the entire /work and ~/.cargo trees (makepkg refuses root, but any uid != 0 works,
-          # with any name and any specific uid).
-          HOST_UID=$(id -u)
-          HOST_GID=$(id -g)
-          # Note: do not pass GITHUB_ACTIONS=true through into the container.
-          # When script/bundle sees that variable it does `echo ... >> "$GITHUB_OUTPUT"`,
-          # but there is no GITHUB_OUTPUT in the container, so redirecting to an empty string triggers a `set -e` exit
-          # and the Arch package simply cannot be built (see run 26153630745).
-          # We also do not need this step's step outputs — it is continue-on-error,
-          # and packages_dir is provided by the earlier AppImage step's bundle_app.outputs.
-          docker run --rm \
-            -v "$PWD:/work" \
-            -v "$HOME/.cargo:/cargo-home" \
-            -w /work \
-            -e GIT_RELEASE_TAG="${{ needs.prepare_metadata.outputs.release_tag }}" \
-            -e SKIP_SETTINGS_SCHEMA=1 \
-            -e HOST_UID="$HOST_UID" \
-            -e HOST_GID="$HOST_GID" \
-            archlinux:latest bash -euxc '
-              # Pre-install the runtime dependencies from PKGBUILD `depends` to avoid makepkg -s
-              # calling `sudo pacman -S` inside the container to install missing packages (builder has no passwordless sudo,
-              # so it exits 8 because it cannot read a password, and the Arch package is dropped, see run 26267606877).
-              # `opengl-driver` does not exist in the official repositories (a NixOS concept / AUR virtual package),
-              # so use --assume-installed separately to make the dependency check skip it.
-              pacman -Sy --noconfirm --needed \
-                base-devel git sudo rust cargo-about \
-                curl default-cursors fontconfig libegl libx11 libxcb \
-                libxcursor libxi libxkbcommon-x11 xdg-utils zlib &&
-              # Create the user with the host uid/gid, so the mounted /work and /cargo-home are owned by it,
-              # and no chown is needed — sudo -u can read and write directly.
-              groupadd -g "$HOST_GID" builder 2>/dev/null || true
-              useradd -u "$HOST_UID" -g "$HOST_GID" -m builder
-              # Set HOME=/home/builder explicitly, otherwise `sudo -E` keeps the outer HOME=/root,
-              # causing `git config --global` to try to write /root/.gitconfig and fail with Permission denied.
-              sudo -u builder -E env \
-                HOME=/home/builder \
-                CARGO_HOME=/cargo-home \
-                PATH=/cargo-home/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
-                bash -c "
-                  git config --global --add safe.directory /work
-                  cd /work
-                  # Dependencies are already installed by the outer pacman; tell makepkg to treat `opengl-driver`
-                  # as already installed, to avoid it running pacman -S on a package that is not in any repository.
-                  # Also pass --noconfirm: GITHUB_ACTIONS is not passed through into the container,
-                  # so the native branch for it inside bundle_arch does not take effect.
-                  MAKEPKG_EXTRA_ARGS='\''--noconfirm --assume-installed opengl-driver'\'' \
-                    script/bundle --skip-build --channel oss --arch x86_64 --packages arch
-                "
-            '
-        shell: bash
-
-      - name: Upload package artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: zap-linux-x86_64
-          # packages_dir is target/release-lto/bundle/linux, where AppImage/deb/Arch all end up
-          path: ${{ steps.bundle_app.outputs.packages_dir }}
-          if-no-files-found: error
-          retention-days: 7
-
-      # The CLI/remote-server tarball uses static musl linking, so the artifact does not depend on the host glibc
-      # and can run on any Linux x86_64 host (including old-glibc systems such as CentOS 7 / Amazon Linux 2
-      # and musl distributions such as Alpine). The GUI AppImage/deb still use the
-      # glibc-linked build above and are unaffected.
-      #
-      # Use `cargo zigbuild` for musl cross-compilation: zig ships a complete C/C++ musl
-      # toolchain (`zig cc` / `zig c++`) and does not depend on the host's `musl-gcc` or a hand-written
-      # `musl-g++` wrapper — so the historical "host g++ + musl specs" hack prepared for *-sys
-      # dependencies such as freetype-sys / harfbuzz-sys is removed entirely.
-      # The local dev auto-build path (`ssh_transport.rs`) also prefers zigbuild, so the
-      # toolchain is unified on both sides.
-      - name: Install zig + cargo-zigbuild for static musl CLI build
-        run: |
-          set -euo pipefail
-          rustup target add x86_64-unknown-linux-musl
-          # zig: use the official pre-built tarball, pinned to a fixed version for reproducible builds.
-          # 0.13.0 is compatible with cargo-zigbuild >= 0.19.
-          ZIG_VERSION="0.13.0"
-          ZIG_DIR="$HOME/.local/zig-${ZIG_VERSION}"
-          if [ ! -x "${ZIG_DIR}/zig" ]; then
-            mkdir -p "${ZIG_DIR}"
-            curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" \
-              | tar -xJ -C "${ZIG_DIR}" --strip-components=1
-          fi
-          echo "${ZIG_DIR}" >> "$GITHUB_PATH"
-          # cargo-zigbuild: installed via cargo install; once cached after the first install it is reused.
-          cargo install --locked cargo-zigbuild --version ^0.19
-        shell: bash
-
-      - name: Build CLI (static musl via zigbuild)
-        id: bundle_cli
-        run: |
-          script/bundle --channel "$CHANNEL" --arch x86_64 --artifact cli --packages none \
-            --target x86_64-unknown-linux-musl
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
-          APPIMAGE_EXTRACT_AND_RUN: 1
-          # Make script/linux/bundle switch `cargo build` to `cargo zigbuild`.
-          USE_ZIGBUILD: "true"
-          # libc (musl) is statically linked into the binary via +crt-static — this is the key to freeing the artifact
-          # from the host glibc floor. `libdbus-sys` is now compiled from embedded source via keyring's
-          # `vendored` feature (see Cargo.toml), and no longer uses pkg-config to
-          # probe the host `dbus-1`; `PKG_CONFIG_ALLOW_CROSS=1` is kept as a fallback,
-          # so that if some newly introduced -sys crate still uses pkg-config it will not get stuck.
-          PKG_CONFIG_ALLOW_CROSS: 1
-
-      - name: Package CLI tarball
-        run: |
-          cp "${{ steps.bundle_cli.outputs.executable_path }}" zap-oss
-          tar czf zap-linux-x86_64.tar.gz \
-            zap-oss \
-            -C "$(dirname "${{ steps.bundle_cli.outputs.bundled_resources_dir }}")" resources
-        shell: bash
-
-      - name: Upload CLI artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: zap-cli-linux-x86_64
-          path: zap-linux-x86_64.tar.gz
-          if-no-files-found: error
-          retention-days: 7
-
   publish_release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    # Must wait for all platforms to build successfully before publishing; if any fails → this job is skipped → no empty Release appears.
+    # Must wait for the build to succeed before publishing; if it fails → this job is skipped → no empty Release appears.
     needs:
       - prepare_metadata
       - release_macos
-      - release_windows
-      - release_linux
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
