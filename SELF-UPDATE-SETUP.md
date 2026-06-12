@@ -36,7 +36,7 @@ it's free to create:
 - Xcode → **Settings → Accounts →** select your team **→ Manage Certificates → + → Developer ID Application**.
   *(or developer.apple.com → Certificates → + → Developer ID Application)*
 - ⚠️ **Confirm the Team ID** shown for that cert is **`P5465LP9FW`**. If it's a
-  different team (e.g. `7646ZJDP5W`), tell me — it's a one-line constant change.
+  different team, updating it is a one-line constant change.
 
 ### 2. Export the cert as `.p12` and base64 it
 - Keychain Access → **login** keychain → find **"Developer ID Application: Mehmet Baykar"** → expand it, select **both the cert and its private key** → right-click → **Export 2 items… → .p12**, set an export password.
