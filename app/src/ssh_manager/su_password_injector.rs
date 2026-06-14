@@ -31,14 +31,17 @@ const SHELL_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 lazy_static! {
     /// Password prompt regex — strictly matches two categories:
-    /// 1. `password` / `passphrase` / `密码` at end-of-line with a halfwidth
-    ///    colon `:` or fullwidth colon `：`
-    /// 2. Galaxy Kylin V10's colon-less `输入密码`
+    /// 1. `password` / `passphrase` / the Chinese "password" keyword (U+5BC6 U+7801)
+    ///    at end-of-line with a halfwidth colon `:` or fullwidth colon (U+FF1A)
+    /// 2. Galaxy Kylin V10's colon-less Chinese "enter password" prompt (U+8F93 U+5165 U+5BC6 U+7801)
     ///
     /// The old implementation made the colon optional, so any end-of-line
     /// containing "password" (e.g. `Your password has expired`) would false-positive.
+    ///
+    /// The CJK codepoints are spelled as `\x{...}` regex escapes to keep this source
+    /// file pure-ASCII while matching exactly the same bytes.
     static ref PASSWORD_PROMPT_REGEX: Regex = Regex::new(
-        r"(?im)(?:(?:password|passphrase|密码)[^\n]*(?::|：)\s*$|输入密码\s*$)"
+        r"(?im)(?:(?:password|passphrase|\x{5BC6}\x{7801})[^\n]*(?::|\x{FF1A})\s*$|\x{8F93}\x{5165}\x{5BC6}\x{7801}\s*$)"
     )
     .expect("su password prompt regex must compile");
 

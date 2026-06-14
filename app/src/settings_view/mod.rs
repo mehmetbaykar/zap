@@ -302,8 +302,10 @@ impl FromStr for SettingsSection {
             "Knowledge" => Ok(Self::Knowledge),
             "Third party CLI agents" | "ThirdPartyCLIAgents" => Ok(Self::ThirdPartyCLIAgents),
             "Editor and Code Review" | "EditorAndCodeReview" => Ok(Self::EditorAndCodeReview),
-            "Network" | "网络" => Ok(Self::Network),
-            "CloudSync" | "Cloud Sync" | "云同步" => Ok(Self::CloudSync),
+            // Chinese-locale stored values ("network" U+7F51 U+7EDC, "cloud sync"
+            // U+4E91 U+540C U+6B65) as \u{} escapes — same match, pure-ASCII source.
+            "Network" | "\u{7F51}\u{7EDC}" => Ok(Self::Network),
+            "CloudSync" | "Cloud Sync" | "\u{4E91}\u{540C}\u{6B65}" => Ok(Self::CloudSync),
             // Zap Wave 3-1: `OzCloudAPIKeys` was physically removed along with the UI.
             // Zap Wave 7-3: the `CloudEnvironments` FromStr arm was physically removed along with the variant.
             _ => Err(()),

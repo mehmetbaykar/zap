@@ -23,8 +23,8 @@ impl CommandBindingDataSource {
     #[cfg(not(target_family = "wasm"))]
     pub fn new(binding_source: ModelHandle<BindingSource>, ctx: &mut ModelContext<Self>) -> Self {
         // Zap: command palette actions always use character-level fuzzy matching (SkimMatcherV2).
-        // Tantivy's default tokenizer does not split CJK, so it treats an entire Chinese description as a single token for prefix matching,
-        // which means under zh-CN searching for "主题" cannot match "打开主题选择器" (Open Theme Chooser).
+        // Tantivy's default tokenizer does not split CJK, so it treats an entire localized description as a single token for prefix matching,
+        // which means under zh-CN a short CJK search term cannot prefix-match a longer localized command label (e.g. "Open Theme Chooser").
         // Fuzzy matching also lets English keywords match binding.name via subsequence matching (see the search implementation below).
         let _ = warp_core::features::FeatureFlag::UseTantivySearch.is_enabled();
         Self::new_fuzzy(binding_source, ctx)
@@ -158,7 +158,7 @@ impl ActionSearcher for FuzzyActionSearcher {
                 //
                 // Zap: also append binding.name (the action identifier, e.g. `workspace:show_theme_chooser`)
                 // to the searchable string, replacing `:` and `_` with spaces to ease subsequence matching.
-                // This way, under zh-CN, a user typing "theme" can also match "打开主题选择器" (Open Theme Chooser).
+                // This way, under zh-CN, a user typing "theme" can also match the localized "Open Theme Chooser" command.
                 let mut searchable = binding
                     .description
                     .in_context(DescriptionContext::Default)

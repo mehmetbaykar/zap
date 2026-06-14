@@ -77,7 +77,7 @@ pub fn is_shared_cjk_han(ch: char) -> bool {
             | 0xFF01..=0xFF0F // Fullwidth ASCII Punctuation (! " # $ % & ' ( ) * + , - . /)
             | 0xFF1A..=0xFF20 // Fullwidth : ; < = > ? @
             | 0xFF3B..=0xFF40 // Fullwidth [ \ ] ^ _ `
-            | 0xFF5B..=0xFF65 // Fullwidth { | } ~ and CJK punctuation 。 「 」 、 ・
+            | 0xFF5B..=0xFF65 // Fullwidth { | } ~ and halfwidth CJK punctuation
             | 0x20000..=0x2A6DF // Extension B
             | 0x2A700..=0x2B73F // Extension C
             | 0x2B740..=0x2B81F // Extension D

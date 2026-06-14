@@ -571,7 +571,7 @@ pub enum AuthViewEvent {
     Close,
 }
 
-/// AuthOverrideWarningModal facade。
+/// AuthOverrideWarningModal facade.
 pub struct AuthOverrideWarningModal;
 
 impl AuthOverrideWarningModal {
@@ -611,7 +611,7 @@ pub enum AuthOverrideWarningModalVariant {
     WorkspaceModal,
 }
 
-/// NeedsSsoLinkView facade。
+/// NeedsSsoLinkView facade.
 pub struct NeedsSsoLinkView;
 
 impl NeedsSsoLinkView {

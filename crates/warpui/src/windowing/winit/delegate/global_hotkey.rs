@@ -142,7 +142,7 @@ fn hotkey_for_keystroke(
             ',' | '<' => Code::Comma,
             '.' | '>' => Code::Period,
             '/' | '?' => Code::Slash,
-            'ろ' => Code::IntlRo,
+            '\u{308D}' => Code::IntlRo, // Japanese hiragana 'ro' keycap (U+308D)
             '¥' => Code::IntlYen,
             ' ' => Code::Space,
             _ => anyhow::bail!("Invalid global hotkey: {c}"),

@@ -4341,7 +4341,7 @@ pub(crate) async fn generate_title_via_byop(
 /// Processing order:
 /// 1. Strip `<think>...</think>` / `<reasoning>...</reasoning>` thinking blocks (a common prefix from reasoning models).
 /// 2. Take the first non-empty line (the model often prefixes "Sure, the title is:" then puts the title on a new line).
-/// 3. Strip prefixes like `Title:` / `标题:` / `Thread:` / `Subject:` (case-insensitive).
+/// 3. Strip prefixes like `Title:` / `Thread:` / `Subject:` and their Chinese equivalents (case-insensitive).
 /// 4. Strip leading/trailing quotes / backticks (Chinese and English).
 /// 5. Remove trailing punctuation.
 /// 6. Truncate to 50 characters (by char, to protect CJK); if longer, append `…` at the end.
@@ -4370,15 +4370,18 @@ fn sanitize_title(raw: &str) -> Option<String> {
         .to_owned();
     let mut s = first_line;
 
-    // 3. Strip prefixes (loop, handling double prefixes like "Title: 标题: foo").
+    // 3. Strip prefixes (loop, handling stacked prefixes like "Title: Subject: foo").
     let prefixes = [
         "title:",
         "subject:",
         "thread:",
-        "标题:",
-        "标题：",
-        "主题:",
-        "主题：",
+        // Chinese title-prefix words ("title" U+6807 U+9898, "topic" U+4E3B U+9898),
+        // each with halfwidth `:` and fullwidth U+FF1A, as pure-ASCII \u{} escapes —
+        // identical strings, no CJK glyphs in source.
+        "\u{6807}\u{9898}:",
+        "\u{6807}\u{9898}\u{FF1A}",
+        "\u{4E3B}\u{9898}:",
+        "\u{4E3B}\u{9898}\u{FF1A}",
     ];
     loop {
         let lower = s.to_lowercase();
@@ -4396,7 +4399,10 @@ fn sanitize_title(raw: &str) -> Option<String> {
     }
 
     // 4. Strip leading/trailing quotes (Chinese and English).
-    let quotes = ['"', '\'', '`', '“', '”', '‘', '’', '《', '》', '「', '」'];
+    // Last four are CJK book/corner quotes (U+300A..U+300D) as \u{} escapes — pure-ASCII source.
+    let quotes = [
+        '"', '\'', '`', '“', '”', '‘', '’', '\u{300A}', '\u{300B}', '\u{300C}', '\u{300D}',
+    ];
     while let Some(c) = s.chars().next() {
         if quotes.contains(&c) {
             s.remove(0);
@@ -4417,7 +4423,18 @@ fn sanitize_title(raw: &str) -> Option<String> {
     while let Some(c) = s.chars().last() {
         if matches!(
             c,
-            '.' | '。' | '!' | '！' | '?' | '？' | ',' | '，' | ';' | '；' | ':' | '：'
+            // CJK fullwidth punctuation as \u{} escapes (ideographic stop, fullwidth !?,;:)
+            '.' | '\u{3002}'
+                | '!'
+                | '\u{FF01}'
+                | '?'
+                | '\u{FF1F}'
+                | ','
+                | '\u{FF0C}'
+                | ';'
+                | '\u{FF1B}'
+                | ':'
+                | '\u{FF1A}'
         ) {
             let new_len = s.len() - c.len_utf8();
             s.truncate(new_len);

@@ -57,7 +57,7 @@ pub struct Turn<Id> {
     pub id: Id,
 }
 
-/// `compaction.ts:82-85`。
+/// `compaction.ts:82-85`.
 #[derive(Debug, Clone)]
 pub struct Tail<Id> {
     pub start: usize,
@@ -71,7 +71,7 @@ pub struct SelectResult<Id> {
     pub tail_start_id: Option<Id>,
 }
 
-/// `compaction.ts:141-157`。
+/// `compaction.ts:141-157`.
 pub fn turns<M: MessageRef>(messages: &[M]) -> Vec<Turn<M::Id>> {
     let mut result: Vec<Turn<M::Id>> = Vec::new();
     let n = messages.len();

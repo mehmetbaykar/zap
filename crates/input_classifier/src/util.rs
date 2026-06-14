@@ -122,8 +122,8 @@ pub fn contains_cjk(text: &str) -> bool {
             | '\u{3040}'..='\u{309F}' // Hiragana
             | '\u{30A0}'..='\u{30FF}' // Katakana
             | '\u{AC00}'..='\u{D7AF}' // Hangul syllables
-            | '\u{3000}'..='\u{303F}' // CJK punctuation (。、!?, etc.)
-            | '\u{FF00}'..='\u{FFEF}' // halfwidth/fullwidth (。、!?, etc.)
+            | '\u{3000}'..='\u{303F}' // CJK symbols and punctuation (ideographic stop, comma, etc.)
+            | '\u{FF00}'..='\u{FFEF}' // halfwidth and fullwidth forms
         )
     })
 }
