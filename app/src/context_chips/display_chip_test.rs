@@ -290,3 +290,25 @@ fn test_truncate_from_beginning_preserves_char_boundaries() {
         );
     }
 }
+
+#[test]
+fn test_chip_commands_neutralize_shell_injection() {
+    use super::{format_change_directory_command, format_git_branch_command};
+
+    // A hostile git branch name or directory name must stay a single quoted
+    // argument instead of breaking out into an injected command (GHSA-hgvx-4xvm-39pw).
+    assert_eq!(
+        format_git_branch_command("x'; touch /tmp/pwned; echo '"),
+        r#"git checkout 'x'"'"'; touch /tmp/pwned; echo '"'"''"#
+    );
+    assert_eq!(
+        format_change_directory_command("a'; rm -rf ~; echo '"),
+        r#"cd 'a'"'"'; rm -rf ~; echo '"'"''"#
+    );
+    // Plain inputs round-trip unchanged inside the quotes.
+    assert_eq!(
+        format_git_branch_command("feature/foo"),
+        "git checkout 'feature/foo'"
+    );
+    assert_eq!(format_change_directory_command(".."), "cd '..'");
+}

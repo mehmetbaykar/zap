@@ -706,7 +706,8 @@ impl DisplayChip {
                     }
                     NodeVersionPopupEvent::SelectVersion { version } => {
                         ctx.emit(PromptDisplayChipEvent::TryExecuteCommand(format!(
-                            "nvm use {version}"
+                            "nvm use {}",
+                            shell_single_quote(version)
                         )));
                         me.close_node_version_popup(ctx);
                         ctx.focus_self();
@@ -1773,12 +1774,21 @@ impl ActionButtonTheme for EnterAgentViewButton {
     }
 }
 
+/// POSIX single-quote-wrap an untrusted chip input (branch name, directory, node
+/// version) so it can't break out of the quoting and inject shell commands when the
+/// chip command is executed. Uses the `'"'"'` idiom, valid in bash/zsh (our build
+/// targets). Without this, a hostile git branch name like `x; rm -rf ~` interpolated
+/// into `git checkout {branch_name}` would execute on click.
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r#"'"'"'"#))
+}
+
 fn format_change_directory_command(dir_name: &str) -> String {
-    format!("cd '{}'", dir_name.replace("'", "'\\'''"))
+    format!("cd {}", shell_single_quote(dir_name))
 }
 
 pub fn format_git_branch_command(branch_name: &str) -> String {
-    format!("git checkout {branch_name}")
+    format!("git checkout {}", shell_single_quote(branch_name))
 }
 
 pub(crate) fn chip_container(
