@@ -272,9 +272,12 @@ impl TerminalView {
 
         match restore_context_state {
             RestorationDirState::NeedsCd { path } => {
+                // Escape the restored working directory before interpolating it into `cd`
+                // (GHSA-8659-m852-gmfx): a hostile path must not break out and inject commands.
+                let escaped = self.shell_family(ctx).shell_escape(&path).into_owned();
                 let path_for_hint = path.clone();
                 let did_execute_cd = self.input.update(ctx, |input, ctx| {
-                    input.try_execute_command(&format!("cd \"{path}\""), ctx)
+                    input.try_execute_command(&format!("cd {escaped}"), ctx)
                 });
                 if did_execute_cd {
                     self.on_next_block_completed(move |me, ctx| {
