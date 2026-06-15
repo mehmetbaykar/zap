@@ -48,7 +48,7 @@ impl Input {
         let mut column = Flex::column();
 
         if matches!(input_mode, InputMode::PinnedToBottom | InputMode::Waterfall) {
-            if let Some(banner) = self.render_input_banner(app, input_mode, false) {
+            if let Some(banner) = self.render_input_banner(appearance, app, input_mode, false) {
                 column.add_child(
                     Container::new(banner)
                         .with_margin_top(spacing::UDI_CHIP_MARGIN)
@@ -92,7 +92,7 @@ impl Input {
         }
 
         if matches!(input_mode, InputMode::PinnedToTop) {
-            if let Some(banner) = self.render_input_banner(app, input_mode, false) {
+            if let Some(banner) = self.render_input_banner(appearance, app, input_mode, false) {
                 column.add_child(
                     Container::new(banner)
                         .with_margin_bottom(spacing::UDI_CHIP_MARGIN)
