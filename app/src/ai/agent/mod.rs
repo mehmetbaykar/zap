@@ -634,6 +634,9 @@ pub enum RenderableAIError {
         /// When `will_attempt_resume` is true, this indicates whether we're waiting for network
         /// connectivity before attempting the resume.
         waiting_for_network: bool,
+        /// True when the error originates from a user-side issue (e.g., model not allowed,
+        /// blocked due to fraud, plan restriction). Maps the task to FAILED state instead of ERROR.
+        is_user_error: bool,
     },
 }
 
@@ -660,6 +663,7 @@ impl RenderableAIError {
 
 impl From<&AIApiError> for RenderableAIError {
     fn from(value: &AIApiError) -> Self {
+        let is_user_error = !value.is_retryable();
         match value {
             AIApiError::QuotaLimit => Self::QuotaLimit,
             AIApiError::ServerOverloaded => Self::ServerOverloaded,
@@ -667,11 +671,13 @@ impl From<&AIApiError> for RenderableAIError {
                 error_message: error.to_string(),
                 will_attempt_resume: false,
                 waiting_for_network: false,
+                is_user_error,
             },
             _ => Self::Other {
                 error_message: format!("Request failed with error: {value:?}"),
                 will_attempt_resume: false,
                 waiting_for_network: false,
+                is_user_error,
             },
         }
     }
