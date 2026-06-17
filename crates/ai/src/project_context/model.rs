@@ -77,11 +77,15 @@ struct RuleAtPath {
     parent_path: PathBuf,
     warp_md: Option<ProjectRule>,
     agents_md: Option<ProjectRule>,
+    claude_md: Option<ProjectRule>,
 }
 
 impl RuleAtPath {
     fn respected_rule(&self) -> Option<&ProjectRule> {
-        self.warp_md.as_ref().or(self.agents_md.as_ref())
+        self.warp_md
+            .as_ref()
+            .or(self.agents_md.as_ref())
+            .or(self.claude_md.as_ref())
     }
 }
 
@@ -156,10 +160,12 @@ impl ProjectRules {
             .iter_mut()
             .find(|rule| rule.parent_path == parent)?;
 
-        if file_name.to_lowercase() == "warp.md" {
+        if file_name.eq_ignore_ascii_case("warp.md") {
             rule.warp_md.take()
-        } else if file_name.to_lowercase() == "agents.md" {
+        } else if file_name.eq_ignore_ascii_case("agents.md") {
             rule.agents_md.take()
+        } else if file_name.eq_ignore_ascii_case("claude.md") {
+            rule.claude_md.take()
         } else {
             None
         }
@@ -188,10 +194,12 @@ impl ProjectRules {
 
         match existing_rule {
             Some(rule) => {
-                if file_name.to_lowercase() == "warp.md" {
+                if file_name.eq_ignore_ascii_case("warp.md") {
                     rule.warp_md = rule_file;
-                } else if file_name.to_lowercase() == "agents.md" {
+                } else if file_name.eq_ignore_ascii_case("agents.md") {
                     rule.agents_md = rule_file;
+                } else if file_name.eq_ignore_ascii_case("claude.md") {
+                    rule.claude_md = rule_file;
                 }
             }
             None => {
@@ -199,10 +207,12 @@ impl ProjectRules {
                     parent_path: parent.to_path_buf(),
                     ..Default::default()
                 };
-                if file_name.to_lowercase() == "warp.md" {
+                if file_name.eq_ignore_ascii_case("warp.md") {
                     rule.warp_md = rule_file;
-                } else if file_name.to_lowercase() == "agents.md" {
+                } else if file_name.eq_ignore_ascii_case("agents.md") {
                     rule.agents_md = rule_file;
+                } else if file_name.eq_ignore_ascii_case("claude.md") {
+                    rule.claude_md = rule_file;
                 }
                 self.rules.push(rule);
             }

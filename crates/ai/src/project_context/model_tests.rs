@@ -263,9 +263,16 @@ fn fast_path_returns_empty_when_no_rules_anywhere() {
 fn fast_path_still_valid_when_nothing_changed() {
     let tmp = tempfile::tempdir().unwrap();
     let cwd = tmp.path().canonicalize().unwrap();
-    std::fs::write(cwd.join("AGENTS.md"), "stable").unwrap();
+    let rule = cwd.join("AGENTS.md");
+    std::fs::write(&rule, "stable").unwrap();
+    let meta = std::fs::metadata(&rule).unwrap();
 
-    let entry = ProjectContextModel::scan_fast_path(&cwd);
+    let entry = FastPathEntry {
+        rules: Vec::new(),
+        root_path: cwd,
+        stamps: vec![(rule, meta.modified().unwrap(), meta.len())],
+        walked_dir_stamps: Vec::new(),
+    };
     assert!(ProjectContextModel::fast_path_entry_still_valid(&entry));
 }
 
@@ -278,8 +285,10 @@ fn fast_path_invalidated_when_rule_file_mtime_changes() {
     let cwd = tmp.path().canonicalize().unwrap();
     let rule = cwd.join("AGENTS.md");
     std::fs::write(&rule, "v1").unwrap();
+    set_file_mtime(&rule, FileTime::from_unix_time(1_700_000_000, 0)).unwrap();
 
     let entry = ProjectContextModel::scan_fast_path(&cwd);
+    assert!(!entry.stamps.is_empty());
     assert!(ProjectContextModel::fast_path_entry_still_valid(&entry));
 
     // Push mtime forward 10s → the cache should be detected as invalid
