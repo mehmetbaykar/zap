@@ -160,6 +160,7 @@ pub use pane::env_var_collection_pane::EnvVarCollectionPane;
 // Zap Wave 7-3: `EnvironmentManagementPane` was physically removed along with the ambient-agent UI subsystem.
 pub use pane::execution_profile_editor_pane::ExecutionProfileEditorPane;
 pub use pane::file_pane::FilePane;
+pub use pane::image_pane::ImagePane;
 pub use pane::notebook_pane::NotebookPane;
 pub use pane::settings_pane::SettingsPane;
 pub use pane::terminal_pane::TerminalPane;
@@ -1814,6 +1815,13 @@ impl PaneGroup {
                 // depends on an active SSH connection and cannot be restored after a restart.
                 Err(anyhow::anyhow!(
                     "SFTP pane should not have been persisted, as it cannot be restored"
+                ))
+            }
+            LeafContents::Image { .. } => {
+                // Image viewer panes are intentionally not persisted (see
+                // `LeafContents::is_persisted`), so this should be unreachable.
+                Err(anyhow::anyhow!(
+                    "Image pane should not have been persisted, as it is not restorable"
                 ))
             }
             LeafContents::GetStarted => {

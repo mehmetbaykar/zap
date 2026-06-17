@@ -394,7 +394,10 @@ Host b
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].alias, "a");
         assert_eq!(got[0].user.as_deref(), Some("u_a"));
-        assert_eq!(got[0].port, None, "the Match block's Port 9999 should not leak into a");
+        assert_eq!(
+            got[0].port, None,
+            "the Match block's Port 9999 should not leak into a"
+        );
         assert_eq!(got[1].alias, "b");
         assert_eq!(got[1].user.as_deref(), Some("u_b"));
     }

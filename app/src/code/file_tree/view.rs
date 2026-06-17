@@ -2234,14 +2234,21 @@ impl FileTreeView {
                     let path = metadata.path.to_local_path_lossy();
                     self.open_file(&path, None, ctx);
                 } else {
-                    // Remote file: open via the buffer-sync protocol.
+                    // Remote images open in the image viewer; other remote files use buffer sync.
                     #[cfg(feature = "local_tty")]
                     if let Some(host_id) = root_dir.remote_host_id.clone() {
                         let remote_path = crate::code::buffer_location::RemotePath::new(
                             host_id,
                             (*metadata.path).clone(),
                         );
-                        ctx.emit(FileTreeEvent::OpenRemoteFile { remote_path });
+                        // Convert only to inspect the extension; the remote path itself is preserved.
+                        if crate::util::openable_file_type::is_supported_image_file(
+                            metadata.path.to_local_path_lossy(),
+                        ) {
+                            ctx.emit(FileTreeEvent::OpenRemoteImage { remote_path });
+                        } else {
+                            ctx.emit(FileTreeEvent::OpenRemoteFile { remote_path });
+                        }
                     }
                 }
             }
@@ -2882,6 +2889,11 @@ pub enum FileTreeEvent {
     /// Emitted when a file is clicked in the remote file tree, requesting it be opened as a remote buffer.
     #[cfg_attr(not(feature = "local_tty"), allow(dead_code))]
     OpenRemoteFile {
+        remote_path: crate::code::buffer_location::RemotePath,
+    },
+    /// Emitted when a remote file-tree image is clicked so it can open in the image viewer.
+    #[cfg_attr(not(feature = "local_tty"), allow(dead_code))]
+    OpenRemoteImage {
         remote_path: crate::code::buffer_location::RemotePath,
     },
 }

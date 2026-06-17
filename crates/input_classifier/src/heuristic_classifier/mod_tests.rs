@@ -1,6 +1,6 @@
 use warp_completer::util::parse_current_commands_and_tokens;
 
-use crate::{test_utils::CompletionContext, Context};
+use crate::{Context, test_utils::CompletionContext};
 
 use super::*;
 

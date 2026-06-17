@@ -180,8 +180,8 @@ async fn test_password_auth_windows(
     cmd_args: Vec<String>,
     password: &Zeroizing<String>,
 ) -> Result<(), String> {
-    let askpass = AskpassSession::new(password)
-        .map_err(|e| format!("Failed to prepare askpass: {e}"))?;
+    let askpass =
+        AskpassSession::new(password).map_err(|e| format!("Failed to prepare askpass: {e}"))?;
 
     let mut cmd = command::r#async::Command::new("ssh");
     cmd.args(&cmd_args)
@@ -192,7 +192,9 @@ async fn test_password_auth_windows(
         .kill_on_drop(true);
     askpass.apply_env(&mut cmd);
 
-    let child = cmd.spawn().map_err(|e| format!("Failed to start ssh: {e}"))?;
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start ssh: {e}"))?;
 
     // When the timeout fires, child is dropped → kill_on_drop automatically kills ssh.
     // The askpass guard is dropped at the end of the function, cleaning up the temporary files.

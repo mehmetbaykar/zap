@@ -379,6 +379,12 @@ pub mod next_command {
     use super::*;
     use warpui::{AppContext, EntityId};
 
+    #[derive(Debug, Serialize)]
+    struct UserRuleCtx {
+        name: Option<String>,
+        content: String,
+    }
+
     pub struct Input {
         pub recent_blocks: Vec<BlockSnippet>,
         /// Similar-command context already selected from the history DB on the client side (optional).
@@ -388,6 +394,8 @@ pub mod next_command {
         pub prefix: Option<String>,
         /// Previously rejected suggestions (to avoid repetition).
         pub rejected_suggestions: Vec<String>,
+        /// Snapshot of global rules configured in Settings -> Agents -> Rules.
+        pub user_rules: Vec<(Option<String>, String)>,
     }
 
     /// Pre-spawn: resolves the BYOP config (needs `&AppContext`). `None` ⇒ silent no-op.
@@ -398,7 +406,17 @@ pub mod next_command {
     /// In-spawn: renders the prompt with cfg + Input and sends the request.
     /// Template rendering doesn't depend on AppContext, so it can be called synchronously inside spawn.
     pub async fn run_with(cfg: OneshotConfig, input: Input) -> Option<String> {
-        let system = render("next_command_system.j2", context! {});
+        let user_rule_ctxs: Vec<UserRuleCtx> = input
+            .user_rules
+            .into_iter()
+            .map(|(name, content)| UserRuleCtx { name, content })
+            .collect();
+        let system = render(
+            "next_command_system.j2",
+            context! {
+                user_rules => user_rule_ctxs,
+            },
+        );
         let user = render(
             "next_command_user.j2",
             context! {

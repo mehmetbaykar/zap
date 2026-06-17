@@ -281,6 +281,7 @@ fn inverted_color_ui_builder(appearance: &Appearance) -> UiBuilder {
         theme.terminal_colors().clone(),
         None,
         None,
+        None,
     );
 
     UiBuilder::new(

@@ -202,7 +202,9 @@ impl SyncDataProvider for SshSyncProvider {
                     rollback_keychain_writes(&self.secret_store, &written_secrets);
                     return Err(SyncEngineError::Provider(format!(
                         "Failed to read prior keychain value ({}, {:?}): {e}. Rolled back {} item(s); please confirm the keychain is available and retry the download",
-                        s.node_id, s.kind, written_secrets.len()
+                        s.node_id,
+                        s.kind,
+                        written_secrets.len()
                     )));
                 }
             };

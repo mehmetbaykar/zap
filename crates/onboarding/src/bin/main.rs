@@ -378,6 +378,7 @@ fn dark_theme() -> WarpTheme {
         dark_mode_colors(),
         None,
         Some("Dark".to_string()),
+        None,
     )
 }
 
@@ -391,6 +392,7 @@ fn light_theme() -> WarpTheme {
         light_mode_colors(),
         None,
         Some("Light".to_string()),
+        None,
     )
 }
 
@@ -410,6 +412,7 @@ fn phenomenon() -> WarpTheme {
             opacity: 100,
         }),
         Some("Phenomenon".to_string()),
+        None,
     )
 }
 
@@ -423,6 +426,7 @@ fn adeberry() -> WarpTheme {
         adeberry_colors(),
         None,
         Some("Adeberry".to_string()),
+        None,
     )
 }
 
@@ -439,6 +443,8 @@ fn build_appearance(theme: WarpTheme, ctx: &mut AppContext) -> Appearance {
         1.2,
         ui_font_family,
         ui_font_family,
+        12.0,
+        Default::default(),
     )
 }
 

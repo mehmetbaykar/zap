@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use async_tungstenite::{
-    WebSocketStream,
     tokio::{
-        ClientStream, client_async_tls_with_connector_and_config, connect_async_with_tls_connector,
+        client_async_tls_with_connector_and_config, connect_async_with_tls_connector, ClientStream,
     },
     tungstenite::client::IntoClientRequest,
+    WebSocketStream,
 };
 use futures::{Sink, Stream};
 use futures_util::StreamExt as _;

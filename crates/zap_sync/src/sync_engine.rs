@@ -237,7 +237,9 @@ impl<C: GistOps> SyncEngine<C> {
             }) {
                 Ok(()) => String::new(),
                 Err(rollback_err) => {
-                    log::error!("Failed to roll back version number after force upload failed: {rollback_err}");
+                    log::error!(
+                        "Failed to roll back version number after force upload failed: {rollback_err}"
+                    );
                     format!(
                         " (rolling back sync_version also failed: {rollback_err}; local version is stuck at {new_version}, please manually change it back to {local_version})"
                     )

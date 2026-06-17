@@ -374,6 +374,7 @@ fn open_file(
             // Safe targets: open in a viewer/editor that won't execute the file.
             FileTarget::MarkdownViewer(_)
             | FileTarget::CodeEditor(_)
+            | FileTarget::ImageViewer(_)
             | FileTarget::ExternalEditor(_)
             | FileTarget::EnvEditor => {
                 ctx.emit(LinkEvent::OpenFileWithTarget {

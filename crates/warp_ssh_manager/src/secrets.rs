@@ -50,7 +50,7 @@ impl From<keyring::Error> for SshSecretStoreError {
 /// Credential storage abstraction — `KeychainSecretStore` is the default implementation; tests can use a mock.
 pub trait SshSecretStore: Send + Sync {
     fn set(&self, node_id: &str, kind: SecretKind, secret: &str)
-        -> Result<(), SshSecretStoreError>;
+    -> Result<(), SshSecretStoreError>;
 
     fn get(
         &self,

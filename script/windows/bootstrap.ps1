@@ -49,6 +49,27 @@ winget install jqlang.jq
 # CMake is needed to build native dependencies.
 winget install -e --id Kitware.CMake
 
+# Strawberry Perl is needed to build OpenSSL from source. zap_sftp -> ssh2
+# (openssl-on-win32) -> openssl-sys uses perl to run OpenSSL Configure.
+# Use native Windows Strawberry Perl; Git for Windows cygwin perl is not suitable for MSVC builds.
+winget install -e --id StrawberryPerl.StrawberryPerl `
+    --accept-package-agreements --accept-source-agreements
+
+# protoc (Protocol Buffers compiler) is used by build.rs for proto dependencies such as warp_multi_agent_api.
+# Pin to the same version as script/linux/install_build_deps for consistent cross-platform code generation.
+# prost-build requires protoc >= 3.15 for proto3 optional fields; winget Google.Protobuf is newer, so use the official zip.
+$protocVersion = '25.1'
+$protocDir = "$env:LOCALAPPDATA\protoc"
+$protocExe = "$protocDir\bin\protoc.exe"
+if (-not (Test-Path $protocExe)) {
+    $protocZip = "$env:TEMP\protoc-$protocVersion-win64.zip"
+    Invoke-WebRequest -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v$protocVersion/protoc-$protocVersion-win64.zip" -OutFile $protocZip
+    Expand-Archive -Path $protocZip -DestinationPath $protocDir -Force
+    Remove-Item $protocZip
+}
+# prost-build reads PROTOC first; pointing it at the pinned binary is the most reliable option.
+[Environment]::SetEnvironmentVariable('PROTOC', $protocExe, 'User')
+
 # We use InnoSetup to build our release bundle installer.
 winget install -e --id JRSoftware.InnoSetup
 

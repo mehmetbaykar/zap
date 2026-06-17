@@ -120,6 +120,10 @@ pub struct LeafSnapshot {
 pub enum LeafContents {
     Terminal(TerminalPaneSnapshot),
     Notebook(NotebookPaneSnapshot),
+    /// A read-only image viewer pane backed by a local file.
+    Image {
+        path: Option<PathBuf>,
+    },
     AIDocument(AIDocumentPaneSnapshot),
     Code(CodePaneSnapShot),
     EnvVarCollection(EnvVarCollectionPaneSnapshot),
@@ -173,6 +177,9 @@ impl LeafContents {
             // SFTP browser: the remote filesystem depends on an active SSH connection, so the pane
             // is not restorable.
             LeafContents::Sftp { .. } => false,
+            // Image viewer panes are intentionally not persisted: they render in-session but
+            // are not restored after restart.
+            LeafContents::Image { .. } => false,
             // Remote-file code pane: the remote buffer depends on an active SSH connection, and the
             // `RemoteFileTree` source is not restorable (`is_restorable() == false`). Persisting it
             // would leave an orphan `Code` row that is skipped during the restore phase, causing the

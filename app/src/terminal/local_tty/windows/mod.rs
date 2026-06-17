@@ -25,8 +25,8 @@ use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Console::{COORD, HPCON};
 use windows::Win32::System::Threading::{
     CreateProcessW, WaitForSingleObject, CREATE_BREAKAWAY_FROM_JOB, CREATE_UNICODE_ENVIRONMENT,
-    EXTENDED_STARTUPINFO_PRESENT, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
+    EXTENDED_STARTUPINFO_PRESENT, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTUPINFOEXW,
+    STARTUPINFOW,
 };
 
 use crate::terminal::local_tty::windows::proc_thread_attribute_list::ProcThreadAttributeList;
@@ -143,7 +143,6 @@ pub(super) fn spawn(
     // The default zeros the memory.
     let mut startup_info = STARTUPINFOEXW::default();
     startup_info.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
-    startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
 
     let mut attrs = unsafe {
         ProcThreadAttributeList::new()

@@ -2,14 +2,14 @@ use std::path::{Path, PathBuf};
 use std::{
     env,
     fs::{self, File},
-    io::{copy, IsTerminal, Write},
+    io::{IsTerminal, Write, copy},
 };
 
 use anyhow::Result;
 use chrono::Local;
 use log::LevelFilter;
 use std::sync::OnceLock;
-use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 use crate::{LogConfig, LogDestination};
 use warp_core::channel::ChannelState;

@@ -10,7 +10,7 @@ use anyhow::anyhow;
 pub use async_tungstenite::tungstenite::client::IntoClientRequest;
 #[cfg(not(target_family = "wasm"))]
 use async_tungstenite::tungstenite::http::HeaderValue;
-use futures_util::{SinkExt, TryStreamExt, future};
+use futures_util::{future, SinkExt, TryStreamExt};
 #[cfg(not(target_family = "wasm"))]
 use itertools::Itertools;
 use thiserror::Error;
@@ -22,7 +22,7 @@ pub use async_tungstenite::tungstenite;
 // root, so `app::settings::network` / `app::settings::init` can reference them
 // directly via `websocket::ProxyMode`.
 #[cfg(not(target_family = "wasm"))]
-pub use imp::proxy::{ProxyConfig, ProxyMode, set_global_proxy_config};
+pub use imp::proxy::{set_global_proxy_config, ProxyConfig, ProxyMode};
 
 use crate::sink_map_err::map_err;
 

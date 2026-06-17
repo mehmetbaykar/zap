@@ -1690,6 +1690,21 @@ impl AgentInputFooter {
             BlocklistAIHistoryModel::as_ref(ctx).active_conversation(self.terminal_view_id)
         {
             let usage = conversation.context_window_usage();
+            // 0.0 is the uninitialized sentinel: context_window_usage starts at 0.0
+            // (ConversationUsageMetadata::default) and is only written when a stream
+            // finishes with Some(usage_metadata). Any real LLM response consumes at
+            // least a nonzero token fraction, so 0.0 unambiguously means "no data yet"
+            // — keep the button's initial neutral tooltip rather than show "100% remaining".
+            if usage == 0.0 {
+                self.context_window_button.update(ctx, |button, ctx| {
+                    button.set_icon(Some(Icon::ConversationContext0), ctx);
+                    button.set_tooltip(
+                        Some(crate::t!("ai-footer-context-window-usage-tooltip")),
+                        ctx,
+                    );
+                });
+                return;
+            }
             let icon = icon_for_context_window_usage(usage);
             let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
             let tooltip = format!("{remaining_pct}% context remaining");

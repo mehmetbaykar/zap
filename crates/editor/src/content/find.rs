@@ -13,16 +13,16 @@
 
 use std::{borrow::Cow, future::Future};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use rangemap::RangeSet;
 use regex_automata::{
+    Anchored, Input, MatchError, MatchKind,
     hybrid::{
-        dfa::{Cache, DFA},
         BuildError, LazyStateID,
+        dfa::{Cache, DFA},
     },
     nfa::thompson,
     util::syntax::Config,
-    Anchored, Input, MatchError, MatchKind,
 };
 use sum_tree::SumTree;
 

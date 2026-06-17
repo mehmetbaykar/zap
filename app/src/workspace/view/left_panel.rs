@@ -110,6 +110,11 @@ pub enum LeftPanelEvent {
     OpenRemoteFile {
         remote_path: crate::code::buffer_location::RemotePath,
     },
+    /// A remote file-tree image was clicked; the main window should open it in the image viewer.
+    #[cfg_attr(not(feature = "local_tty"), allow(dead_code))]
+    OpenRemoteImage {
+        remote_path: crate::code::buffer_location::RemotePath,
+    },
     NewConversationInNewTab,
     ShowDeleteConfirmationDialog {
         conversation_id: AIConversationId,
@@ -945,6 +950,14 @@ impl LeftPanelView {
             FileTreeEvent::OpenRemoteFile { remote_path } => {
                 #[cfg(feature = "local_tty")]
                 ctx.emit(LeftPanelEvent::OpenRemoteFile {
+                    remote_path: remote_path.clone(),
+                });
+                #[cfg(not(feature = "local_tty"))]
+                let _ = remote_path;
+            }
+            FileTreeEvent::OpenRemoteImage { remote_path } => {
+                #[cfg(feature = "local_tty")]
+                ctx.emit(LeftPanelEvent::OpenRemoteImage {
                     remote_path: remote_path.clone(),
                 });
                 #[cfg(not(feature = "local_tty"))]

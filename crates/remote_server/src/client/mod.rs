@@ -10,14 +10,15 @@ use futures::io::{AsyncRead, AsyncWrite};
 use warpui::r#async::{executor, FutureExt as _};
 
 use crate::proto::{
-    client_message, server_message, Abort, Authenticate, BufferEdit, ClientMessage, CloseBuffer,
-    CreateDirectory, CreateDirectoryResponse, DeleteFile, ErrorCode, Initialize,
-    InitializeResponse, ListDirectory, ListDirectoryResponse, LoadRepoMetadataDirectoryResponse,
-    NavigatedToDirectoryResponse, OpenBuffer, OpenBufferResponse, ReadFileChunk,
-    ReadFileChunkResponse, ReadFileContextRequest, ReadFileContextResponse, ResolveConflict,
-    ResolveConflictResponse, ResolvePath, ResolvePathResponse, RunCommandRequest,
-    RunCommandResponse, SaveBuffer, SaveBufferResponse, ServerMessage, SessionBootstrapped,
-    TextEdit, WriteFile, WriteFileChunk, WriteFileChunkResponse,
+    client_message, read_file_chunk_response, server_message, Abort, Authenticate, BufferEdit,
+    ClientMessage, CloseBuffer, CreateDirectory, CreateDirectoryResponse, DeleteFile, ErrorCode,
+    Initialize, InitializeResponse, ListDirectory, ListDirectoryResponse,
+    LoadRepoMetadataDirectoryResponse, NavigatedToDirectoryResponse, OpenBuffer,
+    OpenBufferResponse, ReadFileChunk, ReadFileChunkResponse, ReadFileContextRequest,
+    ReadFileContextResponse, ResolveConflict, ResolveConflictResponse, ResolvePath,
+    ResolvePathResponse, RunCommandRequest, RunCommandResponse, SaveBuffer, SaveBufferResponse,
+    ServerMessage, SessionBootstrapped, TextEdit, WriteFile, WriteFileChunk,
+    WriteFileChunkResponse,
 };
 
 use crate::protocol::{self, ProtocolError, RequestId};
@@ -460,6 +461,38 @@ impl RemoteServerClient {
                 Err(ClientError::UnexpectedResponse)
             }
         }
+    }
+
+    /// Reads an entire remote file by looping [`Self::read_file_chunk`] until EOF.
+    ///
+    /// Accumulates each chunk into a single buffer, advancing `offset` by the
+    /// server-reported `next_offset`, until a chunk signals `eof`. Used by the
+    /// in-app image viewer to fetch raw image bytes for `AssetSource::Raw`.
+    pub async fn read_file_bytes(&self, path: String) -> Result<Vec<u8>, ClientError> {
+        // The server caps each block at 8 MiB (`handle_read_file_chunk`). Request
+        // 4 MiB chunks, well under the 64 MiB message limit, to leave framing headroom.
+        const CHUNK_SIZE: u64 = 4 * 1024 * 1024;
+
+        let mut bytes = Vec::new();
+        let mut offset = 0u64;
+        loop {
+            let response = self
+                .read_file_chunk(path.clone(), offset, CHUNK_SIZE)
+                .await?;
+            let success = match response.result {
+                Some(read_file_chunk_response::Result::Success(success)) => success,
+                Some(read_file_chunk_response::Result::Error(err)) => {
+                    return Err(ClientError::FileOperationFailed(err.message));
+                }
+                None => return Err(ClientError::UnexpectedResponse),
+            };
+            bytes.extend_from_slice(&success.bytes);
+            offset = success.next_offset;
+            if success.eof {
+                break;
+            }
+        }
+        Ok(bytes)
     }
 
     /// Writes a byte range to a remote file.

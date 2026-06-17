@@ -8,6 +8,11 @@ use super::model::{AgentConversation, AgentConversationData};
 use crate::persistence::model::{AgentConversationRecord, AgentTaskRecord};
 use crate::persistence::schema::{self, agent_conversations, agent_tasks};
 
+/// Maximum size of a single serialized `api::Task` protobuf BLOB stored in
+/// `agent_tasks.task`. Tasks exceeding this limit are skipped on both write
+/// and read to prevent startup OOM when all task records are loaded at once.
+const MAX_TASK_BLOB_BYTES: usize = 10 * 1024 * 1024; // 10 MB
+
 #[derive(Debug, Insertable, AsChangeset)]
 #[diesel(table_name = agent_conversations)]
 struct NewAgentConversation {
@@ -61,6 +66,18 @@ pub(super) fn upsert_agent_conversation<'a>(
 
         // Upsert each task
         for task in tasks {
+            // Check encoded size before allocating the full BLOB to avoid a
+            // large heap allocation that is immediately discarded.
+            let encoded_len = task.encoded_len();
+            if encoded_len > MAX_TASK_BLOB_BYTES {
+                log::warn!(
+                    "Task {} encoded size is {} bytes (limit {}), skipping persistence to avoid startup OOM",
+                    task.id,
+                    encoded_len,
+                    MAX_TASK_BLOB_BYTES,
+                );
+                continue;
+            }
             let task_binary = task.encode_to_vec();
             let new_task = NewAgentTask {
                 conversation_id: conversation_id_param.to_owned(),
@@ -122,6 +139,9 @@ pub(super) fn read_agent_conversations(
 
     let task_records: Vec<AgentTaskRecord> = agent_tasks::table
         .select(AgentTaskRecord::as_select())
+        .filter(diesel::dsl::sql::<diesel::sql_types::Bool>(&format!(
+            "length(task) <= {MAX_TASK_BLOB_BYTES}"
+        )))
         .load(conn)?;
 
     let mut invalid_conversation_ids = HashSet::new();
