@@ -2722,6 +2722,8 @@ impl BlockList {
                 .flatten(),
             None,
         );
+
+        self.active_block_mut().disable_reset_grid_checks();
     }
 
     /// Creates a restored command block with the given command, output, and exit code.
