@@ -434,13 +434,14 @@ if [ -z "$WARP_BOOTSTRAPPED" ]; then
         # executed within this block instead of the actual last
         # command that was run.
         local exit_code=$?
+        local next_block_id="precmd-$WARP_SESSION_ID-$((block_id++))"
         if [ "$WARP_IN_MSYS2" = true ]; then
           warp_send_hook_via_kv_pairs_start "CommandFinished"
           warp_send_hook_kv_pair "exit_code" "$exit_code"
-          warp_send_hook_kv_pair "next_block_id" "precmd-$WARP_SESSION_ID-$((block_id++))"
+          warp_send_hook_kv_pair "next_block_id" "$next_block_id"
           warp_send_hook_via_kv_pairs_end
         else
-          warp_send_json_message "{\"hook\": \"CommandFinished\", \"value\": {\"exit_code\": $exit_code, \"next_block_id\": \"precmd-$WARP_SESSION_ID-$((block_id++))\"}}"
+          warp_send_json_message "{\"hook\": \"CommandFinished\", \"value\": {\"exit_code\": $exit_code, \"next_block_id\": \"$next_block_id\"}}"
         fi
 
         warp_maybe_send_reset_grid_osc
@@ -463,6 +464,8 @@ if [ -z "$WARP_BOOTSTRAPPED" ]; then
 
             unset _WARP_GENERATOR_COMMAND
             warp_send_json_message "{\"hook\": \"Precmd\", \"value\": {
+            \"exit_code\": $exit_code,
+            \"next_block_id\": \"$next_block_id\",
             \"pwd\": \"\",
             \"ps1\": \"\",
             \"git_head\": \"\",
@@ -649,6 +652,8 @@ if [ -z "$WARP_BOOTSTRAPPED" ]; then
         # We send the escaped PS1, if we are in active Warp prompt mode, for prompt preview rendering (note the shell's PS1 is unset in this case).
         if [ "$WARP_IN_MSYS2" = true ]; then
           warp_send_hook_via_kv_pairs_start "Precmd"
+          warp_send_hook_kv_pair "exit_code" "$exit_code"
+          warp_send_hook_kv_pair "next_block_id" "$next_block_id"
           warp_send_hook_kv_pair "pwd" "$PWD"
           warp_send_hook_kv_pair_escaped "ps1" "$deref_ps1"
           warp_send_hook_kv_pair "ps1_is_encoded" "false"
@@ -662,6 +667,8 @@ if [ -z "$WARP_BOOTSTRAPPED" ]; then
           warp_send_hook_via_kv_pairs_end
         else
           local escaped_json="{\"hook\": \"Precmd\", \"value\": {
+          \"exit_code\": $exit_code,
+          \"next_block_id\": \"$next_block_id\",
           \"pwd\": \"$escaped_pwd\",
           \"ps1\": \"$escaped_ps1\",
           \"honor_ps1\": $honor_ps1,
