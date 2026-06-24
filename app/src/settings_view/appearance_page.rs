@@ -1643,6 +1643,11 @@ impl AppearanceSettingsPageView {
             AppearanceEvent::UiFontFamilyChanged { .. } => {
                 self.update_font_dropdown(ctx);
             }
+            AppearanceEvent::ThemeChanged => {
+                // Context-chip colors are theme-derived, so rebuild the Input
+                // preview chips when the theme changes to keep them in sync.
+                self.context_chips = Self::get_context_chip_renderers(ctx);
+            }
             _ => {}
         }
 
