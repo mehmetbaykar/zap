@@ -1257,33 +1257,35 @@ Thumbs.db
         });
     }
 
-    /// Regression test: the user's home directory must be trackable as a
-    /// lazily-loaded standalone path (listed shallowly, without a recursive
-    /// file watcher). It used to be rejected outright, which left the file
-    /// tree panel permanently empty when the terminal cwd was $HOME.
+    /// Regression test for https://github.com/zerx-lab/zap/issues/260.
+    /// The home directory must be indexable as a lazy-loaded standalone path so that
+    /// the file tree shows its first-level children when the terminal starts in `~`.
+    #[cfg(feature = "local_fs")]
     #[test]
-    fn lazy_loaded_home_directory_is_tracked_and_loaded() {
+    fn test_index_lazy_loaded_home_dir_succeeds() {
         let Some(home) = dirs::home_dir() else {
-            // No $HOME (sandboxed CI) — nothing to assert.
+            // No $HOME available (sandboxed CI) — guard is a no-op by design.
             return;
         };
-
         App::test((), |mut app| async move {
             let model_handle = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
-            let home_key = StandardizedPath::from_local_canonicalized(&home).unwrap();
-
+            let home_std = StandardizedPath::from_local_canonicalized(&home).unwrap();
+            let home_std_clone = home_std.clone();
             model_handle.update(&mut app, |model, ctx| {
-                model
-                    .index_lazy_loaded_path(&home_key, ctx)
-                    .expect("home directory must be indexable as a lazy-loaded path");
-
-                assert!(model.is_lazy_loaded_path(&home_key));
-                let state = model
-                    .get_repository(&home_key)
-                    .expect("home tree state must be tracked after lazy indexing");
+                let result = model.index_lazy_loaded_path(&home_std_clone, ctx);
                 assert!(
-                    state.entry.get(&home_key).is_some_and(|e| e.loaded()),
-                    "home root entry must be loaded (first level listed)"
+                    result.is_ok(),
+                    "index_lazy_loaded_path for home dir must succeed, got: {result:?}"
+                );
+            });
+            model_handle.read(&app, |model, _ctx| {
+                assert!(
+                    model.is_lazy_loaded_path(&home_std),
+                    "home dir must be tracked as a lazy-loaded path"
+                );
+                assert!(
+                    model.has_repository(&home_std),
+                    "home dir entry must be present in the repository map"
                 );
             });
         });

@@ -7,6 +7,8 @@ use warp_editor::render::model::LineCount;
 use warp_util::path::EscapeChar;
 use warpui::App;
 
+#[cfg(unix)]
+use super::cli_agent_search_dirs;
 use super::{
     build_diff_hunk_prompt, build_review_prompt, build_selection_line_range_prompt,
     build_selection_substring_prompt, CLIAgent, UBER_TEAM_UID,
@@ -510,4 +512,26 @@ fn test_detect_aifx_agent_run_claude_wrong_team() {
             );
         });
     });
+}
+
+#[cfg(unix)]
+#[test]
+fn test_cli_agent_search_dirs_include_common_gui_app_paths() {
+    let dirs: Vec<PathBuf> = cli_agent_search_dirs().collect();
+
+    assert!(dirs.contains(&PathBuf::from("/opt/homebrew/bin")));
+    assert!(dirs.contains(&PathBuf::from("/usr/local/bin")));
+}
+
+#[cfg(unix)]
+#[test]
+fn test_cli_agent_search_dirs_include_home_managed_bins() {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let dirs: Vec<PathBuf> = cli_agent_search_dirs().collect();
+
+    assert!(dirs.contains(&home.join(".cargo/bin")));
+    assert!(dirs.contains(&home.join(".bun/bin")));
+    assert!(dirs.contains(&home.join(".local/bin")));
 }

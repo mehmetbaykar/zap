@@ -20,6 +20,11 @@ pub use ssh_config_parser::{
     LoadOutcome, LoadResult, SshConfigCandidate, default_ssh_config_path, load_candidates,
     load_candidates_from, parse_ssh_config,
 };
-pub use sync_provider::{DbVersionStore, SshSyncData, SshSyncProvider, SyncNode, SyncServer};
+pub use sync_provider::{
+    DbVersionStore, SshSyncData, SshSyncProvider, SyncNode, SyncOneKeyCredential, SyncServer,
+};
 pub use types::ConnectionStatus;
-pub use types::{AuthType, NodeKind, SshNode, SshServerInfo};
+pub use types::{
+    AuthType, NodeKind, OneKeyCredentialKind, ResolvedSshAuth, SshNode, SshOneKeyCredential,
+    SshServerInfo,
+};

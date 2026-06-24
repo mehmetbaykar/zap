@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use warp_ssh_manager::secrets::{SecretKind, SshSecretStore};
-use warp_ssh_manager::types::{AuthType, SshServerInfo};
+use warp_ssh_manager::secrets::SshSecretStore;
+use warp_ssh_manager::types::{AuthType, ResolvedSshAuth, SshServerInfo};
+use warp_ssh_manager::SshRepository;
 use zap_sftp::session::{AuthMethod, SftpSession};
 use zap_sftp::types::OpenOptions;
 use zap_sftp::Sftp;
@@ -68,15 +69,21 @@ pub fn connect_from_server(
     server: &SshServerInfo,
     secret_store: &dyn SshSecretStore,
 ) -> Result<SftpSession, SftpOpsError> {
-    let auth = build_auth_method(server, secret_store)?;
+    let resolved_auth = resolve_sftp_auth(server)?;
+    let auth = build_auth_method(server, &resolved_auth, secret_store)?;
     SftpSession::connect(
         &server.host,
         server.port,
-        &server.username,
+        &resolved_auth.username,
         auth,
         Some(CONNECT_TIMEOUT),
     )
     .map_err(|e| SftpOpsError::Connection(e.to_string()))
+}
+
+fn resolve_sftp_auth(server: &SshServerInfo) -> Result<ResolvedSshAuth, SftpOpsError> {
+    warp_ssh_manager::with_conn(|conn| Ok(SshRepository::resolve_server_auth(conn, server)?))
+        .map_err(|e| SftpOpsError::NoCredentials(format!("Failed to resolve authentication: {e}")))
 }
 
 /// List remote directory contents, converting to UI-layer FileEntry
@@ -269,7 +276,7 @@ pub fn upload_file_streaming(
                 // Keep the remote temp file when rename fails, to avoid data loss
                 let temp_display = temp_remote_path.display();
                 return Err(SftpOpsError::Operation(format!(
-                    "Failed to rename remote temp file: {e}. Temp file: {temp_display}"
+                    "Failed to rename remote temp file: {e}。Temp file: {temp_display}"
                 )));
             }
         }
@@ -459,12 +466,13 @@ pub fn download_dir_recursive(
 /// Build the authentication method based on the server configuration
 fn build_auth_method(
     server: &SshServerInfo,
+    resolved_auth: &ResolvedSshAuth,
     secret_store: &dyn SshSecretStore,
 ) -> Result<AuthMethod, SftpOpsError> {
-    match server.auth_type {
-        AuthType::Password => {
+    match resolved_auth.auth_type {
+        AuthType::Password | AuthType::OneKey => {
             let password = secret_store
-                .get(&server.node_id, SecretKind::Password)
+                .get(&resolved_auth.secret_lookup_id, resolved_auth.secret_kind)
                 .map_err(|e| SftpOpsError::NoCredentials(format!("Failed to read password: {e}")))?
                 .ok_or_else(|| {
                     SftpOpsError::NoCredentials(format!(
@@ -477,14 +485,14 @@ fn build_auth_method(
             })
         }
         AuthType::Key => {
-            let key_path = server.key_path.as_ref().ok_or_else(|| {
+            let key_path = resolved_auth.key_path.as_ref().ok_or_else(|| {
                 SftpOpsError::NoCredentials(
                     "Key authentication selected but no key path specified".to_string(),
                 )
             })?;
             let expanded = shellexpand_path(key_path);
             let passphrase = secret_store
-                .get(&server.node_id, SecretKind::Passphrase)
+                .get(&resolved_auth.secret_lookup_id, resolved_auth.secret_kind)
                 .ok()
                 .flatten()
                 .map(|p| p.to_string());

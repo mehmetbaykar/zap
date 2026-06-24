@@ -3,20 +3,22 @@
 //! This module provides types for detecting and working with CLI-based AI agents
 //! like Claude Code, Gemini CLI, Codex, Amp, and Droid.
 
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::{Arc, LazyLock, RwLock};
-
 use ai::skills::SkillProvider;
 use enum_iterator::Sequence;
 use markdown_parser::parse_markdown;
 use pathfinder_color::ColorU;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+use std::borrow::Cow;
+use std::collections::HashMap;
+#[cfg(unix)]
+use std::collections::HashSet;
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use warp_editor::content::{buffer::Buffer, markdown::MarkdownStyle};
 
-use warpui::{AppContext, SingletonEntity};
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use crate::ai::agent::{AgentReviewCommentBatch, DiffSetHunk};
 use crate::ai::blocklist::CLAUDE_ORANGE;
@@ -568,55 +570,170 @@ impl From<CLIAgent> for CLIAgentType {
     }
 }
 
-/// CLI agent install-status cache. Populated once by a background thread at app startup.
-static AGENT_INSTALL_CACHE: LazyLock<Arc<RwLock<Option<HashMap<CLIAgent, bool>>>>> =
-    LazyLock::new(|| Arc::new(RwLock::new(None)));
+// -- CLI agent install-status singleton model --
+// Matches the AntivirusInfo pattern: ctx.spawn runs an async scan, the callback emits an event, and subscribers refresh UI automatically.
 
-impl CLIAgent {
-    /// Non-blocking cache read. Returns false when the cache is not ready, so the agent is hidden from the menu.
-    pub fn is_installed(&self) -> bool {
-        AGENT_INSTALL_CACHE
-            .read()
-            .ok()
-            .and_then(|c| c.as_ref().map(|m| m.get(self).copied().unwrap_or(false)))
+/// CLI agent install scan completion event.
+pub enum CLIAgentInstallEvent {
+    /// Background scan complete; install-status cache is ready.
+    ScanComplete,
+}
+
+/// Singleton model that tracks CLI agent install status.
+///
+/// Starts a background PATH scan with `ctx.spawn` during construction. After the scan completes, it emits
+/// [`CLIAgentInstallEvent::ScanComplete`] and automatically syncs per-agent settings.
+///
+/// All UI code that needs install status should read through `CLIAgentInstallModel::as_ref(ctx)`
+/// and subscribe to the event to trigger repaint after the scan completes.
+pub struct CLIAgentInstallModel {
+    /// None = scan not complete; Some = results are available.
+    cache: Option<HashMap<CLIAgent, bool>>,
+}
+
+impl CLIAgentInstallModel {
+    pub fn new(ctx: &mut ModelContext<Self>) -> Self {
+        ctx.spawn(
+            async move { scan_cli_agent_installations() },
+            Self::on_scan_complete,
+        );
+        Self { cache: None }
+    }
+
+    fn on_scan_complete(&mut self, results: HashMap<CLIAgent, bool>, ctx: &mut ModelContext<Self>) {
+        self.cache = Some(results.clone());
+
+        // Automatically sync to per-agent settings
+        crate::settings::AISettings::handle(ctx).update(ctx, |settings, ctx| {
+            settings.sync_per_agent_from_scan(&results, ctx);
+        });
+
+        ctx.emit(CLIAgentInstallEvent::ScanComplete);
+    }
+
+    /// Query whether an agent is installed. Returns false before the scan completes.
+    pub fn is_cli_agent_installed(&self, agent: CLIAgent) -> bool {
+        self.cache
+            .as_ref()
+            .map(|m| m.get(&agent).copied().unwrap_or(false))
             .unwrap_or(false)
     }
 
-    /// Refreshes the install status of all agents in the background without blocking the UI.
-    /// Called only once at app startup.
-    pub fn refresh_install_cache() {
-        let cache = AGENT_INSTALL_CACHE.clone();
-        std::thread::spawn(move || {
-            let results: HashMap<CLIAgent, bool> = enum_iterator::all::<CLIAgent>()
-                .filter(|a| !matches!(a, CLIAgent::Unknown))
-                .map(|a| (a, a.is_installed_blocking()))
-                .collect();
-            if let Ok(mut guard) = cache.write() {
-                *guard = Some(results);
-            }
-        });
+    /// Whether the scan is complete.
+    pub fn is_scan_complete(&self) -> bool {
+        self.cache.is_some()
     }
 
-    /// Synchronously detects whether this agent is installed on the system. Background-thread only.
-    fn is_installed_blocking(&self) -> bool {
-        match self {
-            CLIAgent::Unknown => false,
-            // `agent` is too generic; detect Cursor CLI via cursor-agent
-            CLIAgent::CursorCli => is_on_path("cursor-agent"),
-            // DeepSeek: check both the main command and the alias
-            CLIAgent::DeepSeek => is_on_path("deepseek") || is_on_path("deepseek-tui"),
-            other => is_on_path(other.command_prefix()),
+    /// Get an install-status snapshot. Returns None before the scan completes.
+    pub fn snapshot(&self) -> Option<HashMap<CLIAgent, bool>> {
+        self.cache.clone()
+    }
+}
+
+impl Entity for CLIAgentInstallModel {
+    type Event = CLIAgentInstallEvent;
+}
+
+impl SingletonEntity for CLIAgentInstallModel {}
+
+/// Synchronous PATH search that detects whether all agents are installed. Only used inside the `ctx.spawn` async task.
+#[cfg(unix)]
+fn scan_cli_agent_installations() -> HashMap<CLIAgent, bool> {
+    let search_dirs = cli_agent_search_dirs().collect::<Vec<_>>();
+    enum_iterator::all::<CLIAgent>()
+        .filter(|a| !matches!(a, CLIAgent::Unknown))
+        .map(|a| (a, cli_agent_is_on_path_with_dirs(a, &search_dirs)))
+        .collect()
+}
+
+/// Synchronous PATH search that detects whether all agents are installed. Only used inside the `ctx.spawn` async task.
+#[cfg(windows)]
+fn scan_cli_agent_installations() -> HashMap<CLIAgent, bool> {
+    enum_iterator::all::<CLIAgent>()
+        .filter(|a| !matches!(a, CLIAgent::Unknown))
+        .map(|a| (a, cli_agent_is_on_path(a)))
+        .collect()
+}
+
+#[cfg(unix)]
+fn cli_agent_is_on_path_with_dirs(agent: CLIAgent, search_dirs: &[PathBuf]) -> bool {
+    match agent {
+        CLIAgent::Unknown => false,
+        CLIAgent::CursorCli => is_on_path_in_dirs("cursor-agent", search_dirs),
+        CLIAgent::DeepSeek => {
+            is_on_path_in_dirs("deepseek", search_dirs)
+                || is_on_path_in_dirs("deepseek-tui", search_dirs)
         }
+        other => is_on_path_in_dirs(other.command_prefix(), search_dirs),
     }
 }
 
 /// Inline PATH search; zero processes, zero flashing windows.
 #[cfg(unix)]
-fn is_on_path(cmd: &str) -> bool {
-    let Ok(path_var) = std::env::var("PATH") else {
-        return false;
+fn is_on_path_in_dirs(cmd: &str, search_dirs: &[PathBuf]) -> bool {
+    search_dirs.iter().any(|dir| dir.join(cmd).is_file())
+}
+
+#[cfg(unix)]
+fn cli_agent_search_dirs() -> impl Iterator<Item = PathBuf> {
+    let mut dirs = Vec::new();
+
+    if let Some(path_var) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&path_var));
+    }
+
+    extend_common_cli_dirs(&mut dirs);
+    dedupe_paths(dirs).into_iter()
+}
+
+#[cfg(unix)]
+fn extend_common_cli_dirs(dirs: &mut Vec<PathBuf>) {
+    dirs.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/opt/homebrew/sbin"),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/usr/local/sbin"),
+    ]);
+
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
     };
-    std::env::split_paths(&path_var).any(|dir| dir.join(cmd).is_file())
+
+    dirs.extend([
+        home.join(".cargo/bin"),
+        home.join(".bun/bin"),
+        home.join(".local/bin"),
+    ]);
+
+    if let Ok(node_versions) = std::fs::read_dir(home.join(".nvm/versions/node")) {
+        dirs.extend(
+            node_versions
+                .filter_map(Result::ok)
+                .map(|entry| entry.path().join("bin")),
+        );
+    }
+}
+
+#[cfg(unix)]
+fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::with_capacity(paths.len());
+    let mut deduped = Vec::with_capacity(paths.len());
+    for path in paths {
+        if seen.insert(path.clone()) {
+            deduped.push(path);
+        }
+    }
+    deduped
+}
+
+#[cfg(windows)]
+fn cli_agent_is_on_path(agent: CLIAgent) -> bool {
+    match agent {
+        CLIAgent::Unknown => false,
+        CLIAgent::CursorCli => is_on_path("cursor-agent"),
+        CLIAgent::DeepSeek => is_on_path("deepseek") || is_on_path("deepseek-tui"),
+        other => is_on_path(other.command_prefix()),
+    }
 }
 
 #[cfg(windows)]

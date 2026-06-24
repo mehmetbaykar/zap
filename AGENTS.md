@@ -262,7 +262,6 @@ Under `app/src/` there are 60+ flatly-laid-out product-domain directories, each 
 > These are compiled from `WARP.md` and the project's custom rules; this file's verification requirement for the agent is `cargo check`.
 
 ### 5.1 Must-read conventions
-- **Comments/replies must always use Simplified Chinese** (user rule).
 - For searching/grepping within the git index, use the `fff` tool or `rg -n "<keyword>" <path>`; `read_file` is only for images/binaries.
 - Before opening a PR / pushing a new commit, you **only** need to pass: `cargo check`.
 - Changes must be precise: **every modified line must trace back to a user request**; do not casually "improve" unrelated code, comments, or formatting.

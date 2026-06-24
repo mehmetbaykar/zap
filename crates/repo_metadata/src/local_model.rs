@@ -383,35 +383,26 @@ impl LocalRepoMetadataModel {
             ));
         }
 
-        // Register this path with the watcher if we have one.
-        //
-        // The home directory and its ancestors (e.g. /Users, /) are tracked
-        // WITHOUT a recursive file watcher: registering such a broad root makes
-        // the OS push fsevents from unrelated areas (~/Library/*, photo
-        // libraries, IM caches, ...) into the indexer, leaking user data and
-        // producing endless PermissionDenied noise. Their trees still load
-        // (lazily, one level at a time via index_lazy_loaded_path /
-        // load_directory) — they just don't live-refresh on filesystem changes.
+        // Register this path with the watcher if we have one. Skip the home
+        // directory and its ancestors to avoid recursively watching unrelated
+        // user data; those paths can still be listed in the file tree.
         #[cfg(feature = "local_fs")]
-        if is_unsafe_watch_root(&local_path) {
-            log::info!(
-                "Tracking {} without a recursive file watcher (home directory or ancestor)",
-                local_path.display(),
-            );
-        } else {
+        {
             if let Some(ref watcher) = self.watcher {
-                let watch_path = local_path.clone();
-                watcher.update(ctx, |watcher, _ctx| {
-                    use crate::entry::should_ignore_git_path;
-                    let watch_filter = WatchFilter::with_filter(Arc::new(move |watch_path| {
-                        !should_ignore_git_path(watch_path)
-                    }));
-                    std::mem::drop(watcher.register_path(
-                        &watch_path,
-                        watch_filter,
-                        RecursiveMode::Recursive,
-                    ));
-                });
+                if !is_unsafe_watch_root(&local_path) {
+                    let watch_path = local_path.clone();
+                    watcher.update(ctx, |watcher, _ctx| {
+                        use crate::entry::should_ignore_git_path;
+                        let watch_filter = WatchFilter::with_filter(Arc::new(move |watch_path| {
+                            !should_ignore_git_path(watch_path)
+                        }));
+                        std::mem::drop(watcher.register_path(
+                            &watch_path,
+                            watch_filter,
+                            RecursiveMode::Recursive,
+                        ));
+                    });
+                }
             }
         }
 
@@ -434,14 +425,17 @@ impl LocalRepoMetadataModel {
         ctx: &mut ModelContext<Self>,
     ) -> Result<(), RepoMetadataError> {
         if self.repositories.remove(repo_path).is_some() {
-            // Unregister from watcher
+            // Unregister from watcher, mirroring the guard in add_repository_internal:
+            // home directory and ancestors are never registered, so skip them here too.
             #[cfg(feature = "local_fs")]
             {
                 if let Some(ref watcher) = self.watcher {
                     if let Some(local_path) = repo_path.to_local_path() {
-                        watcher.update(ctx, |watcher, _ctx| {
-                            std::mem::drop(watcher.unregister_path(&local_path));
-                        });
+                        if !is_unsafe_watch_root(&local_path) {
+                            watcher.update(ctx, |watcher, _ctx| {
+                                std::mem::drop(watcher.unregister_path(&local_path));
+                            });
+                        }
                     }
                 }
             }

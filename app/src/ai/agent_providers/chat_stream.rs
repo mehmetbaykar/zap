@@ -2347,8 +2347,11 @@ fn serialize_outgoing_tool_call(
     if tc.tool.is_none() {
         if let Some((fn_name, raw_args)) = server_message_data.split_once('\n') {
             if !fn_name.is_empty() {
-                let args_value = serde_json::from_str(raw_args)
-                    .unwrap_or_else(|_| Value::String(raw_args.to_owned()));
+                // When raw_args is invalid JSON (e.g. model emitted \e or \` escape),
+                // fall back to an empty object so the provider receives valid JSON
+                // rather than a JSON string wrapping the invalid content (which causes
+                // "Invalid \escape" 400 on the next turn).
+                let args_value = serde_json::from_str(raw_args).unwrap_or_else(|_| json!({}));
                 return (fn_name.to_owned(), args_value);
             }
         }
@@ -2872,17 +2875,26 @@ pub(super) fn build_client(
         ..WebConfig::default()
     };
     let proxy_cfg = current_proxy_config();
-    if proxy_cfg.mode == http_client::ProxyMode::Custom && !proxy_cfg.url.is_empty() {
-        if let Err(err) = web_config.set_proxy_settings(
-            &proxy_cfg.url,
-            &proxy_cfg.username,
-            &proxy_cfg.password,
-            &proxy_cfg.no_proxy,
-        ) {
-            log::warn!(
-                "[byop] proxy URL '{}' is invalid; skipping proxy config: {err}",
-                proxy_cfg.url
-            );
+    match proxy_cfg.mode {
+        http_client::ProxyMode::Off => {
+            // Disable all proxies, including system proxies and environment variables, aligning with http_client::Client::new() Off behavior.
+            web_config.no_proxy = true;
+        }
+        http_client::ProxyMode::System => {
+            // Use system/environment proxies (reqwest default behavior).
+            // When WebConfig has no proxy set, reqwest reads macOS SystemConfiguration or HTTP_PROXY / HTTPS_PROXY environment variables.
+        }
+        http_client::ProxyMode::Custom => {
+            if !proxy_cfg.url.is_empty() {
+                if let Err(err) = web_config.set_proxy_settings(
+                    &proxy_cfg.url,
+                    &proxy_cfg.username,
+                    &proxy_cfg.password,
+                    &proxy_cfg.no_proxy,
+                ) {
+                    log::warn!("[byop] proxy URL '{}' is invalid; skipping proxy config: {err}", proxy_cfg.url);
+                }
+            }
         }
     }
     Client::builder()
@@ -6036,6 +6048,50 @@ mod serializer_readiness_tests {
         assert!(
             contents[0].to_ascii_lowercase().contains("cancel"),
             "expected real cancellation content, got {}",
+            contents[0]
+        );
+    }
+
+    /// Regression test for issues #147 and #222: when the user interrupts AI during tool execution, the interrupted tool call can lose its result because of a cancellation race or dropped future, leaving an orphaned gap with a tool_call but no tool_result. Previously readiness returned MissingResultWithoutRepairSource and blocked the conversation permanently. After the fix, controller preflight synthesizes a cancellation placeholder ToolCallResult for that gap, with server_message_data carrying {"status":"cancelled",...} and the result oneof left as None. This test verifies that once the synthesized message enters history, readiness becomes Ready and the request serializes normally, so the conversation no longer gets stuck.
+    #[test]
+    fn synthesized_cancellation_result_unblocks_interrupted_tool_call() {
+        let tool_call_message = make_tool_call_message("task-1", "req-1", "call-1", shell_tool());
+
+        // The gap must block before repair, matching the pre-regression stuck scenario.
+        assert_build_request_blocked(
+            request_params(
+                vec![tool_call_message.clone()],
+                vec![user_query_input("continue")],
+            ),
+            "MissingResultWithoutRepairSource",
+        );
+
+        // After the synthesized cancellation message is persisted to history, the gap is filled and readiness becomes Ready.
+        let synthesized = make_tool_call_result_message(
+            "task-1",
+            "req-1",
+            "call-1".to_owned(),
+            serde_json::json!({
+                "status": "cancelled",
+                "reason": "interrupted_by_user",
+            })
+            .to_string(),
+        );
+        let params = request_params(
+            vec![tool_call_message, synthesized],
+            vec![user_query_input("continue")],
+        );
+        assert!(matches!(
+            classify_byop_controller_readiness(&params).state,
+            ReadinessState::Ready
+        ));
+        let request = build_openai_request(&params)
+            .expect("synthesized cancellation should let the request serialize");
+        let contents = tool_response_contents(&request, "call-1");
+        assert_eq!(contents.len(), 1);
+        assert!(
+            contents[0].to_ascii_lowercase().contains("cancel"),
+            "expected cancellation content, got {}",
             contents[0]
         );
     }

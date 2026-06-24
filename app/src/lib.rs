@@ -1507,8 +1507,8 @@ fn initialize_app(
 
     timer.mark_interval_end("SUBSYSTEM_INITS_DONE");
 
-    // Detect system-installed CLI agents in the background, without blocking the UI
-    crate::terminal::CLIAgent::refresh_install_cache();
+    // Register the CLI agent install-status model. It scans PATH in the background and syncs per-agent settings when complete.
+    ctx.add_singleton_model(crate::terminal::cli_agent::CLIAgentInstallModel::new);
 
     let display_count = ctx.windows().display_count();
     ctx.add_singleton_model(|_| DisplayCount(display_count));
@@ -2319,6 +2319,8 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::InBandGeneratorsForSSH,
         #[cfg(feature = "run_generators_with_cmd_exe")]
         FeatureFlag::RunGeneratorsWithCmdExe,
+        #[cfg(feature = "windows_high_performance_gpu_default")]
+        FeatureFlag::WindowsHighPerformanceGpuDefault,
         #[cfg(feature = "ligatures")]
         FeatureFlag::Ligatures,
         #[cfg(feature = "selectable_prompt")]
@@ -2705,9 +2707,13 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
     flags
 }
 
-/// Mapping from the unstable feature names accepted by `ZAP_UNSTABLE_FEATURES` -> FeatureFlag.
-/// The features registered here are hidden by default in release builds and only appear once the
-/// corresponding token is set; dev builds enable them by default via the debug_assertions branch,
-/// with no need for this variable.
-const UNSTABLE_FEATURES: &[(&str, FeatureFlag)] =
-    &[("server_file_browser", FeatureFlag::ServerFileBrowser)];
+/// Mapping from unstable feature names accepted by `ZAP_UNSTABLE_FEATURES` to FeatureFlag.
+/// Features registered here are hidden by default in release builds and only appear once the corresponding token is set;
+/// dev builds enable them by default through the debug_assertions branch, with no need for this variable.
+const UNSTABLE_FEATURES: &[(&str, FeatureFlag)] = &[
+    ("server_file_browser", FeatureFlag::ServerFileBrowser),
+    (
+        "windows_high_performance_gpu_default",
+        FeatureFlag::WindowsHighPerformanceGpuDefault,
+    ),
+];

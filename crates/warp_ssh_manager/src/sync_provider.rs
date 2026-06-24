@@ -6,7 +6,7 @@
 use crate::db::with_conn;
 use crate::repository::{SshRepository, SyncMetaRepository};
 use crate::secrets::{KeychainSecretStore, SecretKind, SshSecretStore};
-use crate::types::NodeKind;
+use crate::types::{NodeKind, OneKeyCredentialKind};
 use diesel::connection::{Connection, SimpleConnection};
 use diesel::{QueryDsl, RunQueryDsl};
 use serde::{Deserialize, Serialize};
@@ -15,11 +15,12 @@ use zap_sync::crypto;
 use zap_sync::{SyncDataProvider, SyncEngineError, SyncVersionStore};
 use zeroize::Zeroizing;
 
-/// The three keychain credential kinds, iterated uniformly during collect/apply/orphan-cleanup
-const ALL_SECRET_KINDS: [SecretKind; 3] = [
+/// All keychain credential kinds, used to iterate consistently during collect/apply/orphan cleanup
+const ALL_SECRET_KINDS: [SecretKind; 4] = [
     SecretKind::Password,
     SecretKind::Passphrase,
     SecretKind::RootPassword,
+    SecretKind::OneKeyPassword,
 ];
 
 /// Node data used for SSH sync
@@ -44,9 +45,23 @@ pub struct SyncServer {
     pub key_path: Option<String>,
     pub startup_command: Option<String>,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub credential_id: Option<String>,
     pub password_encrypted: Option<String>,
     pub passphrase_encrypted: Option<String>,
     pub root_password_encrypted: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncOneKeyCredential {
+    pub id: String,
+    pub label: String,
+    pub username: String,
+    #[serde(default = "default_onekey_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub key_path: Option<String>,
+    pub password_encrypted: Option<String>,
 }
 
 /// SSH sync data
@@ -54,6 +69,8 @@ pub struct SyncServer {
 pub struct SshSyncData {
     pub nodes: Vec<SyncNode>,
     pub servers: Vec<SyncServer>,
+    #[serde(default)]
+    pub onekey_credentials: Vec<SyncOneKeyCredential>,
 }
 
 /// SSH data sync provider
@@ -81,6 +98,23 @@ impl SyncDataProvider for SshSyncProvider {
 
         let mut sync_nodes = Vec::new();
         let mut sync_servers = Vec::new();
+        let mut sync_onekey_credentials = Vec::new();
+
+        let onekey_credentials =
+            with_conn(|conn| Ok(SshRepository::list_onekey_credentials(conn)?))
+                .map_err(|e| SyncEngineError::Provider(e.to_string()))?;
+        for credential in onekey_credentials {
+            let secret_kind = onekey_secret_kind(credential.kind);
+            let password = read_secret(&self.secret_store, &credential.id, secret_kind)?;
+            sync_onekey_credentials.push(SyncOneKeyCredential {
+                id: credential.id,
+                label: credential.label,
+                username: credential.username,
+                kind: credential.kind.as_db_str().to_string(),
+                key_path: credential.key_path,
+                password_encrypted: encrypt_optional(token, password.as_deref())?,
+            });
+        }
 
         for node in &nodes {
             sync_nodes.push(SyncNode {
@@ -117,6 +151,7 @@ impl SyncDataProvider for SshSyncProvider {
                         key_path: server.key_path.clone(),
                         startup_command: server.startup_command.clone(),
                         notes: server.notes.clone(),
+                        credential_id: server.credential_id.clone(),
                         password_encrypted: encrypt_optional(token, password.as_deref())?,
                         passphrase_encrypted: encrypt_optional(token, passphrase.as_deref())?,
                         root_password_encrypted: encrypt_optional(token, root_password.as_deref())?,
@@ -128,6 +163,7 @@ impl SyncDataProvider for SshSyncProvider {
         let data = SshSyncData {
             nodes: sync_nodes,
             servers: sync_servers,
+            onekey_credentials: sync_onekey_credentials,
         };
 
         serde_json::to_value(&data)
@@ -171,18 +207,45 @@ impl SyncDataProvider for SshSyncProvider {
                 }
             }
         }
+        for credential in &ssh_data.onekey_credentials {
+            let secret_kind = onekey_secret_kind(
+                OneKeyCredentialKind::parse(&credential.kind)
+                    .unwrap_or(OneKeyCredentialKind::Password),
+            );
+            match &credential.password_encrypted {
+                Some(enc) => {
+                    let value = crypto::decrypt(token, enc)
+                        .map_err(|e| SyncEngineError::Crypto(e.to_string()))?;
+                    pending_secrets.push(PendingSecret {
+                        node_id: credential.id.clone(),
+                        kind: secret_kind,
+                        value,
+                    });
+                }
+                None => {
+                    explicit_clears.push((credential.id.clone(), secret_kind));
+                }
+            }
+        }
 
         // ---- Phase 0.5 ---- topologically sort the nodes, parents before children; orphans (parent not in the dataset)
         // are inserted as root nodes, to avoid a SQLite FK violation rolling back the whole transaction
         let sorted_nodes = topologically_sort_nodes(&ssh_data.nodes);
 
-        // ---- Phase 0.6 ---- collect the local existing node_id values, for the later orphan keychain cleanup
-        let existing_node_ids: Vec<String> = with_conn(|conn| {
+        // ---- Phase 0.6 ---- collect existing local keychain owner IDs for later orphan keychain cleanup
+        let mut existing_secret_owner_ids: Vec<String> = with_conn(|conn| {
             Ok(persistence::schema::ssh_nodes::table
                 .select(persistence::schema::ssh_nodes::id)
                 .load::<String>(conn)?)
         })
         .map_err(|e| SyncEngineError::Provider(e.to_string()))?;
+        let existing_credential_ids: Vec<String> = with_conn(|conn| {
+            Ok(persistence::schema::ssh_onekey_credentials::table
+                .select(persistence::schema::ssh_onekey_credentials::id)
+                .load::<String>(conn)?)
+        })
+        .map_err(|e| SyncEngineError::Provider(e.to_string()))?;
+        existing_secret_owner_ids.extend(existing_credential_ids);
 
         // ---- Phase 1 ---- write the keychain first. Any failure → abort immediately, do not touch the DB.
         // Track a (node_id, kind, prior_value) list; when the DB phase fails:
@@ -201,7 +264,7 @@ impl SyncDataProvider for SshSyncProvider {
                     // As strict as read_secret: any keychain error aborts, to avoid being unable to roll back
                     rollback_keychain_writes(&self.secret_store, &written_secrets);
                     return Err(SyncEngineError::Provider(format!(
-                        "Failed to read prior keychain value ({}, {:?}): {e}. Rolled back {} item(s); please confirm the keychain is available and retry the download",
+                        "Failed to read old keychain value ({}, {:?}): {e}。rolled back {} items; confirm the keychain is available before retrying download",
                         s.node_id,
                         s.kind,
                         written_secrets.len()
@@ -225,7 +288,23 @@ impl SyncDataProvider for SshSyncProvider {
         // ---- Phase 2 ---- DB transaction: DELETE + INSERT in topological order
         let db_result = with_conn(|conn| {
             conn.transaction::<(), anyhow::Error, _>(|conn| {
-                conn.batch_execute("DELETE FROM ssh_servers; DELETE FROM ssh_nodes;")?;
+                conn.batch_execute(
+                    "DELETE FROM ssh_servers; DELETE FROM ssh_nodes; DELETE FROM ssh_onekey_credentials;",
+                )?;
+
+                for credential in &ssh_data.onekey_credentials {
+                    diesel::insert_into(persistence::schema::ssh_onekey_credentials::table)
+                        .values(persistence::model::NewSshOneKeyCredential {
+                            id: &credential.id,
+                            label: &credential.label,
+                            username: &credential.username,
+                            kind: OneKeyCredentialKind::parse(&credential.kind)
+                                .unwrap_or(OneKeyCredentialKind::Password)
+                                .as_db_str(),
+                            key_path: credential.key_path.as_deref(),
+                        })
+                        .execute(conn)?;
+                }
 
                 for node in &sorted_nodes {
                     let kind = NodeKind::parse(&node.kind)
@@ -255,6 +334,7 @@ impl SyncDataProvider for SshSyncProvider {
                             key_path: server.key_path.as_deref(),
                             startup_command: server.startup_command.as_deref(),
                             notes: server.notes.as_deref(),
+                            credential_id: server.credential_id.as_deref(),
                         })
                         .execute(conn)?;
                 }
@@ -276,17 +356,24 @@ impl SyncDataProvider for SshSyncProvider {
         for (node_id, kind) in &explicit_clears {
             if let Err(e) = self.secret_store.delete(node_id, *kind) {
                 log::warn!(
-                    "Failed to clean up explicit-clear keychain item {node_id}/{:?}: {e}",
+                    "Failed to clean explicit-clear keychain item {node_id}/{:?}: {e}",
                     kind
                 );
             }
         }
 
-        // ---- Phase 3b ---- clean up orphan keychain entries: passwords for node_id values that existed locally but were deleted remotely
-        // must be explicitly deleted, otherwise a node reappearing with the same UUID would read a stale password (PR #161 review #4)
-        let new_node_ids: HashSet<&str> = ssh_data.nodes.iter().map(|n| n.id.as_str()).collect();
-        for old_id in &existing_node_ids {
-            if new_node_ids.contains(old_id.as_str()) {
+        // ---- Phase 3b ---- clean orphan keychain entries for owner IDs that existed locally but were removed remotely,
+        // using explicit delete so the stale password is not reused if a node with the same UUID reappears (PR #161 review #4)
+        let mut new_secret_owner_ids: HashSet<&str> =
+            ssh_data.nodes.iter().map(|n| n.id.as_str()).collect();
+        new_secret_owner_ids.extend(
+            ssh_data
+                .onekey_credentials
+                .iter()
+                .map(|credential| credential.id.as_str()),
+        );
+        for old_id in &existing_secret_owner_ids {
+            if new_secret_owner_ids.contains(old_id.as_str()) {
                 continue;
             }
             for kind in ALL_SECRET_KINDS {
@@ -311,10 +398,10 @@ struct WrittenSecret {
     prior_value: Option<Zeroizing<String>>,
 }
 
-/// The true "rollback": for each overwritten entry:
-/// - prior_value=Some → write back the old value, to avoid swallowing the user's existing password
-/// - prior_value=None → delete, to avoid an orphan
-/// A failure of any step is only logged, not blocking the caller (best-effort).
+/// Real rollback for each overwritten entry:
+/// - prior_value=Some -> write back the old value so the user's existing password is not lost
+/// - prior_value=None -> delete to avoid an orphan
+/// Failures are logged only and do not block the caller (best effort).
 fn rollback_keychain_writes<S: SshSecretStore + ?Sized>(store: &S, written: &[WrittenSecret]) {
     for entry in written {
         let res = match &entry.prior_value {
@@ -323,7 +410,7 @@ fn rollback_keychain_writes<S: SshSecretStore + ?Sized>(store: &S, written: &[Wr
         };
         if let Err(e) = res {
             log::warn!(
-                "Failed to roll back keychain write {}/{:?}: {e} (the secret may keep the new value or become an orphan)",
+                "Failed to roll back keychain write {}/{:?}: {e}(secret may keep the new value or become an orphan)",
                 entry.node_id,
                 entry.kind
             );
@@ -369,8 +456,19 @@ fn encrypt_optional(token: &str, value: Option<&str>) -> Result<Option<String>, 
     }
 }
 
-/// BFS topological sort: parents before children. Orphan nodes whose parent_id references a node outside the dataset
-/// are appended at the end as root nodes with parent_id cleared, to avoid a SQLite FK constraint failure rolling back the entire download.
+fn default_onekey_kind() -> String {
+    OneKeyCredentialKind::Password.as_db_str().to_string()
+}
+
+fn onekey_secret_kind(kind: OneKeyCredentialKind) -> SecretKind {
+    match kind {
+        OneKeyCredentialKind::Password => SecretKind::OneKeyPassword,
+        OneKeyCredentialKind::Key => SecretKind::Passphrase,
+    }
+}
+
+/// BFS topological sort: parents before children. Orphan nodes whose parent_id points outside the dataset
+/// are treated as roots, appended at the end, and have parent_id cleared to avoid SQLite FK failures rolling back the whole download.
 fn topologically_sort_nodes(nodes: &[SyncNode]) -> Vec<SyncNode> {
     use std::collections::HashMap;
     let mut by_parent: HashMap<Option<&str>, Vec<&SyncNode>> = HashMap::new();
@@ -405,13 +503,13 @@ fn topologically_sort_nodes(nodes: &[SyncNode]) -> Vec<SyncNode> {
         if !seen.contains(&n.id) {
             if has_cycle_membership(n, nodes) {
                 log::warn!(
-                    "apply_data: node {} is in a reference cycle (parent_id {:?}); demoted to a root node",
+                    "apply_data: node {} is in a cycle (parent_id {:?}); treating it as a root node",
                     n.id,
                     n.parent_id
                 );
             } else {
                 log::warn!(
-                    "apply_data: node {}'s parent_id {:?} does not exist in the dataset; inserting as a root node",
+                    "apply_data: node {} has parent_id {:?}, which does not exist in the dataset; inserting as root",
                     n.id,
                     n.parent_id
                 );
@@ -511,6 +609,7 @@ mod tests {
             key_path: Some("/key".to_string()),
             startup_command: None,
             notes: Some("test".to_string()),
+            credential_id: None,
             password_encrypted: Some("enc123".to_string()),
             passphrase_encrypted: None,
             root_password_encrypted: Some("enc456".to_string()),
@@ -535,6 +634,7 @@ mod tests {
             key_path: None,
             startup_command: None,
             notes: None,
+            credential_id: None,
             password_encrypted: None,
             passphrase_encrypted: None,
             root_password_encrypted: None,
@@ -566,10 +666,12 @@ mod tests {
                 key_path: None,
                 startup_command: None,
                 notes: None,
+                credential_id: None,
                 password_encrypted: Some("enc".to_string()),
                 passphrase_encrypted: None,
                 root_password_encrypted: None,
             }],
+            onekey_credentials: Vec::new(),
         };
         let json = serde_json::to_string(&data).unwrap();
         let parsed: SshSyncData = serde_json::from_str(&json).unwrap();
@@ -579,6 +681,102 @@ mod tests {
         assert_eq!(
             parsed.servers[0].password_encrypted,
             Some("enc".to_string())
+        );
+    }
+
+    #[test]
+    fn test_ssh_sync_data_deserializes_legacy_payload_without_onekey_fields() {
+        let json = r#"{
+            "nodes": [
+                {
+                    "id": "s1",
+                    "parent_id": null,
+                    "kind": "server",
+                    "name": "legacy",
+                    "sort_order": 0,
+                    "is_collapsed": false
+                }
+            ],
+            "servers": [
+                {
+                    "node_id": "s1",
+                    "host": "example.com",
+                    "port": 22,
+                    "username": "root",
+                    "auth_type": "password",
+                    "key_path": null,
+                    "startup_command": null,
+                    "notes": null,
+                    "password_encrypted": null,
+                    "passphrase_encrypted": null,
+                    "root_password_encrypted": null
+                }
+            ]
+        }"#;
+
+        let parsed: SshSyncData = serde_json::from_str(json).unwrap();
+
+        assert!(parsed.onekey_credentials.is_empty());
+        assert_eq!(parsed.servers[0].credential_id, None);
+    }
+
+    #[test]
+    fn test_onekey_credential_serialization_roundtrip() {
+        let data = SshSyncData {
+            nodes: Vec::new(),
+            servers: Vec::new(),
+            onekey_credentials: vec![SyncOneKeyCredential {
+                id: "cred-1".to_string(),
+                label: "prod-root".to_string(),
+                username: "root".to_string(),
+                kind: "key".to_string(),
+                key_path: Some("/home/root/.ssh/id_ed25519".to_string()),
+                password_encrypted: Some("enc".to_string()),
+            }],
+        };
+
+        let json = serde_json::to_string(&data).unwrap();
+        let parsed: SshSyncData = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.onekey_credentials.len(), 1);
+        assert_eq!(parsed.onekey_credentials[0].id, "cred-1");
+        assert_eq!(parsed.onekey_credentials[0].label, "prod-root");
+        assert_eq!(parsed.onekey_credentials[0].username, "root");
+        assert_eq!(parsed.onekey_credentials[0].kind, "key");
+        assert_eq!(
+            parsed.onekey_credentials[0].key_path.as_deref(),
+            Some("/home/root/.ssh/id_ed25519")
+        );
+        assert_eq!(
+            parsed.onekey_credentials[0].password_encrypted,
+            Some("enc".to_string())
+        );
+    }
+
+    #[test]
+    fn test_onekey_credential_deserializes_legacy_payload_as_password() {
+        let json = r#"{
+            "id": "cred-1",
+            "label": "prod-root",
+            "username": "root",
+            "password_encrypted": null
+        }"#;
+
+        let parsed: SyncOneKeyCredential = serde_json::from_str(json).unwrap();
+
+        assert_eq!(parsed.kind, "password");
+        assert_eq!(parsed.key_path, None);
+    }
+
+    #[test]
+    fn test_onekey_key_credentials_use_passphrase_secret_slot() {
+        assert_eq!(
+            onekey_secret_kind(OneKeyCredentialKind::Password),
+            SecretKind::OneKeyPassword
+        );
+        assert_eq!(
+            onekey_secret_kind(OneKeyCredentialKind::Key),
+            SecretKind::Passphrase
         );
     }
 
@@ -602,7 +800,7 @@ mod tests {
         let json = serde_json::to_string(&node).unwrap();
         assert!(
             json.contains("\"parent_id\":null"),
-            "parent_id=None should serialize to null"
+            "parent_id=None should serialize as null"
         );
         let parsed: SyncNode = serde_json::from_str(&json).unwrap();
         assert!(parsed.parent_id.is_none());

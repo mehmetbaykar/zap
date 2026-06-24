@@ -2190,6 +2190,60 @@ impl BlocklistAIController {
                     diagnostics.finish(&diagnostic_context, ReadinessDiagnosticLevel::Debug);
                     return Err(PendingByopToolResultsError::new(tool_calls.len()).into());
                 }
+                crate::ai::byop_readiness::ReadinessState::MissingResultWithoutRepairSource {
+                    tool_calls,
+                    reason: crate::ai::byop_readiness::MissingResultReason::NoResult,
+                } => {
+                    // When the user interrupts AI during tool execution by submitting a new message, the interrupted tool call may never produce a cancelled result because of a cancellation race or a dropped long-running command future; see action_model/execute/shell_command.rs cancel_execution. That leaves an orphaned gap with a tool_call but no tool_result. Previously this blocked the conversation permanently (issues #147 and #222). The only safe meaning for the missing result is that the call was cancelled, so synthesize a cancellation placeholder result for confirmed no-result tool calls and persist it to history so the conversation can recover.
+                    let diagnostic_context = ReadinessDiagnosticContext::new(
+                        &conversation_id_for_log,
+                        &readiness_attempt_id,
+                        ReadinessTriggerLayer::ControllerPreflight,
+                    )
+                    .with_iteration(iteration);
+                    diagnostics.log_state(
+                        &crate::ai::byop_readiness::ReadinessState::MissingResultWithoutRepairSource {
+                            tool_calls: tool_calls.clone(),
+                            reason: crate::ai::byop_readiness::MissingResultReason::NoResult,
+                        },
+                        &diagnostic_context,
+                        ReadinessDiagnosticLevel::Debug,
+                    );
+                    let progress = self.synthesize_byop_missing_cancellation_results(
+                        conversation_data.id,
+                        &tool_calls,
+                        ctx,
+                    )?;
+                    if progress == 0 {
+                        diagnostics.finish(&diagnostic_context, ReadinessDiagnosticLevel::Error);
+                        log::error!(
+                            "[byop-readiness] controller preflight could not synthesize \
+                             cancellation result for missing tool call(s) \
+                             iteration={iteration} tool_calls={} conversation_id={} \
+                             request_attempt_id={}",
+                            tool_calls.len(),
+                            conversation_id_for_log,
+                            readiness_attempt_id
+                        );
+                        return Err(BlockedByopReadinessError::new(
+                            ReadinessCategory::MissingResultWithoutRepairSource,
+                        )
+                        .into());
+                    }
+                    log::info!(
+                        "[byop-readiness] controller synthesized cancellation result(s) for \
+                         interrupted tool call(s) progress={progress} iteration={iteration} \
+                         conversation_id={conversation_id_for_log}"
+                    );
+                    self.rebuild_request_after_byop_preflight(
+                        request_input,
+                        conversation_data,
+                        request_params,
+                        query_metadata.clone(),
+                        ctx,
+                    )?;
+                    request_params.byop_readiness_attempt_id = Some(readiness_attempt_id.clone());
+                }
                 state @ (crate::ai::byop_readiness::ReadinessState::DuplicateToolResults {
                     ..
                 }
@@ -2533,6 +2587,78 @@ impl BlocklistAIController {
 
         let removed = request_input.remove_action_results_by_tool_call_id(&keys_to_remove);
         Ok(appended + removed + already_persisted)
+    }
+
+    /// Synthesize and persist a cancellation placeholder `ToolCallResult` for a user-interrupted tool call that is confirmed to have no result: no running action and no finished or persisted result.
+    ///
+    /// Only called when readiness returns `MissingResultWithoutRepairSource { NoResult }`: history contains an orphaned tool_call, no real result will be produced because the future was dropped or a cancellation race lost it, and no RepairRecord authorizes another repair. Adding a "cancelled" result is the only safe and semantically correct repair, allowing the BYOP request to continue instead of permanently blocking the conversation.
+    fn synthesize_byop_missing_cancellation_results(
+        &self,
+        conversation_id: AIConversationId,
+        tool_calls: &[crate::ai::byop_readiness::ToolCallRef],
+        ctx: &mut ModelContext<Self>,
+    ) -> anyhow::Result<usize> {
+        let request_id = format!("byop-preflight:{}", uuid::Uuid::new_v4());
+        let mut grouped_messages: HashMap<TaskId, Vec<warp_multi_agent_api::Message>> =
+            HashMap::new();
+        for tool_call in tool_calls {
+            let task_id = &tool_call.key.task_id;
+            let tool_call_id = &tool_call.key.tool_call_id;
+            // Defensive check: skip if this (task_id, tool_call_id) already has a persisted result to avoid synthesizing a duplicate result.
+            if self.has_persisted_tool_result(conversation_id, task_id, tool_call_id, ctx) {
+                continue;
+            }
+            grouped_messages
+                .entry(TaskId::new(task_id.clone()))
+                .or_default()
+                .push(Self::byop_synthetic_cancellation_message(
+                    &request_id,
+                    task_id,
+                    tool_call_id,
+                ));
+        }
+
+        let mut appended = 0;
+        for (task_id, messages) in grouped_messages {
+            appended +=
+                BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
+                    history_model.append_byop_preflight_messages_to_task(
+                        conversation_id,
+                        task_id,
+                        messages,
+                        ctx,
+                    )
+                })?;
+        }
+        Ok(appended)
+    }
+
+    /// Build a cancellation `ToolCallResult` message without relying on `AIAgentActionResult`.
+    /// The interrupted tool call no longer has a corresponding action, so it cannot use `byop_action_result_message`;
+    /// instead, carry the cancellation status directly in `server_message_data`, matching the format used when no structured result exists.
+    fn byop_synthetic_cancellation_message(
+        request_id: &str,
+        task_id: &str,
+        tool_call_id: &str,
+    ) -> warp_multi_agent_api::Message {
+        let server_message_data = serde_json::json!({
+            "status": "cancelled",
+            "reason": "interrupted_by_user",
+        })
+        .to_string();
+        warp_multi_agent_api::Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            task_id: task_id.to_owned(),
+            server_message_data,
+            citations: vec![],
+            message: Some(message::Message::ToolCallResult(message::ToolCallResult {
+                tool_call_id: tool_call_id.to_owned(),
+                context: None,
+                result: None,
+            })),
+            request_id: request_id.to_owned(),
+            timestamp: None,
+        }
     }
 
     fn has_persisted_tool_result(

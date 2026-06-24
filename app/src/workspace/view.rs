@@ -102,6 +102,7 @@ use crate::ai::blocklist::FORK_PREFIX;
 #[cfg(not(target_family = "wasm"))]
 use crate::terminal::cli_agent_sessions::plugin_manager::{plugin_manager_for, PluginModalKind};
 use crate::terminal::cli_agent_sessions::{CLIAgentSessionsModel, CLIAgentSessionsModelEvent};
+use crate::terminal::cli_agent::{CLIAgentInstallEvent, CLIAgentInstallModel};
 use crate::terminal::CLIAgent;
 use crate::workspace::header_toolbar_editor::{HeaderToolbarEditorEvent, HeaderToolbarEditorModal};
 use crate::workspace::header_toolbar_item::HeaderToolbarItemKind;
@@ -2583,6 +2584,14 @@ impl Workspace {
         ctx.subscribe_to_model(&CLIAgentSessionsModel::handle(ctx), |me, _, event, ctx| {
             me.handle_cli_agent_sessions_event(event, ctx);
         });
+
+        // Refresh UI after the CLI agent install scan completes, including the new-tab menu and titlebar buttons.
+        ctx.subscribe_to_model(
+            &CLIAgentInstallModel::handle(ctx),
+            |_, _, CLIAgentInstallEvent::ScanComplete, ctx| {
+                ctx.notify();
+            },
+        );
 
         ctx.subscribe_to_model(
             &SessionSettings::handle(ctx),
@@ -5186,8 +5195,9 @@ impl Workspace {
                 let open_as_preview = false;
                 self.open_code(code_source, layout, line_col, open_as_preview, &[], ctx);
             }
-            FileTarget::ImageViewer(layout) => {
-                self.open_image(path.clone(), self.get_active_session(ctx), layout, ctx);
+            FileTarget::ImageViewer(_layout) => {
+                // Images always open in a new tab; see `insert_image_pane`. The layout carried by target is intentionally ignored here.
+                self.open_image(path.clone(), self.get_active_session(ctx), ctx);
             }
             FileTarget::ExternalEditor(editor) => {
                 crate::util::file::open_file_path_with_editor(
@@ -5401,9 +5411,33 @@ impl Workspace {
         server: warp_ssh_manager::SshServerInfo,
         ctx: &mut ViewContext<Self>,
     ) {
-        use warp_ssh_manager::{KeychainSecretStore, SecretKind, SshSecretStore};
+        use warp_ssh_manager::{KeychainSecretStore, SecretKind, SshRepository, SshSecretStore};
 
-        let cmd = warp_ssh_manager::build_ssh_command_line(&server);
+        let (server_for_connection, secret_lookup_id, secret_kind) =
+            match warp_ssh_manager::with_conn(|conn| {
+                let resolved_auth = SshRepository::resolve_server_auth(conn, &server)?;
+                let mut server_for_connection = server.clone();
+                server_for_connection.username = resolved_auth.username;
+                server_for_connection.auth_type = resolved_auth.auth_type;
+                server_for_connection.key_path = resolved_auth.key_path;
+                Ok((
+                    server_for_connection,
+                    resolved_auth.secret_lookup_id,
+                    resolved_auth.secret_kind,
+                ))
+            }) {
+                Ok(resolved) => resolved,
+                Err(e) => {
+                    log::warn!("ssh auth resolution failed (will continue without injection): {e}");
+                    let fallback_kind = match server.auth_type {
+                        warp_ssh_manager::AuthType::Password => SecretKind::Password,
+                        warp_ssh_manager::AuthType::Key => SecretKind::Passphrase,
+                        warp_ssh_manager::AuthType::OneKey => SecretKind::OneKeyPassword,
+                    };
+                    (server.clone(), node_id.clone(), fallback_kind)
+                }
+            };
+        let cmd = warp_ssh_manager::build_ssh_command_line(&server_for_connection);
         let window_id = ctx.window_id();
 
         // Open a new tab (no split -- previously using add_terminal_pane(Direction::Right) would switch to a left/right
@@ -5435,12 +5469,8 @@ impl Workspace {
             });
         }
 
-        // 1. Synchronously read the keychain (OK on the main thread). auth_type decides whether to look up password or passphrase.
-        let secret_kind = match server.auth_type {
-            warp_ssh_manager::AuthType::Password => SecretKind::Password,
-            warp_ssh_manager::AuthType::Key => SecretKind::Passphrase,
-        };
-        let secret = match KeychainSecretStore.get(&node_id, secret_kind) {
+        // 1. Synchronously read the keychain (OK on the main thread). OneKey servers use the shared credential ID.
+        let secret = match KeychainSecretStore.get(&secret_lookup_id, secret_kind) {
             Ok(opt) => opt.unwrap_or_else(|| zeroize::Zeroizing::new(String::new())),
             Err(e) => {
                 log::warn!("ssh keychain read failed (will continue without injection): {e}");
@@ -5478,11 +5508,13 @@ impl Workspace {
                 None
             }
         };
-        if let Some(root_pw) = root_secret {
+        if crate::ssh_manager::su_password_injector::should_spawn_su_password_injector(
+            root_secret.as_ref(),
+        ) {
             crate::ssh_manager::su_password_injector::spawn_su_password_injector(
                 terminal_view.read(ctx, |v, c| v.inactive_pty_reads_rx(c)),
                 terminal_view.downgrade(),
-                root_pw,
+                root_secret,
                 ctx,
             );
         }
@@ -5963,14 +5995,20 @@ impl Workspace {
             menu_items.push(agent_item.into_item());
         }
 
-        // 5. Coding Agents — only installed ones appear in the menu
+        // 5. Coding Agents - only installed agents with tab_menu enabled appear in the menu
         let coding_agent_count = {
             let start_len = menu_items.len();
+            let ai_settings = AISettings::as_ref(ctx);
+            let install_model = CLIAgentInstallModel::as_ref(ctx);
             for agent in enum_iterator::all::<CLIAgent>() {
                 if matches!(agent, CLIAgent::Unknown) {
                     continue;
                 }
-                if !agent.is_installed() {
+                if !install_model.is_cli_agent_installed(agent) {
+                    continue;
+                }
+                // Check the per-agent tab_menu setting
+                if !ai_settings.is_cli_agent_tab_menu_enabled(agent) {
                     continue;
                 }
                 let icon = agent.icon().unwrap_or(icons::Icon::LayoutAlt01);
@@ -6949,42 +6987,27 @@ impl Workspace {
         &mut self,
         path: PathBuf,
         session: Option<Arc<Session>>,
-        layout: EditorLayout,
         ctx: &mut ViewContext<Self>,
     ) {
         let pane = ImagePane::new(Some(path), session, ctx);
-        self.insert_image_pane(pane, layout, ctx);
+        self.insert_image_pane(pane, ctx);
     }
 
-    /// Insert an already-constructed [`ImagePane`] using the editor layout (new tab
-    /// vs. split). Shared by local [`Self::open_image`] and remote
-    /// [`Self::open_remote_image`].
-    fn insert_image_pane(
-        &mut self,
-        pane: ImagePane,
-        layout: EditorLayout,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        match layout {
-            EditorLayout::NewTab => {
-                let new_tab_placement_setting = TabSettings::as_ref(ctx).new_tab_placement;
-                let new_idx = match new_tab_placement_setting {
-                    NewTabPlacement::AfterAllTabs => self.tab_count(),
-                    NewTabPlacement::AfterCurrentTab => self.active_tab_index + 1,
-                };
-                self.add_tab_from_existing_pane(Box::new(pane), new_idx, ctx);
-            }
-            EditorLayout::SplitPane => {
-                self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
-                    pane_group.add_pane_with_direction(
-                        Direction::Right,
-                        pane,
-                        true, /* focus_new_pane */
-                        ctx,
-                    );
-                });
-            }
-        }
+    /// Insert an already-constructed [`ImagePane`] as its own workspace tab. Shared by
+    /// local [`Self::open_image`] and remote [`Self::open_remote_image`].
+    ///
+    /// Images always open in a new tab rather than honoring `open_file_layout` (which
+    /// defaults to `SplitPane`). Unlike the code editor — whose `CodeView` stacks files
+    /// as internal tabs — an `ImagePane` holds a single image, so a `SplitPane` layout
+    /// would subdivide the window for every image opened. A new tab per image gives the
+    /// expected tab-stacking behavior instead.
+    fn insert_image_pane(&mut self, pane: ImagePane, ctx: &mut ViewContext<Self>) {
+        let new_tab_placement_setting = TabSettings::as_ref(ctx).new_tab_placement;
+        let new_idx = match new_tab_placement_setting {
+            NewTabPlacement::AfterAllTabs => self.tab_count(),
+            NewTabPlacement::AfterCurrentTab => self.active_tab_index + 1,
+        };
+        self.add_tab_from_existing_pane(Box::new(pane), new_idx, ctx);
     }
 
     /// Open a remote image in an image viewer pane. Creates the pane immediately
@@ -7012,11 +7035,10 @@ impl Workspace {
             return;
         };
 
-        // Create an empty pane with a loading spinner first, then fill it asynchronously.
-        let layout = *EditorSettings::as_ref(ctx).open_file_layout.value();
+        // Create an empty pane with a loading spinner first, then fill it asynchronously with bytes.
         let pane = ImagePane::new_remote(remote_path.clone(), ctx);
         let image_view = pane.image_view(ctx);
-        self.insert_image_pane(pane, layout, ctx);
+        self.insert_image_pane(pane, ctx);
 
         let path_str = remote_path.path.as_str().to_string();
         ctx.spawn(
@@ -16243,6 +16265,11 @@ impl Workspace {
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_main_axis_size(MainAxisSize::Min);
 
+            // Titlebar agent quick-launch buttons in vertical tab-bar mode
+            for button in self.render_cli_agent_titlebar_buttons(appearance, ctx) {
+                right_controls.add_child(button);
+            }
+
             self.add_configurable_right_side_tab_bar_controls(
                 &mut right_controls,
                 &config,
@@ -16382,6 +16409,11 @@ impl Workspace {
         // Placeholder to make sure the flex row expands across the entire width of the app.
         tab_bar.add_child(Shrinkable::new(0.5, Empty::new().finish()).finish());
 
+        // Titlebar agent quick-launch buttons in horizontal tab-bar mode
+        for button in self.render_cli_agent_titlebar_buttons(appearance, ctx) {
+            tab_bar.add_child(button);
+        }
+
         self.add_configurable_right_side_tab_bar_controls(
             &mut tab_bar,
             &config,
@@ -16454,6 +16486,80 @@ impl Workspace {
             .with_margin_left(TAB_BAR_ICON_PADDING)
             .finish(),
         )
+    }
+
+    /// Render titlebar quick-launch buttons for installed CLI agents.
+    /// Only show agents whose per-agent titlebar setting is true.
+    fn render_cli_agent_titlebar_buttons(
+        &self,
+        appearance: &Appearance,
+        ctx: &AppContext,
+    ) -> Vec<Box<dyn Element>> {
+        let ai_settings = AISettings::as_ref(ctx);
+        let install_model = CLIAgentInstallModel::as_ref(ctx);
+        let mut buttons = Vec::new();
+
+        for agent in enum_iterator::all::<CLIAgent>() {
+            if matches!(agent, CLIAgent::Unknown) || !install_model.is_cli_agent_installed(agent) {
+                continue;
+            }
+            if !ai_settings.is_cli_agent_titlebar_enabled(agent) {
+                continue;
+            }
+
+            let agent_key = agent.to_serialized_name();
+            let mut states = self
+                .mouse_states
+                .cli_agent_titlebar_button_states
+                .borrow_mut();
+            let handle = states
+                .entry(agent_key.clone())
+                .or_insert_with(MouseStateHandle::default)
+                .clone();
+
+            let icon = agent.icon().unwrap_or(icons::Icon::LayoutAlt01);
+            let theme = appearance.theme();
+            let icon_color = theme.sub_text_color(theme.background());
+            let button = icon_button_with_color(
+                appearance,
+                icon,
+                false,
+                handle.clone(),
+                icon_color,
+            )
+            .with_hovered_styles(UiComponentStyles {
+                font_color: Some(icon_color.into()),
+                background: Some(theme.surface_2().into()),
+                ..UiComponentStyles::default()
+            })
+            .with_clicked_styles(UiComponentStyles {
+                font_color: Some(icon_color.into()),
+                background: Some(theme.background().into()),
+                ..UiComponentStyles::default()
+            })
+            // Shrink the icon to 14x14: increase padding from 4 to 5.0 while keeping the 24x24 button frame unchanged.
+            .with_style(UiComponentStyles::default()
+                .set_padding(Coords::uniform(5.0))
+            );
+
+            let agent_name = agent.display_name().to_string();
+            let button = button
+                .with_tooltip(
+                    self.render_tab_bar_icon_button_tooltip(appearance, agent_name, None),
+                )
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(WorkspaceAction::AddSpecificAgentTab(agent));
+                });
+
+            buttons.push(
+                Container::new(button.finish())
+                    .with_margin_left(TAB_BAR_ICON_PADDING)
+                    .finish(),
+            );
+        }
+
+        buttons
     }
 
     /// Renders the notifications mailbox button (extracted for reuse from

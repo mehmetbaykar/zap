@@ -1,7 +1,4 @@
-//! su password confirmation prompt. Continuously listens to PTY output, and when
-//! it detects a password prompt appearing after the user enters a switch-to-root
-//! command like `su root` / `su - root`, pops up a confirmation menu and injects
-//! the root password after the user confirms.
+//! su password confirmation prompt. Continuously listens to PTY output; when a password prompt appears after a root-switch command such as `su root` or `su - root`, it shows a confirmation menu and injects the root password or shared OneKey password after user confirmation.
 //!
 //! Only injects for the root target; switching to other users like `su lg` does
 //! not trigger it. It first waits for the shell prompt to appear (indicating SSH
@@ -59,7 +56,7 @@ lazy_static! {
 pub fn spawn_su_password_injector<O>(
     pty_reads_rx: Option<InactiveReceiver<Arc<Vec<u8>>>>,
     terminal_view: WeakViewHandle<TerminalView>,
-    root_password: Zeroizing<String>,
+    root_password: Option<Zeroizing<String>>,
     ctx: &mut ViewContext<O>,
 ) where
     O: warpui::View + 'static,
@@ -68,12 +65,11 @@ pub fn spawn_su_password_injector<O>(
         log::debug!("ssh su password injector: no pty_reads_rx — skip");
         return;
     };
-    if root_password.is_empty() {
-        log::debug!("ssh su password injector: empty root password — skip");
+    let Some(root_password) = root_password.filter(|password| !password.is_empty()) else {
+        log::debug!("ssh su password injector: empty root password - skip");
         return;
-    }
-
-    // Set the in-flight flag to prevent the OneKey credential picker from popping up while waiting for the shell prompt.
+    };
+    // Set the in-flight flag so the OneKey credential picker does not appear while waiting for the shell prompt.
     if let Some(view) = terminal_view.upgrade(ctx) {
         view.update(ctx, |view, _| {
             view.set_ssh_secret_auto_injection_in_flight(true);
@@ -146,6 +142,10 @@ pub fn spawn_su_password_injector<O>(
 /// Check whether the buffer contains a su command targeting root.
 fn is_su_to_root(buf: &[u8]) -> bool {
     SU_ROOT_CMD_REGEX.is_match(buf)
+}
+
+pub(crate) fn should_spawn_su_password_injector(root_password: Option<&Zeroizing<String>>) -> bool {
+    root_password.is_some_and(|password| !password.is_empty())
 }
 
 #[cfg(test)]

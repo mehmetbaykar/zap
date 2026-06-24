@@ -1158,6 +1158,48 @@ impl settings_value::SettingsValue for BYOPLastUsedReasoningMap {
     }
 }
 
+/// Per-agent settings controlling toolbar, tab-menu, and titlebar visibility for each CLI agent.
+/// The key is the serialized CLIAgent name, such as "Claude" or "Gemini".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PerAgentSettings {
+    /// Whether to show the coding-agent toolbar below terminal input.
+    #[serde(default = "default_true_bool")]
+    pub toolbar: bool,
+    /// Whether to show this agent as a quick-launch entry in the new-tab menu.
+    #[serde(default = "default_true_bool", alias = "tab_menu")]
+    pub tabmenu: bool,
+    /// Whether to show this agent as a quick-launch button on the right side of the titlebar.
+    #[serde(default)]
+    pub titlebar: bool,
+}
+
+fn default_true_bool() -> bool {
+    true
+}
+
+impl PerAgentSettings {
+    /// Return defaults for the given agent. titlebar defaults to enabled for Claude, Codex, Gemini, and Antigravity.
+    pub fn default_for(agent: CLIAgent) -> Self {
+        let titlebar = matches!(
+            agent,
+            CLIAgent::Claude | CLIAgent::Codex | CLIAgent::Gemini | CLIAgent::Antigravity
+        );
+        Self { toolbar: true, tabmenu: true, titlebar }
+    }
+}
+
+impl Default for PerAgentSettings {
+    fn default() -> Self {
+        Self {
+            toolbar: true,
+            tabmenu: true,
+            titlebar: false,
+        }
+    }
+}
+
+impl settings_value::SettingsValue for PerAgentSettings {}
+
 define_settings_group!(AISettings, settings: [
     // Legacy setting. Zap's Zap agent is now always on; don't use this field to
     // determine the enabled state.
@@ -1963,6 +2005,29 @@ define_settings_group!(AISettings, settings: [
         max_table_depth: 1,
         description: "Per-(api_type, model) reasoning effort memory for BYOP picker.",
     }
+
+    // Per-agent settings controlling toolbar and tab-menu visibility for each CLI agent.
+    // The key is the result of CLIAgent::to_serialized_name().
+    cli_agent_per_agent_settings: CLIAgentPerAgentSettings {
+        type: HashMap<String, PerAgentSettings>,
+        default: HashMap::new(),
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Never,
+        private: false,
+        toml_path: "agents.third_party.per_agent",
+        max_table_depth: 1,
+        description: "Per-agent visibility settings for toolbar and tab menu.",
+    }
+
+    // Whether at least one CLI agent install scan has completed.
+    // When the third-party agent settings page is first opened, a sync is triggered if this flag is false.
+    cli_agent_scan_completed: CLIAgentScanCompleted {
+        type: bool,
+        default: false,
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Never,
+        private: true,
+    }
 ]);
 
 impl AISettings {
@@ -2398,6 +2463,131 @@ impl AISettings {
         report_if_error!(self
             .plugin_update_chip_dismissed_for_version_map
             .set_value(map, ctx));
+    }
+
+    // ── Per-agent settings ──
+
+    /// Query whether the toolbar is enabled for a CLI agent. Falls back to the agent default when missing from per-agent settings.
+    pub fn is_cli_agent_toolbar_enabled(&self, agent: CLIAgent) -> bool {
+        if matches!(agent, CLIAgent::Unknown) {
+            return true;
+        }
+        self.cli_agent_per_agent_settings
+            .get(agent.to_serialized_name().as_str())
+            .map(|s| s.toolbar)
+            .unwrap_or_else(|| PerAgentSettings::default_for(agent).toolbar)
+    }
+
+    /// Query whether a CLI agent appears in the new-tab menu. Falls back to the agent default when missing from per-agent settings.
+    pub fn is_cli_agent_tab_menu_enabled(&self, agent: CLIAgent) -> bool {
+        if matches!(agent, CLIAgent::Unknown) {
+            return false;
+        }
+        self.cli_agent_per_agent_settings
+            .get(agent.to_serialized_name().as_str())
+            .map(|s| s.tabmenu)
+            .unwrap_or_else(|| PerAgentSettings::default_for(agent).tabmenu)
+    }
+
+    /// Query whether the titlebar button is enabled for a CLI agent. Falls back to the agent default when missing from per-agent settings.
+    pub fn is_cli_agent_titlebar_enabled(&self, agent: CLIAgent) -> bool {
+        if matches!(agent, CLIAgent::Unknown) {
+            return false;
+        }
+        self.cli_agent_per_agent_settings
+            .get(agent.to_serialized_name().as_str())
+            .map(|s| s.titlebar)
+            .unwrap_or_else(|| PerAgentSettings::default_for(agent).titlebar)
+    }
+
+    /// Set the toolbar enabled state for one agent.
+    pub fn set_cli_agent_toolbar(
+        &mut self,
+        agent: CLIAgent,
+        enabled: bool,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let key = agent.to_serialized_name();
+        let mut map = self.cli_agent_per_agent_settings.clone();
+        map.entry(key)
+            .and_modify(|s| s.toolbar = enabled)
+            .or_insert_with(|| PerAgentSettings { toolbar: enabled, ..PerAgentSettings::default_for(agent) });
+        report_if_error!(self.cli_agent_per_agent_settings.set_value(map, ctx));
+    }
+
+    /// Set the tab-menu enabled state for one agent.
+    pub fn set_cli_agent_tab_menu(
+        &mut self,
+        agent: CLIAgent,
+        enabled: bool,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let key = agent.to_serialized_name();
+        let mut map = self.cli_agent_per_agent_settings.clone();
+        map.entry(key)
+            .and_modify(|s| s.tabmenu = enabled)
+            .or_insert_with(|| PerAgentSettings { tabmenu: enabled, ..PerAgentSettings::default_for(agent) });
+        report_if_error!(self.cli_agent_per_agent_settings.set_value(map, ctx));
+    }
+
+    /// Set the titlebar-button enabled state for one agent.
+    pub fn set_cli_agent_titlebar(
+        &mut self,
+        agent: CLIAgent,
+        enabled: bool,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let key = agent.to_serialized_name();
+        let mut map = self.cli_agent_per_agent_settings.clone();
+        map.entry(key)
+            .and_modify(|s| s.titlebar = enabled)
+            .or_insert_with(|| PerAgentSettings { titlebar: enabled, ..PerAgentSettings::default_for(agent) });
+        report_if_error!(self.cli_agent_per_agent_settings.set_value(map, ctx));
+    }
+
+    /// Sync per-agent settings from install scan results.
+    /// - Newly detected agents get default values (toolbar=true, tabmenu=true)
+    /// - Uninstalled agents are removed from settings
+    /// - Mark the scan complete
+    pub fn sync_per_agent_from_scan(
+        &mut self,
+        installed: &HashMap<CLIAgent, bool>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let installed_agents: Vec<CLIAgent> = installed
+            .iter()
+            .filter(|(a, v)| **v && !matches!(a, CLIAgent::Unknown))
+            .map(|(a, _)| *a)
+            .collect();
+        let installed_names: std::collections::HashSet<String> = installed_agents
+            .iter()
+            .map(|a| a.to_serialized_name())
+            .collect();
+
+        let mut per_agent = self.cli_agent_per_agent_settings.clone();
+
+        for agent in &installed_agents {
+            per_agent
+                .entry(agent.to_serialized_name())
+                .or_insert_with(|| PerAgentSettings::default_for(*agent));
+        }
+
+        // Remove uninstalled agents
+        per_agent.retain(|name, _| installed_names.contains(name.as_str()));
+
+        let changed = &per_agent != self.cli_agent_per_agent_settings.value();
+        if changed {
+            report_if_error!(self.cli_agent_per_agent_settings.set_value(per_agent, ctx));
+        }
+
+        if !*self.cli_agent_scan_completed.value() {
+            report_if_error!(self.cli_agent_scan_completed.set_value(true, ctx));
+        }
+    }
+
+    /// Return whether at least one CLI agent install scan has completed.
+    pub fn is_cli_agent_scan_completed(&self) -> bool {
+        *self.cli_agent_scan_completed.value()
     }
 }
 

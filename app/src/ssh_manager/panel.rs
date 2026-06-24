@@ -19,9 +19,11 @@ use warp_core::ui::theme::color::internal_colors;
 use warpui::elements::{
     AcceptedByDropTarget, Border, ChildAnchor, ConstrainedBox, Container, CornerRadius,
     CrossAxisAlignment, Dismiss, Draggable, DraggableState, DropTarget, DropTargetData, Element,
-    Empty, Flex, Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning,
-    ParentAnchor, ParentElement, ParentOffsetBounds, Radius, SavePosition, Stack, Text,
+    Empty, Fill as ElementFill, Flex, Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle,
+    OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, SavePosition,
+    ScrollbarWidth, Stack, Text,
 };
+use warpui::elements::{ClippedScrollStateHandle, ClippedScrollable};
 use warpui::platform::Cursor;
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::{
@@ -195,6 +197,8 @@ pub struct SshManagerPanel {
     /// Hover state for the section header's Refresh / Toggle buttons.
     candidates_refresh_btn: MouseStateHandle,
     candidates_toggle_btn: MouseStateHandle,
+
+    content_scroll_state: ClippedScrollStateHandle,
 }
 
 impl SshManagerPanel {
@@ -221,6 +225,7 @@ impl SshManagerPanel {
             candidate_add_states: HashMap::new(),
             candidates_refresh_btn: MouseStateHandle::default(),
             candidates_toggle_btn: MouseStateHandle::default(),
+            content_scroll_state: ClippedScrollStateHandle::default(),
         };
         // Panel first opened → read ssh_config once immediately (PRODUCT.md decision A).
         me.candidates.update(ctx, |vm, ctx| vm.refresh(ctx));
@@ -383,6 +388,7 @@ impl SshManagerPanel {
                 .identity_file
                 .as_ref()
                 .map(|p| p.to_string_lossy().into_owned()),
+            credential_id: None,
             startup_command: None,
             notes: Some(format!("Imported from {path_display}")),
             last_connected_at: None,
@@ -1518,7 +1524,7 @@ impl SshManagerPanel {
             )
             .with_child(chevron_el)
             .with_child(icon_el)
-            .with_child(label_or_editor)
+            .with_child(warpui::elements::Shrinkable::new(1.0, label_or_editor).finish())
             .with_main_axis_size(MainAxisSize::Max)
             .finish();
 
@@ -1810,9 +1816,7 @@ impl View for SshManagerPanel {
             .with_uniform_padding(8.0)
             .finish();
 
-        // PRODUCT.md §2: the Candidates section is **above** the saved tree, sharing the same panel
-        // horizontal padding. The section returns Empty when the view-model hasn't refreshed yet, taking no
-        // height. When auto-discovery is off, the section isn't rendered.
+        // PRODUCT.md section 2: the Candidates section is above the saved tree and shares the same panel horizontal padding. The section returns Empty before the view-model refreshes, taking no height. It is not rendered when auto-discovery is disabled.
         let auto_discover = *SshSettings::as_ref(app).enable_ssh_auto_discovery.value();
         let candidates_section = if auto_discover {
             Container::new(self.render_candidates(appearance, app))
@@ -1828,17 +1832,30 @@ impl View for SshManagerPanel {
             .with_padding_right(PANEL_HORIZONTAL_PADDING - ITEM_PADDING_HORIZONTAL)
             .finish();
 
-        // Let the tree fill the remaining vertical space — so the root DropTarget covers down to the panel bottom,
-        // and dragging into the blank area at the very bottom of the tree can still land on root (`SshDropData{parent_id:None}`).
-        let tree_filled = warpui::elements::Shrinkable::new(1.0, tree).finish();
+        let root_content = Flex::column()
+            .with_main_axis_size(MainAxisSize::Min)
+            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+            .with_child(candidates_section)
+            .with_child(tree)
+            .finish();
+
+        let scrollable_content = ClippedScrollable::vertical_centered(
+            self.content_scroll_state.clone(),
+            root_content,
+            ScrollbarWidth::Custom(4.0),
+            appearance.theme().nonactive_ui_detail().into(),
+            appearance.theme().active_ui_detail().into(),
+            ElementFill::None,
+        )
+        .with_overlayed_scrollbar()
+        .finish();
 
         let panel_content = Container::new(
             Flex::column()
                 .with_main_axis_size(MainAxisSize::Max)
                 .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
                 .with_child(toolbar)
-                .with_child(candidates_section)
-                .with_child(tree_filled)
+                .with_child(warpui::elements::Shrinkable::new(1.0, scrollable_content).finish())
                 .finish(),
         )
         .finish();
@@ -1866,10 +1883,10 @@ impl View for SshManagerPanel {
 
 // --- helpers --------------------------------------------------------------
 
-/// Compute the parent ID for a new node based on the current selection and the node list.
-/// - Folder selected → create as a child under that folder
-/// - Server selected → create as a sibling (inherits the server's parent)
-/// - No selection → create at root level (returns None)
+/// Compute the parent ID for a new node based on the current selection and node list.
+/// - Folder selected -> create as a child under that folder
+/// - Server selected -> create as a sibling, inheriting the server's parent
+/// - No selection -> create at root level, returning None
 fn resolve_parent_for_new_node(selected_id: Option<&str>, nodes: &[SshNode]) -> Option<String> {
     let id = selected_id?;
     let node = nodes.iter().find(|n| n.id == id)?;
@@ -1880,7 +1897,8 @@ fn resolve_parent_for_new_node(selected_id: Option<&str>, nodes: &[SshNode]) -> 
 }
 
 fn sort_for_display(nodes: Vec<SshNode>, depths: &HashMap<String, usize>) -> Vec<SshNode> {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
+    let ids: HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
     let mut by_parent: BTreeMap<Option<String>, Vec<SshNode>> = BTreeMap::new();
     for n in nodes {
         by_parent.entry(n.parent_id.clone()).or_default().push(n);
@@ -1893,15 +1911,36 @@ fn sort_for_display(nodes: Vec<SshNode>, depths: &HashMap<String, usize>) -> Vec
         parent: Option<&String>,
         by_parent: &BTreeMap<Option<String>, Vec<SshNode>>,
         out: &mut Vec<SshNode>,
+        seen: &mut HashSet<String>,
     ) {
         if let Some(children) = by_parent.get(&parent.cloned()) {
             for c in children {
+                if !seen.insert(c.id.clone()) {
+                    continue;
+                }
                 out.push(c.clone());
-                walk(Some(&c.id), by_parent, out);
+                walk(Some(&c.id), by_parent, out, seen);
             }
         }
     }
-    walk(None, &by_parent, &mut out);
+    let root_parents: Vec<Option<String>> = by_parent
+        .keys()
+        .filter(|parent| parent.as_ref().is_none_or(|id| !ids.contains(id)))
+        .cloned()
+        .collect();
+    let mut seen = HashSet::new();
+    for parent in root_parents {
+        walk(parent.as_ref(), &by_parent, &mut out, &mut seen);
+    }
+    for children in by_parent.values() {
+        for child in children {
+            if !seen.insert(child.id.clone()) {
+                continue;
+            }
+            out.push(child.clone());
+            walk(Some(&child.id), &by_parent, &mut out, &mut seen);
+        }
+    }
     out
 }
 
@@ -1912,8 +1951,11 @@ fn compute_depths(nodes: &[SshNode]) -> HashMap<String, usize> {
         let mut d = 0;
         let mut p = n.parent_id.as_deref();
         while let Some(pid) = p {
+            let Some(parent) = by_id.get(pid) else {
+                break;
+            };
             d += 1;
-            p = by_id.get(pid).and_then(|nn| nn.parent_id.as_deref());
+            p = parent.parent_id.as_deref();
             if d > 64 {
                 break;
             }

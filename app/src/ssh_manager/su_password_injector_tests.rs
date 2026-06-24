@@ -1,4 +1,7 @@
-use super::{is_su_to_root, PASSWORD_PROMPT_REGEX, SU_ROOT_CMD_REGEX};
+use super::{
+    is_su_to_root, should_spawn_su_password_injector, PASSWORD_PROMPT_REGEX, SU_ROOT_CMD_REGEX,
+};
+use zeroize::Zeroizing;
 
 fn pw_matches(input: &str) -> bool {
     PASSWORD_PROMPT_REGEX.is_match(input.as_bytes())
@@ -15,12 +18,12 @@ fn password_prompt_matches_typical_forms() {
     assert!(pw_matches("Password: "));
     assert!(pw_matches("[sudo] password for alice: "));
     assert!(pw_matches("user@host's password: "));
-    // Fullwidth colon (Chinese input method)
-    assert!(pw_matches("密码:"));
-    assert!(pw_matches("密码："));
+    // Fullwidth colon from CJK input methods.
+    assert!(pw_matches("\u{5BC6}\u{7801}:"));
+    assert!(pw_matches("\u{5BC6}\u{7801}\u{FF1A}"));
     // Galaxy Kylin V10 colon-less special case
-    assert!(pw_matches("输入密码"));
-    assert!(pw_matches("输入密码 "));
+    assert!(pw_matches("\u{8F93}\u{5165}\u{5BC6}\u{7801}"));
+    assert!(pw_matches("\u{8F93}\u{5165}\u{5BC6}\u{7801} "));
     // passphrase
     assert!(pw_matches(
         "Enter passphrase for key '/home/u/.ssh/id_rsa': "
@@ -29,7 +32,7 @@ fn password_prompt_matches_typical_forms() {
 
 #[test]
 fn password_prompt_rejects_false_positives() {
-    // These all contain 'password' / '密码' but are not real prompts, so they must not false-positive
+    // These all contain password-like text but are not real prompts, so they must not false-positive.
     assert!(!pw_matches("Your password has expired"));
     assert!(!pw_matches("Bad password, try again"));
     assert!(!pw_matches("password changed successfully"));
@@ -38,8 +41,10 @@ fn password_prompt_rejects_false_positives() {
     assert!(!pw_matches(
         "Last login: Mon Jan 1 password rotated yesterday\n"
     ));
-    // Same for Chinese
-    assert!(!pw_matches("您的密码已过期"));
+    // Same for CJK password-like text.
+    assert!(!pw_matches(
+        "\u{60A8}\u{7684}\u{5BC6}\u{7801}\u{5DF2}\u{8FC7}\u{671F}"
+    ));
 }
 
 #[test]
@@ -94,4 +99,15 @@ fn full_pipeline_su_root_with_password_prompt() {
     let buf = b"alice@kylin:~$ su -\r\n\xe5\xaf\x86\xe7\xa0\x81\xef\xbc\x9a";
     assert!(PASSWORD_PROMPT_REGEX.is_match(buf));
     assert!(is_su_to_root(buf));
+}
+
+#[test]
+fn should_spawn_su_password_injector_requires_non_empty_root_password() {
+    assert!(!should_spawn_su_password_injector(None));
+
+    let empty_password = Zeroizing::new(String::new());
+    assert!(!should_spawn_su_password_injector(Some(&empty_password)));
+
+    let password = Zeroizing::new("root-password".to_string());
+    assert!(should_spawn_su_password_injector(Some(&password)));
 }

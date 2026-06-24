@@ -6,10 +6,10 @@
 use std::sync::{Arc, Mutex};
 
 use warp_ssh_manager::{SshRepository, SshServerInfo};
-use warpui::integration::TestStep;
-use warpui::windowing::WindowManager;
 use warpui::SingletonEntity;
 use warpui::TypedActionView;
+use warpui::integration::TestStep;
+use warpui::windowing::WindowManager;
 
 use crate::ssh_manager::server_view::SshServerAction;
 use crate::workspace::{Workspace, WorkspaceAction};
@@ -63,6 +63,7 @@ pub fn create_server_via_db(name: &str, parent_id: Option<&str>) -> String {
             username: "root".into(),
             auth_type: warp_ssh_manager::AuthType::Password,
             key_path: None,
+            credential_id: None,
             startup_command: None,
             notes: None,
             last_connected_at: None,
