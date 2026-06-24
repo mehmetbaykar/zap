@@ -1170,7 +1170,7 @@ impl View for AIBlock {
                 {
                     ctx.dispatch_typed_action(AIBlockAction::CopyOnSelect(selection.clone()));
                 }
-                *selected_text.write() = selection;
+                *selected_text.write() = selection.filter(|selection| !selection.is_empty());
             },
             SavePosition::new(content.finish(), self.saved_position_id().as_str()).finish(),
         )
