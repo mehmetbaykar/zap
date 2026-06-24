@@ -30,7 +30,7 @@ use crate::platform::NotificationInfo;
 use crate::platform::OperatingSystem;
 use crate::platform::{
     self,
-    app::{AppCallbackDispatcher, ApproveTerminateResult},
+    app::{AppCallbackDispatcher, ApproveTerminateResult, TerminationRequestSource},
     TerminationMode, WindowContext,
 };
 use crate::r#async::Timer;
@@ -1530,7 +1530,11 @@ impl EventLoop {
             return ApproveTerminateResult::Terminate;
         }
 
-        let approve_terminate_result = self.callbacks.should_terminate_app();
+        // Winit doesn't tell us why termination was requested, so assume the
+        // user asked (system-initiated shutdown detection is macOS-only for now).
+        let approve_terminate_result = self
+            .callbacks
+            .should_terminate_app(TerminationRequestSource::User);
         if let ApproveTerminateResult::Terminate = approve_terminate_result {}
         approve_terminate_result
     }

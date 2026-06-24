@@ -4,7 +4,10 @@ use std::sync::mpsc::{Receiver, Sender};
 use crate::{
     platform::{
         self,
-        app::{AppCallbackDispatcher, ApproveTerminateResult, TerminationResult},
+        app::{
+            AppCallbackDispatcher, ApproveTerminateResult, TerminationRequestSource,
+            TerminationResult,
+        },
         TerminationMode,
     },
     AppContext, WindowId,
@@ -51,7 +54,7 @@ pub(super) fn run(
                 let should_terminate = match termination_mode {
                     TerminationMode::Cancellable => {
                         matches!(
-                            callbacks.should_terminate_app(),
+                            callbacks.should_terminate_app(TerminationRequestSource::User),
                             ApproveTerminateResult::Terminate
                         )
                     }
