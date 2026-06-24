@@ -1237,7 +1237,7 @@ impl BlocklistAIActionModel {
                     .collect::<Vec<_>>()
                     .join(",")
             );
-            debug_assert!(false, "Expected action to be requested command.");
+            log::warn!("Ignoring acceptance for non-pending requested command: {action_id:?}");
             return;
         };
 

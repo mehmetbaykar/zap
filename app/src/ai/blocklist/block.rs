@@ -2962,6 +2962,7 @@ impl AIBlock {
                         ctx,
                     );
                 });
+                self.yield_requested_action_focus_if_focused(&view, ctx);
                 ctx.notify();
             }
             RequestedCommandViewEvent::EnableAutoexecuteMode => {
@@ -2969,6 +2970,7 @@ impl AIBlock {
             }
             RequestedCommandViewEvent::Rejected => {
                 self.cancel_action(action_id, ctx);
+                self.yield_requested_action_focus_if_focused(&view, ctx);
             }
             RequestedCommandViewEvent::UpdatedExpansionState { is_expanded } => {
                 // We only care about expansion state updates when the command
@@ -3094,10 +3096,12 @@ impl AIBlock {
                 self.action_model.update(ctx, |action_model, ctx| {
                     action_model.execute_action(action_id, self.client_ids.conversation_id, ctx);
                 });
+                self.yield_requested_action_focus_if_focused(&view, ctx);
                 ctx.notify();
             }
             RequestedCommandViewEvent::Rejected => {
                 self.cancel_action(action_id, ctx);
+                self.yield_requested_action_focus_if_focused(&view, ctx);
             }
             RequestedCommandViewEvent::TextSelected => {
                 // If there's an ongoing text selection, clear all other selections within the
@@ -4008,6 +4012,15 @@ impl AIBlock {
         });
     }
 
+    fn yield_requested_action_focus_if_focused(
+        &self,
+        view: &ViewHandle<RequestedCommandView>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if view.is_self_or_child_focused(ctx) {
+            ctx.emit(AIBlockEvent::FocusTerminal);
+        }
+    }
     /// Tries to focus the AI block or one of its parts, if applicable.
     /// If the block doesn't need to be focused, focus is yielded
     /// back to the owning [`TerminalView`].
