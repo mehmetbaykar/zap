@@ -64,7 +64,7 @@ pub fn register_noop(service_name: &str, ctx: &mut warpui::AppContext) {
 /// Registers an unavailable Secure Storage provider that deliberately does not persist values.
 ///
 /// Reads report missing values, while writes and removals succeed without accessing storage.
-pub fn register_unavailable(ctx: &mut warpui_core::AppContext) {
+pub fn register_unavailable(ctx: &mut warpui::AppContext) {
     ctx.add_singleton_model(|_| -> Model { Box::new(unavailable::SecureStorage) });
 }
 

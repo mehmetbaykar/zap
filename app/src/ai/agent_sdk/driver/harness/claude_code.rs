@@ -97,9 +97,6 @@ impl ThirdPartyHarness for ClaudeHarness {
         )?))
     }
 
-    fn requires_verified_platform_plugin(&self) -> bool {
-        true
-    }
 }
 
 /// Command used to exit claude.

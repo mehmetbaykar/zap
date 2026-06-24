@@ -6896,7 +6896,13 @@ impl TerminalView {
         } else if active_block_state.is_long_running {
             // A second Ctrl+C after Stop takeover should cancel both the command and conversation.
             if let Some(conversation_id) = active_block_state.conversation_id_to_stop {
-                self.stop_local_agent_conversation(conversation_id, ctx);
+                self.ai_controller.update(ctx, |controller, ctx| {
+                    controller.cancel_conversation_progress(
+                        conversation_id,
+                        CancellationReason::ManuallyCancelled,
+                        ctx,
+                    );
+                });
             } else {
                 self.user_write_ctrl_c_to_pty(ctx);
             }

@@ -149,7 +149,6 @@ impl AgentToolbarItemKind {
             | Self::NLDToggle
             | Self::ContextWindowUsage
             | Self::FastForwardToggle
-            | Self::HandoffToCloud
             | Self::ShareSession
             | Self::FileExplorer
             | Self::RichInput
