@@ -4250,6 +4250,20 @@ impl AppContext {
         }
     }
 
+    #[cfg(test)]
+    pub fn record_view_parent(
+        &mut self,
+        window_id: WindowId,
+        child_view_id: EntityId,
+        parent_view_id: EntityId,
+    ) {
+        if let Some(presenter) = self.presenter(window_id) {
+            presenter
+                .borrow_mut()
+                .set_parent(child_view_id, parent_view_id);
+        }
+    }
+
     pub fn open_view_tree_debug_window(&mut self, target_window_id: WindowId) {
         let Some(presenter) = self.presenter(target_window_id) else {
             return;

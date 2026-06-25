@@ -22170,8 +22170,28 @@ impl Workspace {
                         tab.draggable_state.adjust_mouse_position(adjustment);
                     }
                 }
-                DragResult::HandoffNeeded { target } => {
-                    self.perform_handoff(target, ctx);
+                DragResult::ReorderInSource => {
+                    let new_index = self.tab_insertion_index_for_cursor(
+                        window_id,
+                        position.center()
+                            + ctx.window_bounds(&window_id)
+                                .map(|bounds| bounds.origin())
+                                .unwrap_or_default(),
+                        ctx,
+                    );
+                    let new_index = new_index.min(self.tabs.len().saturating_sub(1));
+                    if new_index != current_index && current_index < self.tabs.len() {
+                        self.tabs.swap(new_index, current_index);
+                        if current_index == self.active_tab_index {
+                            self.set_active_tab_index(new_index, ctx);
+                        } else if new_index == self.active_tab_index {
+                            self.set_active_tab_index(current_index, ctx);
+                        }
+                        CrossWindowTabDrag::handle(ctx).update(ctx, |drag, _ctx| {
+                            drag.set_source_placeholder_index(new_index);
+                        });
+                        ctx.notify();
+                    }
                 }
             }
             return;
