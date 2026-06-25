@@ -261,6 +261,10 @@ Under `app/src/` there are 60+ flatly-laid-out product-domain directories, each 
 
 > These are compiled from `WARP.md` and the project's custom rules; this file's verification requirement for the agent is `cargo check`.
 
+Current verification note (2026-06-25):
+- `cargo check` passes.
+- `cargo nextest run --no-fail-fast --workspace --exclude command-signatures-v2` currently fails during `cargo test --no-run`, before individual tests execute, because `crates/managed_secrets_wasm` cannot compile: `ManagedSecretValue::openai_api_key(...)` is referenced in `crates/managed_secrets_wasm/src/lib.rs`, but the current `ManagedSecretValue` implementation in `crates/managed_secrets/src/secret_value.rs` does not define that helper/variant.
+
 ### 5.1 Must-read conventions
 - For searching/grepping within the git index, use the `fff` tool or `rg -n "<keyword>" <path>`; `read_file` is only for images/binaries.
 - Before opening a PR / pushing a new commit, you **only** need to pass: `cargo check`.
