@@ -149,29 +149,58 @@ runs:
       shell: bash
       run: corepack enable
 
-    - name: Install protoc for generating rust bindings of protobuf APIs
+    - name: Install protoc for generating rust bindings of protobuf APIs (non-Windows)
       id: install_protoc
+      if: ${{ inputs.target_os != 'windows' }}
       # Install protoc for generating rust bindings of protobuf APIs.
       uses: ConorMacBride/install-package@3e7ad059e07782ee54fa35f827df52aae0626f30 # v1
-      # Don't fail the job here so the winget fallback below has a chance to run on Windows.
-      continue-on-error: true
       with:
         brew: protobuf
         choco: protoc
 
-    - name: Install protoc via winget (fallback for Windows)
-      if: ${{ inputs.target_os == 'windows' && steps.install_protoc.outcome == 'failure' }}
-      shell: pwsh
-      run: winget install Google.Protobuf
-
-    - name: Fail if protoc install did not succeed
+    - name: Fail if protoc install did not succeed (non-Windows)
       if: ${{ inputs.target_os != 'windows' && steps.install_protoc.outcome == 'failure' }}
       shell: bash
       run: |
         echo "::error::protoc install step failed on ${{ inputs.target_os }}"
         exit 1
 
+    - name: Install protoc from official release (Windows)
+      if: ${{ inputs.target_os == 'windows' }}
+      shell: pwsh
+      # choco/winget 的 protoc 不稳定:choco 社区源时常返回无效 XML 导致包找不到,
+      # winget 的 Google.Protobuf 版本又过新(35.x)与 Linux 固定的 25.1 漂移。
+      # 直接取官方发行版 zip,版本与 script/linux/install_build_deps、bootstrap.ps1 对齐。
+      # prost-build 优先读 PROTOC 环境变量,显式写入 $GITHUB_ENV 最稳妥。
+      run: |
+        $protocVersion = '25.1'
+        $protocDir = "$env:RUNNER_TEMP\protoc"
+        $protocExe = "$protocDir\bin\protoc.exe"
+        $protocZip = "$env:RUNNER_TEMP\protoc-$protocVersion-win64.zip"
+        Invoke-WebRequest -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v$protocVersion/protoc-$protocVersion-win64.zip" -OutFile $protocZip
+        Expand-Archive -Path $protocZip -DestinationPath $protocDir -Force
+        Remove-Item $protocZip
+        "PROTOC=$protocExe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        "$protocDir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
     - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
       if: ${{ inputs.target_os == 'macos' && inputs.is_self_hosted != 'true' }}
       with:
         xcode-version: '26'
+
+    - name: Ensure Metal Toolchain is available (macOS)
+      if: ${{ inputs.target_os == 'macos' && inputs.is_self_hosted != 'true' }}
+      shell: bash
+      # warpui 的 build script 用 `metal` 把 shaders.metal 编译成 .air。Xcode 26 把
+      # Metal Toolchain 拆成需单独下载的组件,macos-26 runner 镜像默认不预装,且
+      # 编译走 MD_APPLE_SDK_ROOT 指向的 Xcode(可能与 setup-xcode 选定的不同),
+      # 故对该 Xcode 显式下载组件。-downloadComponent 幂等,已存在则快速返回。
+      run: |
+        if [ -n "$MD_APPLE_SDK_ROOT" ]; then
+          DEVELOPER_DIR="$MD_APPLE_SDK_ROOT/Contents/Developer"
+        else
+          DEVELOPER_DIR="$(xcode-select -p)"
+        fi
+        export DEVELOPER_DIR
+        echo "Using DEVELOPER_DIR=$DEVELOPER_DIR"
+        xcodebuild -downloadComponent MetalToolchain
