@@ -2279,6 +2279,16 @@ fn test_vertical_tabs_panel_auto_shows_when_setting_enabled() {
     });
 }
 
+/// The position id of whichever tab bar is the active cross-window drop zone:
+/// the vertical panel when vertical tabs are on, otherwise the horizontal bar.
+fn active_tab_bar_position_id(app: &AppContext) -> &'static str {
+    if uses_vertical_tabs(app) {
+        VERTICAL_TABS_PANEL_POSITION_ID
+    } else {
+        TAB_BAR_POSITION_ID
+    }
+}
+
 #[test]
 fn test_active_tab_bar_position_id_tracks_layout() {
     // Cross-window drag hit-testing (`tab_bar_rects_for_window`) targets only

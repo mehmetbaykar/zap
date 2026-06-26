@@ -4,6 +4,8 @@ use std::pin::pin;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::terminal::model::escape_sequences::C0;
+
 use crate::ai::agent::conversation::ConversationStatus;
 use parking_lot::FairMutex;
 use warp_terminal::model::escape_sequences::{BRACKETED_PASTE_END, BRACKETED_PASTE_START};
@@ -3278,7 +3280,7 @@ fn ctrl_c_after_stop_takeover_cancels_conversation() {
         let conversation_id = terminal.update(&mut app, |view, ctx| {
             let conversation_id =
                 BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
-                    history.start_new_conversation(view.view_id, false, false, false, ctx)
+                    history.start_new_conversation(view.view_id, false, false, ctx)
                 });
 
             view.model
@@ -3333,7 +3335,7 @@ fn ctrl_c_after_transfer_takeover_does_not_cancel_conversation() {
         let conversation_id = terminal.update(&mut app, |view, ctx| {
             let conversation_id =
                 BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
-                    history.start_new_conversation(view.view_id, false, false, false, ctx)
+                    history.start_new_conversation(view.view_id, false, false, ctx)
                 });
 
             view.model
