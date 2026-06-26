@@ -4374,28 +4374,33 @@ impl TerminalView {
 
     /// Returns whether this terminal view should subscribe to git status
     /// updates. We subscribe when:
-    /// 1. Agent mode is active and its chip list includes `GitDiffStats`, or
-    /// 2. Terminal mode with the Zap prompt enabled and the git stats chip
+    /// 1. Agent mode is active and its chip list includes a git-status-backed
+    ///    chip (`GitDiffStats` or `GitBranchStatus`), or
+    /// 2. Terminal mode with the Zap prompt enabled and a git-status-backed chip
     ///    configured.
     #[cfg(feature = "local_fs")]
     fn should_subscribe_to_git_status(&self, ctx: &AppContext) -> bool {
-        // Agent view: subscribe only when the configured agent footer includes git stats.
+        // Agent view: subscribe only when the configured agent footer includes
+        // a git-status-backed chip.
         if self.agent_view_controller.as_ref(ctx).is_active() {
-            return SessionSettings::as_ref(ctx)
+            let chips = SessionSettings::as_ref(ctx)
                 .agent_footer_chip_selection
-                .all_chips()
-                .contains(&ContextChipKind::GitDiffStats);
+                .all_chips();
+            return chips.contains(&ContextChipKind::GitDiffStats)
+                || chips.contains(&ContextChipKind::GitBranchStatus);
         }
 
         // Terminal prompt path: the Zap prompt is active when honor_ps1 is
-        // off, or when UDI overrides PS1. GitDiffStats must also be in the
-        // configured chip list.
+        // off, or when UDI overrides PS1. A git-status-backed chip must also be
+        // in the configured chip list.
         let is_using_warp_prompt = !*SessionSettings::as_ref(ctx).honor_ps1
             || InputSettings::as_ref(ctx).is_universal_developer_input_enabled(ctx);
-        is_using_warp_prompt
-            && Prompt::as_ref(ctx)
-                .chip_kinds()
-                .contains(&ContextChipKind::GitDiffStats)
+        if !is_using_warp_prompt {
+            return false;
+        }
+        let chip_kinds = Prompt::as_ref(ctx).chip_kinds();
+        chip_kinds.contains(&ContextChipKind::GitDiffStats)
+            || chip_kinds.contains(&ContextChipKind::GitBranchStatus)
     }
 
     /// No-op when the `local_fs` feature is disabled – git status is not

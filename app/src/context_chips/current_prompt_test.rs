@@ -17,6 +17,8 @@ use warpui_extras::user_preferences;
 use crate::code_review::diff_state::DiffStats;
 #[cfg(feature = "local_fs")]
 use crate::code_review::git_status_update::{GitRepoStatusModel, GitStatusMetadata};
+#[cfg(feature = "local_fs")]
+use crate::context_chips::display_chip::GitBranchTrackingStatus;
 #[cfg(windows)]
 use crate::system::SystemInfo;
 use crate::{
@@ -1233,6 +1235,7 @@ fn test_git_status_change_updates_chip_value() {
             current_branch_name: "main".to_string(),
             main_branch_name: "main".to_string(),
             stats_against_head: DiffStats::default(),
+            branch_tracking_status: GitBranchTrackingStatus::new("main".to_string(), None, 0, 0),
         };
         let git_status = app.add_model(move |_| {
             GitRepoStatusModel::new_for_test(repo_handle, Some(initial_metadata))
@@ -1254,6 +1257,12 @@ fn test_git_status_change_updates_chip_value() {
                     current_branch_name: "feature-branch".to_string(),
                     main_branch_name: "main".to_string(),
                     stats_against_head: DiffStats::default(),
+                    branch_tracking_status: GitBranchTrackingStatus::new(
+                        "feature-branch".to_string(),
+                        None,
+                        0,
+                        0,
+                    ),
                 }),
                 ctx,
             );
