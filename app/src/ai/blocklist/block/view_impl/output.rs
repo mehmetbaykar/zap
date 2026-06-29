@@ -1982,9 +1982,13 @@ fn create_formatted_text_for_grep(
         .is_some_and(|status| status.is_queued());
 
     let display_path = if path == "." {
-        "the current directory"
+        "the current directory".to_string()
     } else {
-        path
+        shell_native_absolute_path(
+            path,
+            props.shell_launch_data,
+            props.current_working_directory,
+        )
     };
 
     let formatted_text = if queries.len() == 1 {
@@ -2092,7 +2096,13 @@ fn create_formatted_text_for_file_glob(
         .is_some_and(|status| status.is_queued());
 
     let path = path
-        .map(ToOwned::to_owned)
+        .map(|path| {
+            shell_native_absolute_path(
+                path,
+                props.shell_launch_data,
+                props.current_working_directory,
+            )
+        })
         .unwrap_or_else(|| crate::t!("common-current-directory"));
 
     let formatted_text = if patterns.len() == 1 {
