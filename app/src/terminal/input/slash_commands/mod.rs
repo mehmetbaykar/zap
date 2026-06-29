@@ -686,11 +686,8 @@ impl Input {
                     return true;
                 };
 
-                let destination = if trigger.is_cmd_or_ctrl_enter() {
-                    ForkedConversationDestination::NewTab
-                } else {
-                    ForkedConversationDestination::SplitPane
-                };
+                let destination =
+                    ForkedConversationDestination::for_fork_trigger(trigger.is_cmd_or_ctrl_enter());
 
                 ctx.dispatch_typed_action(&WorkspaceAction::ForkAIConversation {
                     conversation_id,
@@ -718,11 +715,8 @@ impl Input {
                     return true;
                 };
 
-                let destination = if trigger.is_cmd_or_ctrl_enter() {
-                    ForkedConversationDestination::SplitPane
-                } else {
-                    ForkedConversationDestination::CurrentPane
-                };
+                let destination =
+                    ForkedConversationDestination::for_fork_trigger(trigger.is_cmd_or_ctrl_enter());
 
                 ctx.dispatch_typed_action(&WorkspaceAction::ForkAIConversation {
                     conversation_id,

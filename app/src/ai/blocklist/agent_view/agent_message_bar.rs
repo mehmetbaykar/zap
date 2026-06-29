@@ -765,29 +765,15 @@ impl MessageProvider<AgentMessageArgs<'_>> for ForkSlashCommandMessageProducer {
             }
         };
 
-        // `/fork` opens in a new pane with Enter and a new tab with Cmd/Ctrl+Enter.
-        // Other fork-like commands open in the current pane with Enter and a new pane
-        // with Cmd/Ctrl+Enter.
-        let (primary_label, secondary_label) = if command_name == commands::FORK.name {
-            (
-                crate::t!("agent-message-bar-new-pane"),
-                crate::t!("agent-message-bar-new-tab"),
-            )
-        } else {
-            (
-                crate::t!("agent-message-bar-current-pane"),
-                crate::t!("agent-message-bar-new-pane"),
-            )
-        };
-
+        // All fork-style commands open a new pane on Enter and a new tab on Cmd/Ctrl+Enter.
         Some(Message::new(vec![
             MessageItem::keystroke(Keystroke {
                 key: "enter".to_owned(),
                 ..Default::default()
             }),
-            MessageItem::text(primary_label),
+            MessageItem::text(" new pane"),
             MessageItem::keystroke(modifier_keystroke),
-            MessageItem::text(secondary_label),
+            MessageItem::text(" new tab"),
         ]))
     }
 }
