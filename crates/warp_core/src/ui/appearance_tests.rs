@@ -25,6 +25,7 @@ fn mock_appearance() -> Appearance {
         FamilyId(1),
         1.4,
         FamilyId(0),
+        None,
         FamilyId(0),
         DEFAULT_UI_FONT_SIZE,
         Default::default(),
@@ -234,4 +235,81 @@ fn test_dropdown_top_bar_height_at_boundaries() {
 
     appearance.set_ui_font_size_test(20.0);
     assert_eq!(appearance.dropdown_top_bar_height(), 50.0);
+}
+
+#[test]
+fn test_terminal_fallback_font_family_can_be_updated() {
+    let mut appearance = mock_appearance();
+
+    assert_eq!(appearance.terminal_fallback_font_family(), None);
+
+    appearance.set_terminal_fallback_font_family_test(Some(FamilyId(42)));
+    assert_eq!(
+        appearance.terminal_fallback_font_family(),
+        Some(FamilyId(42))
+    );
+
+    appearance.set_terminal_fallback_font_family_test(None);
+    assert_eq!(appearance.terminal_fallback_font_family(), None);
+}
+
+/// Per-window theme override resolution: `theme()`/`ui_builder()` return the
+/// override only for the ambient render window, and the global value otherwise.
+/// Also exercises the `theme_overrides.is_empty()` zero-cost fast path.
+#[test]
+fn test_per_window_theme_override_resolution() {
+    use warpui::{current_render_window, set_current_render_window, WindowId};
+
+    let mut appearance = mock_appearance();
+    let window_a = WindowId::from_usize(1);
+    let window_b = WindowId::from_usize(2);
+
+    // Fast path: with no overrides, the ambient window is irrelevant and the
+    // global theme/ui_builder is always returned.
+    set_current_render_window(Some(window_a));
+    assert!(std::ptr::eq(appearance.theme(), &appearance.theme));
+    assert!(std::ptr::eq(appearance.ui_builder(), &appearance.ui_builder));
+    set_current_render_window(None);
+
+    // Insert an override for window A directly (bypassing `ModelContext`, which
+    // the unit-test harness doesn't provide). A distinct instance differs by
+    // address from the global theme even though the values are equal.
+    appearance
+        .theme_overrides
+        .insert(window_a, appearance.theme.clone());
+    let override_ui_builder = appearance.ui_builder.clone();
+    appearance
+        .ui_builder_overrides
+        .insert(window_a, override_ui_builder);
+
+    // Ambient == A → the override is returned.
+    set_current_render_window(Some(window_a));
+    assert!(std::ptr::eq(
+        appearance.theme(),
+        appearance.theme_overrides.get(&window_a).unwrap()
+    ));
+    assert!(std::ptr::eq(
+        appearance.ui_builder(),
+        appearance.ui_builder_overrides.get(&window_a).unwrap()
+    ));
+
+    // Ambient == B (no override) → the global theme is returned.
+    set_current_render_window(Some(window_b));
+    assert!(std::ptr::eq(appearance.theme(), &appearance.theme));
+    assert!(std::ptr::eq(appearance.ui_builder(), &appearance.ui_builder));
+
+    // Ambient == None (e.g. non-render reads) → the global theme is returned.
+    set_current_render_window(None);
+    assert_eq!(current_render_window(), None);
+    assert!(std::ptr::eq(appearance.theme(), &appearance.theme));
+
+    // Clearing the override returns to the fast path.
+    appearance.theme_overrides.remove(&window_a);
+    appearance.ui_builder_overrides.remove(&window_a);
+    set_current_render_window(Some(window_a));
+    assert!(std::ptr::eq(appearance.theme(), &appearance.theme));
+
+    // Reset the thread-local ambient so it doesn't leak into other tests sharing
+    // this test thread.
+    set_current_render_window(None);
 }

@@ -1,5 +1,6 @@
 use core::fmt;
 use std::{
+    cell::Cell,
     collections::HashMap,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -32,6 +33,49 @@ impl WindowId {
 impl fmt::Display for WindowId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+thread_local! {
+    /// The window currently being rendered on this thread, if any.
+    ///
+    /// Rendering happens on a single thread (the main loop), one window at a
+    /// time, so an ambient thread-local is a safe, zero-plumbing way to make the
+    /// active window available to window-blind theme accessors. It is set by the
+    /// render chokepoints (see `CurrentRenderWindowGuard`) and consulted by
+    /// per-window appearance overrides in higher crates.
+    static CURRENT_RENDER_WINDOW: Cell<Option<WindowId>> = const { Cell::new(None) };
+}
+
+/// Returns the window currently being rendered on this thread, if any.
+pub fn current_render_window() -> Option<WindowId> {
+    CURRENT_RENDER_WINDOW.with(|cell| cell.get())
+}
+
+/// Sets the window currently being rendered on this thread. Prefer
+/// [`CurrentRenderWindowGuard`] so the ambient is always restored.
+pub fn set_current_render_window(window_id: Option<WindowId>) {
+    CURRENT_RENDER_WINDOW.with(|cell| cell.set(window_id));
+}
+
+/// RAII guard that sets the ambient current render window for the duration of a
+/// render pass and restores the previous value on drop (covering every early
+/// return). Restoring the *previous* value (rather than forcing `None`) keeps
+/// nested render passes correct.
+#[must_use = "the guard must be held for the duration of the render pass"]
+pub struct CurrentRenderWindowGuard(Option<WindowId>);
+
+impl CurrentRenderWindowGuard {
+    pub fn new(window_id: WindowId) -> Self {
+        let previous = current_render_window();
+        set_current_render_window(Some(window_id));
+        Self(previous)
+    }
+}
+
+impl Drop for CurrentRenderWindowGuard {
+    fn drop(&mut self) {
+        set_current_render_window(self.0);
     }
 }
 

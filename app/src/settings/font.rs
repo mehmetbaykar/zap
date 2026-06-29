@@ -13,6 +13,7 @@ use warpui::elements::{HeadingFontSizeMultipliers, DEFAULT_UI_LINE_HEIGHT_RATIO}
 use super::EnforceMinimumContrast as EnforceMinimumContrastEnum;
 
 pub const DEFAULT_MONOSPACE_FONT_NAME: &str = "Hack";
+pub const DEFAULT_MONOSPACE_FALLBACK_FONT_NAME: &str = "";
 
 // Valid range for Markdown heading font-size multipliers, kept aligned with the UI clamp.
 pub const MARKDOWN_HEADING_SCALE_MIN: f32 = 0.1;
@@ -33,6 +34,16 @@ define_settings_group!(FontSettings,
             storage_key: "FontName",
             toml_path: "appearance.text.font_name",
             description: "The monospace font used in the terminal.",
+        },
+        monospace_fallback_font_name: MonospaceFallbackFontName {
+            type: String,
+            default: DEFAULT_MONOSPACE_FALLBACK_FONT_NAME.to_string(),
+            supported_platforms: SupportedPlatforms::ALL,
+            sync_to_cloud: SyncToCloud::Never,
+            private: false,
+            storage_key: "TerminalFallbackFontName",
+            toml_path: "appearance.text.fallback_font_name",
+            description: "The fallback font used when the terminal font cannot render a character.",
         },
         monospace_font_size: MonospaceFontSize {
             type: f32,

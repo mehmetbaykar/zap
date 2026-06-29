@@ -1,6 +1,7 @@
 mod cell_glyph_cache;
 mod cell_type;
 
+use crate::appearance::Appearance;
 use crate::terminal::grid_size_util::calculate_grid_baseline_position;
 use crate::terminal::model::ansi::{Color, CursorShape, CursorStyle};
 use crate::terminal::model::cell::{Cell, Flags};
@@ -25,7 +26,7 @@ use warp_core::features::FeatureFlag;
 use warpui::assets::asset_cache::{AssetCache, AssetSource, AssetState};
 use warpui::color::ColorU;
 use warpui::elements::{Border, CornerRadius, Fill, Radius, DEFAULT_UI_LINE_HEIGHT_RATIO};
-use warpui::fonts::{FamilyId, FontId, Properties, Style, Weight};
+use warpui::fonts::{Cache as FontCache, FamilyId, FontId, Properties, Style, Weight};
 use warpui::geometry::rect::RectF;
 use warpui::geometry::vector::{vec2f, Vector2F};
 use warpui::image_cache::{AnimatedImageBehavior, CacheOption, FitType, Image, ImageCache};
@@ -495,6 +496,7 @@ fn render_grid_without_ligatures<'a>(
     grid_origin.set_y(grid_origin.y().round());
 
     let default_font_id = font_cache.select_font(font_family, default_font_properties);
+    let fallback_font_family = Appearance::as_ref(app).terminal_fallback_font_family();
 
     // To avoid selecting the correct font on every cell render we use a cache that adds `FontId`s
     // to the cache only when needed.
@@ -681,6 +683,7 @@ fn render_grid_without_ligatures<'a>(
                         cell_size,
                         grid_origin,
                         glyphs,
+                        fallback_font_family,
                         alpha,
                         enforce_minimal_contrast,
                         &mut minimal_contrast_cache,
@@ -817,6 +820,7 @@ fn render_grid_without_ligatures<'a>(
                 cell_size,
                 grid_origin,
                 glyphs,
+                fallback_font_family,
                 alpha,
                 enforce_minimal_contrast,
                 &mut minimal_contrast_cache,
@@ -892,6 +896,7 @@ fn render_cell(
     cell_size: Vector2F,
     grid_origin: Vector2F,
     glyphs: &mut CellGlyphCache,
+    fallback_font_family: Option<FamilyId>,
     alpha: u8,
     enforce_minimal_contrast: EnforceMinimumContrast,
     minimal_contrast_cache: &mut MinimalContrastCache,
@@ -944,6 +949,7 @@ fn render_cell(
         cell_colors.foreground_color,
         native_glyphs_to_render,
         obfuscate_mode,
+        fallback_font_family,
         ctx,
     );
     cell_decorations.extend(calculate_cell_decorations(
@@ -996,6 +1002,7 @@ fn render_grid_with_ligatures<'a>(
     let default_font_id = ctx
         .font_cache
         .select_font(font_family, default_font_properties);
+    let fallback_font_family = Appearance::as_ref(app).terminal_fallback_font_family();
     let mut font_id_cache = HashMap::new();
     font_id_cache.insert(FontStyle::Default, default_font_id);
 
@@ -1114,8 +1121,13 @@ fn render_grid_with_ligatures<'a>(
 
     for (offset, row_idx) in visible_rows.enumerate() {
         let offset_row = start_row + offset;
-        let mut string_builder =
-            AttributedStringBuilder::new(font_family, font_family, grid.columns());
+        let mut string_builder = AttributedStringBuilder::new(
+            font_family,
+            font_family,
+            fallback_font_family,
+            ctx.font_cache,
+            grid.columns(),
+        );
 
         let Some(row) = grid.row(row_idx) else {
             log::error!("grid_renderer should not try to render an out-of-bounds row");
@@ -1687,6 +1699,7 @@ fn render_cell_glyph(
     foreground_color: ColorU,
     native_glyphs_to_render: &mut Vec<NativeGlyph>,
     obfuscate_mode: ObfuscateSecrets,
+    fallback_font_family: Option<FamilyId>,
     ctx: &mut PaintContext,
 ) {
     let cell_size = if cell.flags().intersects(Flags::WIDE_CHAR) {
@@ -1730,7 +1743,13 @@ fn render_cell_glyph(
         // explicitly check these two chars instead of using
         // `char::is_whitespace` for performance reasons.
         CharOrStr::Char(' ' | '\t') => None,
-        CharOrStr::Char(char) => glyphs.glyph_for_char(char, *font_id, ctx.font_cache),
+        CharOrStr::Char(char) => glyphs.glyph_for_char(
+            char,
+            *font_id,
+            fallback_font_family,
+            properties,
+            ctx.font_cache,
+        ),
         // Certain zerowidth characters, such as emoji presentation selectors, can affect the underlying glyph and
         // change the rendering. Hence, we need to layout/render the text as a combined string, instead of simply
         // the single character. For example, in \0x2601\0xFE0F, the FE0F selector causes ☁️ to be changed from a
@@ -1740,6 +1759,7 @@ fn render_cell_glyph(
             *font_id,
             ctx.font_cache,
             font_family,
+            fallback_font_family,
             font_size,
             properties,
             ctx,
@@ -2599,8 +2619,10 @@ pub fn render_selection_cursor(
 ///
 /// Used by ligature rendering to build the attributed string for laying out text and connecting
 /// the rendered glyphs back with their appropriate offsets.
-struct AttributedStringBuilder {
+struct AttributedStringBuilder<'a> {
     font_family: FamilyId,
+    fallback_font_family: Option<FamilyId>,
+    font_cache: &'a FontCache,
     current_style: StyleAndFont,
     current_style_start_char_index: usize,
     style_runs: Vec<(Range<usize>, StyleAndFont)>,
@@ -2610,10 +2632,18 @@ struct AttributedStringBuilder {
     line: String,
 }
 
-impl AttributedStringBuilder {
-    fn new(font_family: FamilyId, default_font_family: FamilyId, columns: usize) -> Self {
+impl<'a> AttributedStringBuilder<'a> {
+    fn new(
+        font_family: FamilyId,
+        default_font_family: FamilyId,
+        fallback_font_family: Option<FamilyId>,
+        font_cache: &'a FontCache,
+        columns: usize,
+    ) -> Self {
         Self {
             font_family,
+            fallback_font_family,
+            font_cache,
             current_style: StyleAndFont::new(
                 default_font_family,
                 Properties::default(),
@@ -2685,8 +2715,41 @@ impl AttributedStringBuilder {
     /// This will update the mapping of cell indexes so that the character can be connected with
     /// its expected grid position later.
     fn append_character(&mut self, chr: char, column: usize) {
+        if let Some(fallback_font_family) = self.fallback_font_family_for_char(chr) {
+            let previous_style = self.current_style;
+            self.flush_style_run();
+            self.current_style.font_family = fallback_font_family;
+            self.line.push(chr);
+            self.character_index_to_cell_map.push(column);
+            self.flush_style_run();
+            self.current_style = previous_style;
+            return;
+        }
+
         self.line.push(chr);
         self.character_index_to_cell_map.push(column);
+    }
+
+    fn fallback_font_family_for_char(&self, chr: char) -> Option<FamilyId> {
+        let fallback_font_family = self.fallback_font_family?;
+        let primary_font = self.font_cache.select_font(
+            self.current_style.font_family,
+            self.current_style.properties,
+        );
+        if self
+            .font_cache
+            .glyph_for_char(primary_font, chr, false)
+            .is_some()
+        {
+            return None;
+        }
+
+        let fallback_font = self
+            .font_cache
+            .select_font(fallback_font_family, self.current_style.properties);
+        self.font_cache
+            .glyph_for_char(fallback_font, chr, false)
+            .map(|_| fallback_font_family)
     }
 
     /// Append a cell's content to the attributed string at a specific grid column.

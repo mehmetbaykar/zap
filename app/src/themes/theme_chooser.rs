@@ -22,6 +22,7 @@ use warpui::{
 };
 
 use crate::resource_center::{mark_feature_used_and_write_to_user_defaults, Tip, TipAction};
+use crate::ui_components::tab_selector::{render_tab_selector, SettingsTab};
 use crate::themes::theme::{RespectSystemTheme, ThemeKind, WarpTheme};
 use crate::util::traffic_lights::traffic_light_data;
 use crate::workspace::PANEL_HEADER_HEIGHT;
@@ -67,6 +68,8 @@ const THEME_CHOOSER_ITEM_PADDING: f32 = 16.;
 struct MouseStateHandles {
     create_theme_button_hover_state: MouseStateHandle,
     close_button_mouse_state: MouseStateHandle,
+    scope_all_windows_mouse_state: MouseStateHandle,
+    scope_this_window_mouse_state: MouseStateHandle,
 }
 
 pub enum ThemeChooserEvent {
@@ -74,6 +77,42 @@ pub enum ThemeChooserEvent {
     Close(ThemeChooserMode),
     OpenThemeCreatorModal,
     OpenThemeDeletionModal(ThemeKind),
+    /// The per-window theme override for this window changed. `Some(kind)` when
+    /// the user committed a "This window" theme; `None` when the window was
+    /// returned to the global theme. The owning `Workspace` records this for
+    /// persistence.
+    WindowThemeOverride(Option<ThemeKind>),
+}
+
+/// Whether a theme selection applies to every window (the global theme setting)
+/// or only the current window (a per-window override).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ThemeScope {
+    /// Change the global theme; affects all windows without an override.
+    #[default]
+    AllWindows,
+    /// Change only the current window via a per-window override.
+    ThisWindow,
+}
+
+impl ThemeScope {
+    const ALL_WINDOWS_LABEL: &'static str = "All windows";
+    const THIS_WINDOW_LABEL: &'static str = "This window";
+
+    fn label(self) -> &'static str {
+        match self {
+            ThemeScope::AllWindows => Self::ALL_WINDOWS_LABEL,
+            ThemeScope::ThisWindow => Self::THIS_WINDOW_LABEL,
+        }
+    }
+
+    fn from_label(label: &str) -> Option<Self> {
+        match label {
+            Self::ALL_WINDOWS_LABEL => Some(ThemeScope::AllWindows),
+            Self::THIS_WINDOW_LABEL => Some(ThemeScope::ThisWindow),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -145,6 +184,8 @@ pub struct ThemeChooser {
     themes: Tracked<Vec<ThemeChooserItem>>,
     filtered_themes: Tracked<Option<Vec<ThemeChooserItem>>>,
     mode: ThemeChooserMode,
+    /// Whether selections apply globally or only to this window.
+    scope: ThemeScope,
     search_editor: ViewHandle<EditorView>,
     tips_completed: ModelHandle<TipsCompleted>,
     window_id: warpui::WindowId,
@@ -159,6 +200,7 @@ pub enum ThemeChooserAction {
     Down,
     OpenThemeCreator,
     OpenThemeDeletionModal(ThemeKind),
+    SetScope(ThemeScope),
 }
 
 pub fn init(app: &mut AppContext) {
@@ -234,6 +276,7 @@ impl ThemeChooser {
             selected_theme: Tracked::new(None),
             filtered_themes: Tracked::new(None),
             mode: ThemeChooserMode::for_active_theme(ctx),
+            scope: ThemeScope::default(),
             search_editor,
             tips_completed,
             window_id: ctx.window_id(),
@@ -400,6 +443,17 @@ impl ThemeChooser {
             },
             ctx
         );
+
+        // In "This window" scope, the per-window override was already applied by
+        // `select_theme`; record it on the owning workspace for persistence and
+        // skip writing the global theme setting.
+        if self.scope == ThemeScope::ThisWindow {
+            ctx.emit(ThemeChooserEvent::WindowThemeOverride(Some(
+                selected_kind.clone(),
+            )));
+            return;
+        }
+
         let theme_settings = ThemeSettings::handle(ctx);
 
         let selected_themes = respect_system_theme(theme_settings.as_ref(ctx))
@@ -437,6 +491,35 @@ impl ThemeChooser {
                 });
             }
         };
+
+        // Choosing a theme for all windows clears this window's per-window
+        // override (if any) so it follows the global theme again.
+        let window_id = self.window_id;
+        AppearanceManager::handle(ctx).update(ctx, |appearance_manager, ctx| {
+            appearance_manager.clear_window_theme(window_id, ctx);
+        });
+        ctx.emit(ThemeChooserEvent::WindowThemeOverride(None));
+    }
+
+    /// Switches the selection scope (all windows vs. this window). Switching to
+    /// "All windows" immediately drops this window's override so it rejoins the
+    /// global theme. Switching to "This window" defers until the user picks a
+    /// theme.
+    fn set_scope(&mut self, scope: ThemeScope, ctx: &mut ViewContext<Self>) {
+        if self.scope == scope {
+            return;
+        }
+        self.scope = scope;
+
+        if scope == ThemeScope::AllWindows {
+            let window_id = self.window_id;
+            AppearanceManager::handle(ctx).update(ctx, |appearance_manager, ctx| {
+                appearance_manager.clear_window_theme(window_id, ctx);
+            });
+            ctx.emit(ThemeChooserEvent::WindowThemeOverride(None));
+        }
+
+        ctx.notify();
     }
 
     fn theme_position(&self, kind: ThemeKind) -> Option<usize> {
@@ -463,8 +546,14 @@ impl ThemeChooser {
             ctx.notify();
         });
 
-        AppearanceManager::handle(ctx).update(ctx, |appearance_manager, ctx| {
-            appearance_manager.set_transient_theme(kind, ctx);
+        // Preview the selection. In "All windows" scope this is a global transient
+        // preview; in "This window" scope it applies a per-window override so only
+        // the current window changes.
+        let scope = self.scope;
+        let window_id = self.window_id;
+        AppearanceManager::handle(ctx).update(ctx, |appearance_manager, ctx| match scope {
+            ThemeScope::AllWindows => appearance_manager.set_transient_theme(kind, ctx),
+            ThemeScope::ThisWindow => appearance_manager.set_window_theme(window_id, kind, ctx),
         });
     }
 
@@ -660,6 +749,39 @@ impl ThemeChooser {
             .finish()
     }
 
+    fn render_scope_selector(&self, appearance: &Appearance) -> Box<dyn Element> {
+        let tabs = vec![
+            SettingsTab::new(
+                ThemeScope::AllWindows.label(),
+                self.button_mouse_states
+                    .scope_all_windows_mouse_state
+                    .clone(),
+            ),
+            SettingsTab::new(
+                ThemeScope::ThisWindow.label(),
+                self.button_mouse_states
+                    .scope_this_window_mouse_state
+                    .clone(),
+            ),
+        ];
+
+        let selector = render_tab_selector(
+            tabs,
+            self.scope.label(),
+            |label, ctx| {
+                if let Some(scope) = ThemeScope::from_label(label) {
+                    ctx.dispatch_typed_action(ThemeChooserAction::SetScope(scope));
+                }
+            },
+            appearance,
+        );
+
+        Container::new(selector)
+            .with_margin_left(TITLE_MARGIN)
+            .with_margin_right(TITLE_MARGIN)
+            .finish()
+    }
+
     fn render_search_bar(&self, appearance: &Appearance) -> Box<dyn Element> {
         Container::new(
             Flex::row()
@@ -806,6 +928,7 @@ impl TypedActionView for ThemeChooser {
             Enter => self.enter(ctx),
             OpenThemeCreator => self.open_theme_creator_modal(ctx),
             OpenThemeDeletionModal(kind) => self.open_theme_deletion_modal(kind.clone(), ctx),
+            SetScope(scope) => self.set_scope(*scope, ctx),
         }
     }
 }
@@ -831,6 +954,7 @@ impl View for ThemeChooser {
             Flex::column()
                 .with_child(self.render_header(traffic_light_data.as_ref(), appearance, app))
                 .with_child(self.render_title_row(appearance))
+                .with_child(self.render_scope_selector(appearance))
                 .with_child(self.mode.render_hint_text(appearance))
                 .with_child(self.render_search_bar(appearance))
                 .with_child(self.render_list(appearance))

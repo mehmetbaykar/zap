@@ -3402,8 +3402,15 @@ impl TypedActionView for AISettingsPageView {
                     ctx.spawn(
                         async move { models_dev::fetch_and_cache(client).await },
                         |view, result, ctx| match result {
-                            Ok(()) => view.rebuild_current_page(ctx),
-                            Err(e) => log::warn!("[models.dev] fetch failed: {e}"),
+                            Ok(()) => {
+                                models_dev::set_fetch_failed(false);
+                                view.rebuild_current_page(ctx);
+                            }
+                            Err(e) => {
+                                log::warn!("[models.dev] fetch failed: {e}");
+                                models_dev::set_fetch_failed(true);
+                                ctx.notify();
+                            }
                         },
                     );
                 } else {
@@ -3416,8 +3423,15 @@ impl TypedActionView for AISettingsPageView {
                 ctx.spawn(
                     async move { models_dev::fetch_and_cache(client).await },
                     |view, result, ctx| match result {
-                        Ok(()) => view.rebuild_current_page(ctx),
-                        Err(e) => log::warn!("[models.dev] refresh failed: {e}"),
+                        Ok(()) => {
+                            models_dev::set_fetch_failed(false);
+                            view.rebuild_current_page(ctx);
+                        }
+                        Err(e) => {
+                            log::warn!("[models.dev] refresh failed: {e}");
+                            models_dev::set_fetch_failed(true);
+                            ctx.notify();
+                        }
                     },
                 );
             }

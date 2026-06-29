@@ -79,6 +79,20 @@ use super::{
 
 use crate::{send_telemetry_from_ctx, TelemetryEvent};
 
+// Read-only rendered Markdown preview for remote files reuses the notebook rich-text
+// machinery. `RichTextEditorView` is referenced by the always-present `TabData` field, so
+// it must be in scope unconditionally; the construction helpers are only used on the
+// `local_fs` toggle path.
+use crate::notebooks::editor::view::RichTextEditorView;
+#[cfg(feature = "local_fs")]
+use crate::{
+    notebooks::{
+        editor::{model::NotebooksEditorModel, rich_text_styles, view::RichTextEditorConfig},
+        link::{NotebookLinks, SessionSource},
+    },
+    settings::FontSettings,
+};
+
 type SaveCallback =
     Box<dyn FnOnce(SaveOutcome, &mut CodeView, &mut ViewContext<CodeView>) + Send + Sync + 'static>;
 
@@ -215,6 +229,10 @@ pub struct TabData {
     editor_view: ViewHandle<LocalCodeEditorView>,
     mouse_state_handles: TabDataMouseStateHandles,
     preview: bool,
+    /// 远端 Markdown 的只读渲染预览视图。`Some` = 正在显示渲染预览,`None` = 显示
+    /// 可编辑源码。仅远端文件会用到 —— 本地 Markdown 走 `ReplaceWithFilePane` 切换到
+    /// `FileNotebookView`,不在 `CodeView` 内联渲染。
+    rendered_markdown_view: Option<ViewHandle<RichTextEditorView>>,
 }
 
 #[derive(Debug, Clone)]
@@ -296,13 +314,20 @@ impl CodeView {
 
     #[cfg(feature = "local_fs")]
     fn update_markdown_mode_segmented_control(&mut self, ctx: &mut ViewContext<Self>) {
+        // 本地文件优先用 `local_path()` / `tab.path` / `source.path()`;远端文件这些都是
+        // `None`,改用 `location.language_path()`(只取后缀,不做文件系统访问)识别 Markdown。
         let path = self
             .local_path(ctx)
             .or_else(|| {
                 self.tab_at(self.active_tab_index)
                     .and_then(|t| t.path.clone())
             })
-            .or_else(|| self.source.path());
+            .or_else(|| self.source.path())
+            .or_else(|| {
+                self.tab_at(self.active_tab_index)
+                    .and_then(|t| t.location.as_ref())
+                    .map(|loc| loc.language_path())
+            });
 
         let is_markdown = path.as_ref().map(is_markdown_file).unwrap_or(false);
 
@@ -319,17 +344,106 @@ impl CodeView {
 
             ctx.subscribe_to_view(&handle, |view, _, event, ctx| {
                 let MarkdownToggleEvent::ModeSelected(mode) = event;
-                match mode {
-                    MarkdownDisplayMode::Rendered => {
+                // 远端文件在 `CodeView` 内联切换渲染/源码;本地文件保持原行为
+                // (Rendered → 替换为 `FileNotebookView` pane)。
+                let is_remote = view
+                    .tab_at(view.active_tab_index)
+                    .and_then(|t| t.location.as_ref())
+                    .is_some_and(|loc| matches!(loc, BufferLocation::Remote(_)));
+                match (mode, is_remote) {
+                    (MarkdownDisplayMode::Rendered, false) => {
                         view.handle_action(&CodeViewAction::RenderMarkdown, ctx);
                     }
-                    MarkdownDisplayMode::Raw => {}
+                    (MarkdownDisplayMode::Raw, false) => {}
+                    (MarkdownDisplayMode::Rendered, true) => {
+                        view.set_remote_markdown_rendered(true, ctx);
+                    }
+                    (MarkdownDisplayMode::Raw, true) => {
+                        view.set_remote_markdown_rendered(false, ctx);
+                    }
                 }
             });
 
             self.markdown_mode_segmented_control = Some(handle);
         }
 
+        // 切 tab 时,把分段控件的选中态同步到当前 tab 的渲染状态。
+        let control = self.markdown_mode_segmented_control.clone();
+        if let Some(control) = control {
+            let mode = if self
+                .tab_at(self.active_tab_index)
+                .is_some_and(|t| t.rendered_markdown_view.is_some())
+            {
+                MarkdownDisplayMode::Rendered
+            } else {
+                MarkdownDisplayMode::Raw
+            };
+            control.update(ctx, |control, ctx| {
+                control.set_selected_mode(mode, ctx);
+            });
+        }
+
+        ctx.notify();
+    }
+
+    /// 为远端 Markdown 文件在 `CodeView` 内联切换只读渲染预览与可编辑源码。
+    ///
+    /// `rendered = true`:对当前 buffer 文本做一次快照,构造一个只读
+    /// (`InteractionState::Selectable`)的 [`RichTextEditorView`],存到当前 tab。
+    /// `rendered = false`:清除该视图,回到源码编辑器。
+    ///
+    /// 注意:这是**快照**式渲染 —— buffer 后续经 sync 更新时预览不会自动刷新,
+    /// 用户切回 Raw 再切回 Rendered 即可重新渲染。本地文件不走这里
+    /// (走 `RenderMarkdown` → `ReplaceWithFilePane`)。
+    #[cfg(feature = "local_fs")]
+    fn set_remote_markdown_rendered(&mut self, rendered: bool, ctx: &mut ViewContext<Self>) {
+        let index = self.active_tab_index;
+
+        if !rendered {
+            if let Some(tab) = self.tab_group.get_mut(index) {
+                tab.rendered_markdown_view = None;
+            }
+            ctx.notify();
+            return;
+        }
+
+        let Some(content) = self.tab_at(index).map(|tab| {
+            tab.editor_view
+                .as_ref(ctx)
+                .editor()
+                .as_ref(ctx)
+                .text(ctx)
+                .as_str()
+                .to_string()
+        }) else {
+            return;
+        };
+
+        let window_id = self.window_id;
+        let view_position_id = format!("code_remote_markdown_{}_{}", ctx.view_id(), index);
+        let links = ctx.add_model(|ctx| NotebookLinks::new(SessionSource::Active(window_id), ctx));
+        let editor_model = ctx.add_model(|ctx| {
+            let styles = rich_text_styles(Appearance::as_ref(ctx), FontSettings::as_ref(ctx));
+            NotebooksEditorModel::new(styles, window_id, ctx)
+        });
+        let rendered_view = ctx.add_typed_action_view(|ctx| {
+            let mut view = RichTextEditorView::new(
+                view_position_id,
+                editor_model,
+                links,
+                RichTextEditorConfig::default(),
+                ctx,
+            );
+            view.set_interaction_state(InteractionState::Selectable, ctx);
+            view
+        });
+        rendered_view.update(ctx, |editor, ctx| {
+            editor.reset_with_markdown(&content, ctx);
+        });
+
+        if let Some(tab) = self.tab_group.get_mut(index) {
+            tab.rendered_markdown_view = Some(rendered_view);
+        }
         ctx.notify();
     }
 
@@ -687,6 +801,7 @@ impl CodeView {
             editor_view: code_editor,
             mouse_state_handles: Default::default(),
             preview,
+            rendered_markdown_view: None,
         }
     }
 
@@ -2280,14 +2395,19 @@ impl View for CodeView {
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         let tab = self.tab_at(self.active_tab_index);
         let body = if let Some(tab) = tab {
-            match self.source {
-                CodeSource::AIAction { .. } => Flex::column()
-                    .with_child(self.render_request_edit_action_header(tab, app))
-                    .with_child(
-                        Shrinkable::new(1., ChildView::new(&tab.editor_view).finish()).finish(),
-                    )
-                    .finish(),
-                _ => ChildView::new(&tab.editor_view).finish(),
+            if let Some(rendered) = &tab.rendered_markdown_view {
+                // 远端 Markdown 的只读渲染预览,内联替换源码编辑器。
+                ChildView::new(rendered).finish()
+            } else {
+                match self.source {
+                    CodeSource::AIAction { .. } => Flex::column()
+                        .with_child(self.render_request_edit_action_header(tab, app))
+                        .with_child(
+                            Shrinkable::new(1., ChildView::new(&tab.editor_view).finish()).finish(),
+                        )
+                        .finish(),
+                    _ => ChildView::new(&tab.editor_view).finish(),
+                }
             }
         } else {
             Empty::new().finish()

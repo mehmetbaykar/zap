@@ -483,7 +483,12 @@ impl Cache {
         let mut should_check_fallback_fonts = false;
         match self.glyphs_by_char.entry((font, char)) {
             Entry::Occupied(entry) => {
-                return *entry.into_ref();
+                let glyph_id = *entry.into_ref();
+                if glyph_id.is_some() || !include_fallback_fonts {
+                    return glyph_id;
+                }
+
+                should_check_fallback_fonts = true;
             }
             Entry::Vacant(entry) => {
                 let glyph_id = self.platform.glyph_for_char(font, char);

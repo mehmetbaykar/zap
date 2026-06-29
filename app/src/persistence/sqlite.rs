@@ -1093,6 +1093,12 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
                     .agent_management_filters
                     .as_ref()
                     .and_then(|f| serde_json::to_string(f).ok()),
+                // Serialize with serde (not Display) so the `ThemeKind::Custom`
+                // variant round-trips.
+                theme_override: window
+                    .theme_override
+                    .as_ref()
+                    .and_then(|k| serde_json::to_string(k).ok()),
             };
             diesel::insert_into(schema::windows::dsl::windows)
                 .values(new_window)
@@ -2861,6 +2867,9 @@ fn read_sqlite_data(
                 right_panel_width,
                 agent_management_filters: window
                     .agent_management_filters
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+                theme_override: window
+                    .theme_override
                     .and_then(|s| serde_json::from_str(&s).ok()),
             }
         })

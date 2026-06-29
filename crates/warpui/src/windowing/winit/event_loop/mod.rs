@@ -1566,6 +1566,15 @@ impl EventLoop {
                 {
                     return;
                 }
+                // 记录 preedit 文本是否变化：update_ime_position 读取的是终端光标位置，该
+                // 位置只有在 preedit 文本实际改变时才会移动。若同文本仅 cursor_position 不同
+                // (IME 对 set_ime_cursor_area 的回声)，调用 update_ime_position 会再次触发
+                // 回送，引发 2-步振荡崩溃（Fixes #213）。
+                let preedit_text_changed = self
+                    .last_preedit
+                    .as_ref()
+                    .map(|(text, _)| text != &preedit_text)
+                    .unwrap_or(true);
                 self.last_preedit = Some((preedit_text.clone(), cursor_position));
 
                 let Some(window_state) = self.state.windows.get_mut(&winit_window_id) else {
@@ -1590,8 +1599,12 @@ impl EventLoop {
                 // During composition the cursor moves as preedit text is inserted and wrapped, so
                 // we must keep pushing the latest rectangle to IMM; otherwise the candidate window
                 // stays at the composition start position (which, on some IMEs, shows up as the
-                // candidate window being misaligned with the current input position).
-                self.update_ime_position();
+                // candidate window being misaligned with the current input position). Only reposition
+                // when the text actually changed, to avoid an IME echo (same text, different
+                // cursor_position) triggering another round of oscillation.
+                if preedit_text_changed {
+                    self.update_ime_position();
+                }
             }
             winit::event::Ime::Commit(chars) => {
                 // Composition has been committed, so clear the dedup baseline to avoid the next composition's initial preedit being misjudged as a duplicate.

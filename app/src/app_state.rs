@@ -19,7 +19,7 @@ use crate::server::ids::SyncId;
 use crate::settings_view::SettingsSection;
 use crate::tab::SelectedTabColor;
 use crate::terminal::ShellLaunchData;
-use crate::themes::theme::AnsiColorIdentifier;
+use crate::themes::theme::{AnsiColorIdentifier, ThemeKind};
 use crate::workspace::view::left_panel::ToolPanelView;
 use crate::workspace::WorkspaceRegistry;
 use warpui::SingletonEntity as _;
@@ -57,6 +57,9 @@ pub struct WindowSnapshot {
     pub left_panel_width: Option<f32>,
     pub right_panel_width: Option<f32>,
     pub agent_management_filters: Option<PersistedAgentManagementFilters>,
+    /// The per-window theme override for this window, if the user set one via the
+    /// theme chooser's "This window" scope. Re-applied on restore.
+    pub theme_override: Option<ThemeKind>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

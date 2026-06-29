@@ -24,12 +24,24 @@ impl CellGlyphCache {
         &mut self,
         char: char,
         font_id: FontId,
+        fallback_font_family: Option<FamilyId>,
+        properties: Properties,
         font_cache: &FontCache,
     ) -> Option<(GlyphId, FontId)> {
-        *self
-            .glyph_cache
-            .entry((char, font_id))
-            .or_insert_with(|| font_cache.glyph_for_char(font_id, char, true))
+        *self.glyph_cache.entry((char, font_id)).or_insert_with(|| {
+            if let Some(glyph) = font_cache.glyph_for_char(font_id, char, false) {
+                return Some(glyph);
+            }
+
+            if let Some(fallback_font_family) = fallback_font_family {
+                let fallback_font = font_cache.select_font(fallback_font_family, properties);
+                if let Some(glyph) = font_cache.glyph_for_char(fallback_font, char, false) {
+                    return Some(glyph);
+                }
+            }
+
+            font_cache.glyph_for_char(font_id, char, true)
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -39,6 +51,7 @@ impl CellGlyphCache {
         font_id: FontId,
         font_cache: &FontCache,
         font_family: FamilyId,
+        fallback_font_family: Option<FamilyId>,
         font_size: f32,
         properties: Properties,
         ctx: &mut PaintContext,
@@ -50,6 +63,21 @@ impl CellGlyphCache {
 
         // Calculate the length of total characters in the string.
         let run_length_chars = string.chars().count();
+        let layout_font_family = string
+            .chars()
+            .next()
+            .and_then(|char| {
+                if font_cache.glyph_for_char(font_id, char, false).is_some() {
+                    return None;
+                }
+
+                let fallback_font_family = fallback_font_family?;
+                let fallback_font = font_cache.select_font(fallback_font_family, properties);
+                font_cache
+                    .glyph_for_char(fallback_font, char, false)
+                    .map(|_| fallback_font_family)
+            })
+            .unwrap_or(font_family);
         let line = ctx.text_layout_cache.layout_line(
             string,
             LineStyle {
@@ -64,7 +92,7 @@ impl CellGlyphCache {
             &[(
                 (0..run_length_chars),
                 StyleAndFont {
-                    font_family,
+                    font_family: layout_font_family,
                     properties,
                     style: Default::default(),
                 },
@@ -85,7 +113,13 @@ impl CellGlyphCache {
             #[cfg(debug_assertions)]
             log::debug!("Falling back to glyph for first character of string, could not get glyph for entire string: {string:?}");
             let first_char = string.chars().next()?;
-            self.glyph_for_char(first_char, font_id, font_cache)
+            self.glyph_for_char(
+                first_char,
+                font_id,
+                fallback_font_family,
+                properties,
+                font_cache,
+            )
         });
 
         self.string_cache.insert(key, glyph);

@@ -32,9 +32,9 @@ use crate::settings::{
     EnforceMinimumContrast, FocusPaneOnHover, FontSettings, FontSettingsChangedEvent, InputBoxType,
     InputModeSettings, InputModeState, MarkdownHeadingH1Scale, MarkdownHeadingH2Scale,
     MarkdownHeadingH3Scale, MarkdownHeadingH4Scale, MarkdownHeadingH5Scale, MarkdownHeadingH6Scale,
-    MonospaceFontName, PaneSettings, ShouldDimInactivePanes, ThemeSettings, UiFontName,
-    UseSystemTheme, DEFAULT_MONOSPACE_FONT_NAME, MARKDOWN_HEADING_SCALE_MAX,
-    MARKDOWN_HEADING_SCALE_MIN, UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN,
+    MonospaceFallbackFontName, MonospaceFontName, PaneSettings, ShouldDimInactivePanes,
+    ThemeSettings, UiFontName, UseSystemTheme, DEFAULT_MONOSPACE_FONT_NAME,
+    MARKDOWN_HEADING_SCALE_MAX, MARKDOWN_HEADING_SCALE_MIN, UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN,
 };
 use crate::settings::{CursorDisplayType, GPUSettings, InputSettings, InputSettingsChangedEvent};
 use crate::terminal::block_list_viewport::InputMode;
@@ -137,6 +137,17 @@ fn default_font_label(is_ai_font: bool) -> String {
     } else {
         format!("{} (default)", MonospaceFontName::default_value())
     }
+}
+
+fn fallback_font_dropdown_should_include_font(
+    name: &str,
+    font_type: FontType,
+    view_font_type: FontType,
+    selected_font_name: &str,
+) -> bool {
+    matches!(view_font_type, FontType::Any)
+        || matches!(font_type, FontType::Monospace)
+        || name == selected_font_name
 }
 
 pub fn init_actions_from_parent_view<T: Action + Clone>(
@@ -440,6 +451,7 @@ pub enum AppearancePageAction {
     OpacitySliderDragged(f32),
     BlurSliderDragged(f32),
     SetFontFamily(String),
+    SetFallbackFontFamily(String),
     SetAIFontFamily(String),
     SetUIFontFamily(String),
     SetUIFontSize,
@@ -514,6 +526,7 @@ pub struct AppearanceSettingsPageView {
     opacity_state: SliderStateHandle,
     blur_state: SliderStateHandle,
     font_family_dropdown: ViewHandle<FilterableDropdown<AppearancePageAction>>,
+    fallback_font_family_dropdown: ViewHandle<FilterableDropdown<AppearancePageAction>>,
     font_weight_dropdown: ViewHandle<Dropdown<AppearancePageAction>>,
     #[allow(dead_code)]
     thin_strokes_dropdown: ViewHandle<Dropdown<AppearancePageAction>>,
@@ -575,6 +588,7 @@ impl TypedActionView for AppearanceSettingsPageView {
             SetOpacity(value) => self.set_opacity(*value, true, ctx),
             SetBlur(value) => self.set_blur(*value, true, ctx),
             SetFontFamily(name) => self.set_font_family(name, ctx),
+            SetFallbackFontFamily(name) => self.set_fallback_font_family(name, ctx),
             SetAIFontFamily(name) => {
                 self.set_ai_font_family(name, ctx);
                 FontSettings::handle(ctx).update(ctx, |font_settings, ctx| {
@@ -1106,6 +1120,16 @@ impl AppearanceSettingsPageView {
             dropdown
         });
 
+        let fallback_font_family_dropdown = ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = FilterableDropdown::new(ctx);
+            dropdown.set_top_bar_max_width(FONT_FAMILY_DROPDOWN_WIDTH);
+            dropdown.set_menu_width(FONT_FAMILY_DROPDOWN_WIDTH, ctx);
+
+            dropdown.add_items(vec![Self::default_fallback_font_item()], ctx);
+            dropdown.set_selected_by_index(0, ctx);
+            dropdown
+        });
+
         let ai_font_family_dropdown = ctx.add_typed_action_view(|ctx| {
             let mut dropdown = FilterableDropdown::new(ctx);
             dropdown.set_top_bar_max_width(FONT_FAMILY_DROPDOWN_WIDTH);
@@ -1365,6 +1389,7 @@ impl AppearanceSettingsPageView {
             opacity_state: Default::default(),
             blur_state: Default::default(),
             font_family_dropdown,
+            fallback_font_family_dropdown,
             font_weight_dropdown,
             thin_strokes_dropdown,
             input_mode_dropdown,
@@ -1612,6 +1637,9 @@ impl AppearanceSettingsPageView {
             AppearanceEvent::MonospaceFontFamilyChanged { .. } => {
                 self.update_font_dropdown(ctx);
             }
+            AppearanceEvent::TerminalFallbackFontFamilyChanged { .. } => {
+                self.update_font_dropdown(ctx);
+            }
             AppearanceEvent::MonospaceFontSizeChanged { .. } => {
                 let font_size = handle.as_ref(ctx).monospace_font_size();
                 self.font_size_editor.update(ctx, move |editor, ctx| {
@@ -1725,6 +1753,13 @@ impl AppearanceSettingsPageView {
         }
 
         initial_dropdown_item
+    }
+
+    fn default_fallback_font_item() -> DropdownItem<AppearancePageAction> {
+        DropdownItem::new(
+            crate::t!("settings-appearance-font-fallback-system"),
+            AppearancePageAction::SetFallbackFontFamily(MonospaceFallbackFontName::default_value()),
+        )
     }
 
     fn input_mode_dropdown_item_label(val: InputMode) -> String {
@@ -2228,6 +2263,7 @@ impl AppearanceSettingsPageView {
 
     fn update_font_dropdown(&mut self, ctx: &mut ViewContext<Self>) {
         let monospace_font_family = Appearance::as_ref(ctx).monospace_font_family();
+        let fallback_font_family = Appearance::as_ref(ctx).terminal_fallback_font_family();
         let ai_font_family = Appearance::as_ref(ctx).ai_font_family();
         let ui_font_family = Appearance::as_ref(ctx).ui_font_family();
 
@@ -2298,6 +2334,69 @@ impl AppearanceSettingsPageView {
                 dropdown.set_selected_by_name(label, ctx);
             }
         });
+
+        self.fallback_font_family_dropdown
+            .update(ctx, |dropdown, ctx| {
+                let font_name = FontSettings::as_ref(ctx)
+                    .monospace_fallback_font_name
+                    .value()
+                    .clone();
+
+                if let Some(fallback_font_family) = fallback_font_family {
+                    if let Some(loaded_font_name) = ctx
+                        .font_cache()
+                        .load_family_name_from_id(fallback_font_family)
+                    {
+                        self.available_families
+                            .entry(loaded_font_name)
+                            .and_modify(|entry| entry.0 = Some(fallback_font_family))
+                            .or_insert((Some(fallback_font_family), FontType::Monospace));
+                    }
+                }
+
+                let mut items = self
+                    .available_families
+                    .iter()
+                    .filter_map(|(name, (family, font_type))| {
+                        let include_in_dropdown = fallback_font_dropdown_should_include_font(
+                            name,
+                            *font_type,
+                            self.view_font_type,
+                            &font_name,
+                        );
+                        if include_in_dropdown {
+                            let name_move = name.clone();
+                            let mut dropdown = DropdownItem::new(
+                                name,
+                                AppearancePageAction::SetFallbackFontFamily(name_move),
+                            );
+
+                            if cfg!(not(any(target_os = "linux", target_os = "freebsd"))) {
+                                if let Some(family_id) = family {
+                                    dropdown = dropdown.with_font_override(*family_id)
+                                }
+                            }
+
+                            Some(dropdown)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                items.sort_by(|a, b| a.display_text.cmp(&b.display_text));
+                items.insert(0, Self::default_fallback_font_item());
+                dropdown.set_items(items, ctx);
+
+                if font_name.is_empty() {
+                    dropdown.set_selected_by_name(
+                        crate::t!("settings-appearance-font-fallback-system"),
+                        ctx,
+                    );
+                } else {
+                    dropdown.set_selected_by_name(&font_name, ctx);
+                }
+            });
 
         self.ai_font_family_dropdown.update(ctx, |dropdown, ctx| {
             // Get the family name of the current agent mode font.
@@ -2447,6 +2546,14 @@ impl AppearanceSettingsPageView {
             if *font_settings.match_ai_font_to_terminal_font.value() {
                 report_if_error!(font_settings.ai_font_name.set_value(name.to_string(), ctx))
             }
+        });
+    }
+
+    pub fn set_fallback_font_family(&mut self, name: &str, ctx: &mut ViewContext<Self>) {
+        FontSettings::handle(ctx).update(ctx, |font_settings, ctx| {
+            report_if_error!(font_settings
+                .monospace_fallback_font_name
+                .set_value(name.to_string(), ctx));
         });
     }
 
@@ -4487,7 +4594,7 @@ impl SettingsWidget for TerminalFontWidget {
     type View = AppearanceSettingsPageView;
 
     fn search_terms(&self) -> &str {
-        "text terminal font family font size line height monospace"
+        "text terminal font family fallback font size line height monospace"
     }
 
     fn render(
@@ -4516,6 +4623,24 @@ impl SettingsWidget for TerminalFontWidget {
 
         terminal_font.add_child(
             Container::new(ChildView::new(&view.font_family_dropdown).finish())
+                .with_margin_bottom(10.)
+                .finish(),
+        );
+        terminal_font.add_child(render_body_item_label::<AppearancePageAction>(
+            crate::t!("settings-appearance-font-terminal-fallback-label"),
+            None,
+            None,
+            LocalOnlyIconState::for_setting(
+                MonospaceFallbackFontName::storage_key(),
+                MonospaceFallbackFontName::sync_to_cloud(),
+                &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                app,
+            ),
+            ToggleState::Enabled,
+            appearance,
+        ));
+        terminal_font.add_child(
+            Container::new(ChildView::new(&view.fallback_font_family_dropdown).finish())
                 .with_margin_bottom(10.)
                 .finish(),
         );
@@ -5996,3 +6121,7 @@ impl From<ViewHandle<AppearanceSettingsPageView>> for SettingsPageViewHandle {
         SettingsPageViewHandle::Appearance(view_handle)
     }
 }
+
+#[cfg(test)]
+#[path = "appearance_page_tests.rs"]
+mod tests;

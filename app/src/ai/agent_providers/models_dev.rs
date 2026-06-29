@@ -269,6 +269,21 @@ pub fn toggle_chips_expanded() {
     CHIPS_EXPANDED.fetch_xor(true, Ordering::Relaxed);
 }
 
+// ── most-recent network fetch failure flag ───────────────────────────────────
+
+static FETCH_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the most recent network fetch failed (meaningful when `cached() == None`).
+pub fn last_fetch_failed() -> bool {
+    FETCH_FAILED.load(Ordering::Relaxed)
+}
+
+/// Set by the caller in the spawn callback (true on failure; no reset needed on
+/// success because `cached()` is `Some` by then).
+pub fn set_fetch_failed(failed: bool) {
+    FETCH_FAILED.store(failed, Ordering::Relaxed);
+}
+
 // ── search filter for the quick-add chip row ──────────────────────────────────────────────
 
 fn search_state() -> &'static RwLock<String> {

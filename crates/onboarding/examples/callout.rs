@@ -169,6 +169,7 @@ fn build_appearance(
         ui_font_family,
         1.4,
         ai_font_family,
+        None,
         password_font_family,
         warp_core::ui::appearance::DEFAULT_UI_FONT_SIZE,
         Default::default(),

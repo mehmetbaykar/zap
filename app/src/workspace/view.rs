@@ -882,6 +882,16 @@ pub struct Workspace {
     import_modal: ViewHandle<ImportModal>,
     theme_chooser_view: ViewHandle<ThemeChooser>,
     previous_theme: Option<ThemeKind>,
+    /// The per-window theme override selected for this window via the theme
+    /// chooser's "This window" scope, if any. Source of truth that feeds
+    /// `WindowSnapshot` at save time and is re-applied on restore. `None` when
+    /// the window follows the global theme.
+    theme_override: Option<ThemeKind>,
+    /// The per-window theme override that was active when the theme chooser was
+    /// opened. Lets a cancelled preview (the `revert_theme` path) restore this
+    /// window's override, mirroring how `clear_transient_theme` reverts the
+    /// global preview. `None` means the window had no override at open time.
+    previous_theme_override: Option<ThemeKind>,
     pub(crate) current_workspace_state: WorkspaceState,
     previous_workspace_state: Option<WorkspaceState>,
     welcome_tips_view_state: WelcomeTipsViewState,
@@ -2864,6 +2874,8 @@ impl Workspace {
             ctrl_tab_palette,
             mouse_states: Default::default(),
             previous_theme: None,
+            theme_override: None,
+            previous_theme_override: None,
             settings_pane,
             theme_chooser_view,
             current_workspace_state: Default::default(),
@@ -3282,6 +3294,16 @@ impl Workspace {
             } => {
                 let active_tab_index = window_snapshot.active_tab_index;
                 let restored_left_panel_open = window_snapshot.left_panel_open;
+
+                // Re-apply this window's per-window theme override, if it had one,
+                // and record it so subsequent snapshots keep it.
+                self.theme_override = window_snapshot.theme_override.clone();
+                if let Some(theme_kind) = window_snapshot.theme_override.clone() {
+                    let window_id = ctx.window_id();
+                    AppearanceManager::handle(ctx).update(ctx, |appearance_manager, ctx| {
+                        appearance_manager.set_window_theme(window_id, theme_kind, ctx);
+                    });
+                }
 
                 window_snapshot
                     .tabs
@@ -9648,6 +9670,7 @@ impl Workspace {
             left_panel_width,
             right_panel_width,
             agent_management_filters: None,
+            theme_override: self.theme_override.clone(),
         }
     }
 
@@ -13472,6 +13495,11 @@ impl Workspace {
             ThemeChooserEvent::OpenThemeDeletionModal(theme_kind) => {
                 self.open_theme_deletion_modal(theme_kind.clone(), ctx);
             }
+            ThemeChooserEvent::WindowThemeOverride(theme_kind) => {
+                // Record (or clear) this window's per-window theme override so it
+                // is persisted in the window snapshot and re-applied on restart.
+                self.theme_override = theme_kind.clone();
+            }
         };
     }
 
@@ -14687,17 +14715,41 @@ impl Workspace {
     }
 
     fn revert_theme(&mut self, ctx: &mut ViewContext<Self>) {
+        // Mirror the transient revert for the per-window override: a "This
+        // window" preview writes directly into the override map (there is no
+        // transient layer for it), so restore this window to whatever override
+        // it had when the chooser opened instead of leaving the preview behind.
+        let window_id = ctx.window_id();
+        let restored = self.previous_theme_override.take();
         AppearanceManager::handle(ctx).update(ctx, |appearance_manager, ctx| {
             appearance_manager.clear_transient_theme(ctx);
+            match &restored {
+                Some(theme_kind) => {
+                    appearance_manager.set_window_theme(window_id, theme_kind.clone(), ctx)
+                }
+                None => appearance_manager.clear_window_theme(window_id, ctx),
+            }
         });
+        self.theme_override = restored;
         self.current_workspace_state.is_theme_chooser_open = false;
         self.previous_theme = None;
         ctx.notify();
     }
 
     fn keep_theme(&mut self, ctx: &mut ViewContext<Self>) {
+        // 关闭时把 per-window override map 同步回已提交的 self.theme_override,抵消打开时
+        // select_theme 在 ThisWindow scope 下写入的预览覆盖(否则重开后 override 会丢失)。
+        let window_id = ctx.window_id();
+        let committed = self.theme_override.clone();
+        AppearanceManager::handle(ctx).update(ctx, |appearance_manager, ctx| match &committed {
+            Some(theme_kind) => {
+                appearance_manager.set_window_theme(window_id, theme_kind.clone(), ctx)
+            }
+            None => appearance_manager.clear_window_theme(window_id, ctx),
+        });
         self.current_workspace_state.is_theme_chooser_open = false;
         self.previous_theme = None;
+        self.previous_theme_override = None;
         ctx.notify();
     }
 
@@ -14891,6 +14943,7 @@ impl Workspace {
         self.current_workspace_state.is_theme_chooser_open = true;
 
         self.previous_theme = Some(current_theme);
+        self.previous_theme_override = self.theme_override.clone();
 
         self.theme_chooser_view.update(ctx, |view, ctx| {
             view.record_open_theme(ctx);
@@ -21730,6 +21783,12 @@ impl View for Workspace {
         }
 
         let window_id = ctx.window_id();
+
+        // Drop any per-window theme override so the override maps don't leak as
+        // windows come and go. No-op if this window had no override.
+        AppearanceManager::handle(ctx).update(ctx, |appearance_manager, ctx| {
+            appearance_manager.clear_window_theme(window_id, ctx);
+        });
 
         WorkspaceRegistry::handle(ctx).update(ctx, |registry, _| {
             registry.unregister(window_id);
