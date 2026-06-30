@@ -497,6 +497,7 @@ impl AIConversation {
                 task.reassign_exchange_ids();
             });
         }
+        self.task_store.rebuild_exchange_id_index();
     }
 
     pub fn is_viewing_shared_session(&self) -> bool {
@@ -1078,12 +1079,7 @@ impl AIConversation {
 
     #[cfg_attr(target_family = "wasm", allow(unused))]
     pub fn exchange_with_id(&self, exchange_id: AIAgentExchangeId) -> Option<&AIAgentExchange> {
-        for task in self.task_store.tasks() {
-            if let Some(exchange) = task.exchanges().find(|exchange| exchange.id == exchange_id) {
-                return Some(exchange);
-            }
-        }
-        None
+        self.task_store.exchange_by_id(exchange_id)
     }
 
     /// Returns the exchange that preceded the exchange with the given id, if there is one.
