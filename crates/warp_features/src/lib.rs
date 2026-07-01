@@ -686,6 +686,11 @@ pub enum FeatureFlag {
     /// When disabled, the UI entry point is hidden and `Client::new()` falls back to the reqwest default (reading environment variables).
     /// See Issue #72.
     HttpProxySettings,
+
+    /// Renders MCP tool-call request and response JSON as an interactive
+    /// collapsible tree with typed colors and per-row Copy JSON, instead of
+    /// a flat pretty-printed blob.
+    McpJsonTreeView,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -747,6 +752,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::ConfigurableContextWindow,
     FeatureFlag::DragTabsToWindows,
     FeatureFlag::ServerFileBrowser,
+    FeatureFlag::McpJsonTreeView,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Zap).

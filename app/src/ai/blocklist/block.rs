@@ -1801,7 +1801,6 @@ impl AIBlock {
                     self.handle_mcp_tool_stream_update(
                         action_id,
                         &command_text,
-                        name.to_string(),
                         display_input,
                         ctx,
                     );
@@ -3047,7 +3046,6 @@ impl AIBlock {
         &mut self,
         action_id: &AIAgentActionId,
         command_text: &str,
-        mcp_name: String,
         mcp_args: serde_json::Value,
         ctx: &mut ViewContext<Self>,
     ) {
@@ -3055,7 +3053,7 @@ impl AIBlock {
             Some(requested_mcp_tool) => {
                 requested_mcp_tool.view.update(ctx, |view, ctx| {
                     view.apply_streamed_update(command_text, ctx);
-                    view.update_mcp_request(mcp_name, mcp_args);
+                    view.update_mcp_request(mcp_args);
                     ctx.notify();
                 });
             }
@@ -3076,7 +3074,7 @@ impl AIBlock {
                         ctx,
                     );
                     view.apply_streamed_update(command_text, ctx);
-                    view.update_mcp_request(mcp_name, mcp_args);
+                    view.update_mcp_request(mcp_args);
                     view
                 });
                 let action_id_clone = action_id.clone();
