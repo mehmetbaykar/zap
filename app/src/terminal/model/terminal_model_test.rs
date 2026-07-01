@@ -1,5 +1,5 @@
 use super::*;
-use crate::terminal::model::ansi::{Handler, Processor};
+use crate::terminal::model::ansi::{CompletionMetadata, Handler, Processor};
 use crate::terminal::model::block::BlockId;
 use crate::terminal::model::bootstrap::BootstrapStage;
 use crate::terminal::model::grid::Dimensions as _;
@@ -46,10 +46,8 @@ fn create_default_serialized_block() -> SerializedBlock {
 #[test]
 fn ssh_bootstraps_if_blocklist_empty() {
     let mut terminal = TerminalModel::mock(None, None);
-    terminal.command_finished(Default::default());
-    terminal.precmd(Default::default());
-    terminal.command_finished(Default::default());
-    terminal.precmd(Default::default());
+    command_finished_and_precmd(&mut terminal);
+    command_finished_and_precmd(&mut terminal);
 
     let bootstrapped_value = BootstrappedValue {
         histfile: None,
@@ -77,7 +75,12 @@ fn ssh_bootstraps_if_blocklist_empty() {
     };
     terminal.bootstrapped(bootstrapped_value.clone());
     terminal.command_finished(Default::default());
-    terminal.block_list_mut().precmd(Default::default());
+    terminal
+        .block_list_mut()
+        .precmd_with_completion_metadata(PrecmdValue {
+            completion_metadata: CompletionMetadata::default(),
+            prompt_metadata: PromptMetadata::default(),
+        });
 
     assert!(terminal.is_active_block_bootstrapped());
 
@@ -96,13 +99,10 @@ fn ssh_bootstraps_if_blocklist_empty() {
     // The active block should no longer be considered bootstrapped after the init shell call.
     assert!(!terminal.is_active_block_bootstrapped());
 
-    terminal.command_finished(Default::default());
-    terminal.precmd(PrecmdValue::default());
-    terminal.command_finished(Default::default());
-    terminal.precmd(Default::default());
+    command_finished_and_precmd(&mut terminal);
+    command_finished_and_precmd(&mut terminal);
     terminal.bootstrapped(bootstrapped_value);
-    terminal.command_finished(Default::default());
-    terminal.precmd(Default::default());
+    command_finished_and_precmd(&mut terminal);
 
     assert!(terminal.is_active_block_bootstrapped());
 }
@@ -672,8 +672,10 @@ fn test_exit_alt_screen_on_command_finished() {
     terminal.enter_alt_screen(true);
 
     terminal.command_finished(CommandFinishedValue {
-        exit_code: ExitCode::from(0),
-        next_block_id: BlockId::new(),
+        completion_metadata: CompletionMetadata {
+            exit_code: ExitCode::from(0),
+            next_block_id: BlockId::new(),
+        },
     });
 
     assert!(!terminal.alt_screen_active);
@@ -686,8 +688,10 @@ fn test_unset_bracketed_paste_mode_on_command_finished() {
     terminal.set_mode(Mode::BracketedPaste);
 
     terminal.command_finished(CommandFinishedValue {
-        exit_code: ExitCode::from(0),
-        next_block_id: BlockId::new(),
+        completion_metadata: CompletionMetadata {
+            exit_code: ExitCode::from(0),
+            next_block_id: BlockId::new(),
+        },
     });
 
     assert!(!terminal.is_term_mode_set(TermMode::BRACKETED_PASTE));

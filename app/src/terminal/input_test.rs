@@ -51,7 +51,7 @@ use crate::workspaces::user_workspaces::UserWorkspaces;
 
 use crate::terminal::block_list_viewport::ScrollPosition;
 use crate::terminal::local_tty::shell::ShellStarter;
-use crate::terminal::model::ansi::{Handler, PrecmdValue};
+use crate::terminal::model::ansi::{Handler, PromptMetadata};
 use crate::terminal::model::block::SerializedBlock;
 use crate::terminal::model::blocks::{insert_block, BlockListPoint};
 use crate::terminal::model::grid::Dimensions as _;
@@ -396,7 +396,7 @@ pub fn simulate_directory_for_completion<A, S>(
 {
     let directory = directory.into();
     terminal.update(app, |terminal, ctx| {
-        terminal.model.lock().block_list_mut().precmd(PrecmdValue {
+        terminal.model.lock().block_list_mut().prompt_only_precmd(PromptMetadata {
             pwd: Some(directory.clone()),
             session_id: Some(session_id.into()),
             ..Default::default()

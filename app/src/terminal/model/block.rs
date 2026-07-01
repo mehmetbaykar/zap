@@ -33,7 +33,7 @@ use crate::{
         },
         event_listener::ChannelEventListener,
         model::{
-            ansi::{self, PrecmdValue, PreexecValue, Processor},
+            ansi::{self, PrecmdValue, PreexecValue, Processor, PromptMetadata},
             blockgrid::BlockGrid,
             grid::grid_handler::TermMode,
             index::{Point, VisibleRow},
@@ -3201,11 +3201,14 @@ impl ansi::Handler for Block {
         delegate!(self.text_area_size_chars(writer));
     }
 
-    fn precmd(&mut self, data: PrecmdValue) {
+    fn precmd_with_completion_metadata(&mut self, data: PrecmdValue) {
+        self.prompt_only_precmd(data.prompt_metadata);
+    }
+
+    fn prompt_only_precmd(&mut self, data: PromptMetadata) {
         record_trace_event!("command_execution:block:precmd");
         let is_after_in_band_command = data.was_sent_after_in_band_command();
-
-        self.header_grid.precmd(data.clone());
+        self.header_grid.prompt_only_precmd(data.clone());
 
         self.state = BlockState::BeforeExecution;
         self.pwd = data.pwd;

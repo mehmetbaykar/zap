@@ -1,6 +1,6 @@
 use super::{display_working_directory, format_session_location};
 use crate::ai::blocklist::agent_view::zero_state_block::current_working_directory_for_zero_state;
-use crate::terminal::model::ansi::{Handler, InitShellValue, PrecmdValue, SSHValue};
+use crate::terminal::model::ansi::{Handler, InitShellValue, PromptMetadata, SSHValue};
 use crate::terminal::model::test_utils::block_size;
 use crate::terminal::model::{session::Session, TerminalModel};
 use crate::terminal::{
@@ -76,7 +76,7 @@ fn display_working_directory_abbreviates_subdirectory_under_home() {
 #[test]
 fn cwd_for_recent_conversations_prefers_active_block_pwd() {
     let mut terminal = prebootstrap_terminal_with_startup_path("/startup/path");
-    terminal.precmd(PrecmdValue {
+    terminal.prompt_only_precmd(PromptMetadata {
         pwd: Some("/active/path".to_owned()),
         session_id: Some(0),
         ..Default::default()
