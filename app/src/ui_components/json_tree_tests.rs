@@ -1,4 +1,4 @@
-//! Pure-logic unit tests for the `json_tree` component (Phase 1, APP-2527).
+//! Pure-logic unit tests for the `json_tree` component.
 //!
 //! These tests cover only the data-layer functions and types: annotation
 //! formatting, long-string detection, state management, and value rendering.
@@ -96,7 +96,7 @@ fn toggle_one_path_leaves_other_paths_unchanged() {
     assert!(state.is_expanded(&path_b, 0));
 
     // Toggle path A.
-    state.toggle(path_a.clone(), 0);
+    state.toggle(&path_a, 0);
 
     // A is now collapsed.
     assert!(!state.is_expanded(&path_a, 0));
@@ -113,11 +113,11 @@ fn toggle_is_idempotent_across_two_calls() {
     assert!(!state.is_expanded(&path, 1));
 
     // First toggle: collapsed → expanded.
-    state.toggle(path.clone(), 1);
+    state.toggle(&path, 1);
     assert!(state.is_expanded(&path, 1));
 
     // Second toggle: expanded → collapsed again.
-    state.toggle(path.clone(), 1);
+    state.toggle(&path, 1);
     assert!(!state.is_expanded(&path, 1));
 }
 
@@ -135,10 +135,52 @@ fn toggle_nested_path_independent_of_parent() {
     assert!(!state.is_expanded(&child, 1));
 
     // Toggle parent only.
-    state.toggle(parent.clone(), 1);
+    state.toggle(&parent, 1);
 
     assert!(state.is_expanded(&parent, 1));
     assert!(!state.is_expanded(&child, 1));
+}
+
+// -----------------------------------------------------------------------
+// JsonTreeState — long-string expansion (toggle_string / is_string_expanded)
+// -----------------------------------------------------------------------
+
+#[test]
+fn string_collapsed_by_default() {
+    let state = JsonTreeState::default();
+    let path = vec![PathSegment::Key("summary".to_string())];
+    assert!(!state.is_string_expanded(&path));
+}
+
+#[test]
+fn toggle_string_expands_then_collapses() {
+    let path = vec![PathSegment::Key("body".to_string())];
+    let mut state = JsonTreeState::default();
+
+    // Default: collapsed.
+    assert!(!state.is_string_expanded(&path));
+
+    // First toggle: collapsed → expanded.
+    state.toggle_string(&path);
+    assert!(state.is_string_expanded(&path));
+
+    // Second toggle: expanded → collapsed.
+    state.toggle_string(&path);
+    assert!(!state.is_string_expanded(&path));
+}
+
+#[test]
+fn toggle_string_is_independent_of_node_expansion() {
+    let path = vec![PathSegment::Key("note".to_string())];
+    let mut state = JsonTreeState::default();
+
+    // Toggling a string does not affect node expansion state for the same path.
+    state.toggle_string(&path);
+    assert!(state.is_string_expanded(&path));
+    // Node expansion at depth 0 is still the default (expanded).
+    assert!(state.is_expanded(&path, 0));
+    // Node expansion at depth 1 is still the default (collapsed).
+    assert!(!state.is_expanded(&path, 1));
 }
 
 // -----------------------------------------------------------------------
@@ -256,6 +298,94 @@ fn multi_key_object_all_entries_preserved() {
     for key in ["x", "y", "z"] {
         assert!(map.contains_key(key), "key {key:?} was missing");
     }
+}
+
+// -----------------------------------------------------------------------
+// mcp_result_to_renderable
+// -----------------------------------------------------------------------
+
+#[test]
+fn mcp_result_success_with_structured_content_returns_tree() {
+    use crate::ai::agent::CallMCPToolResult;
+    use crate::ai::blocklist::inline_action::requested_command::{
+        mcp_result_to_renderable, McpRenderable,
+    };
+
+    let value = serde_json::json!({"count": 42, "files": ["a.rs", "b.rs"]});
+    let result = rmcp::model::CallToolResult::structured(value.clone());
+    let renderable = mcp_result_to_renderable(&CallMCPToolResult::Success { result });
+
+    match renderable {
+        McpRenderable::Tree(v) => assert_eq!(v, value),
+        _ => panic!("expected Tree variant"),
+    }
+}
+
+#[test]
+fn mcp_result_success_with_json_text_content_returns_parsed_tree() {
+    use crate::ai::agent::CallMCPToolResult;
+    use crate::ai::blocklist::inline_action::requested_command::{
+        mcp_result_to_renderable, McpRenderable,
+    };
+
+    let json_str = r#"{"status": "ok", "value": 7}"#;
+    let content = vec![rmcp::model::Content::text(json_str)];
+    let result = rmcp::model::CallToolResult::success(content);
+    let renderable = mcp_result_to_renderable(&CallMCPToolResult::Success { result });
+
+    let expected: serde_json::Value = serde_json::from_str(json_str).unwrap();
+    match renderable {
+        McpRenderable::Tree(v) => assert_eq!(v, expected),
+        _ => panic!("expected Tree variant with parsed JSON"),
+    }
+}
+
+#[test]
+fn mcp_result_success_with_non_json_text_returns_string_tree() {
+    use crate::ai::agent::CallMCPToolResult;
+    use crate::ai::blocklist::inline_action::requested_command::{
+        mcp_result_to_renderable, McpRenderable,
+    };
+
+    let plain_text = "just some plain text output";
+    let content = vec![rmcp::model::Content::text(plain_text)];
+    let result = rmcp::model::CallToolResult::success(content);
+    let renderable = mcp_result_to_renderable(&CallMCPToolResult::Success { result });
+
+    match renderable {
+        McpRenderable::Tree(serde_json::Value::String(s)) => {
+            assert_eq!(s, plain_text);
+        }
+        _ => panic!("expected Tree(String) variant"),
+    }
+}
+
+#[test]
+fn mcp_result_error_returns_error_variant() {
+    use crate::ai::agent::CallMCPToolResult;
+    use crate::ai::blocklist::inline_action::requested_command::{
+        mcp_result_to_renderable, McpRenderable,
+    };
+
+    let msg = "tool not found".to_string();
+    let renderable = mcp_result_to_renderable(&CallMCPToolResult::Error(msg.clone()));
+
+    match renderable {
+        McpRenderable::Error(e) => assert_eq!(e, msg),
+        _ => panic!("expected Error variant"),
+    }
+}
+
+#[test]
+fn mcp_result_cancelled_returns_cancelled_variant() {
+    use crate::ai::agent::CallMCPToolResult;
+    use crate::ai::blocklist::inline_action::requested_command::{
+        mcp_result_to_renderable, McpRenderable,
+    };
+
+    let renderable = mcp_result_to_renderable(&CallMCPToolResult::Cancelled);
+
+    assert!(matches!(renderable, McpRenderable::Cancelled));
 }
 
 // -----------------------------------------------------------------------
