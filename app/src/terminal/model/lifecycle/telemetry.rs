@@ -39,6 +39,7 @@ pub struct LifecycleRecoveryRecord {
     pub(in crate::terminal) is_bootstrapped: bool,
     pub(in crate::terminal) is_bootstrap_done: bool,
     pub(in crate::terminal) is_alt_screen_active: bool,
+    pub(in crate::terminal) completion_mismatch: bool,
     pub(in crate::terminal) suppressed_repeats: u64,
 }
 
@@ -68,6 +69,7 @@ impl LifecycleRecoveryRecord {
             is_bootstrapped: snapshot.is_bootstrapped,
             is_bootstrap_done: snapshot.is_bootstrap_done,
             is_alt_screen_active: snapshot.is_alt_screen_active,
+            completion_mismatch: snapshot.completion_mismatch,
             suppressed_repeats: 0,
         }
     }
