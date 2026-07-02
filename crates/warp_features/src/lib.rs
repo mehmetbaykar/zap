@@ -761,6 +761,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::ConfigurableContextWindow,
     FeatureFlag::DragTabsToWindows,
     FeatureFlag::ServerFileBrowser,
+    FeatureFlag::TerminalLifecycleRecovery,
     FeatureFlag::McpJsonTreeView,
 ];
 

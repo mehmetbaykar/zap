@@ -11,3 +11,10 @@ fn test_all_preview_flags_have_a_description() {
         );
     }
 }
+
+#[test]
+fn terminal_lifecycle_recovery_is_dogfood_only_by_default() {
+    assert!(DOGFOOD_FLAGS.contains(&FeatureFlag::TerminalLifecycleRecovery));
+    assert!(!PREVIEW_FLAGS.contains(&FeatureFlag::TerminalLifecycleRecovery));
+    assert!(!RELEASE_FLAGS.contains(&FeatureFlag::TerminalLifecycleRecovery));
+}
