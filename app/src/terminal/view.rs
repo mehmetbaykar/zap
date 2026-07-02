@@ -18397,18 +18397,27 @@ impl TerminalView {
             }
             AIBlockEvent::ShowLinkTooltip(tooltip_info) => {
                 self.open_rich_content_link_tool_tip = Some(tooltip_info.clone());
+                // A plain click that opens a tooltip now skips `dismiss_ai_tooltips` (see the
+                // empty-selection guard in `AIBlock`'s `SelectText` handler), which previously
+                // also triggered a re-render via its own `ctx.notify()`. Without that incidental
+                // render the terminal view doesn't re-render to place the tooltip overlay, so we
+                // must notify here when tooltip visibility changes.
+                ctx.notify();
             }
             AIBlockEvent::DismissLinkTooltip => {
                 self.open_rich_content_link_tool_tip = None;
+                ctx.notify();
             }
             AIBlockEvent::ShowSecretTooltip(tooltip_info) => {
                 self.open_secret_tool_tip = Some(SecretTooltip::RichContent {
                     is_agent_mode: true,
                     tooltip: tooltip_info.clone(),
                 });
+                ctx.notify();
             }
             AIBlockEvent::DismissSecretTooltip => {
                 self.open_secret_tool_tip = None;
+                ctx.notify();
             }
             #[cfg(windows)]
             AIBlockEvent::WindowsCtrlC => {
