@@ -50,6 +50,15 @@ pub(super) fn upsert_agent_conversation<'a>(
 
     let serialized_conversation_data = serde_json::to_string(&conversation_data_param)?;
 
+    // `updated_tasks` is always a full snapshot of the conversation's current
+    // task set (see `write_updated_conversation_state` and the fork paths), so
+    // we treat persistence as replace/delete-missing: any `agent_tasks` row for
+    // this conversation not present in the snapshot is deleted. This keeps
+    // pruned subtasks (e.g. those dropped by a conversation rewind) from
+    // lingering as orphan rows and being resurrected on restore.
+    let tasks: Vec<&api::Task> = tasks.into_iter().collect();
+    let kept_task_ids: Vec<String> = tasks.iter().map(|task| task.id.clone()).collect();
+
     conn.transaction::<_, Error, _>(|conn| {
         // Upsert the conversation level metadata
         let new_conversation = NewAgentConversation {
@@ -65,7 +74,7 @@ pub(super) fn upsert_agent_conversation<'a>(
             .execute(conn)?;
 
         // Upsert each task
-        for task in tasks {
+        for task in &tasks {
             // Check encoded size before allocating the full BLOB to avoid a
             // large heap allocation that is immediately discarded.
             let encoded_len = task.encoded_len();
@@ -97,7 +106,22 @@ pub(super) fn upsert_agent_conversation<'a>(
             }
         }
 
-        // Prune old conversations if we exceed MAX_PERSISTED_CONVERSATION_COUNT conversations
+        // Delete any tasks for this conversation that are no longer part of the
+        // snapshot (replace semantics). `ne_all` with an empty set matches every
+        // row, so a fully-rewound conversation (no persisted tasks) has all of
+        // its task rows cleared.
+        diesel::delete(
+            agent_tasks::table
+                .filter(tasks_dsl::conversation_id.eq(conversation_id_param))
+                .filter(tasks_dsl::task_id.ne_all(kept_task_ids)),
+        )
+        .execute(conn)?;
+
+        // Prune old conversations if we exceed MAX_PERSISTED_CONVERSATION_COUNT.
+        //
+        // Eviction is tree-aware: parents and children are an atomic unit, so
+        // we never delete a parent whose child still lives in the DB (or vice
+        // versa). See `select_conversations_to_evict`.
         let conversation_count: i64 = agent_conversations::table().count().get_result(conn)?;
         if conversation_count > MAX_PERSISTED_CONVERSATION_COUNT {
             // Remove the oldest conversations, keeping only the most recent MAX_PERSISTED_CONVERSATION_COUNT
