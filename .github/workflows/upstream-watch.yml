@@ -50,16 +50,36 @@ jobs:
           git log --oneline -20 "HEAD..upstream/${UPSTREAM_BRANCH}" > drift.txt || true
           echo "Fork is ${behind} commits behind ${UPSTREAM_REPO}@${UPSTREAM_BRANCH}."
 
+      # GitHub hard-caps the Actions GITHUB_TOKEN on forked repositories: it can
+      # never create issues, even with `permissions: issues: write` declared
+      # (createIssue fails with "Resource not accessible by integration"; the
+      # contents scope used by zap_release.yml is exempt, which is why releases
+      # work). Prefer the UPSTREAM_WATCH_TOKEN PAT secret when configured;
+      # without it, publish the drift report to the run summary instead of
+      # failing the run.
       - name: Open or refresh the upstream-sync issue
         if: steps.drift.outputs.behind != '0'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.UPSTREAM_WATCH_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           title="Upstream sync: ${{ steps.drift.outputs.behind }} commits behind ${UPSTREAM_REPO}"
           body="$(printf 'New commits on `%s@%s`.\n\nRecent upstream commits:\n```\n%s\n```\n\n**To sync:**\n1. `git fetch upstream && git merge upstream/%s`\n2. Resolve conflicts; re-run the Chinese->English migration on any new Chinese.\n3. Push a `v*` tag -> the "Zap Release" workflow builds a Developer ID signed + notarized DMG and publishes it.\n4. Your installed Zap auto-updates from the new release.' "$UPSTREAM_REPO" "$UPSTREAM_BRANCH" "$(cat drift.txt)" "$UPSTREAM_BRANCH")"
-          existing="$(gh issue list --state open --search "Upstream sync in:title" --json number --jq '.[0].number')"
-          if [ -n "$existing" ]; then
-            gh issue edit "$existing" --title "$title" --body "$body"
+          create_or_refresh() {
+            local existing
+            existing="$(gh issue list --state open --search "Upstream sync in:title" --json number --jq '.[0].number')" || return 1
+            if [ -n "$existing" ]; then
+              gh issue edit "$existing" --title "$title" --body "$body"
+            else
+              gh issue create --title "$title" --body "$body"
+            fi
+          }
+          if create_or_refresh; then
+            echo "Upstream-sync issue created/refreshed."
           else
-            gh issue create --title "$title" --body "$body"
+            echo "::notice title=Upstream sync needed::${title}. Issue creation is unavailable (fork GITHUB_TOKEN cannot create issues; add an UPSTREAM_WATCH_TOKEN PAT secret to restore it). Drift report is in this run's summary."
+            {
+              echo "## ${title}"
+              echo ""
+              echo "$body"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
