@@ -61,6 +61,27 @@ pub fn dump_dhat_heap_profile() {
     let _ = HEAP_PROFILER.lock().take();
 }
 
+/// Writes a heap profile to disk and returns the generated path.
+pub async fn dump_heap_profile_to_disk() -> anyhow::Result<std::path::PathBuf> {
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "dhat_heap_profiling")] {
+            let path = heap_profile_path();
+            dump_dhat_heap_profile();
+            Ok(path)
+        } else if #[cfg(feature = "heap_usage_tracking")] {
+            use anyhow::Context as _;
+
+            let path = heap_profile_path();
+            let profile_data = dump_jemalloc_heap_profile_inner().await?;
+            async_fs::write(&path, profile_data).await
+                .with_context(|| format!("Failed to write heap profile to {}", path.display()))?;
+            Ok(path)
+        } else {
+            anyhow::bail!("heap profiling is not enabled in this build");
+        }
+    }
+}
+
 /// Dump the jemalloc heap profile and write it to the local log.
 ///
 /// This spawns `go tool pprof` to pull from the local HTTP server and symbolicate the heap profile.
@@ -128,9 +149,15 @@ fn pprof_binary_path() -> anyhow::Result<std::path::PathBuf> {
 }
 
 /// Returns the path at which heap profiles will be written.
-#[cfg(feature = "dhat_heap_profiling")]
+#[cfg(any(feature = "dhat_heap_profiling", feature = "heap_usage_tracking"))]
 pub fn heap_profile_path() -> std::path::PathBuf {
-    profile_output_dir().join("dhat-heap.json")
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "dhat_heap_profiling")] {
+            profile_output_dir().join("dhat-heap.json")
+        } else {
+            profile_output_dir().join("heap-profile.pb")
+        }
+    }
 }
 
 /// Uninitializes the profiling subsystem, writing reports to disk as-needed.
@@ -162,7 +189,11 @@ fn write_pprof_report(report: pprof::Report) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(any(feature = "dhat_heap_profiling", feature = "pprof_cpu_profiling"))]
+#[cfg(any(
+    feature = "dhat_heap_profiling",
+    feature = "heap_usage_tracking",
+    feature = "pprof_cpu_profiling"
+))]
 fn profile_output_dir() -> std::path::PathBuf {
     cfg_if::cfg_if! {
         if #[cfg(feature = "release_bundle")] {
