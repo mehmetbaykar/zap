@@ -6,6 +6,7 @@ use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewCon
 use super::search_results_common::{
     render_collapsible_search_results, CollapsibleSearchResultsState,
 };
+use crate::ai::agent::icons::failed_icon;
 use crate::ai::agent::WebFetchStatus;
 use crate::ai::blocklist::block::view_impl::WithContentItemSpacing;
 use crate::ui_components::spinner::SpinnerStateHandle;
@@ -183,10 +184,14 @@ impl View for WebFetchView {
                 .with_agent_output_item_spacing(app)
                 .finish(),
             WebFetchStatus::Error => {
-                // Render as if fetch completed with no results
-                self.render_success(&[], app)
-                    .with_agent_output_item_spacing(app)
-                    .finish()
+                let appearance = Appearance::as_ref(app);
+                super::search_results_common::render_status_header(
+                    "Web page fetch failed".to_string(),
+                    failed_icon(appearance),
+                    app,
+                )
+                .with_agent_output_item_spacing(app)
+                .finish()
             }
         }
     }
