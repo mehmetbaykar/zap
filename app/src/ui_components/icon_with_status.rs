@@ -32,6 +32,7 @@ pub(crate) struct IconWithStatusSizing {
 
 const DEEPSEEK_LOGO_PATH: &str = "bundled/svg/deepseek.svg";
 const ANTIGRAVITY_LOGO_PATH: &str = "bundled/svg/antigravity.svg";
+const OMP_LOGO_PATH: &str = "bundled/svg/omp.svg";
 
 pub(crate) fn render_cli_agent_logo(
     agent: CLIAgent,
@@ -41,6 +42,7 @@ pub(crate) fn render_cli_agent_logo(
     let multi_color_logo_path = match agent {
         CLIAgent::DeepSeek => Some(DEEPSEEK_LOGO_PATH),
         CLIAgent::Antigravity => Some(ANTIGRAVITY_LOGO_PATH),
+        CLIAgent::Omp => Some(OMP_LOGO_PATH),
         _ => None,
     };
     if let Some(path) = multi_color_logo_path {
@@ -154,7 +156,7 @@ pub(crate) fn render_icon_with_status(
                 .with_height(sizing.icon_size)
                 .finish();
             let background: ElementFill =
-                if matches!(agent, CLIAgent::DeepSeek | CLIAgent::Antigravity) {
+                if matches!(agent, CLIAgent::DeepSeek | CLIAgent::Antigravity | CLIAgent::Omp) {
                     theme.background().into()
                 } else {
                     ThemeFill::Solid(brand_color).into()

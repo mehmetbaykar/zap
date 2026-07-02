@@ -217,6 +217,28 @@ impl SecretRedactionState {
         }
     }
 
+    /// Clears redaction results for all output positions, keeping the query's redaction state.
+    pub fn clear_output_locations(&mut self) {
+        self.detected_secrets
+            .retain(|location, _| !matches!(location, TextLocation::Output { .. }));
+
+        if self
+            .currently_hovered_secret_location
+            .as_ref()
+            .is_some_and(|location| matches!(location.location, TextLocation::Output { .. }))
+        {
+            self.currently_hovered_secret_location = None;
+        }
+
+        if self
+            .secret_location_open_tooltip
+            .as_ref()
+            .is_some_and(|location| matches!(location.location, TextLocation::Output { .. }))
+        {
+            self.secret_location_open_tooltip = None;
+        }
+    }
+
     pub fn show_secret_tooltip(
         &mut self,
         location: &TextLocation,
@@ -309,6 +331,62 @@ impl SecretRedactionState {
                     );
             }
         }
+    }
+
+    /// Scans a group of output sections from the given render-section start and returns the number of sections that participate in index accumulation.
+    pub(crate) fn run_redaction_on_text_sections_with_starting_section_index(
+        &mut self,
+        sections: &[AIAgentTextSection],
+        starting_section_index: usize,
+        should_obfuscate: bool,
+    ) -> usize {
+        for (section_offset, section) in sections.iter().enumerate() {
+            if let AIAgentTextSection::PlainText { text } = section {
+                let texts = if let Some(formatted_lines) = &text.formatted_lines {
+                    formatted_lines
+                        .lines()
+                        .iter()
+                        .map(|line| line.raw_text())
+                        .collect()
+                } else {
+                    vec![text.text()]
+                };
+
+                for (line_index, text) in texts.iter().enumerate() {
+                    self.run_redaction_for_location(
+                        text,
+                        TextLocation::Output {
+                            section_index: starting_section_index + section_offset,
+                            line_index,
+                        },
+                        should_obfuscate,
+                    );
+                }
+            }
+        }
+
+        sections.len()
+    }
+
+    /// Scans the full output from the given render-section start and returns the number of sections that participate in index accumulation.
+    pub(crate) fn run_redaction_on_output_with_starting_section_index(
+        &mut self,
+        output: &AIAgentOutput,
+        starting_section_index: usize,
+        should_obfuscate: bool,
+    ) -> usize {
+        let mut scanned_section_count = 0;
+
+        for text in output.all_text() {
+            scanned_section_count += self
+                .run_redaction_on_text_sections_with_starting_section_index(
+                    &text.sections,
+                    starting_section_index + scanned_section_count,
+                    should_obfuscate,
+                );
+        }
+
+        scanned_section_count
     }
 
     pub fn run_incremental_redaction_on_partial_output(
@@ -572,45 +650,8 @@ impl SecretRedactionState {
 
     pub fn run_redaction_on_complete_output(&mut self, output: &AIAgentOutput) {
         // Delete all output secrets as we'll be rescanning the entire output.
-        self.detected_secrets
-            .retain(|location, _| !matches!(location, TextLocation::Output { .. }));
-        for (section_index, section) in output
-            .all_text()
-            .flat_map(|text| text.sections.iter())
-            .enumerate()
-        {
-            if let AIAgentTextSection::PlainText { text } = section {
-                let texts = match &text.formatted_lines {
-                    Some(text) => text.lines().iter().map(|line| line.raw_text()).collect(),
-                    _ => vec![text.text()],
-                };
-                for (line_index, text) in texts.iter().enumerate() {
-                    let secret_ranges_with_levels = find_secrets_in_text_with_levels(text);
-                    for (secret_range, secret_level) in secret_ranges_with_levels {
-                        if let Some(secret_text) =
-                            text.get(secret_range.byte_range.start..secret_range.byte_range.end)
-                        {
-                            self.detected_secrets
-                                .entry(TextLocation::Output {
-                                    section_index,
-                                    line_index,
-                                })
-                                .or_default()
-                                .detected_secrets
-                                .insert(
-                                    secret_range,
-                                    Secret {
-                                        secret: secret_text.to_string(),
-                                        is_obfuscated: true,
-                                        mouse_state: Default::default(),
-                                        secret_level,
-                                    },
-                                );
-                        }
-                    }
-                }
-            }
-        }
+        self.clear_output_locations();
+        self.run_redaction_on_output_with_starting_section_index(output, 0, true);
     }
 
     fn rerun_secret_detection_for_output_line(

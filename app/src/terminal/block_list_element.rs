@@ -1,4 +1,5 @@
 use crate::ai::blocklist::agent_view::{agent_view_bg_fill, AgentViewState};
+use crate::ai::blocklist::block::cli::CLI_SUBAGENT_MIN_RESIZABLE_WIDTH;
 use crate::ai::blocklist::{ai_brand_color, ATTACH_AS_AGENT_MODE_CONTEXT_TEXT};
 use crate::ai_assistant::{AI_ASSISTANT_SVG_PATH, ASK_AI_ASSISTANT_TEXT};
 use crate::appearance::Appearance;
@@ -185,6 +186,31 @@ const SPACE_BETWEEN_SELECTED_BLOCK_AVATARS: f32 = 2.;
 
 const CLI_SUBAGENT_HORIZONTAL_MARGIN: f32 = 8.;
 const CLI_SUBAGENT_VERTICAL_MARGIN: f32 = 8.;
+// In a normal block list the CLI agent floating window can nearly fill the terminal area, keeping a small edge margin.
+const CLI_SUBAGENT_MAX_WIDTH_RATIO: f32 = 0.98;
+// Height is likewise near the full window, but still limited by the current block's available height.
+const CLI_SUBAGENT_MAX_HEIGHT_RATIO: f32 = 0.98;
+
+fn cli_subagent_layout_max_size(
+    available_size: Vector2F,
+    block_height: f32,
+    is_agent_blocked: bool,
+) -> Vector2F {
+    // Mirrors Warp's outer constraint shape: the block list first gives the floating window a large enough layout ceiling,
+    // then CLISubagentView's inner Resizable handles the final dragged size.
+    let max_width = (available_size.x() * CLI_SUBAGENT_MAX_WIDTH_RATIO
+        - CLI_SUBAGENT_HORIZONTAL_MARGIN)
+        .max(CLI_SUBAGENT_MIN_RESIZABLE_WIDTH);
+    let window_max_height = available_size.y() * CLI_SUBAGENT_MAX_HEIGHT_RATIO;
+    let max_height = if is_agent_blocked {
+        window_max_height
+    } else {
+        // In the non-blocked state keep Warp's within-block constraints, so an inactive floating window doesn't escape its block.
+        (block_height - CLI_SUBAGENT_VERTICAL_MARGIN * 2.).min(window_max_height)
+    }
+    .max(0.);
+    vec2f(max_width, max_height)
+}
 
 pub type LabelBuilderFn = dyn Fn(
     Vec<BlockIndex>,
@@ -777,6 +803,38 @@ pub enum VisibleItem {
         height_px: f32,
         index: TotalIndex,
     },
+}
+
+/// Returns the currently visible RichContent view IDs in event-dispatch order.
+fn visible_rich_content_views_for_event_dispatch(
+    visible_items: Option<&[VisibleItem]>,
+) -> Vec<EntityId> {
+    let mut view_ids = Vec::new();
+
+    // Collect only visible RichContent; plain terminal blocks and spacers don't participate in child-view event dispatch.
+    let Some(visible_items) = visible_items else {
+        return view_ids;
+    };
+    // RichContent draws in list order, later items draw later; event dispatch iterates in reverse
+    // so that on overlap or edge-adjacent hit ranges, the visually upper block gets mouse events first.
+    for item in visible_items.iter().rev() {
+        if let VisibleItem::RichContent { view_id, .. } = item {
+            view_ids.push(*view_id);
+        }
+    }
+
+    view_ids
+}
+
+/// Decides whether, after RichContent handles an event, propagation to other blocks or the terminal text should stop.
+fn should_stop_after_rich_content_handles_event(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::LeftMouseDown { .. }
+            | Event::LeftMouseDragged { .. }
+            | Event::LeftMouseUp { .. }
+            | Event::RightMouseDown { .. }
+    )
 }
 
 impl VisibleItem {
@@ -3038,21 +3096,9 @@ impl BlockListElement {
     /// filters for RichContent items only, and returns the corresponding
     /// view id for those that are visible.
     fn visible_rich_content_views(&self) -> Vec<EntityId> {
-        let mut result = Vec::new();
-
-        // If there are no visible items, return an empty vector
-        let Some(visible_items) = &self.visible_items else {
-            return result;
-        };
-
-        // Filter visible items for RichContent items and collect their view_ids
-        for item in visible_items.iter() {
-            if let VisibleItem::RichContent { view_id, .. } = item {
-                result.push(*view_id);
-            }
-        }
-
-        result
+        visible_rich_content_views_for_event_dispatch(
+            self.visible_items.as_ref().map(|items| items.as_slice()),
+        )
     }
 
     #[cfg(feature = "voice_input")]
@@ -3358,10 +3404,10 @@ impl Element for BlockListElement {
                                 cli_subagent_view.layout(
                                     SizeConstraint {
                                         min: vec2f(0., 0.),
-                                        max: vec2f(
-                                            constraint.max.x() * 0.4
-                                                - CLI_SUBAGENT_HORIZONTAL_MARGIN,
-                                            block_height - CLI_SUBAGENT_VERTICAL_MARGIN * 2.,
+                                        max: cli_subagent_layout_max_size(
+                                            constraint.max,
+                                            block_height,
+                                            block.is_agent_blocked(),
                                         ),
                                     },
                                     ctx,
@@ -4531,9 +4577,15 @@ impl Element for BlockListElement {
             // Its unclear if this should be the case for the hoverable toolbelt elements above.
             // That's an open product question.
             if self.pane_state.is_focused() {
+                let should_stop_after_rich_content_handles_event =
+                    should_stop_after_rich_content_handles_event(event.raw_event());
                 for view_id in self.visible_rich_content_views() {
                     if let Some(rich_content) = self.rich_content_elements.get_mut(&view_id) {
-                        handled |= rich_content.dispatch_event(event, ctx, app);
+                        let rich_content_handled = rich_content.dispatch_event(event, ctx, app);
+                        handled |= rich_content_handled;
+                        if rich_content_handled && should_stop_after_rich_content_handles_event {
+                            return true;
+                        }
                     }
                 }
             }
@@ -4845,4 +4897,127 @@ where
     }
 
     button.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rich_content_event_dispatch_prefers_last_painted_item() {
+        let first_view_id = EntityId::from_usize(10);
+        let second_view_id = EntityId::from_usize(20);
+        let third_view_id = EntityId::from_usize(30);
+
+        let visible_items = vec![
+            VisibleItem::RichContent {
+                view_id: first_view_id,
+                height_px: 24.,
+                index: TotalIndex(0),
+            },
+            VisibleItem::Gap {
+                height_px: 4.,
+                index: TotalIndex(1),
+            },
+            VisibleItem::RichContent {
+                view_id: second_view_id,
+                height_px: 24.,
+                index: TotalIndex(2),
+            },
+            VisibleItem::RichContent {
+                view_id: third_view_id,
+                height_px: 24.,
+                index: TotalIndex(3),
+            },
+        ];
+
+        assert_eq!(
+            visible_rich_content_views_for_event_dispatch(Some(&visible_items)),
+            vec![third_view_id, second_view_id, first_view_id]
+        );
+    }
+
+    #[test]
+    fn rich_content_selection_mouse_events_stop_after_being_handled() {
+        let position = vec2f(4., 8.);
+        let modifiers = ModifiersState::default();
+
+        assert!(should_stop_after_rich_content_handles_event(
+            &Event::LeftMouseDown {
+                position,
+                modifiers,
+                click_count: 1,
+                is_first_mouse: false,
+            }
+        ));
+        assert!(should_stop_after_rich_content_handles_event(
+            &Event::LeftMouseDragged {
+                position,
+                modifiers,
+            }
+        ));
+        assert!(should_stop_after_rich_content_handles_event(
+            &Event::LeftMouseUp {
+                position,
+                modifiers,
+            }
+        ));
+        assert!(should_stop_after_rich_content_handles_event(
+            &Event::RightMouseDown {
+                position,
+                cmd: false,
+                shift: false,
+                click_count: 1,
+            }
+        ));
+
+        assert!(!should_stop_after_rich_content_handles_event(
+            &Event::MouseMoved {
+                position,
+                cmd: false,
+                shift: false,
+                is_synthetic: false,
+            }
+        ));
+    }
+
+    #[test]
+    fn cli_subagent_layout_max_size_allows_nearly_full_block_list_width() {
+        assert_eq!(
+            cli_subagent_layout_max_size(vec2f(1000., 700.), 900., true),
+            vec2f(972., 686.)
+        );
+    }
+
+    #[test]
+    fn cli_subagent_layout_max_size_allows_nearly_full_height_when_agent_blocked() {
+        assert_eq!(
+            cli_subagent_layout_max_size(vec2f(1000., 700.), 300., true),
+            vec2f(972., 686.)
+        );
+    }
+
+    #[test]
+    fn cli_subagent_layout_max_size_keeps_block_height_limit_when_not_agent_blocked() {
+        assert_eq!(
+            cli_subagent_layout_max_size(vec2f(1000., 700.), 300., false),
+            vec2f(972., 284.)
+        );
+    }
+
+    #[test]
+    fn cli_subagent_layout_max_size_does_not_go_negative() {
+        assert_eq!(
+            cli_subagent_layout_max_size(vec2f(4., 4.), 10., false),
+            vec2f(360., 0.)
+        );
+    }
+
+    #[test]
+    fn cli_subagent_layout_max_size_keeps_min_width_for_narrow_windows() {
+        assert_eq!(
+            cli_subagent_layout_max_size(vec2f(320., 700.), 300., true).x(),
+            360.
+        );
+    }
 }

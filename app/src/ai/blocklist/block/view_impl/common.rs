@@ -3560,6 +3560,18 @@ pub(super) fn query_prefix_highlight_len(
     }
 }
 
+/// Decides whether the current block's user-query bubble should render.
+///
+/// When "Hide responses" is on, the query itself is hidden here too, so the UI
+/// doesn't hide only the output while leaving the sent input visible.
+pub(super) fn should_render_query_and_header(
+    query_and_index_is_some: bool,
+    should_hide_first_block_query_and_header: bool,
+    should_hide_responses: bool,
+) -> bool {
+    query_and_index_is_some && !should_hide_first_block_query_and_header && !should_hide_responses
+}
+
 pub(super) fn query_context_references(
     input: &AIAgentInput,
     displayed_query: &str,
