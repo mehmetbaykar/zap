@@ -1152,7 +1152,6 @@ fn test_multiline_preexec_reconciles_command_grid_redraw_prefix() {
 
         block.preexec(PreexecValue {
             command: reported_command.to_owned(),
-            session_id: None,
         });
 
         assert_eq!(block.command_to_string(), reported_command);
@@ -1187,7 +1186,6 @@ fn test_multiline_preexec_reconciliation_preserves_prompt_demarcation() {
 
     block.preexec(PreexecValue {
         command: reported_command.to_owned(),
-        session_id: None,
     });
 
     assert_eq!(block.command_to_string(), reported_command);
@@ -1217,7 +1215,6 @@ fn test_multiline_preexec_preserves_legitimate_repeated_command_prefix() {
 
     block.preexec(PreexecValue {
         command: reported_command.to_owned(),
-        session_id: None,
     });
 
     assert_eq!(block.command_to_string(), reported_command);

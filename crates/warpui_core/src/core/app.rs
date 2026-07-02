@@ -4094,6 +4094,15 @@ impl AppContext {
             .contains(view_id)
     }
 
+    /// Returns the ancestor chain of `view_id` (including the view itself), or
+    /// an empty vec when the window has no presenter.
+    pub fn view_ancestors(&self, window_id: WindowId, view_id: EntityId) -> Vec<EntityId> {
+        match self.presenter(window_id) {
+            Some(presenter) => presenter.borrow().ancestors(view_id),
+            None => Vec::new(),
+        }
+    }
+
     fn relay_task_output(&mut self, task_id: usize, output: Box<dyn Any>) -> Result<()> {
         self.pending_flushes += 1;
         let Some(task_callback) = self.task_callbacks.remove(&task_id) else {

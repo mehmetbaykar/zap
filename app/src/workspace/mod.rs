@@ -267,20 +267,11 @@ pub fn init(app: &mut AppContext) {
             id!("Workspace"),
         )
         .with_enabled(|| ContextFlag::CreateNewSession.is_enabled()),
-<<<<<<< HEAD
-        FixedBinding::custom(
-            CustomAction::NewFile,
-            WorkspaceAction::NewCodeFile,
-            crate::t!("keybinding-desc-workspace-new-file"),
-            id!("Workspace") & !id!("Workspace_ViewOnlySharedSession"),
-        ),
-=======
->>>>>>> 2f3b0c009 (Make New File keybinding editable (#12979))
     ]);
 
     app.register_editable_bindings([EditableBinding::new(
         NEW_FILE_BINDING_NAME,
-        BindingDescription::new("New File"),
+        BindingDescription::new(crate::t!("keybinding-desc-workspace-new-file")),
         WorkspaceAction::NewCodeFile,
     )
     .with_custom_action(CustomAction::NewFile)

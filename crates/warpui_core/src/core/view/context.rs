@@ -102,6 +102,12 @@ impl<'a, T: View> ViewContext<'a, T> {
             .check_view_or_child_focused(self.window_id, &self.view_id)
     }
 
+    /// Returns the ancestor chain of `view_id` in `window_id`, including the
+    /// view itself.
+    pub fn view_ancestors(&self, window_id: WindowId, view_id: EntityId) -> Vec<EntityId> {
+        self.app.view_ancestors(window_id, view_id)
+    }
+
     pub fn element_position_by_id<S>(&self, id: S) -> Option<RectF>
     where
         S: AsRef<str>,
