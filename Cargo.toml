@@ -331,6 +331,7 @@ arborium = { version = "2", default-features = false, features = [
   "lang-clojure",
   "lang-elm",
   "lang-cmake",
+  "lang-markdown",
 ] }
 unicode-general-category = "1.1.0"
 unicode-width = "0.1.12"
