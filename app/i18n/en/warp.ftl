@@ -327,6 +327,7 @@ notebook-block-divider = Divider
 notebook-insert-block-tooltip = Insert block
 notebook-refresh-notebook = Refresh notebook
 notebook-refresh-file = Refresh file
+notebook-copy-file-path = Copy file path
 notebook-open-in-editor = Open in editor
 notebook-sign-in-to-edit = Sign in to edit
 editor-custom-keybinding = Custom...
