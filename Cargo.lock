@@ -772,9 +772,9 @@ dependencies = [
 
 [[package]]
 name = "arborium-markdown"
-version = "2.13.0"
+version = "2.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3705547b4e843b1caaf8b690be09a54094ee888faa260f6333189dc7b9b9b7f7"
+checksum = "ddfca4251ca8fbe058634631742b8fe4e168a0692d2fd857ce3b2f1d9c15debc"
 dependencies = [
  "arborium-html",
  "arborium-sysroot",
