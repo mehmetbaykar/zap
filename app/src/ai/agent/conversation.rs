@@ -3579,12 +3579,6 @@ fn subagent_pair_message_ids_to_remove(
     extra_ids
 }
 
-fn parse_orchestration_harness_type(value: &str) -> Harness {
-    Harness::from_config_name(value)
-        .or_else(|| Harness::parse_orchestration_harness(value))
-        .unwrap_or(Harness::Unknown)
-}
-
 pub(super) fn update_todo_list_from_todo_op(
     todo_lists: &mut Vec<AIAgentTodoList>,
     op: api::message::update_todos::Operation,
