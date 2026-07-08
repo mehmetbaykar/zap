@@ -74,7 +74,9 @@ use super::CLIAgent;
 #[cfg(feature = "local_fs")]
 use crate::ai::agent::{CurrentHead, DiffBase};
 use crate::ai::ambient_agents::{conversation_output_status_from_conversation, AmbientAgentTaskId};
-use crate::ai::blocklist::block::cli::{CLISubagentView, CLISubagentViewEvent};
+use crate::ai::blocklist::block::cli::{
+    CLISubagentView, CLISubagentViewEvent, CLISubagentViewMode,
+};
 use crate::ai::blocklist::block::cli_controller::{
     CLISubagentController, CLISubagentEvent, UserTakeOverReason,
 };
@@ -174,6 +176,7 @@ use warpui::{ViewHandle, WeakModelHandle};
 
 use crate::ai::agent::conversation::{AIConversation, AIConversationId, ConversationStatus};
 
+use crate::ai::agent::task::TaskId;
 #[cfg(any(test, feature = "integration_tests"))]
 use crate::ai::agent::UserQueryMode;
 use crate::ai::agent::{
@@ -3114,12 +3117,38 @@ impl TerminalView {
                     // LRC conversations should only have one entry point (the original LRC block).
                     let has_existing_lrc_block =
                         me.has_existing_lrc_agent_view_block(*conversation_id);
+                    let has_existing_agent_view_entry_block =
+                        me.has_agent_view_entry_block_for_conversation(*conversation_id);
+                    let is_restored_existing_conversation_origin = matches!(
+                        origin,
+                        AgentViewEntryOrigin::ConversationListView
+                            | AgentViewEntryOrigin::RestoreExistingConversation
+                            | AgentViewEntryOrigin::AgentViewBlock
+                            | AgentViewEntryOrigin::ConversationSelector
+                            | AgentViewEntryOrigin::InlineHistoryMenu
+                            | AgentViewEntryOrigin::InlineConversationMenu
+                    );
+                    let has_conversation = BlocklistAIHistoryModel::as_ref(ctx)
+                        .conversation(conversation_id)
+                        .is_some();
+                    let should_insert_restored_unmodified_entry_card = !was_modified
+                        && !was_new
+                        && !*was_ambient_agent
+                        && is_restored_existing_conversation_origin
+                        && has_conversation
+                        && !is_exit_due_to_user_takeover_of_lrc
+                        && !has_existing_lrc_block
+                        && !has_existing_agent_view_entry_block;
 
                     let should_insert = (!me
                         .last_visible_item_is_agent_view_block_for_conversation(*conversation_id)
                         && was_modified
                         && !is_exit_due_to_user_takeover_of_lrc
                         && !has_existing_lrc_block)
+                        // restored/历史会话只读查看时不会新增 exchange；
+                        // 用户按 ESC 返回 terminal 后仍需要一个 terminal-mode 入口卡片，
+                        // 否则 fullscreen AgentView 退出后所有 Agent block 都会被隐藏。
+                        || should_insert_restored_unmodified_entry_card
                         // If the agent view was entered via accepting a 'new conversation
                         // speedbump', an entry block should always be inserted.
                         || matches!(origin, AgentViewEntryOrigin::AgentRequestedNewConversation);
@@ -3128,7 +3157,7 @@ impl TerminalView {
                             AgentViewEntryBlockParams {
                                 conversation_id: *conversation_id,
                                 is_new: was_new,
-                                is_restored: false, /* is_restored */
+                                is_restored: should_insert_restored_unmodified_entry_card,
                                 origin: *origin,
                                 agent_view_controller: me.agent_view_controller.clone(),
                             },
@@ -5184,6 +5213,195 @@ impl TerminalView {
         ctx.notify();
     }
 
+    pub(super) fn create_cli_subagent_view(
+        &mut self,
+        block_id: BlockId,
+        conversation_id: AIConversationId,
+        task_id: TaskId,
+        mode: CLISubagentViewMode,
+        initial_requested_command_action_id: Option<&AIAgentActionId>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let is_live = mode == CLISubagentViewMode::Live;
+        let block_id_for_view = block_id.clone();
+        let task_id_for_view = task_id.clone();
+        let ai_action_model = self.ai_action_model.clone();
+        let cli_subagent_controller = self.cli_subagent_controller.clone();
+        let terminal_model = self.model.clone();
+        let current_working_directory = self.pwd();
+        let shell_launch_data = self.shell_launch_data_if_local(ctx);
+
+        let subagent_view = ctx.add_typed_action_view(move |ctx| match mode {
+            CLISubagentViewMode::Live => CLISubagentView::new(
+                block_id_for_view,
+                ai_action_model,
+                cli_subagent_controller,
+                terminal_model,
+                conversation_id,
+                task_id_for_view,
+                current_working_directory,
+                shell_launch_data,
+                ctx,
+            ),
+            CLISubagentViewMode::RestoredReadOnly => CLISubagentView::new_restored(
+                block_id_for_view,
+                ai_action_model,
+                cli_subagent_controller,
+                terminal_model,
+                conversation_id,
+                task_id_for_view,
+                current_working_directory,
+                shell_launch_data,
+                ctx,
+            ),
+        });
+        self.cli_subagent_views
+            .insert(block_id.clone(), subagent_view.clone());
+        log::info!(
+            "[byop-diag] cli_subagent_views.len()={} after insert",
+            self.cli_subagent_views.len()
+        );
+
+        let should_forward_windows_ctrl_c = is_live;
+        ctx.subscribe_to_view(&subagent_view, move |me, view, event, ctx| {
+            me.handle_cli_subagent_view_event(
+                view.id(),
+                event,
+                should_forward_windows_ctrl_c,
+                ctx,
+            );
+        });
+
+        if is_live {
+            if let Some(initial_requested_command_id) = initial_requested_command_action_id {
+                // live spawn 时，触发 CLI subagent 的那轮 AI block 只是桥接工具调用，
+                // 真正 UI 挂在 command block 上；移除它以保持 requested command 视觉连续。
+                if let Some((result_ai_block_id, result_conversation_id, result_exchange_id)) =
+                    self.rich_content_views.iter().find_map(|view| {
+                        let ai_metadata = view.ai_block_metadata()?;
+                        ai_metadata
+                            .ai_block_handle
+                            .as_ref(ctx)
+                            .contains_action_result(initial_requested_command_id, ctx)
+                            .then_some((
+                                view.view_id(),
+                                ai_metadata.conversation_id,
+                                ai_metadata.exchange_id,
+                            ))
+                    })
+                {
+                    BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
+                        history_model.set_exchange_hidden_status(
+                            self.view_id,
+                            result_conversation_id,
+                            result_exchange_id,
+                            true,
+                            ctx,
+                        );
+                    });
+                    self.rich_content_views
+                        .retain(|rich_content| rich_content.view_id() != result_ai_block_id);
+                    self.model
+                        .lock()
+                        .block_list_mut()
+                        .remove_rich_content(result_ai_block_id);
+                }
+            }
+        }
+    }
+
+    fn handle_cli_subagent_view_event(
+        &mut self,
+        cli_subagent_view_id: EntityId,
+        event: &CLISubagentViewEvent,
+        should_forward_windows_ctrl_c: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        match event {
+            CLISubagentViewEvent::TextSelected => {
+                // CLI subagent 的文本选择不能和 block list / alt screen 选择并存，
+                // 先清掉终端侧选择，再交给统一的 rich content selection 逻辑收尾。
+                {
+                    let mut model = self.model.lock();
+                    model.block_list_mut().clear_selection();
+                    model.alt_screen_mut().clear_selection();
+                }
+                // 清理临时拖选状态，避免切换到 CLI subagent view 后仍残留旧选择视觉。
+                self.is_selecting = false;
+                self.block_text_selection_start_position = None;
+                self.clear_selected_text_except(Some(cli_subagent_view_id), ctx);
+                ctx.notify();
+            }
+            CLISubagentViewEvent::CopiedEmptyText => {
+                self.copy(ctx);
+            }
+            #[cfg(windows)]
+            CLISubagentViewEvent::WindowsCtrlC => {
+                if should_forward_windows_ctrl_c {
+                    self.ctrl_c(ctx);
+                }
+            }
+        }
+    }
+
+    fn persist_cli_subagent_block_snapshot(
+        &mut self,
+        block_id: &BlockId,
+        conversation_id: Option<AIConversationId>,
+        task_id: Option<TaskId>,
+        requested_command_action_id: Option<AIAgentActionId>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let Some((block_snapshot, conversation_id, task_id, requested_command_action_id)) = ({
+            let model = self.model.lock();
+            let Some(block) = model.block_list().block_with_id(block_id) else {
+                log::warn!("Cannot persist CLI subagent snapshot; block {block_id:?} not found");
+                return;
+            };
+            let metadata = block.agent_interaction_metadata();
+            let conversation_id =
+                conversation_id.or_else(|| metadata.map(|metadata| *metadata.conversation_id()));
+            let task_id = task_id
+                .or_else(|| metadata.and_then(|metadata| metadata.subagent_task_id().cloned()));
+            let requested_command_action_id = requested_command_action_id.or_else(|| {
+                metadata.and_then(|metadata| metadata.requested_command_action_id().cloned())
+            });
+
+            // 只在持锁期间复制 block 快照，写 conversation 时不持有 TerminalModel 锁。
+            let block_snapshot = SerializedBlock::from(block);
+            conversation_id
+                .zip(task_id)
+                .map(|(conversation_id, task_id)| {
+                    (
+                        block_snapshot,
+                        conversation_id,
+                        task_id,
+                        requested_command_action_id,
+                    )
+                })
+        }) else {
+            log::warn!(
+                "Cannot persist CLI subagent snapshot; block {block_id:?} has no conversation/task metadata"
+            );
+            return;
+        };
+
+        BlocklistAIHistoryModel::handle(ctx).update(ctx, move |history_model, ctx| {
+            let Some(conversation) = history_model.conversation_mut(&conversation_id) else {
+                log::warn!(
+                    "Cannot persist CLI subagent snapshot; conversation {conversation_id} not found"
+                );
+                return;
+            };
+            conversation.upsert_cli_subagent_block_snapshot(
+                task_id,
+                block_snapshot,
+                requested_command_action_id,
+                ctx,
+            );
+        });
+    }
+
     fn handle_cli_subagent_controller_event(
         &mut self,
         _: ModelHandle<CLISubagentController>,
@@ -5202,101 +5420,21 @@ impl TerminalView {
                      block_id={block_id:?} task_id={task_id:?} conv={conversation_id:?} \
                      → creating CLISubagentView and adding it to the cli_subagent_views map"
                 );
-                let subagent_view = ctx.add_typed_action_view(|ctx| {
-                    CLISubagentView::new(
-                        block_id.clone(),
-                        self.ai_action_model.clone(),
-                        self.cli_subagent_controller.clone(),
-                        self.model.clone(),
-                        *conversation_id,
-                        task_id.clone(),
-                        self.pwd(),
-                        self.shell_launch_data_if_local(ctx),
-                        ctx,
-                    )
-                });
-                self.cli_subagent_views
-                    .insert(block_id.clone(), subagent_view.clone());
-                log::info!(
-                    "[byop-diag] cli_subagent_views.len()={} after insert",
-                    self.cli_subagent_views.len()
+                self.create_cli_subagent_view(
+                    block_id.clone(),
+                    *conversation_id,
+                    task_id.clone(),
+                    CLISubagentViewMode::Live,
+                    initial_requested_command_action_id.as_ref(),
+                    ctx,
                 );
-
-                ctx.subscribe_to_view(&subagent_view, |me, view, event, ctx| match event {
-                    CLISubagentViewEvent::TextSelected => {
-                        // Unlike AI blocks, CLI subagent view text selections should not coexist
-                        // with block list or alt screen text selections. Clear those first before
-                        // calling `clear_selected_text_except`, which handles the side effects
-                        // (clipboard sync, context model, etc.) and clears other rich content views.
-                        {
-                            let mut model = me.model.lock();
-                            model.block_list_mut().clear_selection();
-                            model.alt_screen_mut().clear_selection();
-                        }
-                        // Also reset transient terminal-side selection state so stale alt-screen
-                        // selection visuals don't persist after switching selection focus to the
-                        // CLI subagent view.
-                        me.is_selecting = false;
-                        me.block_text_selection_start_position = None;
-                        me.clear_selected_text_except(Some(view.id()), ctx);
-                        ctx.notify();
-                    }
-                    CLISubagentViewEvent::CopiedEmptyText => {
-                        me.copy(ctx);
-                    }
-                    #[cfg(windows)]
-                    CLISubagentViewEvent::WindowsCtrlC => {
-                        me.ctrl_c(ctx);
-                    }
-                });
-
-                if let Some(initial_requested_command_id) = initial_requested_command_action_id {
-                    // Remove the AI block for the request/response pair that resulted in spawning
-                    // the CLI subagent. You can think of this block as corresponding to the
-                    // initial action result input for the long running requested command (the
-                    // initial output snapshot) and the output containing the subagent tool call.
-                    //
-                    // This block doesn't actually have any renderable inputs or outputs (typically,
-                    // the output tool call would be rendered like all our other tool calls), but
-                    // the CLI subagent tool call is 'special' in that it corresponds to UI rendered
-                    // on the _command_ block for the previously requested command.
-                    //
-                    // We remove this block so the AI block originally containing the requested
-                    // command remains immediately above the actual command block in the blocklist,
-                    // which enables visual continuity in the requested command's expanded state
-                    // (e.g. the expanded requested command header appears right on top of the
-                    // running command block; they appear part of the same UI component).
-                    if let Some((result_ai_block_id, result_conversation_id, result_exchange_id)) =
-                        self.rich_content_views.iter().find_map(|view| {
-                            let ai_metadata = view.ai_block_metadata()?;
-                            ai_metadata
-                                .ai_block_handle
-                                .as_ref(ctx)
-                                .contains_action_result(initial_requested_command_id, ctx)
-                                .then_some((
-                                    view.view_id(),
-                                    ai_metadata.conversation_id,
-                                    ai_metadata.exchange_id,
-                                ))
-                        })
-                    {
-                        BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
-                            history_model.set_exchange_hidden_status(
-                                self.view_id,
-                                result_conversation_id,
-                                result_exchange_id,
-                                true,
-                                ctx,
-                            );
-                        });
-                        self.rich_content_views
-                            .retain(|rich_content| rich_content.view_id() != result_ai_block_id);
-                        self.model
-                            .lock()
-                            .block_list_mut()
-                            .remove_rich_content(result_ai_block_id);
-                    }
-                }
+                self.persist_cli_subagent_block_snapshot(
+                    block_id,
+                    Some(*conversation_id),
+                    Some(task_id.clone()),
+                    initial_requested_command_action_id.clone(),
+                    ctx,
+                );
             }
             CLISubagentEvent::UpdatedControl {
                 agent_has_control, ..
@@ -5309,10 +5447,47 @@ impl TerminalView {
             }
             CLISubagentEvent::FinishedSubagent {
                 block_id,
+                task_id,
                 conversation_id,
-                ..
+                initial_requested_command_action_id,
             } => {
+                self.persist_cli_subagent_block_snapshot(
+                    block_id,
+                    *conversation_id,
+                    Some(task_id.clone()),
+                    initial_requested_command_action_id.clone(),
+                    ctx,
+                );
                 self.cli_subagent_views.remove(block_id);
+
+                // SSH 等交互式 CLI subagent 会话结束后，Live 卡片会被回收，
+                // 但用户仍应能在终端里看到折叠的只读终端交互卡片（与重开历史时一致）。
+                // 这里在 block 仍持有匹配 metadata 的前提下，用 RestoredReadOnly 模式重建。
+                if let Some(conversation_id) = conversation_id {
+                    let should_restore = {
+                        let model = self.model.lock();
+                        model.block_list().block_with_id(block_id).is_some_and(
+                            |block| {
+                                block.agent_interaction_metadata().is_some_and(|metadata| {
+                                    metadata.conversation_id() == conversation_id
+                                        && metadata.subagent_task_id() == Some(task_id)
+                                })
+                            },
+                        )
+                    };
+                    if should_restore
+                        && !self.cli_subagent_views.contains_key(block_id)
+                    {
+                        self.create_cli_subagent_view(
+                            block_id.clone(),
+                            *conversation_id,
+                            task_id.clone(),
+                            CLISubagentViewMode::RestoredReadOnly,
+                            None,
+                            ctx,
+                        );
+                    }
+                }
 
                 if FeatureFlag::AgentView.is_enabled() {
                     let Some(conversation_id) = conversation_id else {
@@ -5348,7 +5523,12 @@ impl TerminalView {
                 }
             }
             CLISubagentEvent::ToggledHideResponses => {}
-            CLISubagentEvent::UpdatedLastSnapshot => {}
+            CLISubagentEvent::UpdatedLastSnapshot { .. } => {
+                // 仅更新内存中的 last_snapshot_at（已在 controller 内完成），
+                // 不触发全量落盘。落盘由低频的 SpawnedSubagent / FinishedSubagent 承担，
+                // 避免 BlockCompleted 时 UpdatedLastSnapshot 与紧随其后的 FinishedSubagent
+                // 连续两次全量序列化整个 conversation 造成主线程写放大。
+            }
             CLISubagentEvent::ControlHandedBackAfterTransfer => {
                 // Notify the shell command executor that control was handed back after transfer.
                 self.ai_action_model
@@ -19776,6 +19956,18 @@ impl TerminalView {
         }
 
         false
+    }
+
+    /// 返回当前终端里是否已经有该 conversation 的 AgentView 入口卡片。
+    fn has_agent_view_entry_block_for_conversation(
+        &self,
+        conversation_id: AIConversationId,
+    ) -> bool {
+        self.rich_content_views.iter().any(|content| {
+            content
+                .agent_view_entry_metadata()
+                .is_some_and(|metadata| metadata.conversation_id == conversation_id)
+        })
     }
 
     /// Returns true when there exists an AgentViewBlock with origin LongRunningCommand that matches
