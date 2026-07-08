@@ -1,3 +1,4 @@
+use warpui::EntityIdSet;
 use std::any::Any;
 use std::cell::RefCell;
 use std::pin::pin;
@@ -1562,7 +1563,7 @@ fn test_alt_screen_select_with_sgr_mouse() {
 
         let (window_id, terminal) = add_window_with_id_and_terminal(&mut app, None);
 
-        let mut updated = HashSet::new();
+        let mut updated = EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());
         let invalidation = WindowInvalidation {
             updated,

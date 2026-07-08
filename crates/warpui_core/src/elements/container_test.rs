@@ -1,3 +1,4 @@
+use crate::EntityIdSet;
 use super::*;
 use crate::{
     elements::{ConstrainedBox, DispatchEventResult, EventHandler, Rect, ZIndex},
@@ -7,7 +8,7 @@ use crate::{
 use pathfinder_geometry::vector::vec2f;
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     rc::Rc,
 };
 
@@ -79,7 +80,7 @@ fn test_container_element_overlay_click_handling() {
 
         let mut presenter = Presenter::new(window_id);
 
-        let mut updated = HashSet::new();
+        let mut updated = EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());
         let invalidation = WindowInvalidation {
             updated,

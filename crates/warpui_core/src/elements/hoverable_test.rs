@@ -1,3 +1,4 @@
+use crate::EntityIdSet;
 use super::*;
 use crate::elements::DispatchEventResult;
 use crate::r#async::Timer;
@@ -13,7 +14,7 @@ use crate::{
 use pathfinder_geometry::vector::vec2f;
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     rc::Rc,
 };
 
@@ -235,7 +236,7 @@ fn test_hoverable_element_click_handling() {
 
         let mut presenter = Presenter::new(window_id);
 
-        let mut updated = HashSet::new();
+        let mut updated = EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());
         let invalidation = WindowInvalidation {
             updated,
@@ -344,7 +345,7 @@ fn test_hoverable_element_hover_handling_no_delay() {
 
         let mut presenter = Presenter::new(window_id);
 
-        let mut updated = HashSet::new();
+        let mut updated = EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());
         let invalidation = WindowInvalidation {
             updated,
@@ -421,7 +422,7 @@ fn test_hoverable_element_hover_handling_with_hover_in_delay() {
         let presenter = Rc::new(RefCell::new(Presenter::new(window_id)));
         let presenter_clone = presenter.clone();
 
-        let mut updated = HashSet::new();
+        let mut updated = EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());
         let invalidation = WindowInvalidation {
             updated,
@@ -506,7 +507,7 @@ fn test_hoverable_element_hover_handling_with_hover_out_delay() {
         let presenter = Rc::new(RefCell::new(Presenter::new(window_id)));
         let presenter_clone = presenter.clone();
 
-        let mut updated = HashSet::new();
+        let mut updated = EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());
         let invalidation = WindowInvalidation {
             updated,
@@ -590,7 +591,7 @@ fn test_hoverable_element_hover_handling_with_hover_in_out_delay() {
 
         let presenter = Rc::new(RefCell::new(Presenter::new(window_id)));
 
-        let mut updated = HashSet::new();
+        let mut updated = EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());
         let invalidation = WindowInvalidation {
             updated,

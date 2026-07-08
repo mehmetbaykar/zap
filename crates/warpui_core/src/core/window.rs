@@ -1,13 +1,12 @@
 use core::fmt;
 use std::{
     cell::Cell,
-    collections::HashMap,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
 use serde::{Deserialize, Serialize};
 
-use crate::{core::view::AnyViewHandle, AnyView, EntityId};
+use crate::{core::view::AnyViewHandle, AnyView, EntityId, EntityIdMap};
 
 /// A unique identifier for a window.
 ///
@@ -84,7 +83,7 @@ impl Drop for CurrentRenderWindowGuard {
 #[derive(Default)]
 pub(super) struct Window {
     /// The set of views owned by this window, keyed by view ID.
-    pub views: HashMap<EntityId, Box<dyn AnyView>>,
+    pub views: EntityIdMap<Box<dyn AnyView>>,
 
     /// A handle to the window's root view (top of the view hierarchy), if any.
     pub root_view: Option<AnyViewHandle>,

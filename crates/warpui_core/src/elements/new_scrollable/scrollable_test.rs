@@ -1,6 +1,7 @@
+use crate::EntityIdSet;
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     rc::Rc,
 };
 
@@ -562,7 +563,7 @@ impl TypedActionView for BasicScrollableView {
 }
 
 fn render(presenter: &mut Presenter, view_id: EntityId, ctx: &mut AppContext) {
-    let mut updated = HashSet::new();
+    let mut updated = EntityIdSet::default();
     updated.insert(view_id);
     let invalidation = WindowInvalidation {
         updated,

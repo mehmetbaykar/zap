@@ -106,7 +106,7 @@ mod tests;
 use itertools::Itertools as _;
 pub use tracked::Tracked;
 
-use super::{EntityId, WindowId};
+use super::{EntityId, EntityIdSet, WindowId};
 use std::cell::UnsafeCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::mem;
@@ -206,7 +206,7 @@ pub(super) fn windows_with_invalidations() -> Vec<WindowId> {
 /// system.
 ///
 /// Note: This will clear the cache of invalidations for this window.
-pub(super) fn take_invalidations_for_window(window_id: WindowId) -> HashSet<EntityId> {
+pub(super) fn take_invalidations_for_window(window_id: WindowId) -> EntityIdSet {
     with_cache(|cache| {
         let (matching, remainder) = mem::take(&mut cache.invalidations)
             .into_iter()

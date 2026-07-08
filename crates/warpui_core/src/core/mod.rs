@@ -6,6 +6,7 @@ mod model;
 mod view;
 mod window;
 
+
 pub use action::*;
 pub use app::*;
 pub use autotracking::Tracked;
@@ -28,7 +29,7 @@ use std::rc::Rc;
 use std::time::Duration;
 use std::{
     any::{Any, TypeId},
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fmt::{self, Debug},
     hash::Hash,
     mem,
@@ -195,8 +196,8 @@ pub(crate) type SpawnedFuture = BoxFuture<'static, ()>;
 
 #[derive(Debug, Default, Clone)]
 pub struct WindowInvalidation {
-    pub updated: HashSet<EntityId>,
-    pub removed: HashSet<EntityId>,
+    pub updated: EntityIdSet,
+    pub removed: EntityIdSet,
     /// Stores whether an element in the window needs to be repainted. Currently an
     /// invalidation will repaint the entire element tree for that window, so we
     /// only store a boolean. In the future we can extend this to store entity ids
@@ -399,13 +400,13 @@ pub enum EntityLocation {
 
 #[derive(Default)]
 struct RefCounts {
-    entity_counts: HashMap<EntityId, usize>,
+    entity_counts: EntityIdMap<usize>,
     dropped: DroppedItems,
 }
 
 #[derive(Default)]
 struct DroppedItems {
-    models: HashSet<EntityId>,
+    models: EntityIdSet,
     views: HashSet<(WindowId, EntityId)>,
 }
 

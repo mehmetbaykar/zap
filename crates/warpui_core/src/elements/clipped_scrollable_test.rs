@@ -1,5 +1,4 @@
-use std::collections::HashSet;
-
+use crate::EntityIdSet;
 use pathfinder_geometry::vector::vec2f;
 
 use crate::{
@@ -80,7 +79,7 @@ fn test_scroll_to_position() {
 
         let mut presenter = Presenter::new(window_id);
 
-        let mut updated = HashSet::new();
+        let mut updated = EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());
         let invalidation = WindowInvalidation {
             updated,

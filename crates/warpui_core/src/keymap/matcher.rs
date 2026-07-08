@@ -2,13 +2,13 @@ use super::{
     BindingLens, Context, CustomTag, EditableBinding, EditableBindingLens, FixedBinding, Keymap,
     Keystroke, Trigger,
 };
-use crate::{actions::StandardAction, Action, EntityId};
+use crate::{actions::StandardAction, Action, EntityId, EntityIdMap};
 use itertools::Either;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 #[derive(Default)]
 pub struct Matcher {
-    pending: HashMap<EntityId, Pending>,
+    pending: EntityIdMap<Pending>,
     keymap: Keymap,
     /// Default binding validator that should run on every binding (irrespective of the [`Context`]
     /// the binding was registered against).
@@ -51,7 +51,7 @@ pub enum MatchResult {
 impl Matcher {
     pub fn new(keymap: Keymap) -> Self {
         Self {
-            pending: HashMap::new(),
+            pending: EntityIdMap::default(),
             keymap,
             default_binding_validator: None,
             binding_validators: vec![],
