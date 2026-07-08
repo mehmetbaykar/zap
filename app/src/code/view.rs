@@ -56,7 +56,7 @@ use warpui::{
 
 use crate::{
     menu::{MenuItem, MenuItemFields},
-    notebooks::file::{renders_in_warp_notebook_viewer, MarkdownDisplayMode},
+    notebooks::file::{is_markdown_file, renders_in_warp_notebook_viewer, MarkdownDisplayMode},
     search::{files::icon::icon_from_file_path, ItemHighlightState},
     tab::TAB_BAR_BORDER_HEIGHT,
     ui_components::{blended_colors, buttons::icon_button},
@@ -329,9 +329,23 @@ impl CodeView {
                     .map(|loc| loc.language_path())
             });
 
+        // Remote buffers only get the toggle for Markdown: the remote inline
+        // render path (`set_remote_markdown_rendered`) has no `.ipynb` branch —
+        // Jupyter rendering is local-FS only — so a remote notebook must keep
+        // the pre-#13071 behavior of never offering Rendered mode.
+        let is_remote_buffer = self
+            .tab_at(self.active_tab_index)
+            .and_then(|t| t.location.as_ref())
+            .is_some_and(|loc| matches!(loc, BufferLocation::Remote(_)));
         let renders_in_notebook_viewer = path
             .as_ref()
-            .map(renders_in_warp_notebook_viewer)
+            .map(|path| {
+                if is_remote_buffer {
+                    is_markdown_file(path)
+                } else {
+                    renders_in_warp_notebook_viewer(path)
+                }
+            })
             .unwrap_or(false);
 
         if !renders_in_notebook_viewer {
