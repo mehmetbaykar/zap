@@ -84,7 +84,7 @@ fn panel_with_nodes(
 }
 
 fn render_panel_scene(app: &mut App, presenter: &mut Presenter, window_id: warpui::WindowId) {
-    let mut updated = std::collections::HashSet::new();
+    let mut updated = warpui::EntityIdSet::default();
     updated.insert(app.root_view_id(window_id).unwrap());
     let invalidation = WindowInvalidation {
         updated,

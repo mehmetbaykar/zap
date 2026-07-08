@@ -294,7 +294,7 @@ fn selecting_onekey_dropdown_item_does_not_rebuild_dropdown_while_it_is_borrowed
             view
         });
         let presenter = app.presenter(window_id).unwrap();
-        let mut updated = std::collections::HashSet::new();
+        let mut updated = warpui::EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());
         app.update(|ctx| {
             let mut presenter = presenter.borrow_mut();

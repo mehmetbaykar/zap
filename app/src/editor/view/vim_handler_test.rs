@@ -1,7 +1,6 @@
 use super::*;
 use crate::editor::EditorView;
 use itertools::Itertools;
-use std::collections::HashSet;
 use unindent::Unindent;
 use warpui::platform::WindowStyle;
 use warpui::{App, EntityIdSet, ViewHandle};

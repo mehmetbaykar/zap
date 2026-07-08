@@ -348,7 +348,7 @@ mod tests {
                 .expect("the test window should contain a root view");
             let presenter = Rc::new(RefCell::new(Presenter::new(window_id)));
             let invalidation = WindowInvalidation {
-                updated: HashSet::from([root_view_id]),
+                updated: warpui::EntityIdSet::from_iter([root_view_id]),
                 ..Default::default()
             };
 
