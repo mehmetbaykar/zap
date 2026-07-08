@@ -11469,6 +11469,7 @@ impl Workspace {
                         prompt,
                         /* show_close_button */ true,
                         /* show_send_now_button */ false,
+                        /* locked_for_pending_lrc */ false,
                         terminal_view_ctx,
                     );
                 }
@@ -11568,8 +11569,11 @@ impl Workspace {
 
             if let Some(prompt) = initial_prompt {
                 terminal.send_user_query_after_next_conversation_finished(
-                    prompt, /* show_close_button */ true,
-                    /* show_send_now_button */ false, ctx,
+                    prompt,
+                    /* show_close_button */ true,
+                    /* show_send_now_button */ false,
+                    /* locked_for_pending_lrc */ false,
+                    ctx,
                 );
             }
         });
@@ -20129,7 +20133,12 @@ impl TypedActionView for Workspace {
             } => {
                 self.summarize_active_ai_conversation(prompt.clone(), initial_prompt.clone(), ctx);
             }
-            QueuePromptForConversation { prompt } => {
+            QueuePromptForConversation {
+                prompt,
+                show_close_button,
+                show_send_now_button,
+                locked_for_pending_lrc,
+            } => {
                 let Some(terminal_view) = self
                     .active_tab_pane_group()
                     .as_ref(ctx)
@@ -20141,8 +20150,9 @@ impl TypedActionView for Workspace {
                 terminal_view.update(ctx, |terminal, ctx| {
                     terminal.send_user_query_after_next_conversation_finished(
                         prompt.clone(),
-                        /* show_close_button */ true,
-                        /* show_send_now_button */ true,
+                        *show_close_button,
+                        *show_send_now_button,
+                        *locked_for_pending_lrc,
                         ctx,
                     );
                 });

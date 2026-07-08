@@ -2716,6 +2716,14 @@ pub struct TerminalView {
     /// Used to remove the block when summarization completes or is cancelled.
     pending_user_query_view_id: Option<EntityId>,
 
+    /// When true, the pending user query was filed during the pre-snapshot LRC window
+    /// (upstream #13191) and Send now stays disabled until the shell-command snapshot fires.
+    pending_user_query_locked_for_lrc: bool,
+
+    /// Prompt text for the current pending user query, retained so a locked pending-LRC
+    /// row can be unlocked (re-rendered with Send now) after the snapshot fires.
+    pending_user_query_prompt: Option<String>,
+
     /// Callback for the queued prompt that fires when the current conversation finishes.
     /// Stored separately from `conversation_completed_callbacks` so that queuing a prompt
     /// (via `/queue`, `/compact-and`, etc.) does not wipe unrelated callbacks.
@@ -4036,6 +4044,8 @@ impl TerminalView {
             pane_stack: None,
             ephemeral_message_model,
             pending_user_query_view_id: None,
+            pending_user_query_locked_for_lrc: false,
+            pending_user_query_prompt: None,
             queued_prompt_callback: None,
             pty_recorder: ctx
                 .add_model(|ctx| PtyRecorder::new(inactive_pty_reads_rx, window_id, ctx)),
@@ -5980,7 +5990,38 @@ impl TerminalView {
                 self.redetermine_terminal_focus(ctx);
                 ctx.notify();
             }
-            BlocklistAIActionEvent::FinishedAction { action_id, .. } => {
+            BlocklistAIActionEvent::FinishedAction {
+                action_id,
+                conversation_id,
+                cancellation_reason,
+            } => {
+                // Lifecycle for queries queued during the pre-snapshot LRC window
+                // (upstream #13191 PendingLrcAutoQueue):
+                // - successful finish / LRC completed → unlock (enable Send now + auto-fire)
+                // - cancelled → remove locked row (mirrors remove_pending_lrc_rows)
+                if self.pending_user_query_locked_for_lrc {
+                    let pending_conversation = self.pending_user_query_conversation_id();
+                    if pending_conversation.is_none_or(|id| id == *conversation_id) {
+                        let should_remove = cancellation_reason.is_some_and(|reason| {
+                            !reason.is_lrc_command_completed()
+                                && !reason.is_follow_up_for_same_conversation()
+                        });
+                        if should_remove {
+                            let prompt = self.pending_user_query_prompt.clone();
+                            self.remove_pending_user_query_block(ctx);
+                            if let Some(prompt) = prompt {
+                                self.input.update(ctx, |input, ctx| {
+                                    if input.buffer_text(ctx).is_empty() {
+                                        input.replace_buffer_content(&prompt, ctx);
+                                    }
+                                });
+                            }
+                        } else {
+                            self.unlock_pending_lrc_user_query(ctx);
+                        }
+                    }
+                }
+
                 // Refresh git line changes when files are potentially updated by an action
                 let action_result = action_model
                     .as_ref(ctx)

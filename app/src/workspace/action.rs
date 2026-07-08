@@ -479,8 +479,14 @@ pub enum WorkspaceAction {
         initial_prompt: Option<String>,
     },
     /// Queue a prompt to be sent after the current conversation finishes.
+    ///
+    /// When `locked_for_pending_lrc` is true (pre-snapshot LRC auto-queue, upstream #13191),
+    /// Send now stays disabled until the shell-command snapshot fires.
     QueuePromptForConversation {
         prompt: String,
+        show_close_button: bool,
+        show_send_now_button: bool,
+        locked_for_pending_lrc: bool,
     },
     /// Install the Zap CLI command to /usr/local/bin
     #[cfg(target_os = "macos")]

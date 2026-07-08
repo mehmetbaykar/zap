@@ -1,7 +1,32 @@
 use std::{collections::HashMap, sync::Arc};
 
 use super::*;
-use crate::ai::agent::{task::TaskId, AIAgentActionResultType};
+use crate::ai::agent::{
+    conversation::AIConversationId, task::TaskId, AIAgentActionId, AIAgentActionResultType,
+};
+
+#[test]
+fn is_shell_command_action_pending_checks_running_actions() {
+    let conversation_id = AIConversationId::new();
+    let action_id = AIAgentActionId::from("shell-1".to_owned());
+    let other_id = AIAgentActionId::from("shell-2".to_owned());
+
+    let mut running_actions = HashMap::new();
+    running_actions.insert(
+        conversation_id,
+        RunningActions::new(RunningActionPhase::Serial, action_id.clone()),
+    );
+
+    assert!(running_actions
+        .get(&conversation_id)
+        .is_some_and(|r| r.contains(&action_id)));
+    assert!(!running_actions
+        .get(&conversation_id)
+        .is_some_and(|r| r.contains(&other_id)));
+    assert!(!running_actions
+        .get(&AIConversationId::new())
+        .is_some_and(|r| r.contains(&action_id)));
+}
 
 fn make_action_result(id: &str) -> Arc<AIAgentActionResult> {
     Arc::new(AIAgentActionResult {

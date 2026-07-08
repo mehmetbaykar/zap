@@ -12207,7 +12207,9 @@ impl Input {
 
     /// Checks whether the current input should be queued instead of executed.
     /// Returns true (and queues the prompt) when the queue-next-prompt toggle is
-    /// on and the active conversation is still in progress.
+    /// on and the active conversation is still in progress, or when an
+    /// agent-requested `run_shell_command` is still pending its LRC snapshot
+    /// (to avoid the CliAgentUserQuery / snapshot race from upstream #13191).
     /// Only queues when AI input is active — if the user is in shell mode the
     /// input is not queued (so e.g. `ls` still runs in the terminal).
     fn maybe_queue_input_for_in_progress_conversation(
@@ -12215,14 +12217,6 @@ impl Input {
         ctx: &mut ViewContext<Self>,
     ) -> bool {
         if !FeatureFlag::QueueSlashCommand.is_enabled() {
-            return false;
-        }
-
-        if !self
-            .ai_context_model
-            .as_ref(ctx)
-            .is_queue_next_prompt_enabled()
-        {
             return false;
         }
 
@@ -12239,14 +12233,44 @@ impl Input {
         };
 
         let history = BlocklistAIHistoryModel::handle(ctx);
-        let should_queue = history
+        let conversation_in_progress = history
             .as_ref(ctx)
             .conversation(&conversation_id)
             .is_some_and(|c| {
                 !c.is_empty() && (c.status().is_in_progress() || c.status().is_blocked())
             });
 
-        if !should_queue {
+        if !conversation_in_progress {
+            return false;
+        }
+
+        let queue_toggle_enabled = self
+            .ai_context_model
+            .as_ref(ctx)
+            .is_queue_next_prompt_enabled();
+
+        // When queue mode is not normally active but an agent-requested run_shell_command
+        // action is still pending (snapshot not yet fired), queue as a locked pending-LRC
+        // query to prevent the CliAgentUserQuery / LRC snapshot race (upstream #13191).
+        let queued_for_pending_lrc = !queue_toggle_enabled && {
+            let pending_action_id = {
+                let terminal_model = self.model.lock();
+                let active_block = terminal_model.block_list().active_block();
+                if active_block.is_active_and_long_running() && !active_block.is_agent_monitoring()
+                {
+                    active_block.requested_command_action_id().cloned()
+                } else {
+                    None
+                }
+            };
+            pending_action_id.as_ref().is_some_and(|action_id| {
+                self.ai_action_model
+                    .as_ref(ctx)
+                    .is_shell_command_action_pending(action_id, conversation_id)
+            })
+        };
+
+        if !queue_toggle_enabled && !queued_for_pending_lrc {
             return false;
         }
 
@@ -12283,7 +12307,20 @@ impl Input {
         self.editor.update(ctx, |editor, ctx| {
             editor.clear_buffer(ctx);
         });
-        ctx.dispatch_typed_action(&WorkspaceAction::QueuePromptForConversation { prompt });
+        // Pending-LRC rows stay locked (no Send now) until the snapshot fires; normal
+        // auto-queue / /queue rows remain interruptible.
+        let (show_close_button, show_send_now_button, locked_for_pending_lrc) =
+            if queued_for_pending_lrc {
+                (true, false, true)
+            } else {
+                (true, true, false)
+            };
+        ctx.dispatch_typed_action(&WorkspaceAction::QueuePromptForConversation {
+            prompt,
+            show_close_button,
+            show_send_now_button,
+            locked_for_pending_lrc,
+        });
 
         true
     }

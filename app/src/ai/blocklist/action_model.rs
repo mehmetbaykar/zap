@@ -579,6 +579,17 @@ impl BlocklistAIActionModel {
         has_pending || has_running
     }
 
+    /// Returns true if the given shell command action is still running (snapshot not yet fired).
+    pub fn is_shell_command_action_pending(
+        &self,
+        action_id: &AIAgentActionId,
+        conversation_id: AIConversationId,
+    ) -> bool {
+        self.running_actions
+            .get(&conversation_id)
+            .is_some_and(|r| r.contains(action_id))
+    }
+
     pub(super) fn has_unfinished_action_for_tool_call(
         &self,
         conversation_id: AIConversationId,

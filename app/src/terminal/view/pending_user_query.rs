@@ -26,14 +26,21 @@ impl TerminalView {
     /// `show_close_button` controls the dismiss ("X") button; `show_send_now_button` controls
     /// the "Send now" button that interrupts the active conversation and immediately submits
     /// the queued prompt.
+    /// `locked_for_pending_lrc` marks pre-snapshot LRC auto-queue rows (upstream #13191).
     fn insert_pending_user_query_block(
         &mut self,
         prompt: String,
         show_close_button: bool,
         show_send_now_button: bool,
+        locked_for_pending_lrc: bool,
         ctx: &mut ViewContext<Self>,
     ) {
+        // Preserve the queued-prompt callback across re-inserts used for unlock (re-render
+        // with Send now enabled). `remove_pending_user_query_block` clears it.
+        let preserved_callback = self.queued_prompt_callback.take();
         self.remove_pending_user_query_block(ctx);
+        self.queued_prompt_callback = preserved_callback;
+
         let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
         let user_display_name = auth_state
             .username_for_display()
@@ -41,6 +48,9 @@ impl TerminalView {
         let profile_image_path = auth_state.user_photo_url();
 
         let prompt_for_send_now = prompt.clone();
+        self.pending_user_query_prompt = Some(prompt.clone());
+        self.pending_user_query_locked_for_lrc = locked_for_pending_lrc;
+
         let handle = ctx.add_typed_action_view(|ctx| {
             PendingUserQueryBlock::new(
                 prompt,
@@ -81,7 +91,11 @@ impl TerminalView {
         ctx: &mut ViewContext<Self>,
     ) {
         self.insert_pending_user_query_block(
-            prompt, /* show_close_button */ false, /* show_send_now_button */ false, ctx,
+            prompt,
+            /* show_close_button */ false,
+            /* show_send_now_button */ false,
+            /* locked_for_pending_lrc */ false,
+            ctx,
         );
     }
 
@@ -90,6 +104,8 @@ impl TerminalView {
     /// (Safe to call from within the callback itself — the caller `.take()`s it first.)
     pub(super) fn remove_pending_user_query_block(&mut self, ctx: &mut ViewContext<Self>) {
         self.queued_prompt_callback = None;
+        self.pending_user_query_locked_for_lrc = false;
+        self.pending_user_query_prompt = None;
         if let Some(view_id) = self.pending_user_query_view_id.take() {
             self.model
                 .lock()
@@ -98,6 +114,27 @@ impl TerminalView {
             self.rich_content_views.retain(|rc| rc.view_id() != view_id);
             ctx.notify();
         }
+    }
+
+    /// Transitions a locked pending-LRC query to a normal interruptible queued prompt
+    /// once the shell-command snapshot (or other FinishedAction) has fired.
+    /// Mirrors upstream `QueuedQueryModel::unlock_pending_lrc_rows` (#13191).
+    pub(super) fn unlock_pending_lrc_user_query(&mut self, ctx: &mut ViewContext<Self>) {
+        if !self.pending_user_query_locked_for_lrc {
+            return;
+        }
+        let Some(prompt) = self.pending_user_query_prompt.clone() else {
+            self.pending_user_query_locked_for_lrc = false;
+            return;
+        };
+        // Re-insert with Send now enabled while preserving the auto-fire callback.
+        self.insert_pending_user_query_block(
+            prompt,
+            /* show_close_button */ true,
+            /* show_send_now_button */ true,
+            /* locked_for_pending_lrc */ false,
+            ctx,
+        );
     }
 
     /// Removes the pending block and immediately submits the queued prompt.
@@ -143,12 +180,15 @@ impl TerminalView {
     /// `show_close_button` controls whether a dismiss ("X") button appears on the pending
     /// block. `show_send_now_button` controls whether a "Send now" button appears that
     /// interrupts the active conversation and sends the queued prompt immediately. This
-    /// should be false for summarization-triggered queuing (e.g. `/compact-and`).
+    /// should be false for summarization-triggered queuing (e.g. `/compact-and`) and for
+    /// pre-snapshot LRC auto-queue (upstream #13191).
+    /// `locked_for_pending_lrc` enables unlock-on-FinishedAction for the LRC race fix.
     pub fn send_user_query_after_next_conversation_finished(
         &mut self,
         prompt: String,
         show_close_button: bool,
         show_send_now_button: bool,
+        locked_for_pending_lrc: bool,
         ctx: &mut ViewContext<Self>,
     ) {
         if FeatureFlag::PendingUserQueryIndicator.is_enabled() {
@@ -156,13 +196,22 @@ impl TerminalView {
                 prompt.clone(),
                 show_close_button,
                 show_send_now_button,
+                locked_for_pending_lrc,
                 ctx,
             );
+        } else {
+            // Still track lock state when the indicator flag is off so unlock/cancel
+            // lifecycle stays consistent.
+            self.pending_user_query_prompt = Some(prompt.clone());
+            self.pending_user_query_locked_for_lrc = locked_for_pending_lrc;
         }
         // Replace any previously queued prompt so the latest one always wins.
         self.queued_prompt_callback = Some(Box::new(move |terminal_view, reason, ctx| {
             if FeatureFlag::PendingUserQueryIndicator.is_enabled() {
                 terminal_view.remove_pending_user_query_block(ctx);
+            } else {
+                terminal_view.pending_user_query_locked_for_lrc = false;
+                terminal_view.pending_user_query_prompt = None;
             }
             match reason {
                 FinishReason::Complete => {

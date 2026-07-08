@@ -780,6 +780,9 @@ impl Input {
                 if is_in_progress {
                     ctx.dispatch_typed_action(&WorkspaceAction::QueuePromptForConversation {
                         prompt,
+                        show_close_button: true,
+                        show_send_now_button: true,
+                        locked_for_pending_lrc: false,
                     });
                 } else {
                     self.submit_queued_prompt(prompt, ctx);
