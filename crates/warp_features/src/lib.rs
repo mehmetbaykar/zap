@@ -368,6 +368,11 @@ pub enum FeatureFlag {
     /// Enables improvements to our natural language detection functionality.
     NldImprovements,
 
+    /// Gates NLD input classification matching the buffer against agent
+    /// prompt history (in addition to shell command history). Still in
+    /// development, so enabled only for dev/dogfood builds.
+    NldPromptHistoryMatch,
+
     /// Enables the ability to undo closed panes.
     UndoClosedPanes,
 
@@ -729,6 +734,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::ContextLineReviewComments,
     FeatureFlag::RunGeneratorsWithCmdExe,
     FeatureFlag::NLDClassifierModelEnabled,
+    FeatureFlag::NldPromptHistoryMatch,
     FeatureFlag::Projects,
     FeatureFlag::ProviderCommand,
     FeatureFlag::MarkdownImages,

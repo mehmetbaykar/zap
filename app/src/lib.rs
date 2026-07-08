@@ -1135,6 +1135,7 @@ fn initialize_app(
         object_actions,
         experiments,
         ai_queries,
+        nld_prompts,
         multi_agent_conversations,
         persisted_projects,
         persisted_project_rules,
@@ -1154,6 +1155,7 @@ fn initialize_app(
                 sqlite_data.object_actions,
                 sqlite_data.experiments,
                 sqlite_data.ai_queries,
+                sqlite_data.nld_prompts,
                 sqlite_data.multi_agent_conversations,
                 sqlite_data.projects,
                 sqlite_data.project_rules,
@@ -1164,6 +1166,7 @@ fn initialize_app(
         })
         .unwrap_or_else(|| {
             (
+                Default::default(),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1596,7 +1599,16 @@ fn initialize_app(
 
     {
         let conversations = &multi_agent_conversations;
-        ctx.add_singleton_model(move |_| BlocklistAIHistoryModel::new(ai_queries, conversations));
+        ctx.add_singleton_model(move |_| {
+            // Only wire NLD prompt history when the feature is enabled; disabled
+            // (stable/preview) builds skip this so they don't retain the prompt snapshot.
+            let nld_prompts = if FeatureFlag::NldPromptHistoryMatch.is_enabled() {
+                nld_prompts
+            } else {
+                Vec::new()
+            };
+            BlocklistAIHistoryModel::new(ai_queries, nld_prompts, conversations)
+        });
     }
     {
         let (restored, failed_to_restore) =
@@ -2543,6 +2555,8 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::AllowOpeningFileLinksUsingEditorEnv,
         #[cfg(feature = "nld_improvements")]
         FeatureFlag::NldImprovements,
+        #[cfg(feature = "nld_prompt_history_match")]
+        FeatureFlag::NldPromptHistoryMatch,
         #[cfg(feature = "revert_diff_hunk")]
         FeatureFlag::RevertDiffHunk,
         #[cfg(feature = "code_review_save_changes")]

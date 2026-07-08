@@ -83,7 +83,10 @@ use crate::env_vars::{EnvVarCollectionObject, EnvVarCollectionObjectModel};
 use crate::features::FeatureFlag;
 use crate::notebooks::{NotebookId, NotebookObject};
 use crate::persistence::agent::read_agent_conversations;
-use crate::persistence::block_list::{get_all_restored_blocks, read_ai_queries};
+use crate::persistence::block_list::{
+    get_all_restored_blocks, process_ai_queries_for_nld_history_match,
+    process_ai_queries_for_uparrow_prompt, read_recent_ai_queries,
+};
 use crate::persistence::model::{
     NewGenericStringObject, NewObjectStoreRefresh, NewPersistedObjectAction, NewTeamSettings,
     ProjectRules, UserProfile, CODE_REVIEW_PANE_KIND, GET_STARTED_PANE_KIND,
@@ -3264,7 +3267,17 @@ fn read_sqlite_data(
             .map(|refresh| refresh.time_of_next_refresh.and_utc())
             .min();
 
-    let ai_queries = read_ai_queries(conn)?;
+    // Seed up-arrow prompt history and (optionally) NLD prompt-history matching from a single
+    // SQLite read, deriving both from the same in-memory query vector instead of reading twice.
+    // TODO: Once up-arrow prompt history supports pagination, drop the 100-row up-arrow cap and
+    // serve both up-arrow and NLD matching from one consolidated query list.
+    let recent_ai_queries = read_recent_ai_queries(conn)?;
+    let nld_prompts = if FeatureFlag::NldPromptHistoryMatch.is_enabled() {
+        process_ai_queries_for_nld_history_match(&recent_ai_queries)
+    } else {
+        Vec::new()
+    };
+    let ai_queries = process_ai_queries_for_uparrow_prompt(recent_ai_queries);
 
     let multi_agent_conversations = read_agent_conversations(conn)?;
     let projects = get_all_projects(conn)?;
@@ -3284,6 +3297,7 @@ fn read_sqlite_data(
         object_actions,
         experiments: server_experiments,
         ai_queries,
+        nld_prompts,
         multi_agent_conversations,
         projects,
         project_rules,

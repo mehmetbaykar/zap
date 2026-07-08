@@ -198,6 +198,7 @@ pub struct PersistedData {
     pub object_actions: Vec<ObjectAction>,
     pub experiments: Vec<ServerExperiment>,
     pub ai_queries: Vec<PersistedAIInput>,
+    pub nld_prompts: Vec<(String, DateTime<Local>)>,
     pub multi_agent_conversations: Vec<AgentConversation>,
     pub projects: Vec<Project>,
     pub project_rules: Vec<ProjectRulePath>,
