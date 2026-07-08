@@ -313,6 +313,31 @@ impl FromStr for SettingsSection {
     }
 }
 
+/// Resolves a stable, friendly deeplink slug (used by
+/// `warp://settings?widget=<slug>`) to the settings page and `&'static str`
+/// widget id it should scroll to.
+///
+/// Only allowlisted widgets are linkable, so the public URL contract stays
+/// stable and internal widget identifiers (Rust type names) are not exposed.
+/// Add an entry here to make a new widget deep-linkable.
+///
+/// Note: upstream also seeded `custom_router` (CustomModelRouters); that feature
+/// is not present in Zap and is intentionally omitted.
+pub fn settings_widget_deeplink_target(slug: &str) -> Option<(SettingsSection, &'static str)> {
+    match slug {
+        "global_hotkey" => Some((
+            SettingsSection::Features,
+            features_page::global_hotkey_widget_id(),
+        )),
+        #[cfg(not(target_family = "wasm"))]
+        "cli_agents" => Some((
+            SettingsSection::ThirdPartyCLIAgents,
+            cli_agent_settings_widget_id(),
+        )),
+        _ => None,
+    }
+}
+
 pub struct DisplayCount(pub usize);
 
 impl Entity for DisplayCount {
