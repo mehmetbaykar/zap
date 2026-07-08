@@ -692,6 +692,9 @@ pub enum FeatureFlag {
     /// See Issue #72.
     HttpProxySettings,
 
+    /// Enables state-mutating recovery for abnormal terminal lifecycle sequences.
+    TerminalLifecycleRecovery,
+
     /// Renders MCP tool-call request and response JSON as an interactive
     /// collapsible tree with typed colors and per-row Copy JSON, instead of
     /// a flat pretty-printed blob.

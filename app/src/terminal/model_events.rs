@@ -20,6 +20,7 @@ use super::event::SshLoginStatus;
 use super::model::ansi::{FinishUpdateValue, WarpificationUnavailableReason};
 use super::model::block::BlockId;
 use super::model::completions::ShellCompletion;
+use super::model::lifecycle::LifecycleTelemetryEvent;
 use super::model::terminal_model::{ExitReason, TmuxControlModeContext, TmuxInstallationState};
 use super::model::tmux::commands::TmuxCommand;
 use super::{
@@ -300,6 +301,10 @@ impl ModelEventDispatcher {
                 ModelEvent::PluggableNotification { title, body }
             }
             Event::ExitShell { session_id } => ModelEvent::ExitShell { session_id },
+            Event::LifecycleRecovery(record) => {
+                crate::send_telemetry_from_ctx!(LifecycleTelemetryEvent::Recovery(record), ctx);
+                return;
+            }
             _ => return,
         };
 

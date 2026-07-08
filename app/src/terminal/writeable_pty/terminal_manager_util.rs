@@ -79,10 +79,17 @@ pub fn wire_up_pty_controller_with_view<T: EventLoopSender>(
                     return;
                 };
 
-                model_clone.lock().block_list_mut().active_block_mut().set_cloud_workflow_state(event.workflow_id);
-                controller.update(ctx, |controller, ctx| {
+                let outcome = controller.update(ctx, |controller, ctx| {
                     controller.write_command(&event.command, shell_type, event.source.clone(), ctx)
                 });
+                if !outcome.is_accepted() {
+                    return;
+                }
+                model_clone
+                    .lock()
+                    .block_list_mut()
+                    .active_block_mut()
+                    .set_cloud_workflow_state(event.workflow_id);
 
                 if event.should_add_command_to_history {
                     update_command_history(

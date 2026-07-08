@@ -2,6 +2,7 @@ mod selection;
 
 use crate::ai::agent::{conversation::AIConversationId, AIAgentActionId};
 use crate::ai::blocklist::SerializedBlockListItem;
+use super::lifecycle::NextBlockIdDisposition;
 use crate::terminal::block_filter::BlockFilterQuery;
 
 use crate::ai::blocklist::agent_view::{AgentViewDisplayMode, AgentViewState};
@@ -219,12 +220,6 @@ pub struct CachedPromptData {
     pub rprompt_grid: BlockGrid,
     /// The time at which the block containing these prompts was created.
     pub block_creation_time: DateTime<Local>,
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum NextBlockIdDisposition {
-    Novel,
-    ActiveDuplicate,
-    ExistingCollision,
 }
 
 /// Data about a particular scroll position relative to a block.
