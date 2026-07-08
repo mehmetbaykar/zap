@@ -3150,6 +3150,19 @@ impl ansi::Handler for TerminalModel {
                 self.block_list_mut().reinit_shell();
             }
 
+            // Zap diverges from upstream by not starting the WarpInput block at
+            // creation, so shell-less sessions (cloud mode) never look like a
+            // long-running command. `InitShell` is definitive evidence a real
+            // shell is attached, and upstream's lifecycle coordinator relies on
+            // the bootstrap block being started: an unstarted block reconciles
+            // the phase to `Unknown`, which recovery-gates the bootstrap's own
+            // `CommandFinished`/`Precmd` pair into a no-op when
+            // `TerminalLifecycleRecovery` is disabled (the release default),
+            // leaving the terminal stuck mid-bootstrap. Start it here instead.
+            if !self.block_list().active_block().started() {
+                self.block_list_mut().start_active_block();
+            }
+
             self.emit_handler_event(HandlerEvent::InitShell {
                 pending_session_info: Box::new(pending_session_info),
             });
