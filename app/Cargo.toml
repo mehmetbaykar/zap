@@ -550,6 +550,7 @@ default = [
     "github_pr_prompt_chip",
     "conversations_as_context",
     "markdown_tables",
+    "jupyter_notebook_rendering",
     "markdown_mermaid",
     "blocklist_markdown_images",
     "blocklist_markdown_table_rendering",
@@ -653,6 +654,7 @@ local_fs = [
     "repo_metadata/local_fs",
     "warp_core/local_fs",
 ]
+jupyter_notebook_rendering = []
 markdown_tables = []
 markdown_mermaid = []
 mcp_server = []
