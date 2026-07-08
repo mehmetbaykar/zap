@@ -744,10 +744,17 @@ impl Input {
                 // On the menu path with no argument, argument is Some(""); normalize it to None to avoid
                 // triggering an empty user query after summarizing and wasting tokens.
                 let initial_prompt = argument.cloned().filter(|p: &String| !p.is_empty());
-                ctx.dispatch_typed_action(&WorkspaceAction::SummarizeAIConversation {
+                let summarize = WorkspaceAction::SummarizeAIConversation {
                     prompt: None,
                     initial_prompt,
-                });
+                };
+                // Queued drains can run while TerminalView is mid-update; defer to avoid
+                // WarpUI's circular view update panic (upstream #13236).
+                if is_queued_prompt {
+                    ctx.dispatch_typed_action_deferred(summarize);
+                } else {
+                    ctx.dispatch_typed_action(&summarize);
+                }
             }
             queue if command.name == commands::QUEUE.name => {
                 let Some(conversation_id) = self
