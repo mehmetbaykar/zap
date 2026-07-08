@@ -1,8 +1,5 @@
-use std::collections::BTreeSet;
-
 use instant::Instant;
 use warp_core::features::FeatureFlag;
-use warp_core::telemetry::TelemetryEvent;
 
 use super::telemetry::{
     LifecycleRecoveryRecord, LifecycleTelemetryEvent, LifecycleTelemetryLimiter,
@@ -551,7 +548,7 @@ fn lifecycle_telemetry_is_rate_limited_per_transition_key() {
 }
 
 #[test]
-fn lifecycle_telemetry_payload_is_allowlisted_and_non_ugc() {
+fn lifecycle_telemetry_event_carries_only_allowlisted_evidence() {
     let record = LifecycleRecoveryRecord::new(
         LifecyclePhase::Executing,
         LifecyclePhase::Executing,
@@ -574,37 +571,30 @@ fn lifecycle_telemetry_payload_is_allowlisted_and_non_ugc() {
         },
     );
     let event = LifecycleTelemetryEvent::Recovery(record);
-    assert!(!event.contains_ugc());
-    let payload = event
-        .payload()
-        .expect("Lifecycle telemetry should have a payload.");
-    let fields = payload
-        .as_object()
-        .expect("Lifecycle telemetry should be a JSON object.")
-        .keys()
-        .map(String::as_str)
-        .collect::<BTreeSet<_>>();
+    // Zap physically removes outbound telemetry (`send_telemetry_from_ctx!` is a
+    // type-checking shim), so instead of asserting a serialized payload we assert the
+    // event carries exactly the allowlisted lifecycle evidence — identifiers and flags
+    // only, never UGC such as command text, output, or prompt contents.
+    let LifecycleTelemetryEvent::Recovery(record) = event;
+    assert_eq!(record.previous_phase, LifecyclePhase::Executing);
+    assert_eq!(record.next_phase, LifecyclePhase::Executing);
+    assert_eq!(record.input_kind, LifecycleInputKind::StartCommand);
     assert_eq!(
-        fields,
-        BTreeSet::from([
-            "action",
-            "active_block_id",
-            "active_session_id",
-            "block_state",
-            "completion_mismatch",
-            "finished",
-            "hook_session_id",
-            "input_kind",
-            "is_alt_screen_active",
-            "is_bootstrap_done",
-            "is_bootstrapped",
-            "is_in_band",
-            "next_phase",
-            "previous_phase",
-            "received_precmd",
-            "started",
-            "supplied_next_block_id",
-            "suppressed_repeats",
-        ])
+        record.action,
+        LifecycleAction::Ignore(IgnoreReason::RejectedExecuting)
     );
+    assert_eq!(record.active_block_id, "active");
+    assert_eq!(record.active_session_id, Some(1));
+    assert_eq!(record.supplied_next_block_id, Some("next".to_owned()));
+    assert_eq!(record.hook_session_id, Some(2));
+    assert_eq!(record.block_state, BlockState::Executing);
+    assert!(record.started);
+    assert!(!record.finished);
+    assert!(record.received_precmd);
+    assert!(!record.is_in_band);
+    assert!(record.is_bootstrapped);
+    assert!(record.is_bootstrap_done);
+    assert!(!record.is_alt_screen_active);
+    assert!(!record.completion_mismatch);
+    assert_eq!(record.suppressed_repeats, 0);
 }

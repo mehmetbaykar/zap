@@ -43,6 +43,44 @@ fn create_default_serialized_block() -> SerializedBlock {
     }
 }
 
+fn command_finished_and_precmd(terminal: &mut TerminalModel) {
+    let completion_metadata = CompletionMetadata {
+        exit_code: ExitCode::from(0),
+        next_block_id: BlockId::new(),
+    };
+    terminal.command_finished(CommandFinishedValue {
+        completion_metadata: completion_metadata.clone(),
+    });
+    terminal.precmd_with_completion_metadata(PrecmdValue {
+        completion_metadata,
+        prompt_metadata: PromptMetadata::default(),
+    });
+}
+
+fn normal_command_finished_and_precmd(
+    terminal: &mut TerminalModel,
+    prompt_metadata: PromptMetadata,
+) {
+    assert_eq!(
+        terminal.start_command_execution(),
+        StartCommandOutcome::Accepted
+    );
+    terminal.preexec(PreexecValue {
+        command: "completed".to_owned(),
+    });
+    let completion_metadata = CompletionMetadata {
+        exit_code: ExitCode::from(0),
+        next_block_id: BlockId::new(),
+    };
+    terminal.command_finished(CommandFinishedValue {
+        completion_metadata: completion_metadata.clone(),
+    });
+    terminal.precmd_with_completion_metadata(PrecmdValue {
+        completion_metadata,
+        prompt_metadata,
+    });
+}
+
 // Ensures that an ssh session successfully bootstraps even if the block list is empty.
 #[test]
 fn ssh_bootstraps_if_blocklist_empty() {
@@ -677,7 +715,6 @@ fn test_exit_alt_screen_on_command_finished() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "accepted".to_owned(),
-        session_id: None,
     });
 
     terminal.enter_alt_screen(true);
@@ -699,7 +736,6 @@ fn accepted_precmd_and_preexec_target_the_block_list_while_the_alt_screen_is_act
     terminal.enter_alt_screen(true);
     terminal.preexec(PreexecValue {
         command: "accepted".to_owned(),
-        session_id: None,
     });
     assert_eq!(
         terminal.block_list().active_block().state(),
@@ -742,7 +778,6 @@ fn test_unset_bracketed_paste_mode_on_command_finished() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "accepted".to_owned(),
-        session_id: None,
     });
 
     terminal.set_mode(Mode::BracketedPaste);
@@ -778,7 +813,6 @@ fn normal_lifecycle_pipeline_emits_completion_and_prompt_side_effects_once() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "false".to_owned(),
-        session_id: None,
     });
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: completion_metadata.clone()
@@ -882,7 +916,6 @@ fn repeated_and_executing_command_starts_are_safely_gated() {
 
     terminal.preexec(PreexecValue {
         command: "running".to_owned(),
-        session_id: None,
     });
     assert_eq!(
         terminal.start_command_execution(),
@@ -901,7 +934,6 @@ fn duplicate_and_colliding_completion_evidence_is_ignored() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "first".to_owned(),
-        session_id: None,
     });
     let first_block_id = terminal.active_block_id().clone();
     terminal.command_finished(CommandFinishedValue {
@@ -933,7 +965,6 @@ fn duplicate_and_colliding_completion_evidence_is_ignored() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "second".to_owned(),
-        session_id: None,
     });
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: CompletionMetadata {
@@ -962,7 +993,6 @@ fn terminal_exit_absorbs_later_lifecycle_inputs() {
     );
     terminal.preexec(PreexecValue {
         command: "ignored".to_owned(),
-        session_id: None,
     });
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: CompletionMetadata {
@@ -1244,7 +1274,6 @@ fn precmd_with_completion_metadata_records_completion_mismatch_without_overwriti
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "false".to_owned(),
-        session_id: None,
     });
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: CompletionMetadata {
@@ -1389,7 +1418,6 @@ fn precmd_with_completion_metadata_recovery_cleans_up_alt_screen_and_bracketed_p
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "vim".to_owned(),
-        session_id: None,
     });
     let completed_block_id = terminal.active_block_id().clone();
     terminal.set_mode(Mode::BracketedPaste);
@@ -1638,7 +1666,6 @@ fn repeated_precmd_with_completion_metadata_and_prompt_only_precmd_are_ignored()
             Event::BlockCompleted(_)
                 | Event::AfterBlockCompleted(_)
                 | Event::BlockMetadataReceived(_)
-                | Event::BlockWorkingDirectoryUpdated(_)
                 | Event::Handler(HandlerEvent::CommandFinished { .. })
                 | Event::Handler(HandlerEvent::Precmd { .. })
         )

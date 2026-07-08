@@ -12,6 +12,7 @@ use crate::terminal::{
     event_listener::ChannelEventListener,
 };
 use std::{path::PathBuf, sync::Arc};
+use warp_core::command::ExitCode;
 use warpui::r#async::executor::Background;
 
 fn terminal_with_startup_path(startup_path: Option<&str>) -> TerminalModel {

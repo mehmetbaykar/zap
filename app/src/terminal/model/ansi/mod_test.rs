@@ -637,7 +637,9 @@ fn pending_precmd_rejects_partial_or_invalid_completion_metadata() {
 }
 
 #[test]
-fn parse_dcs_unregistered_session_id_rejected() {
+fn parse_dcs_precmd_preserves_prompt_session_id() {
+    // Zap does not port upstream's hook-session-id registration/validation, so a
+    // Precmd hook always parses and its prompt session id is preserved verbatim.
     let bytes = hex_encoded_dcs_string(
         r#"{
                 "hook": "Precmd",
@@ -647,23 +649,7 @@ fn parse_dcs_unregistered_session_id_rejected() {
                 }
             }"#,
     );
-    let (_, handler) = parse_bytes_with_registered_sessions(&bytes, []);
-
-    assert_eq!(handler.d_proto_hooks.len(), 0);
-}
-
-#[test]
-fn parse_dcs_unregistered_session_id_allowed_when_validation_disabled() {
-    let bytes = hex_encoded_dcs_string(
-        r#"{
-                "hook": "Precmd",
-                "value": {
-                    "pwd": "/Users",
-                    "session_id": 167303092612201
-                }
-            }"#,
-    );
-    let (_, handler) = parse_bytes_with_registered_sessions_and_validation(&bytes, [], false);
+    let (_, handler) = parse_bytes(&bytes);
 
     assert_eq!(handler.d_proto_hooks.len(), 1);
     match handler.d_proto_hooks.first().unwrap() {

@@ -1076,8 +1076,9 @@ impl TerminalModel {
         // implementation of `SessionInfo::determine_session_type()` for more
         // details.)
         let hostname = get_local_hostname().unwrap_or_else(|_| "localhost".to_string());
+        let session_id = SessionId::from(123);
         terminal_model.init_shell(InitShellValue {
-            session_id: 123.into(),
+            session_id,
             shell: "zsh".to_owned(),
             hostname,
             ..Default::default()
