@@ -2297,9 +2297,9 @@ impl PaneGroup {
     }
 
     /// Returns the path to copy for the currently focused pane: the open file's display path
-    /// if the focused pane is the rendered file viewer (`FilePane`), otherwise the focused
-    /// terminal session's working directory (raw pwd, falling back to the user-friendly
-    /// display form). `None` if the focused pane is neither, or yields no path.
+    /// if the focused pane is a file/code viewer, otherwise the focused terminal session's
+    /// working directory (raw pwd, falling back to the user-friendly display form).
+    /// `None` if the focused pane is neither, or yields no path.
     pub fn path_from_focused_pane(&self, ctx: &AppContext) -> Option<String> {
         let focused_pane_id = self.focused_pane_id(ctx);
 
@@ -2307,8 +2307,18 @@ impl PaneGroup {
             return file_pane
                 .file_view(ctx)
                 .as_ref(ctx)
-                .path()
-                .map(|path| path.display_path());
+                .local_path()
+                .map(|path| path.display().to_string());
+        }
+
+        #[cfg(feature = "local_fs")]
+        if focused_pane_id.is_code_pane() {
+            if let Some(path) = self
+                .downcast_pane_by_id::<CodePane>(focused_pane_id)
+                .and_then(|pane| pane.file_view(ctx).as_ref(ctx).local_path(ctx))
+            {
+                return Some(path.display().to_string());
+            }
         }
 
         let terminal_view = self.focused_session_view(ctx)?;

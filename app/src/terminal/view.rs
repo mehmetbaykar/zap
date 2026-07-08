@@ -5314,7 +5314,7 @@ impl TerminalView {
         &mut self,
         cli_subagent_view_id: EntityId,
         event: &CLISubagentViewEvent,
-        should_forward_windows_ctrl_c: bool,
+        #[cfg_attr(not(windows), allow(unused_variables))] should_forward_windows_ctrl_c: bool,
         ctx: &mut ViewContext<Self>,
     ) {
         match event {

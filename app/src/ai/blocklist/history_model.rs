@@ -2425,7 +2425,6 @@ fn reconcile_dangling_tool_calls_in_forked_task(
                     task_id: task.id.clone(),
                     server_message_data: String::new(),
                     citations: vec![],
-                    fetched_memories: vec![],
                     message: Some(warp_multi_agent_api::message::Message::ToolCallResult(
                         warp_multi_agent_api::message::ToolCallResult {
                             tool_call_id: tool_call_id.clone(),
