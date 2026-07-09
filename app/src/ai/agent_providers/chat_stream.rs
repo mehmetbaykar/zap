@@ -14,7 +14,7 @@
 //! | OpenAi         | OpenAI       | https://api.openai.com/v1                      |
 //! | OpenAiResp     | OpenAIResp   | https://api.openai.com/v1 (uses /v1/responses) |
 //! | Gemini         | Gemini       | https://generativelanguage.googleapis.com/v1beta |
-//! | Anthropic      | Anthropic    | https://api.anthropic.com                      |
+//! | Anthropic      | Anthropic    | https://api.anthropic.com/v1 (goes through /v1/messages) |
 //! | Ollama         | Ollama       | http://localhost:11434                         |
 //!
 //! The user-entered `base_url` always overrides the default. This way:
@@ -1182,6 +1182,7 @@ fn build_chat_request(
     let plan_mode = is_plan_mode_turn(&params.input);
     let tool_names = available_tool_names(params);
     let mut system_text = prompt_renderer::render_system(
+        api_type,
         &params.model,
         agent_ctx,
         &tool_names,
@@ -1308,6 +1309,14 @@ fn build_chat_request(
     // `unexpected tool_use_id ... no corresponding tool_use block`.
     let mut skipped_subagent_call_ids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    // Zap: only strip suspected tool JSON from AgentOutput when a structured ToolCall
+    // actually landed under the SAME task_id — evidence scoped to the whole history would
+    // wrongly clip plain-text answers from other turns (different task_id).
+    let tasks_with_tool_call: std::collections::HashSet<&str> = all_msgs
+        .iter()
+        .filter(|msg| matches!(msg.message, Some(api::message::Message::ToolCall(_))))
+        .map(|msg| msg.task_id.as_str())
+        .collect();
 
     for (idx, msg) in all_msgs.iter().enumerate() {
         // Summary request: the tail interval isn't sent upstream (only head + SUMMARY_TEMPLATE appended at the end)
@@ -1398,6 +1407,23 @@ fn build_chat_request(
                 }
             }
             api::message::Message::AgentOutput(a) => {
+                // Local Ollama models often land tool JSON as AgentOutput text, with the
+                // structured ToolCall + ToolCallResult following in the same turn. Re-sending it
+                // upstream drowns the real summary and causes C3 amnesia. Strip only when (a) a
+                // structured ToolCall already landed under the same task_id AND (b) this text
+                // itself yields executable calls via extract_tool_calls_from_assistant_text —
+                // `contains_tool_shaped_json` returns true for any string `name` key (e.g. a
+                // pasted package.json) and would misjudge legitimate answers as tool-JSON noise.
+                if api_type == AgentProviderApiType::Ollama
+                    && tasks_with_tool_call.contains(msg.task_id.as_str())
+                    && !super::content_tool_calls::extract_tool_calls_from_assistant_text(
+                        &a.text,
+                        &tool_names,
+                    )
+                    .is_empty()
+                {
+                    continue;
+                }
                 if buf.text.is_some() || !buf.tool_calls.is_empty() {
                     flush_assistant_buffer(&mut buf, &mut messages, &mut outbound_tool_groups);
                 }
@@ -1807,6 +1833,7 @@ fn log_chat_request_details(
     chat_req: &ChatRequest,
     model_id: &str,
     api_type: AgentProviderApiType,
+    base_url: &str,
 ) {
     let system_in_head = matches!(api_type, AgentProviderApiType::Anthropic)
         && chat_req
@@ -1824,7 +1851,7 @@ fn log_chat_request_details(
         "[byop-diag] request summary: adapter={:?} model={} system_len={} \
          system_in_messages_head={} messages={} tools={} tool_names={:?} \
          previous_response_id_present={} store={:?} system_snippet={:?}",
-        adapter_kind_for(api_type),
+        effective_adapter_kind_for(api_type, model_id, base_url),
         model_id,
         chat_req.system.as_deref().map(str::len).unwrap_or(0),
         system_in_head,
@@ -2782,6 +2809,61 @@ fn adapter_kind_for(api_type: AgentProviderApiType) -> AdapterKind {
     }
 }
 
+/// OpenAI's official gpt-5 / codex family only accepts `/v1/responses` when
+/// function tools + reasoning_effort are present; `/v1/chat/completions` returns 400.
+fn openai_model_requires_responses_api(model_id: &str) -> bool {
+    let id = model_id.to_ascii_lowercase();
+    id.starts_with("gpt-5") || id.starts_with("codex")
+}
+
+/// Claude model-id heuristic (tolerates namespace prefixes like `anthropic/claude-sonnet-4-6`).
+fn is_claude_model(model_id: &str) -> bool {
+    let id = model_id.to_ascii_lowercase();
+    let bare = id.rsplit('/').next().unwrap_or(&id);
+    bare.contains("claude-") || bare.starts_with("claude")
+}
+
+/// Whether `base_url` points at the official Anthropic Messages API host.
+fn is_anthropic_api_host(base_url: &str) -> bool {
+    url::Url::parse(base_url.trim())
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| host == "api.anthropic.com" || host.ends_with(".anthropic.com"))
+}
+
+/// Whether `base_url` points at the official OpenAI API host. The automatic
+/// `/v1/responses` upgrade only applies to the official host: chat-completions-only
+/// relays like one-api / LiteLLM often keep the official model id, and forcing the
+/// Responses API there would 404.
+fn is_openai_api_host(base_url: &str) -> bool {
+    url::Url::parse(base_url.trim())
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| host == "api.openai.com" || host.ends_with(".openai.com"))
+}
+
+/// Resolves the genai adapter that should actually be used, based on the user's
+/// configured `api_type`, the model id, and the `base_url`.
+///
+/// - `OpenAi` + official host + gpt-5.4 etc. → `OpenAIResp` (`/v1/responses`)
+/// - `OpenAi` + `api.anthropic.com` + a claude model → `Anthropic` (`/v1/messages`)
+fn effective_adapter_kind_for(
+    api_type: AgentProviderApiType,
+    model_id: &str,
+    base_url: &str,
+) -> AdapterKind {
+    let base = adapter_kind_for(api_type);
+    if api_type == AgentProviderApiType::OpenAi {
+        if is_anthropic_api_host(base_url) && is_claude_model(model_id) {
+            return AdapterKind::Anthropic;
+        }
+        if is_openai_api_host(base_url) && openai_model_requires_responses_api(model_id) {
+            return AdapterKind::OpenAIResp;
+        }
+    }
+    base
+}
+
 /// Normalizes the user-entered `base_url`, producing the endpoint URL for the genai adapter to concatenate the service path onto.
 ///
 /// All genai 0.6.x adapters assume the endpoint ends with `/` and already contains the version path segment:
@@ -2796,6 +2878,10 @@ fn adapter_kind_for(api_type: AgentProviderApiType) -> AdapterKind {
 ///    Gemini→`/v1beta/`, Ollama doesn't append).
 /// 2. full with version path (`https://ai.zerx.dev/v1`) — only append a trailing `/`, leaving the path untouched.
 /// 3. left empty — use [`AgentProviderApiType::default_base_url`].
+///
+/// Extra Anthropic tolerance: if the user pastes the full endpoint (`…/v1/messages`),
+/// strip the trailing `messages` segment so genai doesn't concatenate again into
+/// `…/messages/messages`.
 fn normalize_endpoint_url(api_type: AgentProviderApiType, base_url: &str) -> String {
     let trimmed = base_url.trim();
     if trimmed.is_empty() {
@@ -2803,13 +2889,33 @@ fn normalize_endpoint_url(api_type: AgentProviderApiType, base_url: &str) -> Str
     }
 
     // Parse failure (the user entered a malformed URL) → degrade to the original "append trailing /" behavior, letting the upstream error rather than panicking here.
-    let parsed = match url::Url::parse(trimmed) {
+    let mut parsed = match url::Url::parse(trimmed) {
         Ok(u) => u,
         Err(_) => {
             let stripped = trimmed.trim_end_matches('/');
             return format!("{stripped}/");
         }
     };
+
+    if api_type == AgentProviderApiType::Anthropic || is_anthropic_api_host(trimmed) {
+        let path = parsed.path().trim_end_matches('/');
+        if let Some(prefix) = path.strip_suffix("/messages") {
+            let new_path = if prefix.is_empty() { "/" } else { prefix };
+            parsed.set_path(&format!("{new_path}/"));
+        }
+    }
+
+    // Ollama's native API lives at the host root (`/api/chat`) with no `/v1/` prefix.
+    // A historical default_base_url mistakenly used `/v1/`, and users bring `/v1`
+    // over from OpenAI habit — strip it here so we don't concatenate `/v1/api/chat`.
+    if api_type == AgentProviderApiType::Ollama {
+        let path = parsed.path().trim_end_matches('/');
+        if path.is_empty() || path == "/" || path == "/v1" {
+            let mut normalized = parsed.clone();
+            normalized.set_path("/");
+            return normalized.to_string();
+        }
+    }
 
     // path == "/" or empty → the user entered only the host, so automatically append the api_type default version path segment.
     if parsed.path() == "/" || parsed.path().is_empty() {
@@ -2823,7 +2929,8 @@ fn normalize_endpoint_url(api_type: AgentProviderApiType, base_url: &str) -> Str
     }
 
     // The user already brought a path → only ensure a trailing `/` (genai format!/Url::join both depend on it).
-    let stripped = trimmed.trim_end_matches('/');
+    let normalized = parsed.to_string();
+    let stripped = normalized.trim_end_matches('/');
     format!("{stripped}/")
 }
 
@@ -2832,18 +2939,31 @@ fn normalize_endpoint_url(api_type: AgentProviderApiType, base_url: &str) -> Str
 /// to the specified AdapterKind, completely bypassing genai's default "identify by model name".
 pub(super) fn build_client(
     api_type: AgentProviderApiType,
-    base_url: String,
+    base_url: &str,
     api_key: String,
 ) -> Client {
-    let adapter_kind = adapter_kind_for(api_type);
-    let endpoint_url = normalize_endpoint_url(api_type, &base_url);
-    log::info!("[byop] build_client: adapter={adapter_kind:?} endpoint_url={endpoint_url}");
+    let endpoint_url = normalize_endpoint_url(api_type, base_url);
+    log::info!("[byop] build_client: api_type={api_type:?} endpoint_url={endpoint_url}");
     let key_for_resolver = api_key.clone();
     let resolver = ServiceTargetResolver::from_resolver_fn(
         move |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
             let ServiceTarget { model, .. } = service_target;
             let endpoint = Endpoint::from_owned(endpoint_url.clone());
             let auth = AuthData::from_single(key_for_resolver.clone());
+            let model_name = model.model_name.as_str();
+            let adapter_kind = effective_adapter_kind_for(api_type, model_name, &endpoint_url);
+            if api_type == AgentProviderApiType::OpenAi && adapter_kind == AdapterKind::OpenAIResp {
+                log::info!(
+                    "[byop] auto-upgrade OpenAi → OpenAIResp for model={model_name} \
+                     (function tools + reasoning_effort require /v1/responses)"
+                );
+            }
+            if api_type == AgentProviderApiType::OpenAi && adapter_kind == AdapterKind::Anthropic {
+                log::info!(
+                    "[byop] auto-upgrade OpenAi → Anthropic for model={model_name} \
+                     (official Anthropic host requires /v1/messages)"
+                );
+            }
             // Override genai's "by model name" identification result with our specified AdapterKind,
             // but keep model_name so the upstream service addresses the model correctly.
             let model = ModelIden::new(adapter_kind, model.model_name);
@@ -2892,7 +3012,10 @@ pub(super) fn build_client(
                     &proxy_cfg.password,
                     &proxy_cfg.no_proxy,
                 ) {
-                    log::warn!("[byop] proxy URL '{}' is invalid; skipping proxy config: {err}", proxy_cfg.url);
+                    log::warn!(
+                        "[byop] proxy URL '{}' is invalid; skipping proxy config: {err}",
+                        proxy_cfg.url
+                    );
                 }
             }
         }
@@ -3229,7 +3352,24 @@ pub async fn generate_byop_output(
     // Only activate streaming extraction for models known to embed reasoning in <think> tags (such as MiniMax M3).
     // Other models keep their original Chunk output behavior, to avoid swallowing normal text containing a literal <think>.
     let use_think_extraction = super::reasoning::model_uses_think_tags_in_content(&model_id);
-    let chat_req = build_chat_request(&params, force_echo_reasoning, api_type, attachment_caps)?;
+    // Zap: request shaping (Anthropic cache_control / system-in-messages layout) must follow
+    // the adapter that actually goes on the wire, not the user-configured api_type — OpenAi +
+    // official Anthropic host + a claude model gets routed to the Anthropic adapter by
+    // effective_adapter_kind_for, and shaping it as OpenAi would drop every prompt cache
+    // breakpoint, significantly raising agentic multi-turn cost. For Ollama and the other
+    // api_types the effective adapter always equals the original, so shaping_api_type == api_type.
+    let shaping_api_type =
+        if effective_adapter_kind_for(api_type, &model_id, &base_url) == AdapterKind::Anthropic {
+            AgentProviderApiType::Anthropic
+        } else {
+            api_type
+        };
+    let chat_req = build_chat_request(
+        &params,
+        force_echo_reasoning,
+        shaping_api_type,
+        attachment_caps,
+    )?;
     let conversation_id = params
         .conversation_token
         .as_ref()
@@ -3247,9 +3387,10 @@ pub async fn generate_byop_output(
             Some(conversation_id.as_str())
         },
     );
-    let client = build_client(api_type, base_url, api_key);
+    let client = build_client(api_type, &base_url, api_key);
     let request_id = Uuid::new_v4().to_string();
     let mcp_context = params.mcp_context.clone();
+    let tool_names_for_extract = available_tool_names(&params);
 
     // ⚠️ BYOP persistence key: on warp's own path, the following ClientActions are all emitted by the server
     // to have the client write "non-model-produced" messages like UserQuery / ToolCallResult
@@ -3291,7 +3432,7 @@ pub async fn generate_byop_output(
     // to messages[0] in order to apply `cache_control`, so `chat_req.system` will be None and `system_len`
     // shows as 0; the actual system content is still in messages[0] (see the per-item report below). To avoid misleading
     // the diagnoser, we add a `system_in_messages_head` hint here.
-    log_chat_request_details(&chat_req, &model_id, api_type);
+    log_chat_request_details(&chat_req, &model_id, shaping_api_type, &base_url);
 
     // Diagnostics: construct a full ChatRequest JSON dump containing system / messages / tools, saved into the
     // stream closure. The real Anthropic wire body is converted one more layer by the genai adapter, but this already
@@ -3603,6 +3744,13 @@ pub async fn generate_byop_output(
         let mut tool_chunk_count: u32 = 0;
         let mut end_count: u32 = 0;
         let mut other_count: u32 = 0;
+        let mut captured_assistant_text: Option<String> = None;
+        // For providers like Ollama, End.captured_content is sometimes empty even though
+        // the Chunk events already delivered the body; the streamed accumulation is the
+        // reliable source for content→tool extraction (assistant body only; hypothetical
+        // command descriptions inside reasoning must not be treated as executable tool
+        // calls — see extract_sources below).
+        let mut streamed_assistant_text = String::new();
         // Accumulate this turn's token usage. genai carries
         // captured_usage (Option<Usage>) in the ChatStreamEvent::End event, where prompt_tokens is this turn's entire history
         // (Anthropic / OpenAI both count by the "full request prompt") and completion_tokens is the model output.
@@ -3659,6 +3807,7 @@ pub async fn generate_byop_output(
                 ChatStreamEvent::Chunk(c) if !c.content.is_empty() => {
                     chunk_count += 1;
                     chunk_bytes += c.content.len();
+                    streamed_assistant_text.push_str(&c.content);
                     if use_think_extraction {
                         // <think> tag streaming extraction: only activated for models within the THINK_TAG_IN_CONTENT_MODELS allowlist.
                         // Route the <think>...</think> segments in /delta/content to the reasoning channel,
@@ -3853,6 +4002,11 @@ pub async fn generate_byop_output(
                     // Prefer the tool_calls in captured_content (more complete),
                     // otherwise use the tool_bufs accumulated during streaming.
                     if let Some(content) = end.captured_content.as_ref() {
+                        if let Some(text) = content.first_text() {
+                            if !text.is_empty() {
+                                captured_assistant_text = Some(text.to_owned());
+                            }
+                        }
                         let mut captured_order: Vec<String> = Vec::new();
                         for call in content.tool_calls() {
                             if !captured_order.contains(&call.call_id) {
@@ -3903,12 +4057,65 @@ pub async fn generate_byop_output(
             }
         }
 
+        // Zap: the content→tool extraction fallback only applies to Ollama, symmetric with
+        // the history filtering at :1412 — if a cloud provider's (OpenAI/Anthropic/...) body
+        // happens to look like tool JSON (e.g. the model is explaining a JSON example), it
+        // must not be misinterpreted as a real ToolCall to execute.
+        if tool_bufs.is_empty() && api_type == AgentProviderApiType::Ollama {
+            let extract_sources: [&str; 2] = [
+                streamed_assistant_text.as_str(),
+                captured_assistant_text.as_deref().unwrap_or(""),
+            ];
+            let mut parsed_any_text = false;
+            for text in extract_sources.into_iter().filter(|t| !t.is_empty()) {
+                parsed_any_text = true;
+                let extracted = super::content_tool_calls::extract_tool_calls_from_assistant_text(
+                    text,
+                    &tool_names_for_extract,
+                );
+                if extracted.is_empty() {
+                    continue;
+                }
+                log::info!(
+                    "[byop] content_tool_extract: found={} names={:?} source_len={}",
+                    extracted.len(),
+                    extracted
+                        .iter()
+                        .map(|call| call.fn_name.as_str())
+                        .collect::<Vec<_>>(),
+                    text.len()
+                );
+                for call in extracted {
+                    let call_id = call.call_id.clone();
+                    if !tool_bufs.contains_key(&call_id) {
+                        tool_order.push(call_id.clone());
+                    }
+                    tool_bufs.insert(call_id, call);
+                }
+                break;
+            }
+            if tool_bufs.is_empty() && parsed_any_text {
+                let preview: String = streamed_assistant_text.chars().take(240).collect();
+                log::info!(
+                    "[byop] content_tool_extract: no tools parsed (streamed={}B captured={}B) \
+                     preview={preview:?}",
+                    streamed_assistant_text.len(),
+                    captured_assistant_text.as_ref().map(|t| t.len()).unwrap_or(0),
+                );
+            } else if tool_bufs.is_empty() {
+                log::warn!(
+                    "[byop] content_tool_extract: skipped — no assistant text in stream \
+                     (chunks={chunk_count} reasoning={reasoning_count})"
+                );
+            }
+        }
+
         // Stream stats INFO log. When chunk_count=0 && tool_count=0 the upstream returned empty,
         // most likely because model_id isn't recognized / max_tokens is missing / an Anthropic-API-compatible proxy returned 200 but an empty body.
         let total_tools = tool_bufs.len();
         log::info!(
             "[byop] stream stats: start={start_count} chunks={chunk_count} ({chunk_bytes}B) \
-             reasoning={reasoning_count} ({reasoning_bytes}B) tool_chunks={tool_chunk_count} \
+             reasoning={reasoning_count} ({reasoning_bytes}B) native_tool_chunks={tool_chunk_count} \
              ends={end_count} other={other_count} captured_tools={total_tools}"
         );
         // P0-6 prompt cache hit-rate log (only printed when the provider returns cache fields).
@@ -5473,6 +5680,153 @@ mod build_chat_options_off_tests {
     }
 }
 
+#[cfg(test)]
+mod adapter_routing_tests {
+    use super::*;
+    use genai::adapter::AdapterKind;
+
+    const OPENAI_HOST: &str = "https://api.openai.com/v1/";
+    const ANTHROPIC_HOST: &str = "https://api.anthropic.com/v1/";
+    const OPENROUTER_HOST: &str = "https://openrouter.ai/api/v1/";
+
+    #[test]
+    fn openai_gpt54_auto_upgrades_to_responses_api() {
+        assert_eq!(
+            effective_adapter_kind_for(AgentProviderApiType::OpenAi, "gpt-5.4", OPENAI_HOST),
+            AdapterKind::OpenAIResp
+        );
+    }
+
+    #[test]
+    fn openai_gpt4o_stays_on_chat_completions() {
+        assert_eq!(
+            effective_adapter_kind_for(AgentProviderApiType::OpenAi, "gpt-4o", OPENAI_HOST),
+            AdapterKind::OpenAI
+        );
+    }
+
+    #[test]
+    fn openai_resp_api_type_unchanged() {
+        assert_eq!(
+            effective_adapter_kind_for(AgentProviderApiType::OpenAiResp, "gpt-5.4", OPENAI_HOST),
+            AdapterKind::OpenAIResp
+        );
+    }
+
+    #[test]
+    fn openai_claude_on_anthropic_host_auto_upgrades() {
+        assert_eq!(
+            effective_adapter_kind_for(
+                AgentProviderApiType::OpenAi,
+                "claude-sonnet-4-6",
+                ANTHROPIC_HOST
+            ),
+            AdapterKind::Anthropic
+        );
+    }
+
+    #[test]
+    fn openai_claude_on_openrouter_stays_openai() {
+        assert_eq!(
+            effective_adapter_kind_for(
+                AgentProviderApiType::OpenAi,
+                "anthropic/claude-sonnet-4-6",
+                OPENROUTER_HOST
+            ),
+            AdapterKind::OpenAI
+        );
+    }
+
+    #[test]
+    fn openai_gpt54_on_relay_host_stays_on_chat_completions() {
+        // Chat-completions-only relays like one-api / LiteLLM keep the official model id;
+        // the automatic Responses API upgrade must apply only to the official host, else 404.
+        assert_eq!(
+            effective_adapter_kind_for(AgentProviderApiType::OpenAi, "gpt-5.4", OPENROUTER_HOST),
+            AdapterKind::OpenAI
+        );
+    }
+
+    #[test]
+    fn anthropic_api_type_unchanged() {
+        assert_eq!(
+            effective_adapter_kind_for(
+                AgentProviderApiType::Anthropic,
+                "claude-opus-4-7",
+                ANTHROPIC_HOST
+            ),
+            AdapterKind::Anthropic
+        );
+    }
+}
+
+#[cfg(test)]
+mod anthropic_endpoint_tests {
+    use super::*;
+
+    #[test]
+    fn host_only_gets_v1_prefix() {
+        assert_eq!(
+            normalize_endpoint_url(AgentProviderApiType::Anthropic, "https://api.anthropic.com"),
+            "https://api.anthropic.com/v1/"
+        );
+    }
+
+    #[test]
+    fn strips_trailing_messages_path() {
+        assert_eq!(
+            normalize_endpoint_url(
+                AgentProviderApiType::Anthropic,
+                "https://api.anthropic.com/v1/messages"
+            ),
+            "https://api.anthropic.com/v1/"
+        );
+    }
+
+    #[test]
+    fn strips_messages_even_when_api_type_openai_but_host_is_anthropic() {
+        assert_eq!(
+            normalize_endpoint_url(
+                AgentProviderApiType::OpenAi,
+                "https://api.anthropic.com/v1/messages"
+            ),
+            "https://api.anthropic.com/v1/"
+        );
+    }
+}
+
+#[cfg(test)]
+mod ollama_endpoint_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_v1_default_base_url_is_rescued() {
+        // The historical default_base_url was `http://localhost:11434/v1/` and is persisted
+        // in existing settings; normalize must strip `/v1` back to the host root, else we
+        // concatenate `/v1/api/chat` and 404.
+        assert_eq!(
+            normalize_endpoint_url(AgentProviderApiType::Ollama, "http://localhost:11434/v1/"),
+            "http://localhost:11434/"
+        );
+    }
+
+    #[test]
+    fn host_only_passes_through_with_trailing_slash() {
+        assert_eq!(
+            normalize_endpoint_url(AgentProviderApiType::Ollama, "http://localhost:11434"),
+            "http://localhost:11434/"
+        );
+    }
+
+    #[test]
+    fn custom_path_is_preserved() {
+        assert_eq!(
+            normalize_endpoint_url(AgentProviderApiType::Ollama, "http://box:11434/ollama"),
+            "http://box:11434/ollama/"
+        );
+    }
+}
+
 /// **End-to-end cache boundary stability tests**: verify, under a multi-turn conversation simulation, the
 /// "byte-level prefix consistency" guarantee that prompt cache requires. These tests do not call the upstream API; they only check
 /// the determinism of `apply_caching_anthropic` and `build_chat_options` output.
@@ -6801,6 +7155,61 @@ mod serializer_readiness_tests {
         params.compaction_state = Some(compaction_state);
 
         assert_build_request_blocked(params, "MissingResultWithoutRepairSource");
+    }
+
+    #[test]
+    fn smoke_build_chat_request_simple_user_query_succeeds() {
+        let params = request_params(
+            vec![make_user_query_message(
+                "task-1",
+                "req-1",
+                "hello".to_owned(),
+                &[],
+            )],
+            vec![user_query_input("hello")],
+        );
+        let request = build_openai_request(&params).expect("simple user query should serialize");
+        assert!(
+            !request.messages.is_empty(),
+            "expected at least one chat message"
+        );
+        assert_request_has_no_repair_placeholder(&request);
+    }
+
+    #[test]
+    fn smoke_build_chat_request_pending_live_tool_call_is_pending_not_blocked() {
+        let user_message = make_user_query_message("task-1", "req-1", "hi".to_owned(), &[]);
+        let tool_call_message = make_tool_call_message("task-1", "req-1", "call-1", shell_tool());
+        let assistant_message_id = tool_call_message.id.clone();
+        let params = request_params(
+            vec![user_message, tool_call_message],
+            vec![user_query_input("continue")],
+        );
+
+        let pending_report = classify_byop_controller_readiness_with_live_tool_calls(
+            &params,
+            vec![LiveToolCall::new(
+                ToolCallRef::new(
+                    ToolCallKey::new("task-1", assistant_message_id, "call-1"),
+                    kind(),
+                ),
+                LiveToolCallState::Running,
+            )],
+        );
+        assert!(
+            matches!(
+                pending_report.state,
+                ReadinessState::PendingToolResults { .. }
+            ),
+            "running tool should wait, not block: {:?}",
+            pending_report.state
+        );
+
+        let build_result = build_openai_request(&params);
+        assert!(
+            build_result.is_err(),
+            "serializer must not send while tool is still running"
+        );
     }
 }
 

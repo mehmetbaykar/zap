@@ -25,9 +25,7 @@ use minijinja::{Environment, Value};
 use serde::Serialize;
 
 use crate::ai::agent::AIAgentContext;
-
-// ---------------------------------------------------------------------------
-// Template environment
+use crate::settings::AgentProviderApiType;
 // ---------------------------------------------------------------------------
 
 static ENV: OnceLock<Environment<'static>> = OnceLock::new();
@@ -101,6 +99,7 @@ fn build_env() -> Environment<'static> {
             "system/trinity.j2",
             include_str!("prompts/system/trinity.j2"),
         ),
+        ("system/local.j2", include_str!("prompts/system/local.j2")),
     ] {
         env.add_template(name, src)
             .unwrap_or_else(|e| panic!("template {name} parses: {e}"));
@@ -120,6 +119,17 @@ fn env() -> &'static Environment<'static> {
 /// Selects a template by model id substring matching (aligned with opencode
 /// `packages/opencode/src/session/system.ts::provider`).
 ///
+/// Ollama / local BYOP routes through the short `local.j2` template (see the
+/// `api_type` parameter), so the 9k+ default.j2 doesn't drown a small model's
+/// context window.
+pub fn pick_template(model_id: &str, api_type: AgentProviderApiType) -> &'static str {
+    if api_type == AgentProviderApiType::Ollama {
+        return "system/local.j2";
+    }
+    pick_template_by_model(model_id)
+}
+
+/// Picks a template by model-id substring match (no provider-level override).
 /// Matching rules (order-sensitive, first match wins):
 /// - `gpt-4` / `o1` / `o3` / `o4` → beast (strong autonomy + sequential thinking)
 /// - other `gpt` containing `codex` → codex (apply_file_diffs + strict final answer formatting)
@@ -132,7 +142,7 @@ fn env() -> &'static Environment<'static> {
 ///
 /// Matching is done after lowercasing throughout, handling user casing like `GPT-4o` / `OPENAI/gpt-4o` / `Anthropic/Claude-3.5`.
 /// The OpenRouter form `provider/model` also matches correctly.
-pub fn pick_template(model_id: &str) -> &'static str {
+fn pick_template_by_model(model_id: &str) -> &'static str {
     let id = model_id.to_ascii_lowercase();
 
     if id.contains("gpt-4") || id.contains("o1") || id.contains("o3") || id.contains("o4") {
@@ -397,6 +407,7 @@ pub fn render_init_project_command(arguments: Option<&str>) -> String {
 /// don't hardcode an "unavailable tools" blocklist anymore —— the model naturally won't call tools it can't see,
 /// whereas a text blocklist would make the model afraid to call even the tools that are actually available.
 pub fn render_system(
+    api_type: AgentProviderApiType,
     model: &LLMId,
     ctx: &[AIAgentContext],
     available_tools: &[String],
@@ -404,7 +415,7 @@ pub fn render_system(
     user_rules: &[(Option<String>, String)],
 ) -> String {
     let model_id = model_id_from_llm_id(model);
-    let template_name = pick_template(&model_id);
+    let template_name = pick_template(&model_id, api_type);
     let mut prompt_ctx = collect_prompt_context(&model_id, ctx);
     prompt_ctx.available_tools = available_tools.to_vec();
     prompt_ctx.plan_mode = plan_mode;
@@ -464,6 +475,18 @@ mod tests {
     }
 
     #[test]
+    fn pick_template_ollama_uses_local_template() {
+        assert_eq!(
+            pick_template("qwen2.5-coder", AgentProviderApiType::Ollama),
+            "system/local.j2"
+        );
+        assert_eq!(
+            pick_template("llama3.1", AgentProviderApiType::Ollama),
+            "system/local.j2"
+        );
+    }
+
+    #[test]
     fn pick_template_dispatches_by_model_family() {
         // direct-connection form
         for (id, want) in [
@@ -488,7 +511,11 @@ mod tests {
             ("my-custom-model", "system/default.j2"),
             ("", "system/default.j2"),
         ] {
-            assert_eq!(pick_template(id), want, "id={id}");
+            assert_eq!(
+                pick_template(id, AgentProviderApiType::OpenAi),
+                want,
+                "id={id}"
+            );
         }
     }
 
@@ -504,7 +531,11 @@ mod tests {
             ("google/gemini-2.5-flash", "system/gemini.j2"),
             ("moonshot/kimi-k2", "system/kimi.j2"),
         ] {
-            assert_eq!(pick_template(id), want, "id={id}");
+            assert_eq!(
+                pick_template(id, AgentProviderApiType::OpenAi),
+                want,
+                "id={id}"
+            );
         }
     }
 
@@ -517,7 +548,11 @@ mod tests {
             ("KIMI-K2", "system/kimi.j2"),
             ("Anthropic/Claude-3.5", "system/anthropic.j2"),
         ] {
-            assert_eq!(pick_template(id), want, "id={id}");
+            assert_eq!(
+                pick_template(id, AgentProviderApiType::OpenAi),
+                want,
+                "id={id}"
+            );
         }
     }
 
@@ -538,7 +573,14 @@ mod tests {
                 shell_version: Some("5.1".into()),
             }),
         ];
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx, &[], false, &[]);
+        let out = render_system(
+            AgentProviderApiType::OpenAi,
+            &LLMId::from("byop:p:deepseek-chat"),
+            &ctx,
+            &[],
+            false,
+            &[],
+        );
         assert!(
             out.contains("Working directory: /home/user/project"),
             "{out}"
@@ -563,6 +605,7 @@ mod tests {
             "weird-model",
         ] {
             let out = render_system(
+                AgentProviderApiType::OpenAi,
                 &LLMId::from(format!("byop:p:{id}").as_str()),
                 &[],
                 &[],
@@ -578,7 +621,14 @@ mod tests {
 
     #[test]
     fn render_omits_skills_block_when_empty() {
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false, &[]);
+        let out = render_system(
+            AgentProviderApiType::OpenAi,
+            &LLMId::from("byop:p:deepseek-chat"),
+            &[],
+            &[],
+            false,
+            &[],
+        );
         // when there are no skills, the skills block should not appear
         assert!(
             !out.contains("Skills provide specialized instructions"),
@@ -605,7 +655,14 @@ mod tests {
         let ctx = vec![AIAgentContext::Skills {
             skills: vec![skill],
         }];
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx, &[], false, &[]);
+        let out = render_system(
+            AgentProviderApiType::OpenAi,
+            &LLMId::from("byop:p:deepseek-chat"),
+            &ctx,
+            &[],
+            false,
+            &[],
+        );
         assert!(
             out.contains(skill_path),
             "system prompt must expose the skill_path so the model can pass it to read_skill; got: {out}"
@@ -632,7 +689,14 @@ mod tests {
         let ctx = vec![AIAgentContext::Skills {
             skills: vec![skill],
         }];
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx, &[], false, &[]);
+        let out = render_system(
+            AgentProviderApiType::OpenAi,
+            &LLMId::from("byop:p:deepseek-chat"),
+            &ctx,
+            &[],
+            false,
+            &[],
+        );
         assert!(
             out.contains("find-skills"),
             "bundled skill name should still appear in prompt: {out}"
@@ -650,7 +714,14 @@ mod tests {
     #[test]
     fn fallback_does_not_panic() {
         // render_system never panics; on failure it goes through fallback_system
-        let out = render_system(&LLMId::from("byop:p:any"), &[], &[], false, &[]);
+        let out = render_system(
+            AgentProviderApiType::OpenAi,
+            &LLMId::from("byop:p:any"),
+            &[],
+            &[],
+            false,
+            &[],
+        );
         assert!(!out.is_empty());
     }
 
@@ -664,6 +735,7 @@ mod tests {
             "mcp__github__create_issue".into(),
         ];
         let out = render_system(
+            AgentProviderApiType::OpenAi,
             &LLMId::from("byop:p:deepseek-chat"),
             &[],
             &tools,
@@ -686,13 +758,27 @@ mod tests {
     #[test]
     fn render_omits_tool_list_when_empty() {
         // tool_names is empty (in theory this won't happen; fallback: don't render the allowlist section)
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false, &[]);
+        let out = render_system(
+            AgentProviderApiType::OpenAi,
+            &LLMId::from("byop:p:deepseek-chat"),
+            &[],
+            &[],
+            false,
+            &[],
+        );
         assert!(!out.contains("Available Tools"), "{out}");
     }
 
     #[test]
     fn plan_mode_off_omits_plan_block() {
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false, &[]);
+        let out = render_system(
+            AgentProviderApiType::OpenAi,
+            &LLMId::from("byop:p:deepseek-chat"),
+            &[],
+            &[],
+            false,
+            &[],
+        );
         assert!(
             !out.contains("Plan Mode (Read-Only)"),
             "plan_mode=false should not contain the Plan Mode section: {out}"
@@ -712,6 +798,7 @@ mod tests {
             "weird-model",
         ] {
             let out = render_system(
+                AgentProviderApiType::OpenAi,
                 &LLMId::from(format!("byop:p:{id}").as_str()),
                 &[],
                 &[],
@@ -734,7 +821,14 @@ mod tests {
 
     #[test]
     fn render_omits_user_rules_block_when_empty() {
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false, &[]);
+        let out = render_system(
+            AgentProviderApiType::OpenAi,
+            &LLMId::from("byop:p:deepseek-chat"),
+            &[],
+            &[],
+            false,
+            &[],
+        );
         assert!(
             !out.contains("# User rules"),
             "should not render the user rules block when user_rules is empty: {out}"
@@ -748,6 +842,7 @@ mod tests {
             "Always use snake_case in Rust.".to_string(),
         )];
         let out = render_system(
+            AgentProviderApiType::OpenAi,
             &LLMId::from("byop:p:deepseek-chat"),
             &[],
             &[],
@@ -788,6 +883,7 @@ mod tests {
             "weird-model",
         ] {
             let out = render_system(
+                AgentProviderApiType::OpenAi,
                 &LLMId::from(format!("byop:p:{id}").as_str()),
                 &[],
                 &[],
@@ -810,6 +906,7 @@ mod tests {
             (Some("R3".to_string()), "third content".to_string()),
         ];
         let out = render_system(
+            AgentProviderApiType::OpenAi,
             &LLMId::from("byop:p:deepseek-chat"),
             &[],
             &[],
@@ -844,6 +941,7 @@ mod tests {
     fn render_user_rules_handles_no_name() {
         let rules = vec![(None, "Be terse.".to_string())];
         let out = render_system(
+            AgentProviderApiType::OpenAi,
             &LLMId::from("byop:p:deepseek-chat"),
             &[],
             &[],
@@ -876,6 +974,7 @@ mod tests {
             "weird-model",
         ] {
             let out = render_system(
+                AgentProviderApiType::OpenAi,
                 &LLMId::from(format!("byop:p:{id}").as_str()),
                 &[],
                 &[],
@@ -899,6 +998,7 @@ mod tests {
         // We need to pass a non-empty tool list, otherwise the entire tool_aliases.j2 block is skipped by {% if available_tools %}.
         let tools = vec!["read_files".to_string()];
         let out = render_system(
+            AgentProviderApiType::OpenAi,
             &LLMId::from("byop:p:claude-sonnet-4-5"),
             &[],
             &tools,

@@ -671,7 +671,7 @@ pub enum AgentProviderApiType {
     OpenAiResp,
     /// Google Gemini native protocol (generativelanguage.googleapis.com).
     Gemini,
-    /// Anthropic Messages API native protocol (api.anthropic.com).
+    /// Anthropic Messages API native protocol (`POST /v1/messages`, default `api.anthropic.com/v1/`).
     Anthropic,
     /// Ollama native protocol (local or self-hosted Ollama).
     Ollama,
@@ -798,7 +798,7 @@ impl AgentProviderApiType {
             Self::OpenAiResp => "https://api.openai.com/v1/",
             Self::Gemini => "https://generativelanguage.googleapis.com/v1beta/",
             Self::Anthropic => "https://api.anthropic.com/v1/",
-            Self::Ollama => "http://localhost:11434/v1/",
+            Self::Ollama => "http://localhost:11434/",
             Self::DeepSeek => "https://api.deepseek.com/v1/",
         }
     }
@@ -833,7 +833,7 @@ pub struct AgentProvider {
     pub api_type: AgentProviderApiType,
 
     /// API base URL, e.g. `https://api.deepseek.com/v1`,
-    /// `http://localhost:11434/v1`. Don't include a trailing slash, but the code
+    /// `http://localhost:11434`. Don't include a trailing slash, but the code
     /// side is tolerant of it.
     pub base_url: String,
 
@@ -1184,7 +1184,11 @@ impl PerAgentSettings {
             agent,
             CLIAgent::Claude | CLIAgent::Codex | CLIAgent::Gemini | CLIAgent::Antigravity
         );
-        Self { toolbar: true, tabmenu: true, titlebar }
+        Self {
+            toolbar: true,
+            tabmenu: true,
+            titlebar,
+        }
     }
 }
 
@@ -2511,7 +2515,10 @@ impl AISettings {
         let mut map = self.cli_agent_per_agent_settings.clone();
         map.entry(key)
             .and_modify(|s| s.toolbar = enabled)
-            .or_insert_with(|| PerAgentSettings { toolbar: enabled, ..PerAgentSettings::default_for(agent) });
+            .or_insert_with(|| PerAgentSettings {
+                toolbar: enabled,
+                ..PerAgentSettings::default_for(agent)
+            });
         report_if_error!(self.cli_agent_per_agent_settings.set_value(map, ctx));
     }
 
@@ -2526,7 +2533,10 @@ impl AISettings {
         let mut map = self.cli_agent_per_agent_settings.clone();
         map.entry(key)
             .and_modify(|s| s.tabmenu = enabled)
-            .or_insert_with(|| PerAgentSettings { tabmenu: enabled, ..PerAgentSettings::default_for(agent) });
+            .or_insert_with(|| PerAgentSettings {
+                tabmenu: enabled,
+                ..PerAgentSettings::default_for(agent)
+            });
         report_if_error!(self.cli_agent_per_agent_settings.set_value(map, ctx));
     }
 
@@ -2541,7 +2551,10 @@ impl AISettings {
         let mut map = self.cli_agent_per_agent_settings.clone();
         map.entry(key)
             .and_modify(|s| s.titlebar = enabled)
-            .or_insert_with(|| PerAgentSettings { titlebar: enabled, ..PerAgentSettings::default_for(agent) });
+            .or_insert_with(|| PerAgentSettings {
+                titlebar: enabled,
+                ..PerAgentSettings::default_for(agent)
+            });
         report_if_error!(self.cli_agent_per_agent_settings.set_value(map, ctx));
     }
 
