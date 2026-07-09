@@ -26,6 +26,17 @@ fn sample_provider(id: &str) -> AgentProvider {
 
 fn init_byop_test_app(app: &mut warpui::App) {
     initialize_settings_for_tests(app);
+    // This fork's LLMPreferences reconciles disabled-model preferences on model-list
+    // updates (upstream warp #10085), which reads the execution-profiles singleton;
+    // register it like the other model-refresh tests do.
+    app.add_singleton_model(crate::cloud_object::model::persistence::ObjectStoreModel::mock);
+    app.add_singleton_model(|_| crate::ai::mcp::templatable_manager::TemplatableMCPServerManager::default());
+    app.add_singleton_model(|ctx| {
+        crate::ai::execution_profiles::profiles::AIExecutionProfilesModel::new(
+            &crate::LaunchMode::new_for_unit_test(),
+            ctx,
+        )
+    });
     app.add_singleton_model(AgentProviderSecrets::new);
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
