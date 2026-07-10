@@ -54,9 +54,14 @@ use crate::workspaces::workspace::{Workspace as WorkspaceMetadata, WorkspaceUid}
 use self::model::{AgentConversation, AgentConversationData, Project};
 
 #[cfg(any(feature = "local_fs", feature = "integration_tests"))]
-pub use sqlite::database_file_path;
+pub use sqlite::database_file_path_for_scope;
 #[cfg(any(feature = "local_fs", feature = "integration_tests"))]
 pub use sqlite::establish_ro_connection;
+
+pub enum PersistenceScope {
+    App,
+    RemoteServerDaemon { identity_key: String },
+}
 
 /// Initializes the persistence "subsystem".
 ///
@@ -64,10 +69,13 @@ pub use sqlite::establish_ro_connection;
 /// writing updated data to persist, if the persistence subsystem is
 /// available.
 #[cfg_attr(not(feature = "local_fs"), allow(unused_variables))]
-pub fn initialize(ctx: &mut AppContext) -> (Option<PersistedData>, Option<WriterHandles>) {
+pub fn initialize(
+    ctx: &mut AppContext,
+    scope: PersistenceScope,
+) -> (Option<PersistedData>, Option<WriterHandles>) {
     cfg_if::cfg_if! {
         if #[cfg(feature = "local_fs")] {
-            sqlite::initialize(ctx)
+            sqlite::initialize(ctx, scope)
         } else {
             (None, None)
         }

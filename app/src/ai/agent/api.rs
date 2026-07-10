@@ -34,6 +34,8 @@ use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::StoredObject;
+#[cfg(not(target_family = "wasm"))]
+use crate::remote_server::codebase_index_model::RemoteCodebaseIndexModel;
 use crate::settings::AISettings;
 use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
 use crate::workspaces::user_workspaces::UserWorkspaces;
@@ -114,6 +116,7 @@ pub struct RequestParams {
     pub web_search_enabled: bool,
     pub computer_use_enabled: bool,
     pub ask_user_question_enabled: bool,
+    pub remote_codebase_search_available: bool,
     pub research_agent_enabled: bool,
     pub supported_tools_override: Option<Vec<warp_multi_agent_api::ToolType>>,
     /// Zap BYOP only: local conversation id, used only for request-readiness diagnostic logs.
@@ -228,6 +231,7 @@ impl RequestParams {
             web_search_enabled: false,
             computer_use_enabled: false,
             ask_user_question_enabled: false,
+            remote_codebase_search_available: false,
             research_agent_enabled: false,
             supported_tools_override: None,
             byop_conversation_id: Some(AIConversationId::new()),
@@ -332,8 +336,10 @@ impl RequestParams {
         let should_redact_secrets = get_secret_obfuscation_mode(app).should_redact_secret();
 
         let user_workspaces = UserWorkspaces::as_ref(app);
-        let api_keys = ApiKeyManager::as_ref(app).api_keys_for_request(
-            user_workspaces.is_byo_api_key_enabled(),
+        let api_key_manager = ApiKeyManager::as_ref(app);
+        let is_byo_enabled = user_workspaces.is_byo_api_key_enabled();
+        let api_keys = api_key_manager.api_keys_for_request(
+            is_byo_enabled,
             user_workspaces.is_aws_bedrock_credentials_enabled(app),
         );
         let allow_use_of_warp_credits_with_byok =
@@ -371,6 +377,13 @@ impl RequestParams {
         let ask_user_question_enabled = BlocklistAIPermissions::as_ref(app)
             .get_ask_user_question_setting(app, terminal_view_id)
             != crate::ai::execution_profiles::AskUserQuestionPermission::Never;
+        #[cfg(not(target_family = "wasm"))]
+        let remote_codebase_search_available = FeatureFlag::RemoteCodebaseIndexing.is_enabled()
+            && RemoteCodebaseIndexModel::as_ref(app)
+                .active_repo_availability(&session_context, None)
+                .is_ready();
+        #[cfg(target_family = "wasm")]
+        let remote_codebase_search_available = false;
 
         let byop_target_task_id = if request_input.input_messages.len() == 1 {
             request_input
@@ -386,7 +399,8 @@ impl RequestParams {
         // current `LLMContextWindow` instead of trusting whatever was stored
         // last. If the active model isn't configurable or has been removed
         // server-side, drop the override; otherwise clamp it to the model's
-        // current `[min, max]` range.
+        // current `[min, max]` range. This closes the window between an
+        // in-flight model metadata refresh and the next request.
         let context_window_limit = {
             let profile_data = AIExecutionProfilesModel::as_ref(app)
                 .active_profile(terminal_view_id, app)
@@ -428,6 +442,7 @@ impl RequestParams {
             web_search_enabled,
             computer_use_enabled,
             ask_user_question_enabled,
+            remote_codebase_search_available,
             research_agent_enabled,
             supported_tools_override: request_input.supported_tools_override.clone(),
             byop_conversation_id: Some(conversation.id),

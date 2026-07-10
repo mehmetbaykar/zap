@@ -13,6 +13,7 @@ pub(crate) mod api_error;
 pub(crate) mod artifact_download;
 pub mod artifacts;
 pub(crate) mod attachment_utils;
+pub mod auth_secret_types;
 #[cfg(not(target_family = "wasm"))]
 pub mod aws_credentials;
 pub(crate) mod block_context;
@@ -26,15 +27,15 @@ pub(crate) mod conversation_utils;
 pub(crate) mod document;
 pub(crate) mod harness_display;
 pub(crate) mod llms;
+pub(crate) mod local_child_harnesses;
 pub mod onboarding;
 pub(crate) mod predict;
 pub(crate) mod project_rules_persister;
-pub mod request_usage_model;
 pub(crate) mod restored_conversations;
+pub mod request_usage_model;
 pub(crate) mod skills;
 pub(crate) mod voice;
 pub use agent_tips::*;
-pub use request_usage_model::*;
 use warpui::AppContext;
 #[cfg(not(target_family = "wasm"))]
 pub mod agent_sdk;
@@ -58,3 +59,5 @@ pub fn init(app: &mut AppContext) {
     blocklist::suggested_rule_modal::init(app);
     ai_document_view::init(app);
 }
+
+pub use request_usage_model::*;

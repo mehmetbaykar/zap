@@ -610,5 +610,5 @@ fn backspace_keystroke_to_escape_sequence(keystroke: &Keystroke) -> Option<Vec<u
 }
 
 #[cfg(test)]
-#[path = "escape_sequences_test.rs"]
+#[path = "escape_sequences_tests.rs"]
 mod tests;

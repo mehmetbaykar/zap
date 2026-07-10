@@ -1809,5 +1809,5 @@ where
 //
 // Byte sequences used in these tests are recording of pty stdout.
 #[cfg(test)]
-#[path = "mod_test.rs"]
+#[path = "mod_tests.rs"]
 mod tests;

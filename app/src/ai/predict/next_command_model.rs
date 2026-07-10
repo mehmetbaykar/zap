@@ -2,6 +2,8 @@ use crate::ai::api_error::AIApiError;
 use crate::ai::block_context::BlockContext;
 use crate::ai_assistant::execution_context::WarpAiExecutionContext;
 use crate::completer::SessionContext;
+#[cfg(feature = "local_fs")]
+use crate::persistence::{database_file_path_for_scope, establish_ro_connection, PersistenceScope};
 use crate::report_error;
 use crate::settings::AISettings;
 use crate::terminal::event::UserBlockCompleted;
@@ -209,10 +211,10 @@ pub enum NextCommandModelEvent {
 impl NextCommandModel {
     pub fn new(sessions: ModelHandle<Sessions>, model: Arc<FairMutex<TerminalModel>>) -> Self {
         #[cfg(feature = "local_fs")]
-        let conn = crate::persistence::database_file_path()
+        let conn = database_file_path_for_scope(&PersistenceScope::App)
             .to_str()
             .and_then(|db_url| {
-                crate::persistence::establish_ro_connection(db_url)
+                establish_ro_connection(db_url)
                     .ok()
                     .map(|conn| Arc::new(Mutex::new(conn)))
             });
@@ -892,5 +894,5 @@ fn find_potential_autosuggestions_from_history<'a>(
 }
 
 #[cfg(test)]
-#[path = "next_command_model_test.rs"]
+#[path = "next_command_model_tests.rs"]
 mod tests;

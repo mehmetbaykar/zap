@@ -328,14 +328,16 @@ impl PaneContent for TerminalPane {
         if view.model.lock().shared_session_status().is_viewer() {
             // We save and restore ambient agent sessions
             // (restoring the shared session if it's still open and the conversation transcript otherwise).
-            let ambient_model = view.ambient_agent_view_model().as_ref(app);
-            if ambient_model.is_ambient_agent() {
-                let task_id = ambient_model.task_id();
+            if let Some(ambient_model) = view.ambient_agent_view_model() {
+                let ambient_model = ambient_model.as_ref(app);
+                if ambient_model.is_ambient_agent() {
+                    let task_id = ambient_model.task_id();
 
-                return LeafContents::AmbientAgent(AmbientAgentPaneSnapshot {
-                    uuid: self.uuid.clone(),
-                    task_id,
-                });
+                    return LeafContents::AmbientAgent(AmbientAgentPaneSnapshot {
+                        uuid: self.uuid.clone(),
+                        task_id,
+                    });
+                }
             }
 
             LeafContents::Terminal(TerminalPaneSnapshot {
@@ -1102,6 +1104,8 @@ fn handle_ai_history_event(
         | BlocklistAIHistoryEvent::UpgradedTask { .. }
         | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. }
         | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
-        | BlocklistAIHistoryEvent::ConversationAgentIdAssigned { .. } => (),
+        | BlocklistAIHistoryEvent::ConversationAgentIdAssigned { .. }
+        | BlocklistAIHistoryEvent::ConversationOwnershipTransferred { .. }
+        | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. } => (),
     }
 }

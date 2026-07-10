@@ -13,7 +13,8 @@ use crate::{
             BlocklistAIInputModel,
         },
         execution_profiles::profiles::AIExecutionProfilesModel,
-        AIRequestUsageModel,
+        // Zap (Phase 3c A1): `AIRequestUsageModel` (cloud AI-request quota/credits tracking)
+        // was removed along with the rest of the subscription quota subsystem.
     },
     appearance::Appearance,
     completer::SessionContext,
@@ -561,7 +562,7 @@ impl AgentInputFooter {
                 menu_positioning_provider.clone(),
                 terminal_view_id,
                 ai_input_model,
-                ambient_agent_view_model.clone(),
+                Some(ambient_agent_view_model.clone()),
                 terminal_model.clone(),
                 None,
                 ctx,
@@ -594,9 +595,8 @@ impl AgentInputFooter {
         ctx.subscribe_to_model(&UserWorkspaces::handle(ctx), |_, _, _, ctx| {
             ctx.notify();
         });
-        ctx.subscribe_to_model(&AIRequestUsageModel::handle(ctx), |_, _, _, ctx| {
-            ctx.notify()
-        });
+        // Zap (Phase 3c A1): removed the `AIRequestUsageModel` subscription (cloud AI-request
+        // quota/credits tracking); the subsystem no longer exists so there's nothing to notify on.
         ctx.subscribe_to_model(&AISettings::handle(ctx), |_, _, event, ctx| {
             if let AISettingsChangedEvent::AIAutoDetectionEnabled { .. } = event {
                 ctx.notify()

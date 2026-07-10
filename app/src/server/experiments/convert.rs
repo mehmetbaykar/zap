@@ -24,6 +24,8 @@ impl Display for ServerExperiment {
             }
             Self::OzMultiHarnessControl => "OZ_MULTI_HARNESS_CONTROL",
             Self::OzMultiHarnessExperiment => "OZ_MULTI_HARNESS_EXPERIMENT",
+            Self::SshRemoteServerControl => "SSH_REMOTE_SERVER_CONTROL",
+            Self::SshRemoteServerExperiment => "SSH_REMOTE_SERVER_EXPERIMENT",
             #[cfg(test)]
             Self::TestExperiment => "TEST_EXPERIMENT",
         };
@@ -46,6 +48,8 @@ impl ServerExperiment {
             "PROMPT_SUGGESTIONS_VIA_MAA_EXPERIMENT" => Ok(Self::PromptSuggestionsViaMaaExperiment),
             "OZ_MULTI_HARNESS_CONTROL" => Ok(Self::OzMultiHarnessControl),
             "OZ_MULTI_HARNESS_EXPERIMENT" => Ok(Self::OzMultiHarnessExperiment),
+            "SSH_REMOTE_SERVER_CONTROL" => Ok(Self::SshRemoteServerControl),
+            "SSH_REMOTE_SERVER_EXPERIMENT" => Ok(Self::SshRemoteServerExperiment),
             s => Err(anyhow::anyhow!(
                 "String doesn't match any server experiment variant {s}"
             )),

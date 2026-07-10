@@ -104,7 +104,7 @@ pub struct BlocklistAIStatusBar {
     terminal_model: Arc<FairMutex<TerminalModel>>,
     shimmering_text_handle: ShimmeringTextStateHandle,
     state_handles: StateHandles,
-    ambient_agent_view_model: ModelHandle<AmbientAgentViewModel>,
+    ambient_agent_view_model: Option<ModelHandle<AmbientAgentViewModel>>,
 
     autoexecute_keystroke: Option<Keystroke>,
     queue_next_prompt_keystroke: Option<Keystroke>,
@@ -146,7 +146,7 @@ impl BlocklistAIStatusBar {
         model_event_dispatcher: &ModelHandle<ModelEventDispatcher>,
         terminal_model: Arc<FairMutex<TerminalModel>>,
         shortcut_view_model: ModelHandle<AgentShortcutViewModel>,
-        ambient_agent_view_model: ModelHandle<AmbientAgentViewModel>,
+        ambient_agent_view_model: Option<ModelHandle<AmbientAgentViewModel>>,
         input_suggestions_model: ModelHandle<InputSuggestionsModeModel>,
         slash_command_model: ModelHandle<SlashCommandModel>,
         ephemeral_message_model: ModelHandle<EphemeralMessageModel>,
@@ -347,20 +347,22 @@ impl BlocklistAIStatusBar {
         let child_agent_status_card = ctx.add_typed_action_view(|ctx| {
             ChildAgentStatusCard::new(agent_view_controller.clone(), ctx)
         });
-        ctx.subscribe_to_model(&ambient_agent_view_model, |me, _, event, ctx| match event {
-            AmbientAgentViewModelEvent::DispatchedAgent
-            | AmbientAgentViewModelEvent::ProgressUpdated => {
-                me.update_agent_tip(ctx);
-                ctx.notify();
-            }
-            AmbientAgentViewModelEvent::SessionReady
-            | AmbientAgentViewModelEvent::Failed { .. }
-            | AmbientAgentViewModelEvent::NeedsGithubAuth
-            | AmbientAgentViewModelEvent::Cancelled => {
-                ctx.notify();
-            }
-            _ => (),
-        });
+        if let Some(ambient_agent_view_model) = ambient_agent_view_model.as_ref() {
+            ctx.subscribe_to_model(ambient_agent_view_model, |me, _, event, ctx| match event {
+                AmbientAgentViewModelEvent::DispatchedAgent
+                | AmbientAgentViewModelEvent::ProgressUpdated => {
+                    me.update_agent_tip(ctx);
+                    ctx.notify();
+                }
+                AmbientAgentViewModelEvent::SessionReady
+                | AmbientAgentViewModelEvent::Failed { .. }
+                | AmbientAgentViewModelEvent::NeedsGithubAuth
+                | AmbientAgentViewModelEvent::Cancelled => {
+                    ctx.notify();
+                }
+                _ => (),
+            });
+        }
 
         Self {
             active_exchange_model: None,
@@ -1084,16 +1086,25 @@ impl View for BlocklistAIStatusBar {
             warping_indicator
         } else if self
             .ambient_agent_view_model
-            .as_ref(app)
-            .is_waiting_for_session()
+            .as_ref()
+            .is_some_and(|ambient_agent_view_model| {
+                ambient_agent_view_model
+                    .as_ref(app)
+                    .is_waiting_for_session()
+            })
         {
             // Don't render warping indicator - the loading screen is shown in the main view
             return Empty::new().finish();
         } else if agent_view_controller.is_active() {
-            return Flex::column()
-                .with_child(ChildView::new(&self.child_agent_status_card).finish())
-                .with_child(ChildView::new(&self.agent_message_bar).finish())
-                .finish();
+            // The new orchestration pill bar in the agent view header
+            // replaces the legacy child-agent status card rows; when
+            // it's enabled, render only the message bar here.
+            let mut column = Flex::column();
+            if !FeatureFlag::OrchestrationPillBar.is_enabled() {
+                column = column.with_child(ChildView::new(&self.child_agent_status_card).finish());
+            }
+            column = column.with_child(ChildView::new(&self.agent_message_bar).finish());
+            return column.finish();
         } else {
             return Empty::new().finish();
         };
@@ -1159,8 +1170,9 @@ impl View for BlocklistAIStatusBar {
 
         // When the agent view is active, keep the child agent status card
         // visible above the warping/status indicator so it doesn't disappear
-        // while the agent is working.
-        if agent_view_controller.is_active() {
+        // while the agent is working. The new orchestration pill bar
+        // replaces this card, so skip it when that flag is on.
+        if agent_view_controller.is_active() && !FeatureFlag::OrchestrationPillBar.is_enabled() {
             return Flex::column()
                 .with_child(ChildView::new(&self.child_agent_status_card).finish())
                 .with_child(container.finish())

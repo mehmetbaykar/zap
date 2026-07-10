@@ -127,13 +127,13 @@ impl PaneContent for CodePane {
                 CodeViewEvent::TabChanged { file_path, .. } => {
                     if let Some(path) = file_path {
                         pane_group.active_file_model().update(ctx, |model, ctx| {
-                            model.active_file_changed(path.clone(), ctx);
+                            model.active_file_changed(crate::code::buffer_location::BufferLocation::Local(path.clone()), ctx);
                         });
                     }
                 }
                 CodeViewEvent::FileOpened { file_path, .. } => {
                     pane_group.active_file_model().update(ctx, |model, ctx| {
-                        model.active_file_changed(file_path.clone(), ctx);
+                        model.active_file_changed(crate::code::buffer_location::BufferLocation::Local(file_path.clone()), ctx);
                     });
 
                     // Track the opened file in the OpenedFilesModel

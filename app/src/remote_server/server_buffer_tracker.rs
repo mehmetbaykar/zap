@@ -190,6 +190,23 @@ impl ServerBufferTracker {
             .push((request_id, conn_id, kind));
     }
 
+    /// Returns the connection IDs that have pending `OpenBuffer` requests
+    /// for the given FileId, without consuming them. Used by the
+    /// `ServerLocalBufferUpdated` handler to exclude connections that will
+    /// receive content via `OpenBufferResponse` instead of the broadcast push.
+    pub fn pending_connections_for_open_buffer(&self, file_id: &FileId) -> HashSet<ConnectionId> {
+        self.pending_requests
+            .get(file_id)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|(_, _, kind)| matches!(kind, PendingBufferRequestKind::OpenBuffer))
+                    .map(|(_, conn_id, _)| *conn_id)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Retrieve and remove pending requests that match `kind` for the given
     /// FileId. Other pending requests for the same FileId are left in place.
     pub fn take_pending_by_kind(

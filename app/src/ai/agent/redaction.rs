@@ -56,10 +56,12 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
             AIAgentInput::SummarizeConversation {
                 prompt,
                 overflow: _,
+                context,
             } => {
                 if let Some(p) = prompt {
                     redact_secrets(p);
                 }
+                redact_context(Arc::make_mut(context));
             }
             AIAgentInput::TriggerPassiveSuggestion {
                 context,
@@ -213,6 +215,8 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
                     AIAgentActionResultType::AskUserQuestion(result) => {
                         redact_ask_user_question_result(result);
                     }
+                    // Orchestrate results contain agent IDs / canonical error
+                    // strings only; no user-provided text to redact.
                 }
             }
             AIAgentInput::FetchReviewComments { repo_path, context } => {

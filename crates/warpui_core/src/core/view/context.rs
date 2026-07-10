@@ -921,5 +921,5 @@ impl<V: View> GetSingletonModelHandle for ViewContext<'_, V> {
 }
 
 #[cfg(test)]
-#[path = "context_test.rs"]
+#[path = "context_tests.rs"]
 mod tests;

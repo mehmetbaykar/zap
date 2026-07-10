@@ -217,7 +217,12 @@ fi
 if [[ "$ARTIFACT" == "cli" ]]; then
   FEATURES="$FEATURES,standalone"
 elif [[ "$ARTIFACT" == "app" ]]; then
-  FEATURES="$FEATURES,gui,nld_improvements"
+  FEATURES="$FEATURES,gui"
+  if [[ "$RELEASE_CHANNEL" == "local" || "$RELEASE_CHANNEL" == "dev" ]]; then
+    FEATURES="$FEATURES,nld_classifier_v2"
+  else
+    FEATURES="$FEATURES,nld_classifier_v1"
+  fi
 fi
 
 if [[ $RELEASE_CHANNEL = "oss" ]]; then

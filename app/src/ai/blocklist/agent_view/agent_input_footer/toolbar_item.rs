@@ -89,6 +89,11 @@ impl AgentToolbarItemKind {
     /// Whether this item should be visible to session viewers.
     /// Items that control host settings or initiate actions on the host's
     /// behalf are hidden from viewers.
+    /// The fork has no cloud handoff; every toolbar item is always available.
+    pub fn is_available(&self, _app: &warpui::AppContext) -> bool {
+        true
+    }
+
     pub fn available_to_session_viewer(
         &self,
         status: &SharedSessionStatus,

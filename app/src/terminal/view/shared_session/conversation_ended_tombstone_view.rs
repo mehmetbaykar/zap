@@ -52,6 +52,9 @@ struct TombstoneDisplayData {
     /// Records the task execution harness when it can be obtained from local data.
     #[cfg(not(target_family = "wasm"))]
     harness: Option<Harness>,
+    /// Hides the continue-locally / open-in-warp actions when the task never
+    /// produced a usable session (e.g. environment setup failed).
+    hide_continue_actions: bool,
 }
 
 impl TombstoneDisplayData {
@@ -99,6 +102,7 @@ impl TombstoneDisplayData {
         Self {
             title: conversation.title(),
             is_error,
+            hide_continue_actions: false,
             error_message,
             conversation_is_transcript,
             source: None,
@@ -139,6 +143,9 @@ impl TombstoneDisplayData {
             self.is_error = true;
             if let Some(status_message) = &task.status_message {
                 self.error_message = Some(status_message.message.clone());
+                if status_message.is_environment_setup_failure() {
+                    self.hide_continue_actions = true;
+                }
             }
         }
 
@@ -200,7 +207,7 @@ impl ConversationEndedTombstoneView {
             ctx.add_typed_action_view(|ctx| ArtifactButtonsRow::new(&display_data.artifacts, ctx));
 
         #[cfg(not(target_family = "wasm"))]
-        let continue_locally_button = conversation_id.map(|conv_id| {
+        let continue_locally_button = conversation_id.filter(|_| !display_data.hide_continue_actions).map(|conv_id| {
             ctx.add_typed_action_view(move |_| {
                 ActionButton::new(crate::t!("terminal-continue-locally"), PrimaryTheme)
                     .with_tooltip(crate::t!("terminal-fork-conversation-locally-tooltip"))
@@ -215,7 +222,7 @@ impl ConversationEndedTombstoneView {
         // In wasm, continuing locally is impossible so we instead
         // offer to open the conversation in warp (where you can continue locally).
         #[cfg(target_family = "wasm")]
-        let open_in_warp_button = conversation_id.map(|conv_id| {
+        let open_in_warp_button = conversation_id.filter(|_| !display_data.hide_continue_actions).map(|conv_id| {
             ctx.add_typed_action_view(move |_| {
                 ActionButton::new(crate::t!("terminal-open-in-warp"), PrimaryTheme)
                     .with_tooltip(crate::t!("terminal-open-conversation-in-warp-tooltip"))

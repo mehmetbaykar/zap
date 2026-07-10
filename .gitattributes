@@ -13,8 +13,8 @@
 app/assets/bundled/bootstrap/*_subshell_bootstrap_block_output.txt -text
 
 *.pdb filter=lfs diff=lfs merge=lfs -text
-input_classifier/models/* filter=lfs diff=lfs merge=lfs -text
-input_classifier/models/**/*tokenizer.json linguist-generated=true
+crates/input_classifier/models/** filter=lfs diff=lfs merge=lfs -text
+crates/input_classifier/models/**/*tokenizer.json -filter -diff -merge text linguist-generated=true
 
 # openWarp-specialized paths: always keep the openWarp version when merging upstream.
 # Usage: locally you must first register the driver `git config merge.openwarp-ours.driver true`

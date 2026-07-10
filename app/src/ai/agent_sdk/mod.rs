@@ -205,9 +205,8 @@ fn build_merged_config_and_task(
         None => (None, None),
     };
 
-    let harness_override = (args.harness != Harness::Oz).then_some(HarnessConfig {
-        harness_type: args.harness,
-    });
+    let harness_override =
+        (args.harness != Harness::Oz).then_some(HarnessConfig::from_harness_type(args.harness));
 
     let mut merged_config = AgentConfigSnapshot {
         // CLI name > skill name > file name

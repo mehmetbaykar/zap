@@ -109,7 +109,7 @@ impl BlocklistAIController {
             })
             .unwrap_or_else(|| {
                 history.update(ctx, |h, ctx| {
-                    h.start_new_conversation(terminal_view_id, false, true, ctx)
+                    h.start_new_conversation(terminal_view_id, false, true, false, ctx)
                 })
             });
 

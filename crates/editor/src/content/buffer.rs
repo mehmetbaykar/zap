@@ -6182,5 +6182,5 @@ pub(super) enum BoundaryEdge {
 }
 
 #[cfg(test)]
-#[path = "buffer_test.rs"]
+#[path = "buffer_tests.rs"]
 pub mod tests;

@@ -32,6 +32,7 @@ use warpui::{
 use crate::terminal::local_shell::LocalShellState;
 use crate::{
     code::editor::{add_color, remove_color},
+    code_review::telemetry_event::{CodeReviewTelemetryEvent, GitDialogStatus, GitOperationKind},
     settings::AISettings,
     ui_components::{
         dialog::{dialog_styles, Dialog},
@@ -45,12 +46,13 @@ use crate::{
     workspace::ToastStack,
     workspaces::user_workspaces::UserWorkspaces,
 };
+use warp_core::send_telemetry_from_ctx;
 
 pub(crate) mod commit;
 pub(crate) mod pr;
 pub(crate) mod push;
 
-pub use commit::{CommitState, CommitSubAction};
+pub use commit::{CommitIntent, CommitState, CommitSubAction};
 pub use pr::{PrState, PrSubAction};
 pub use push::{PushState, PushSubAction};
 
@@ -132,8 +134,7 @@ fn show_toast(msg: impl Into<String>, ctx: &mut ViewContext<GitDialog>) {
 ///
 /// Folds the parent feature flag, the user's dedicated per-feature AI toggle
 /// (which itself requires active AI / auth / remote-session org policy to
-/// allow AI), and an enterprise check with the same Zap-plan exception and
-/// dogfood override as `share_block_modal.rs::should_send_title_gen_request`.
+/// allow AI), and the current team's Git Operations AI tier policy.
 ///
 /// When this returns `false`, call sites skip AI entirely: commit.rs opens
 /// with the manual-type placeholder and pr.rs goes straight to
@@ -141,7 +142,7 @@ fn show_toast(msg: impl Into<String>, ctx: &mut ViewContext<GitDialog>) {
 fn should_send_git_ops_ai_request(app: &AppContext) -> bool {
     FeatureFlag::GitOperationsInCodeReview.is_enabled()
         && AISettings::as_ref(app).is_git_operations_autogen_enabled(app)
-        && UserWorkspaces::as_ref(app).ai_allowed_for_current_team()
+        && UserWorkspaces::as_ref(app).is_git_operations_ai_enabled()
 }
 
 /// Maps a raw git error string to a user-friendly toast message. Known
@@ -798,6 +799,29 @@ impl TypedActionView for GitDialog {
         match action {
             GitDialogAction::Cancel => {
                 if !self.loading {
+                    let operation = match &self.mode {
+                        GitDialogMode::Commit(state) => match state.intent {
+                            CommitIntent::CommitOnly => GitOperationKind::CommitOnly,
+                            CommitIntent::CommitAndPush => GitOperationKind::CommitAndPush,
+                            CommitIntent::CommitAndCreatePr => GitOperationKind::CommitAndCreatePr,
+                        },
+                        GitDialogMode::Push(state) => {
+                            if state.publish {
+                                GitOperationKind::Publish
+                            } else {
+                                GitOperationKind::Push
+                            }
+                        }
+                        GitDialogMode::CreatePr(_) => GitOperationKind::CreatePr,
+                    };
+                    send_telemetry_from_ctx!(
+                        CodeReviewTelemetryEvent::GitDialogCompleted {
+                            operation,
+                            status: GitDialogStatus::Cancelled,
+                            error: None,
+                        },
+                        ctx
+                    );
                     ctx.emit(GitDialogEvent::Cancelled);
                 }
             }

@@ -22,6 +22,7 @@ use crate::ai::artifact_download::sanitized_basename;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
 use ai::agent::convert::ToolToAIAgentActionError;
 use ai::agent::UnknownCitationTypeError;
+use ai::skills::SkillReference;
 use api::ask_user_question::question::QuestionType;
 use warp_core::channel::ChannelState;
 use warp_multi_agent_api as api;
@@ -60,6 +61,24 @@ pub(crate) fn convert_user_query_mode(mode: Option<&api::UserQueryMode>) -> User
         Some(api::user_query_mode::Type::Plan(_)) => UserQueryMode::Plan,
         Some(api::user_query_mode::Type::Orchestrate(_)) => UserQueryMode::Normal,
         None => UserQueryMode::Normal,
+    }
+}
+
+// The `RunAgents`/orchestration-execute proto cluster (Harness oneof, run_agents
+// execution mode, RunAgents message) does not exist in this fork's pinned
+// `warp_multi_agent_api`. The conversions that used to live here
+// (convert_run_agents_harness / convert_run_agents_execution_mode /
+// convert_run_agents) were removed; native-side orchestration types
+// (RunAgentsRequest et al.) remain local-only and are no longer populated
+// from an incoming proto tool call.
+
+fn convert_skill_reference(skill_ref: api::SkillRef) -> Option<SkillReference> {
+    match skill_ref.skill_reference {
+        Some(api::skill_ref::SkillReference::Path(path)) => Some(SkillReference::Path(path.into())),
+        Some(api::skill_ref::SkillReference::BundledSkillId(id)) => {
+            Some(SkillReference::BundledSkillId(id))
+        }
+        None => None,
     }
 }
 

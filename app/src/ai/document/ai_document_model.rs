@@ -19,6 +19,7 @@ use crate::persistence::ModelEvent;
 use crate::{
     ai::{
         agent::{conversation::AIConversationId, AIAgentActionId},
+        blocklist::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel},
         execution_profiles::profiles::AIExecutionProfilesModel,
     },
     appearance::Appearance,
@@ -27,6 +28,7 @@ use crate::{
             model::{FileLinkResolutionContext, NotebooksEditorModel, RichTextEditorModelEvent},
             rich_text_styles,
         },
+        file::MarkdownDisplayMode,
         post_process_notebook,
     },
     settings::FontSettings,
@@ -36,6 +38,7 @@ use crate::{
     },
     throttle::throttle,
 };
+use ai::agent::orchestration_config::{OrchestrationConfig, OrchestrationConfigStatus};
 use ai::diff_validation::DiffDelta;
 use warp_editor::{model::RichTextEditorModel, render::model::RichTextStyles};
 use warpui::color::ColorU;
@@ -139,6 +142,16 @@ pub enum AIDocumentUpdateSource {
     Restoration,
 }
 
+/// Payload queued when the user edits the plan-card orchestration
+/// config block. Cleared after `send_request_input()` piggybacks it
+/// onto the outbound `UserInputs`.
+#[derive(Debug, Clone)]
+pub struct DirtyOrchestrationEvent {
+    pub plan_id: String,
+    pub config: OrchestrationConfig,
+    pub status: OrchestrationConfigStatus,
+}
+
 #[derive(Debug, Clone)]
 pub struct AIDocumentModel {
     documents: HashMap<AIDocumentId, AIDocument>,
@@ -152,10 +165,25 @@ pub struct AIDocumentModel {
     /// Mapping from (conversation_id, action_id, document_index) for streaming CreateDocuments
     /// tool calls to the corresponding AI document ID.
     streaming_create_documents: HashMap<(AIConversationId, AIAgentActionId, usize), AIDocumentId>,
+
+    /// Dirty event queued for the next outbound request.
+    /// Set when the user edits the config or toggles approval on the
+    /// plan card; cleared by the controller after piggybacking onto
+    /// the outbound `UserInputs`.
+    dirty_orchestration_events: HashMap<(AIConversationId, String), DirtyOrchestrationEvent>,
 }
 
 impl AIDocumentModel {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
+        // NOTE: upstream hydrates orchestration config on history restore by
+        // scanning conversation messages for an `OrchestrationConfigSnapshot`
+        // proto message and converting it via `OrchestrationConfig::from_proto`.
+        // The fork's pinned `warp_multi_agent_api` predates that message type
+        // and dropped the proto conversions (see
+        // `ai::agent::orchestration_config`), so there is nothing to scan for
+        // here; the plan-card config block sets `OrchestrationConfig` directly
+        // via `set_orchestration_config_for_plan` instead.
+
         // Setup throttled save channel
         let (save_tx, save_rx) = async_channel::unbounded();
         ctx.spawn_stream_local(
@@ -171,6 +199,7 @@ impl AIDocumentModel {
             content_dirty_flags: HashMap::new(),
             save_tx,
             streaming_create_documents: HashMap::new(),
+            dirty_orchestration_events: HashMap::new(),
         }
     }
 
@@ -184,6 +213,7 @@ impl AIDocumentModel {
             content_dirty_flags: HashMap::new(),
             save_tx,
             streaming_create_documents: HashMap::new(),
+            dirty_orchestration_events: HashMap::new(),
         }
     }
 
@@ -636,6 +666,7 @@ impl AIDocumentModel {
             let styles = rich_text_styles(appearance, font_settings);
 
             let mut model = NotebooksEditorModel::new_unbound(styles, ctx);
+            model.set_default_mermaid_display_mode(MarkdownDisplayMode::Rendered, ctx);
             model.set_file_link_resolution_context(file_link_resolution_context);
 
             let content = content.into();
@@ -862,6 +893,66 @@ impl AIDocumentModel {
         id: &AIDocumentId,
     ) -> Option<&Vec<AIDocumentEarlierVersion>> {
         self.earlier_versions.get(id)
+    }
+
+    // ── Orchestration config accessors ────────────────────────────
+
+    /// Takes all dirty orchestration events for the given conversation,
+    /// returning one event per plan that was edited.
+    pub fn take_dirty_orchestration_events(
+        &mut self,
+        conversation_id: &AIConversationId,
+    ) -> Vec<DirtyOrchestrationEvent> {
+        let keys_to_remove: Vec<_> = self
+            .dirty_orchestration_events
+            .keys()
+            .filter(|(cid, _)| cid == conversation_id)
+            .cloned()
+            .collect();
+        keys_to_remove
+            .into_iter()
+            .filter_map(|key| self.dirty_orchestration_events.remove(&key))
+            .collect()
+    }
+
+    /// Re-insert dirty events that were taken but not successfully sent.
+    pub fn set_dirty_orchestration_events(
+        &mut self,
+        conversation_id: AIConversationId,
+        events: Vec<DirtyOrchestrationEvent>,
+    ) {
+        for event in events {
+            let plan_id = event.plan_id.clone();
+            self.dirty_orchestration_events
+                .insert((conversation_id, plan_id), event);
+        }
+    }
+
+    /// Updates the per-plan orchestration config and status.
+    /// Called from the plan card config block when the user edits a field
+    /// or toggles the approval switch.
+    pub fn set_orchestration_config_for_plan(
+        &mut self,
+        conversation_id: AIConversationId,
+        plan_id: String,
+        config: OrchestrationConfig,
+        status: OrchestrationConfigStatus,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.dirty_orchestration_events.insert(
+            (conversation_id, plan_id.clone()),
+            DirtyOrchestrationEvent {
+                plan_id: plan_id.clone(),
+                config: config.clone(),
+                status,
+            },
+        );
+        BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, hctx| {
+            if let Some(conversation) = history.conversation_mut(&conversation_id) {
+                conversation.set_orchestration_config_for_plan(plan_id, config, status);
+            }
+            hctx.emit(BlocklistAIHistoryEvent::OrchestrationConfigUpdated { conversation_id });
+        });
     }
 
     /// Restore a document to a previous version, creating a new version in the process.

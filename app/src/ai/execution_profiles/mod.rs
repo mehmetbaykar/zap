@@ -145,6 +145,16 @@ pub enum AskUserQuestionPermission {
 }
 
 impl AskUserQuestionPermission {
+    pub fn label(&self) -> &'static str {
+        match self {
+            AskUserQuestionPermission::Never => "Never ask",
+            AskUserQuestionPermission::AskExceptInAutoApprove => "Ask unless auto-approve",
+            AskUserQuestionPermission::AlwaysAsk | AskUserQuestionPermission::Unknown => {
+                "Always ask"
+            }
+        }
+    }
+
     pub fn description(&self) -> &'static str {
         match self {
             AskUserQuestionPermission::AskExceptInAutoApprove
@@ -226,7 +236,7 @@ impl Default for AIExecutionProfile {
             execute_commands: ActionPermission::AlwaysAsk,
             write_to_pty: WriteToPtyPermission::AlwaysAsk,
             mcp_permissions: ActionPermission::AgentDecides,
-            ask_user_question: AskUserQuestionPermission::AskExceptInAutoApprove,
+            ask_user_question: AskUserQuestionPermission::AlwaysAsk,
             command_denylist: DEFAULT_COMMAND_EXECUTION_DENYLIST.clone(),
             command_allowlist: Vec::new(),
             directory_allowlist: Vec::new(),

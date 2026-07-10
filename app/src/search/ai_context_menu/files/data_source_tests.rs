@@ -425,11 +425,23 @@ fn test_directory_search_support() {
     assert!(directory_item.is_directory);
     assert!(!file_item.is_directory);
 
-    // Test accessibility labels
-    assert!(directory_item
-        .accessibility_label()
-        .starts_with("Directory:"));
-    assert!(file_item.accessibility_label().starts_with("File:"));
+    // Test accessibility labels. Zap: labels go through `t!()`, which falls
+    // back to the fluent key in tests, so compare against the same macro
+    // output rather than the English literal.
+    assert_eq!(
+        directory_item.accessibility_label(),
+        crate::t!(
+            "ai-context-files-directory-accessibility-label",
+            path = directory_item.path.display().to_string()
+        )
+    );
+    assert_eq!(
+        file_item.accessibility_label(),
+        crate::t!(
+            "ai-context-files-file-accessibility-label",
+            path = file_item.path.display().to_string()
+        )
+    );
 }
 
 #[test]
@@ -520,7 +532,7 @@ fn test_mixed_file_directory_search() {
         ("src/components/ui", true),
         ("src/components/ui/modal.rs", false),
         ("tests/components", true),
-        ("tests/components/button_test.rs", false),
+        ("tests/components/button_tests.rs", false),
     ];
 
     let query = "components";

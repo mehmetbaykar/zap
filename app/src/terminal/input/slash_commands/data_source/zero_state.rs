@@ -11,12 +11,26 @@ use crate::terminal::input::slash_commands::{
 
 pub struct ZeroStateDataSource {
     slash_command_data_source: ModelHandle<SlashCommandDataSource>,
+    // Upstream's cloud-mode-v2 command palette expands the zero state with a compact item
+    // layout plus skills/saved-prompts listings when this is `true` (via
+    // `InlineItem::with_compact_layout`/`from_saved_prompt` and
+    // `SlashCommandDataSource::active_session_for_v2_zero_state`). That palette
+    // (`cloud_mode_v2_view.rs`) is part of the stripped Warp cloud/handoff-mode cluster and
+    // isn't wired into the module tree (no `mod cloud_mode_v2_view;`), so it never compiles
+    // and the only real caller (`slash_commands/view.rs`) always passes `false`. The flag is
+    // kept for call-site compatibility only; it does not change behavior here.
+    #[allow(dead_code)]
+    is_cloud_mode_v2: bool,
 }
 
 impl ZeroStateDataSource {
-    pub fn new(slash_command_data_source: &ModelHandle<SlashCommandDataSource>) -> Self {
+    pub fn new(
+        slash_command_data_source: &ModelHandle<SlashCommandDataSource>,
+        is_cloud_mode_v2: bool,
+    ) -> Self {
         Self {
             slash_command_data_source: slash_command_data_source.clone(),
+            is_cloud_mode_v2,
         }
     }
 }

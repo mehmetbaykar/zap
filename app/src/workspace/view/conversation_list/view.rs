@@ -4,6 +4,9 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent_conversations_model::{
+    AgentConversationEntryId, AgentConversationNavigationSubject, AgentConversationsModel,
+};
 use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
 use crate::appearance::Appearance;
 use crate::editor::{
@@ -20,7 +23,6 @@ use crate::workspace::view::conversation_list::item::{
     render_item, render_static_item, ItemProps, ItemState, OverflowMenuDisplay, StaticItemProps,
     STATIC_ITEM_MIN_HEIGHT,
 };
-use crate::workspace::view::conversation_list::view_model::ConversationOrTaskId;
 use crate::workspace::ToastStack;
 use crate::workspace::WorkspaceAction;
 use warp_core::ui::Icon;
@@ -51,7 +53,7 @@ const INITIAL_MAX_PAST_ITEMS: usize = 10;
 struct StateHandles {
     list_state: UniformListState,
     scroll_state: ScrollStateHandle,
-    item_states: HashMap<ConversationOrTaskId, ItemState>,
+    item_states: HashMap<AgentConversationEntryId, ItemState>,
     start_new_conversation_item: ItemState,
     list_hover: MouseStateHandle,
     zero_state_button: MouseStateHandle,
@@ -92,7 +94,7 @@ enum ListItem {
 
 #[derive(Clone, Copy)]
 struct OverflowMenuState {
-    conversation_id: ConversationOrTaskId,
+    conversation_id: AgentConversationEntryId,
     /// When `Some`, the menu was opened via right-click and should be
     /// positioned at the cursor location rather than the kebab button.
     position: Option<Vector2F>,
@@ -105,16 +107,16 @@ pub enum ConversationListViewAction {
         terminal_view_id: Option<EntityId>,
     },
     ToggleOverflowMenu {
-        conversation_id: ConversationOrTaskId,
+        conversation_id: AgentConversationEntryId,
         /// When `Some`, the menu was opened via right-click and should be
         /// positioned where the right click took place.
         position: Option<Vector2F>,
     },
     DeleteFromOverflowMenu {
-        conversation_id: ConversationOrTaskId,
+        conversation_id: AgentConversationEntryId,
     },
     OpenItem {
-        id: ConversationOrTaskId,
+        id: AgentConversationEntryId,
     },
     ArrowUp,
     ArrowDown,
@@ -125,7 +127,7 @@ pub enum ConversationListViewAction {
     ToggleSection(ConversationSection),
     ToggleViewAll,
     ForkConversation {
-        conversation_id: ConversationOrTaskId,
+        conversation_id: AgentConversationEntryId,
         destination: ForkedConversationDestination,
     },
 }
@@ -325,8 +327,10 @@ impl ConversationListView {
         self.list_items.get(index)
     }
 
-    /// Finds the flat index of a conversation or task by ID, or None if not found.
-    fn get_index_of_conversation_id(&self, conversation_id: ConversationOrTaskId) -> Option<usize> {
+    fn get_index_of_conversation_id(
+        &self,
+        conversation_id: AgentConversationEntryId,
+    ) -> Option<usize> {
         self.list_items.iter().position(|item| match item {
             ListItem::Conversation(entry) => entry.id == conversation_id,
             ListItem::SectionHeader(_)
@@ -465,7 +469,7 @@ impl ConversationListView {
     }
 
     /// Send telemetry for opening a conversation or task
-    fn send_open_telemetry(_id: &ConversationOrTaskId, _ctx: &mut ViewContext<Self>) {}
+    fn send_open_telemetry(_id: &AgentConversationEntryId, _ctx: &mut ViewContext<Self>) {}
 
     /// Activate the currently selected item by dispatching the appropriate WorkspaceAction
     /// (i.e. opening the selected conversation or starting a new conversation).
@@ -482,13 +486,11 @@ impl ConversationListView {
                 ctx.emit(Event::NewConversationInNewTab);
             }
             ListItem::Conversation(entry) => {
-                let model = self.view_model.as_ref(ctx);
-                let Some(item) = model.get_item_by_id(&entry.id, ctx) else {
-                    return;
-                };
-
-                // Use shared logic from ConversationOrTask to determine click action
-                if let Some(action) = item.get_open_action(None) {
+                if let Some(action) = AgentConversationsModel::resolve_open_action(
+                    AgentConversationNavigationSubject::Entry(entry.id),
+                    None,
+                    ctx,
+                ) {
                     Self::send_open_telemetry(&entry.id, ctx);
                     ctx.dispatch_typed_action(&action);
                 }
@@ -787,12 +789,12 @@ impl TypedActionView for ConversationListView {
                     return;
                 }
 
-                let id = ConversationOrTaskId::ConversationId(*conversation_id);
+                let id = AgentConversationEntryId::Conversation(*conversation_id);
                 let conversation_title = self
                     .view_model
                     .as_ref(ctx)
                     .get_item_by_id(&id, ctx)
-                    .map(|c| c.title(ctx).to_string())
+                    .map(|entry| entry.display.title)
                     .unwrap_or_else(|| crate::t!("workspace-conversation-list-fallback-title"));
                 ctx.emit(Event::ShowDeleteConfirmationDialog {
                     conversation_id: *conversation_id,
@@ -816,8 +818,13 @@ impl TypedActionView for ConversationListView {
                     });
 
                     let conversation_id = *conversation_id;
-                    let is_ambient_agent_conversation =
-                        matches!(conversation_id, ConversationOrTaskId::TaskId(_));
+                    let Some(entry) = self
+                        .view_model
+                        .as_ref(ctx)
+                        .get_item_by_id(&conversation_id, ctx)
+                    else {
+                        return;
+                    };
 
                     let mut delete_item =
                         MenuItemFields::new(crate::t!("workspace-conversation-list-delete"))
@@ -827,8 +834,8 @@ impl TypedActionView for ConversationListView {
                                     conversation_id,
                                 },
                             )
-                            .with_disabled(is_ambient_agent_conversation);
-                    if is_ambient_agent_conversation {
+                            .with_disabled(!entry.capabilities.can_delete);
+                    if !entry.capabilities.can_delete {
                         delete_item = delete_item.with_tooltip(crate::t!(
                             "workspace-conversation-list-delete-ambient-tooltip"
                         ));
@@ -839,7 +846,7 @@ impl TypedActionView for ConversationListView {
 
                     let fork_items: Option<[MenuItem<ConversationListViewAction>; 2]> =
                         // Forking from a closed ambient agent conversation is not supported at this point.
-                        if !is_ambient_agent_conversation {
+                        if entry.capabilities.can_fork_locally {
                             Some([
                                 MenuItemFields::new(crate::t!(
                                     "workspace-conversation-list-fork-new-pane"
@@ -882,14 +889,22 @@ impl TypedActionView for ConversationListView {
                 ctx.notify();
             }
             ConversationListViewAction::DeleteFromOverflowMenu { conversation_id } => {
-                let ConversationOrTaskId::ConversationId(ai_conversation_id) = conversation_id
+                let Some(entry) = self
+                    .view_model
+                    .as_ref(ctx)
+                    .get_item_by_id(conversation_id, ctx)
                 else {
-                    // For now, delete is only implemented for non-ambient conversations.
+                    return;
+                };
+                let Some(ai_conversation_id) = entry.identity.local_conversation_id else {
+                    return;
+                };
+                if !entry.capabilities.can_delete {
                     return;
                 };
 
                 let conversation =
-                    BlocklistAIHistoryModel::as_ref(ctx).conversation(ai_conversation_id);
+                    BlocklistAIHistoryModel::as_ref(ctx).conversation(&ai_conversation_id);
 
                 if let Some(conversation) = conversation {
                     if !conversation.status().is_done() && !conversation.is_empty() {
@@ -909,29 +924,23 @@ impl TypedActionView for ConversationListView {
 
                 self.selected_index = None;
 
-                let item = self
-                    .view_model
-                    .as_ref(ctx)
-                    .get_item_by_id(conversation_id, ctx);
-                let terminal_view_id = item
-                    .as_ref()
-                    .and_then(|item| item.navigation_data().and_then(|nav| nav.terminal_view_id));
-                let conversation_title = item
-                    .as_ref()
-                    .map(|c| c.title(ctx).to_string())
-                    .unwrap_or_else(|| crate::t!("workspace-conversation-list-fallback-title"));
+                // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed); resolve the
+                // owning terminal view from the local history model instead.
+                let terminal_view_id = BlocklistAIHistoryModel::as_ref(ctx)
+                    .terminal_view_id_for_conversation(&ai_conversation_id);
+                let conversation_title = entry.display.title;
                 ctx.emit(Event::ShowDeleteConfirmationDialog {
-                    conversation_id: *ai_conversation_id,
+                    conversation_id: ai_conversation_id,
                     conversation_title,
                     terminal_view_id,
                 });
             }
             ConversationListViewAction::OpenItem { id } => {
-                let model = self.view_model.as_ref(ctx);
-                let Some(item) = model.get_item_by_id(id, ctx) else {
-                    return;
-                };
-                let Some(action) = item.get_open_action(None) else {
+                let Some(action) = AgentConversationsModel::resolve_open_action(
+                    AgentConversationNavigationSubject::Entry(*id),
+                    None,
+                    ctx,
+                ) else {
                     return;
                 };
 
@@ -995,13 +1004,18 @@ impl TypedActionView for ConversationListView {
                 conversation_id,
                 destination,
             } => {
-                let ConversationOrTaskId::ConversationId(ai_conversation_id) = conversation_id
+                let Some(ai_conversation_id) = self
+                    .view_model
+                    .as_ref(ctx)
+                    .get_item_by_id(conversation_id, ctx)
+                    .filter(|entry| entry.capabilities.can_fork_locally)
+                    .and_then(|entry| entry.identity.local_conversation_id)
                 else {
                     return;
                 };
 
                 ctx.dispatch_typed_action(&WorkspaceAction::ForkAIConversation {
-                    conversation_id: *ai_conversation_id,
+                    conversation_id: ai_conversation_id,
                     fork_from_exchange: None,
                     summarize_after_fork: false,
                     summarization_prompt: None,
@@ -1059,7 +1073,7 @@ impl View for ConversationListView {
             let list_items = self.list_items.clone();
             let overflow_menu = self.item_overflow_menu.clone();
             let overflow_menu_state = self.overflow_menu_state;
-            let focused_conversation: Option<ConversationOrTaskId> = None;
+            let focused_conversation: Option<AgentConversationEntryId> = None;
             let list_position_id = self.get_position_id();
             let tooltip_opens_right = TabSettings::as_ref(app)
                 .header_toolbar_chip_selection
@@ -1100,8 +1114,15 @@ impl View for ConversationListView {
                                 }
                                 ListItem::Conversation(entry) => {
                                     let conversation = model.get_item_by_id(&entry.id, app)?;
-                                    let is_focused_conversation = focused_conversation
-                                        .is_some_and(|focused| entry.id == focused);
+                                    let local_conversation_entry_id = conversation
+                                        .identity
+                                        .local_conversation_id
+                                        .map(AgentConversationEntryId::Conversation);
+                                    let is_focused_conversation =
+                                        focused_conversation.is_some_and(|focused| {
+                                            entry.id == focused
+                                                || local_conversation_entry_id == Some(focused)
+                                        });
                                     let state = item_states.get(&entry.id)?;
                                     let highlight_ref = if entry.highlight_indices.is_empty() {
                                         None

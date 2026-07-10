@@ -4,7 +4,7 @@ pub use glibc::{GlibcVersion, RemoteLibc};
 
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use warp_core::channel::{Channel, ChannelState};
 
 /// State machine for the remote server install → launch → initialize flow.
@@ -227,31 +227,43 @@ impl RemoteArch {
 ///
 /// The expected format is `<os> <arch>`, e.g. `Linux x86_64` or `Darwin arm64`.
 /// Takes the last line to skip any shell initialization output.
-pub fn parse_uname_output(output: &str) -> Result<RemotePlatform> {
+pub fn parse_uname_output(
+    output: &str,
+) -> std::result::Result<RemotePlatform, crate::transport::Error> {
+    use crate::transport::Error;
+
     let line = output
         .lines()
         .last()
-        .ok_or_else(|| anyhow!("empty uname output"))?
-        .trim();
+        .ok_or_else(|| Error::Other(anyhow!("empty uname output")))
+        .map(str::trim)?;
 
     let mut parts = line.split_whitespace();
     let os_str = parts
         .next()
-        .ok_or_else(|| anyhow!("missing OS in uname output: {line}"))?;
+        .ok_or_else(|| Error::Other(anyhow!("missing OS in uname output: {line}")))?;
     let arch_str = parts
         .next()
-        .ok_or_else(|| anyhow!("missing arch in uname output: {line}"))?;
+        .ok_or_else(|| Error::Other(anyhow!("missing arch in uname output: {line}")))?;
 
     let os = match os_str {
         "Linux" => RemoteOs::Linux,
         "Darwin" => RemoteOs::MacOs,
-        other => return Err(anyhow!("unsupported OS: {other}")),
+        other => {
+            return Err(Error::UnsupportedOs {
+                os: other.to_string(),
+            })
+        }
     };
 
     let arch = match arch_str {
-        "x86_64" => RemoteArch::X86_64,
+        "x86_64" | "amd64" => RemoteArch::X86_64,
         "aarch64" | "arm64" | "armv8l" => RemoteArch::Aarch64,
-        other => return Err(anyhow!("unsupported arch: {other}")),
+        other => {
+            return Err(Error::UnsupportedArch {
+                arch: other.to_string(),
+            })
+        }
     };
 
     Ok(RemotePlatform { os, arch })
@@ -276,12 +288,11 @@ pub fn remote_server_dir() -> String {
     format!("~/{warp_dir}/remote-server")
 }
 
-/// Returns a remote-server identity key directory name that is safe to put
-/// into a path.
+/// Returns a filesystem-safe directory name for a remote-server identity key.
 ///
-/// The identity key is not a secret, but it may contain bytes that are unsafe
-/// or ambiguous in a path. ASCII alphanumerics and `-` / `_` are preserved;
-/// other UTF-8 bytes are percent-encoded.
+/// The identity key is not secret, but it can contain bytes that are unsafe or
+/// ambiguous in paths. Keep ASCII alphanumeric characters plus `-` and `_`;
+/// percent-encode all other UTF-8 bytes.
 pub fn remote_server_identity_dir_name(identity_key: &str) -> String {
     if identity_key.is_empty() {
         return "empty".to_string();
@@ -299,14 +310,44 @@ pub fn remote_server_identity_dir_name(identity_key: &str) -> String {
     encoded
 }
 
-/// Returns the remote directory isolated by identity, used for the daemon
-/// socket and PID file.
+/// Returns the identity-scoped remote directory used for the daemon socket
+/// and PID file.
 pub fn remote_server_daemon_dir(identity_key: &str) -> String {
     format!(
         "{}/{}",
         remote_server_dir(),
         remote_server_identity_dir_name(identity_key)
     )
+}
+
+/// Returns the identity-scoped remote directory used for daemon-owned
+/// per-user data files.
+pub fn remote_server_daemon_data_dir(identity_key: &str) -> String {
+    format!("{}/data", remote_server_daemon_dir(identity_key))
+}
+
+/// Returns the daemon socket filename, versioned when a release tag is
+/// baked in.
+///
+/// - With `GIT_RELEASE_TAG`:    `server-{version}.sock`
+/// - Without (plain cargo run): `server.sock`
+pub fn daemon_socket_name() -> String {
+    match ChannelState::app_version() {
+        Some(version) => format!("server-{version}.sock"),
+        None => "server.sock".to_string(),
+    }
+}
+
+/// Returns the daemon PID filename, versioned when a release tag is
+/// baked in.
+///
+/// - With `GIT_RELEASE_TAG`:    `server-{version}.pid`
+/// - Without (plain cargo run): `server.pid`
+pub fn daemon_pid_name() -> String {
+    match ChannelState::app_version() {
+        Some(version) => format!("server-{version}.pid"),
+        None => "server.pid".to_string(),
+    }
 }
 
 /// Returns the remote remote-server binary file name.
@@ -335,12 +376,13 @@ pub fn remote_server_binary() -> String {
     }
 }
 
-/// Returns the shell command that checks the remote remote-server binary
-/// exists and is executable.
+/// Returns the shell command to verify the remote server binary is
+/// installed and functional by running it with `--version`.
 ///
-/// Consistent with upstream, this actually runs `--version` rather than just
-/// `test -x`; this lets a corrupted binary, or one that cannot parse its
-/// arguments, be detected early.
+/// Exits 0 when the binary is present, executable, and can parse its
+/// own arguments. A missing binary produces exit 127 (command not
+/// found) or 126 (not executable), and a corrupted binary will fail
+/// with a non-zero exit of its own.
 pub fn binary_check_command() -> String {
     format!("{} --version", remote_server_binary())
 }
@@ -448,12 +490,14 @@ pub fn is_dev_source_build() -> bool {
 /// Timeout for checking whether the binary exists.
 pub const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Timeout for the regular remote install script.
-pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// Timeout for the install script (curl/wget path).
+pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// The SCP fallback includes local download, upload, and remote extraction,
-/// so it gets a more generous timeout.
-pub const SCP_INSTALL_TIMEOUT: Duration = Duration::from_secs(120);
+/// Timeout for the SCP upload fallback path (local download + SCP +
+/// extraction). Higher than [`INSTALL_TIMEOUT`] because SCP transfers the
+/// tarball over the user's SSH link, which is typically slower than the
+/// remote host's direct internet connection.
+pub const SCP_INSTALL_TIMEOUT: Duration = Duration::from_secs(240);
 
 /// Development-mode cross-compilation may have to compile the entire crate
 /// graph from scratch, so it gets a very generous timeout.

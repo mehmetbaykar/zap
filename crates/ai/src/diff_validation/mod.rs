@@ -1271,5 +1271,5 @@ fn find_change_context_start(change_context: &[String], file_lines: &[&str]) -> 
 }
 
 #[cfg(test)]
-#[path = "mod_test.rs"]
+#[path = "mod_tests.rs"]
 mod tests;

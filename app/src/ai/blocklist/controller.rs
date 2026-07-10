@@ -1893,7 +1893,8 @@ impl BlocklistAIController {
             history_model.start_new_conversation(
                 self.terminal_view_id,
                 is_autoexecute_override,
-                false,
+                /* is_viewing_shared_session */ false,
+                /* is_cli_agent_transcript */ false,
                 ctx,
             )
         });
@@ -3160,6 +3161,16 @@ impl BlocklistAIController {
     /// Cancels 'progress' for the active conversation if there is one:
     ///  * If there is an in-flight request, cancels it.
     ///  * Else, if the request finished, but actions from the response are pending or mid-execution, cancels all of them.
+    /// Whether a response stream is currently active for the conversation.
+    pub fn has_active_stream_for_conversation(
+        &self,
+        conversation_id: crate::ai::agent::conversation::AIConversationId,
+        ctx: &warpui::AppContext,
+    ) -> bool {
+        self.in_flight_response_streams
+            .has_active_stream_for_conversation(conversation_id, ctx)
+    }
+
     pub fn cancel_conversation_progress(
         &mut self,
         conversation_id: AIConversationId,

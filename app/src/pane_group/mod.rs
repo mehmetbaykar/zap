@@ -1523,14 +1523,20 @@ impl PaneGroup {
                     .copied()
                     .collect();
 
-                let conversation_restoration = vec1::Vec1::try_from_vec(filtered_conversation_ids)
-                    .ok()
-                    .map(
-                        |conversation_ids| ConversationRestorationInNewPaneType::Startup {
-                            conversation_ids,
-                            active_conversation_id: terminal_snapshot.active_conversation_id,
-                        },
-                    );
+                let conversation_restoration = {
+                    let conversations = RestoredAgentConversations::handle(ctx)
+                        .update(ctx, |store, _| {
+                            store.take_conversations(&filtered_conversation_ids)
+                        });
+                    vec1::Vec1::try_from_vec(conversations)
+                        .ok()
+                        .map(
+                            |conversations| ConversationRestorationInNewPaneType::Startup {
+                                conversations,
+                                active_conversation_id: terminal_snapshot.active_conversation_id,
+                            },
+                        )
+                };
                 let (terminal_view, terminal_manager) = PaneGroup::create_session(
                     startup_directory,
                     HashMap::new(),
@@ -2069,6 +2075,13 @@ impl PaneGroup {
             .any(|pane| pane.terminal_view(ctx).id() == terminal_view_id)
     }
     /// Iterate over the code editors in this pane group.
+    /// Find the visible terminal pane whose PTY session UUID matches (warposs://pane deep link).
+    pub fn find_terminal_pane_by_session_uuid(&self, uuid: &[u8]) -> Option<PaneId> {
+        self.panes_of::<TerminalPane>()
+            .find(|pane| pane.session_uuid() == uuid && !self.is_pane_hidden_for_close(pane.id()))
+            .map(|pane| pane.id())
+    }
+
     pub fn code_panes<'a>(
         &'a self,
         app: &'a AppContext,
@@ -3247,6 +3260,7 @@ impl PaneGroup {
                 let harness = match cli_conversation.metadata.harness {
                     AIAgentHarness::ClaudeCode => Some(Harness::Claude),
                     AIAgentHarness::Gemini => Some(Harness::Gemini),
+                    AIAgentHarness::Codex => Some(Harness::Codex),
                     AIAgentHarness::Oz => None,
                     AIAgentHarness::Unknown => Some(Harness::Unknown),
                 };
@@ -3259,11 +3273,11 @@ impl PaneGroup {
                     );
                     // Keep the viewer's AmbientAgentViewModel harness in sync with the loaded run.
                     if let Some(harness) = harness {
-                        view.ambient_agent_view_model()
-                            .clone()
-                            .update(ctx, |model, ctx| {
+                        if let Some(ambient_agent_view_model) = view.ambient_agent_view_model() {
+                            ambient_agent_view_model.clone().update(ctx, |model, ctx| {
                                 model.set_harness(harness, ctx);
                             });
+                        }
                     }
                     // 3p runs have no materialized AIConversation, so enter agent view with a
                     // fresh vehicle conversation and retag the restored snapshot block onto it so
@@ -4176,13 +4190,10 @@ impl PaneGroup {
             PaneEvent::RepoChanged => {
                 ctx.emit(Event::RepoChanged);
             }
-            PaneEvent::RemoteRepoNavigated {
-                host_id,
-                indexed_path,
-            } => {
+            PaneEvent::RemoteRepoNavigated { remote_path } => {
                 ctx.emit(Event::RemoteRepoNavigated {
-                    host_id: host_id.clone(),
-                    indexed_path: indexed_path.clone(),
+                    host_id: remote_path.host_id.clone(),
+                    indexed_path: remote_path.path.to_string(),
                 });
             }
         }

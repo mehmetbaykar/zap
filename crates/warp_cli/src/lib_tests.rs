@@ -362,3 +362,19 @@ fn harness_parse_local_child_harness_rejects_oz() {
         Some(Harness::OpenCode)
     );
 }
+
+#[test]
+fn harness_parse_orchestration_harness_accepts_codex() {
+    assert_eq!(
+        Harness::parse_orchestration_harness("codex"),
+        Some(Harness::Codex)
+    );
+}
+
+#[test]
+fn harness_parse_local_child_harness_accepts_codex() {
+    assert_eq!(
+        Harness::parse_local_child_harness("codex"),
+        Some(Harness::Codex)
+    );
+}

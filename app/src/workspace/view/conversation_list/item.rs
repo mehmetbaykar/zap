@@ -1,13 +1,16 @@
-use crate::ai::agent_conversations_model::ConversationOrTask;
-use crate::ai::conversation_status_ui::{render_status_element, STATUS_ELEMENT_PADDING};
+use crate::ai::agent_conversations_model::{
+    AgentConversationEntry, AgentConversationEntryId, AgentConversationProvenance,
+};
+use crate::ai::conversation_status_ui::STATUS_ELEMENT_PADDING;
 use crate::appearance::Appearance;
 use crate::menu::Menu;
+use crate::ui_components::agent_icon::agent_conversation_entry_icon_variant;
+use crate::ui_components::icon_with_status::render_icon_with_status;
 use crate::ui_components::icons::Icon;
 use crate::ui_components::menu_button::{icon_button_with_context_menu, MenuDirection};
 use crate::util::time_format::format_approx_duration_from_now_utc;
 use crate::util::truncation::truncate_from_end;
 use crate::workspace::view::conversation_list::view::ConversationListViewAction;
-use crate::workspace::view::conversation_list::view_model::ConversationOrTaskId;
 use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::color::coloru_with_opacity;
 use warp_core::ui::theme::color::internal_colors;
@@ -33,13 +36,24 @@ const ICON_SPACING: f32 = 4.;
 /// Offset for the sharing dialog from the item row
 const DIALOG_OFFSET_PIXELS: f32 = -16.;
 
+/// Total size of the agent icon-with-status component rendered in each conversation list
+/// row.
+const LIST_ITEM_AGENT_SIZE: f32 = 22.;
+/// Extra overhang past the default overlay position, as a fraction of
+/// `LIST_ITEM_AGENT_SIZE`. Pushes the badge all the way to the bounding box's BR corner;
+/// the conversation list reads better with the status sitting slightly further out than
+/// on the other surfaces.
+const LIST_ITEM_OVERLAY_EXTRA_OVERHANG: f32 = 0.05;
+
 /// Generate a position ID for a conversation list item
-fn conversation_item_position_id(id: &ConversationOrTaskId) -> String {
+fn conversation_item_position_id(id: &AgentConversationEntryId) -> String {
     match id {
-        ConversationOrTaskId::ConversationId(conv_id) => {
+        AgentConversationEntryId::Conversation(conv_id) => {
             format!("conversation_list_item_{conv_id}")
         }
-        ConversationOrTaskId::TaskId(task_id) => format!("conversation_list_task_{task_id}"),
+        AgentConversationEntryId::AmbientRun(task_id) => {
+            format!("conversation_list_task_{task_id}")
+        }
     }
 }
 
@@ -63,7 +77,7 @@ pub enum OverflowMenuDisplay {
 }
 
 pub struct ItemProps<'a> {
-    pub conversation: &'a ConversationOrTask<'a>,
+    pub conversation: &'a AgentConversationEntry,
     pub highlight_indices: Option<&'a Vec<usize>>,
     pub is_selected: bool,
     pub is_focused_conversation: bool,
@@ -71,7 +85,7 @@ pub struct ItemProps<'a> {
     pub state: &'a ItemState,
     pub overflow_menu: &'a ViewHandle<Menu<ConversationListViewAction>>,
     pub overflow_menu_display: OverflowMenuDisplay,
-    pub conversation_id: ConversationOrTaskId,
+    pub conversation_id: AgentConversationEntryId,
     pub list_position_id: &'a str,
     pub tooltip_opens_right: bool,
 }
@@ -169,8 +183,12 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
     let font_size = appearance.ui_font_size();
 
     let title_font_size = font_size + 2.;
-    let mut title_text = Text::new_inline(conversation.title(app), font_family, title_font_size)
-        .with_color(theme.main_text_color(theme.background()).into());
+    let mut title_text = Text::new_inline(
+        conversation.display.title.clone(),
+        font_family,
+        title_font_size,
+    )
+    .with_color(theme.main_text_color(theme.background()).into());
 
     if let Some(indices) = highlight_indices {
         if !indices.is_empty() {
@@ -188,18 +206,13 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
     }
 
     let status_element_size = font_size + STATUS_ELEMENT_PADDING * 2.;
-    let icon_element: Box<dyn Element> = if conversation.is_ambient_agent_conversation() {
-        ConstrainedBox::new(
-            Icon::Cloud
-                .to_warpui_icon(theme.sub_text_color(theme.background()))
-                .finish(),
-        )
-        .with_width(status_element_size)
-        .with_height(status_element_size)
-        .finish()
-    } else {
-        render_status_element(&conversation.status(app), font_size, appearance)
-    };
+    let icon_element = render_icon_with_status(
+        agent_conversation_entry_icon_variant(conversation),
+        LIST_ITEM_AGENT_SIZE,
+        LIST_ITEM_OVERLAY_EXTRA_OVERHANG,
+        theme,
+        theme.background(),
+    );
 
     let icon_and_title_row = Shrinkable::new(
         1.0,
@@ -213,7 +226,7 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
     .finish();
 
     let timestamp = Text::new_inline(
-        format_approx_duration_from_now_utc(conversation.last_updated()),
+        format_approx_duration_from_now_utc(conversation.display.last_updated),
         font_family,
         font_size - 2.,
     )
@@ -259,10 +272,8 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
         .with_child(bottom_row)
         .finish();
 
-    // Use shared logic from ConversationOrTask to determine open action
-    let open_action = conversation.get_open_action(None);
-    let title = conversation.title(app);
-    let tooltip_text = truncate_from_end(&title, MAX_TOOLTIP_LENGTH);
+    let can_open = conversation.capabilities.can_open;
+    let tooltip_text = truncate_from_end(&conversation.display.title, MAX_TOOLTIP_LENGTH);
     let overflow_button_state = state.overflow_button_state.clone();
     let hoverable = Hoverable::new(state.mouse_state.clone(), move |_| {
         let container = Container::new(row)
@@ -353,7 +364,7 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
     })
     .with_defer_events_to_children();
 
-    let hoverable_element = if open_action.is_some() {
+    let hoverable_element = if can_open {
         hoverable
             .with_cursor(Cursor::PointingHand)
             .on_click(move |ctx, _, _| {
@@ -389,17 +400,23 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
 /// Returns the secondary label for a conversation list item:
 /// - For local conversations: the working directory.
 /// - For tasks: the source (Linear, Slack, CLI, etc.)
-fn format_item_subtext(conversation: &ConversationOrTask) -> Option<String> {
-    match conversation {
-        ConversationOrTask::Task(task) => {
-            task.source.as_ref().map(|s| s.display_name().to_string())
-        }
-        ConversationOrTask::Conversation(metadata) => {
-            let pwd = metadata.nav_data.initial_working_directory.clone();
-            pwd.map(|pwd| {
-                let home_dir = dirs::home_dir().and_then(|p| p.to_str().map(String::from));
-                user_friendly_path(&pwd, home_dir.as_deref()).into_owned()
-            })
-        }
+fn format_item_subtext(conversation: &AgentConversationEntry) -> Option<String> {
+    if matches!(
+        conversation.provenance,
+        AgentConversationProvenance::AmbientRun
+    ) {
+        return conversation
+            .display
+            .source
+            .as_ref()
+            .map(|source| source.display_name().to_string());
     }
+
+    // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed) live-session lookup;
+    // fall back directly to the entry's recorded working directory.
+    let pwd = conversation.display.working_directory.clone();
+    pwd.map(|pwd| {
+        let home_dir = dirs::home_dir().and_then(|p| p.to_str().map(String::from));
+        user_friendly_path(&pwd, home_dir.as_deref()).into_owned()
+    })
 }

@@ -16,8 +16,6 @@ pub(super) mod util;
 pub use ai::agent::{action::*, action_result::*, AIAgentCitation, FileLocations};
 use warp_core::features::FeatureFlag;
 
-#[cfg(test)]
-mod suggestion_test;
 use crate::ai::api_error::AIApiError;
 use crate::ai::block_context::BlockContext;
 use crate::ai::blocklist::block::view_impl::output::are_all_text_sections_empty;
@@ -750,6 +748,7 @@ impl ProgrammingLanguage {
                 "css" => Some("css"),
                 "c" => Some("c"),
                 "json" => Some("json"),
+                "jq" => Some("jq"),
                 "hcl" | "terraform" | "tf" => Some("hcl"),
                 "lua" => Some("lua"),
                 "ruby" | "rb" => Some("rb"),
@@ -2402,6 +2401,7 @@ pub enum AIAgentInput {
         /// (the overflow path prepends a "previous request exceeded ..." explanation).
         /// The local agent conversation path does not read this field. All existing call sites keep `overflow: false`.
         overflow: bool,
+        context: Arc<[AIAgentContext]>,
     },
 
     /// Invoke a skill. The skill content is passed as instructions to the agent.
@@ -2446,6 +2446,7 @@ pub enum AIAgentInput {
         suggestion: PassiveSuggestionResultType,
         context: Arc<[AIAgentContext]>,
     },
+
 }
 
 /// Data for a single message received by an agent from another agent.
@@ -2691,9 +2692,8 @@ impl AIAgentInput {
             | Self::InvokeSkill { context, .. }
             | Self::StartFromAmbientRunPrompt { context, .. }
             | Self::PassiveSuggestionResult { context, .. } => Some(context),
-            Self::SummarizeConversation { .. }
-            | Self::MessagesReceivedFromAgents { .. }
-            | Self::EventsFromAgents { .. } => None,
+            Self::SummarizeConversation { context, .. } => Some(context),
+            Self::MessagesReceivedFromAgents { .. } | Self::EventsFromAgents { .. } => None,
         }
     }
 
@@ -3004,5 +3004,5 @@ impl Suggestions {
 }
 
 #[cfg(test)]
-#[path = "mod_test.rs"]
+#[path = "mod_tests.rs"]
 mod tests;

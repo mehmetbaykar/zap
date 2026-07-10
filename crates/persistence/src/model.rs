@@ -971,6 +971,7 @@ impl<'de> Deserialize<'de> for PersistedAutoexecuteMode {
         })
     }
 }
+
 // Serializes to `conversation_data` column in `agent_conversations`.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AgentConversationData {
@@ -992,6 +993,13 @@ pub struct AgentConversationData {
     /// The display name for this agent, assigned by the orchestrator.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
+    /// Harness type used to render the child agent's shared icon in orchestration UI.
+    #[serde(
+        default,
+        alias = "orchestration_avatar_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub orchestration_harness_type: Option<String>,
     /// The local conversation ID of the parent conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_conversation_id: Option<String>,
@@ -1016,6 +1024,16 @@ pub struct AgentConversationData {
     /// CLI subagent 终端 block 快照 sidecar。具体 JSON schema 由 app 层负责。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli_subagent_block_snapshots_json: Option<String>,
+    /// Whether this conversation is pinned in the conversation UI.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pinned: bool,
+    /// Whether this conversation is a remote child agent (v2 orchestration).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_remote_child: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1317,6 +1335,9 @@ mod tests {
             artifacts_json: None,
             parent_agent_id: None,
             agent_name: None,
+            orchestration_harness_type: Some("claude".to_string()),
+            pinned: false,
+            is_remote_child: false,
             parent_conversation_id: None,
             run_id: None,
             autoexecute_override: None,
@@ -1328,6 +1349,19 @@ mod tests {
         let json = serde_json::to_string(&data).expect("serialize");
         let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(roundtripped.last_event_sequence, Some(42));
+        assert_eq!(
+            roundtripped.orchestration_harness_type.as_deref(),
+            Some("claude")
+        );
+    }
+
+    #[test]
+    fn agent_conversation_data_accepts_legacy_orchestration_avatar_id() {
+        let legacy_json = r#"{"orchestration_avatar_id":"orbit"}"#;
+        let data: AgentConversationData =
+            serde_json::from_str(legacy_json).expect("legacy rows must deserialize");
+
+        assert_eq!(data.orchestration_harness_type.as_deref(), Some("orbit"));
     }
 
     #[test]
@@ -1338,6 +1372,7 @@ mod tests {
         let data: AgentConversationData =
             serde_json::from_str(legacy_json).expect("legacy rows must deserialize");
         assert_eq!(data.last_event_sequence, None);
+        assert_eq!(data.orchestration_harness_type, None);
         assert_eq!(data.byop_repair_state_json, None);
         assert_eq!(data.cli_subagent_block_snapshots_json, None);
     }
@@ -1352,6 +1387,9 @@ mod tests {
             artifacts_json: None,
             parent_agent_id: None,
             agent_name: None,
+            orchestration_harness_type: None,
+            pinned: false,
+            is_remote_child: false,
             parent_conversation_id: None,
             run_id: None,
             autoexecute_override: None,
@@ -1381,6 +1419,9 @@ mod tests {
             artifacts_json: None,
             parent_agent_id: None,
             agent_name: None,
+            orchestration_harness_type: None,
+            pinned: false,
+            is_remote_child: false,
             parent_conversation_id: None,
             run_id: None,
             autoexecute_override: None,
@@ -1409,6 +1450,9 @@ mod tests {
             artifacts_json: None,
             parent_agent_id: None,
             agent_name: None,
+            orchestration_harness_type: None,
+            pinned: false,
+            is_remote_child: false,
             parent_conversation_id: None,
             run_id: None,
             autoexecute_override: None,

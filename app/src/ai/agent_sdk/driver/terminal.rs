@@ -11,7 +11,7 @@ use std::{
 use futures::channel::oneshot;
 use warp_completer::completer::CommandOutput;
 use warp_core::command::ExitCode;
-use warp_util::path::ShellFamily;
+use warp_util::{path::ShellFamily, sync::Condition};
 use warpui::{r#async::FutureExt, AppContext, Entity, ModelContext, ModelHandle, ViewHandle};
 
 use crate::terminal::model::session::ExecuteCommandOptions;
@@ -26,7 +26,6 @@ use crate::{
         shell::ShellType,
         TerminalView,
     },
-    util::sync::Condition,
 };
 
 use crate::ai::attachment_utils::attachments_download_dir;

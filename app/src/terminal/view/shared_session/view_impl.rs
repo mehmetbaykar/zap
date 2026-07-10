@@ -381,7 +381,7 @@ impl TerminalView {
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if self.active_viewer_driven_size.is_some() {
+        if self.active_viewer_driven_size.is_some() && !self.is_shared_session_for_ambient_agent() {
             self.restore_pty_to_sharer_size(ctx);
         }
 
@@ -1012,6 +1012,7 @@ impl TerminalView {
         let tombstone_view_handle = ctx.add_typed_action_view(|ctx| {
             ConversationEndedTombstoneView::new(ctx, terminal_view_id, task_id)
         });
+        let tombstone_view_id = tombstone_view_handle.id();
         self.insert_rich_content(
             None,
             tombstone_view_handle,
@@ -1021,7 +1022,7 @@ impl TerminalView {
             },
             ctx,
         );
-        self.has_inserted_conversation_ended_tombstone = true;
+        self.conversation_ended_tombstone_view_id = Some(tombstone_view_id);
     }
 
     /// Updates shared session reconnection banner, participant avatars and
@@ -1183,6 +1184,6 @@ impl TerminalView {
 }
 
 #[cfg(test)]
-#[path = "view_impl_test.rs"]
+#[path = "view_impl_tests.rs"]
 mod tests;
 use crate::auth::UserUid;

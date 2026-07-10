@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ManagedSecretType {
     AnthropicApiKey,
+    OpenaiApiKey,
     AnthropicBedrockAccessKey,
     AnthropicBedrockApiKey,
     Dotenvx,
@@ -16,6 +17,7 @@ impl ManagedSecretType {
     pub fn envelope_name(&self) -> &str {
         match self {
             ManagedSecretType::AnthropicApiKey => "anthropic_api_key",
+            ManagedSecretType::OpenaiApiKey => "openai_api_key",
             ManagedSecretType::AnthropicBedrockAccessKey => "anthropic_bedrock_access_key",
             ManagedSecretType::AnthropicBedrockApiKey => "anthropic_bedrock_api_key",
             ManagedSecretType::Dotenvx => "dotenvx",
@@ -46,6 +48,13 @@ pub enum ManagedSecretValue {
     AnthropicBedrockApiKey {
         aws_bearer_token_bedrock: String,
         aws_region: String,
+    },
+    OpenaiApiKey {
+        api_key: String,
+        /// Optional base URL for the OpenAI API (e.g. regional endpoints).
+        /// When absent, the harness uses the provider's default endpoint.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        base_url: Option<String>,
     },
 }
 
@@ -84,6 +93,14 @@ impl ManagedSecretValue {
         }
     }
 
+    /// Construct an OpenAI API key secret value with an optional base URL.
+    pub fn openai_api_key(api_key: impl Into<String>, base_url: Option<String>) -> Self {
+        Self::OpenaiApiKey {
+            api_key: api_key.into(),
+            base_url,
+        }
+    }
+
     pub fn secret_type(&self) -> ManagedSecretType {
         match self {
             ManagedSecretValue::RawValue { .. } => ManagedSecretType::RawValue,
@@ -94,6 +111,7 @@ impl ManagedSecretValue {
             ManagedSecretValue::AnthropicBedrockApiKey { .. } => {
                 ManagedSecretType::AnthropicBedrockApiKey
             }
+            ManagedSecretValue::OpenaiApiKey { .. } => ManagedSecretType::OpenaiApiKey,
         }
     }
 }
@@ -112,6 +130,9 @@ impl fmt::Debug for ManagedSecretValue {
                 .finish_non_exhaustive(),
             ManagedSecretValue::AnthropicBedrockApiKey { .. } => f
                 .debug_struct("ManagedSecret::AnthropicBedrockApiKey")
+                .finish_non_exhaustive(),
+            ManagedSecretValue::OpenaiApiKey { .. } => f
+                .debug_struct("ManagedSecret::OpenaiApiKey")
                 .finish_non_exhaustive(),
         }
     }

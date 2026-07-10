@@ -191,6 +191,7 @@ impl PromptAlertView {
             PromptAlertState::RequestLimitReached => {
                 text_fragments.push(FormattedTextFragment::plain_text("  "));
                 if UserWorkspaces::as_ref(app).is_byo_api_key_enabled() {
+                    text_fragments.push(FormattedTextFragment::plain_text(" or "));
                     text_fragments.push(FormattedTextFragment::hyperlink_action(
                         "use your own API keys",
                         WorkspaceAction::ShowSettingsPageWithSearch {

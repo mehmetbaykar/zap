@@ -20,6 +20,7 @@ use warp_util::{
     content_version::ContentVersion,
     file::{FileId, FileLoadError, FileSaveError},
     path::to_relative_path,
+    sync::Condition,
 };
 use warpui::platform::SaveFilePickerConfiguration;
 use warpui::{
@@ -51,7 +52,6 @@ use crate::{
     },
     settings::AISettings,
     terminal::TerminalView,
-    util::sync::Condition,
 };
 use ai::diff_validation::DiffType;
 use pathfinder_color::ColorU;
@@ -730,6 +730,8 @@ impl LocalCodeEditorView {
         })
     }
 
+    /// Returns the local path if this editor is backed by a local file.
+    /// Returns `None` for remote files. Used by LSP and other local-only code paths.
     pub fn file_path(&self) -> Option<&Path> {
         match self.metadata.as_ref()? {
             LoadedFileMetadata::LocalFile { path, .. } => Some(path.as_path()),

@@ -2132,7 +2132,7 @@ impl Input {
                 terminal_view_id,
                 ai_input_model.clone(),
                 cli_subagent_controller.clone(),
-                ambient_agent_view_model.clone(),
+                Some(ambient_agent_view_model.clone()),
                 model.clone(),
                 ctx,
             )
@@ -3100,7 +3100,7 @@ impl Input {
                 &model_events,
                 model.clone(),
                 agent_shortcut_view_model.clone(),
-                ambient_agent_view_model.clone(),
+                Some(ambient_agent_view_model.clone()),
                 suggestions_mode_model.clone(),
                 slash_command_model.clone(),
                 ephemeral_message_model.clone(),
@@ -3205,7 +3205,11 @@ impl Input {
         };
 
         #[cfg(feature = "local_fs")]
-        if let Some(db_url) = crate::persistence::database_file_path().to_str() {
+        if let Some(db_url) = crate::persistence::database_file_path_for_scope(
+            &crate::persistence::PersistenceScope::App,
+        )
+        .to_str()
+        {
             if let Ok(conn) = crate::persistence::establish_ro_connection(db_url) {
                 input.conn = Some(Arc::new(Mutex::new(conn)));
             }
@@ -14137,5 +14141,5 @@ impl Input {
 }
 
 #[cfg(test)]
-#[path = "input_test.rs"]
+#[path = "input_tests.rs"]
 mod tests;

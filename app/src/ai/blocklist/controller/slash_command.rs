@@ -223,7 +223,11 @@ impl SlashCommandRequest {
                 intended_agent: None,
             }],
             SlashCommandRequest::Summarize { prompt, overflow } => {
-                vec![AIAgentInput::SummarizeConversation { prompt, overflow }]
+                vec![AIAgentInput::SummarizeConversation {
+                    prompt,
+                    overflow,
+                    context,
+                }]
             }
             SlashCommandRequest::FetchReviewComments { repo_path } => {
                 vec![AIAgentInput::FetchReviewComments { repo_path, context }]

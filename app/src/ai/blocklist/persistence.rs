@@ -273,6 +273,8 @@ impl From<&AIAgentActionType> for PersistedAIAgentActionType {
             AIAgentActionType::AskUserQuestion { questions } => Self::AskUserQuestion {
                 questions: questions.clone(),
             },
+            // Orchestrate is rendered from the in-history tool call message;
+            // there is no per-action state we need to persist locally.
         }
     }
 }

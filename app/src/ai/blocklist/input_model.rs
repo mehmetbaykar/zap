@@ -710,7 +710,6 @@ impl BlocklistAIInputModel {
 
                     // If we have history entries (i.e., a live session), check for
                     // close matches against command history and agent prompt history.
-                    // TODO(vorporeal): decide if we still want to do this with NldImprovements.
                     if let Some(history_entries) = history_entries {
                         // Iterate commands newest-first so the first match is the
                         // most-recent matching command.

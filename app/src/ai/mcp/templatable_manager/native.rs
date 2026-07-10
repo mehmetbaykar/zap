@@ -37,7 +37,9 @@ use crate::{
     },
     cloud_object::{GenericStringObjectFormat, JsonObjectType},
     drive::ObjectTypeAndId,
-    persistence::ModelEvent,
+    persistence::{
+        database_file_path_for_scope, establish_ro_connection, ModelEvent, PersistenceScope,
+    },
     send_telemetry_from_ctx,
     server::{ids::SyncId, telemetry::TelemetryEvent},
     settings::AISettings,
@@ -157,6 +159,10 @@ fn error_to_user_message(error: &rmcp::RmcpError) -> String {
             }
             _ => format!("Service error: {}", err),
         },
+        // The enum is marked as non-exhaustive, so we need a catch-all.
+        _ => {
+            format!("Error: {error}")
+        }
     }
 }
 
@@ -272,14 +278,13 @@ impl TemplatableMCPServerManager {
             _ => {}
         });
 
-        let database_connection =
-            crate::persistence::database_file_path()
-                .to_str()
-                .and_then(|db_url| {
-                    crate::persistence::establish_ro_connection(db_url)
-                        .ok()
-                        .map(|conn| Arc::new(Mutex::new(conn)))
-                });
+        let database_connection = database_file_path_for_scope(&PersistenceScope::App)
+            .to_str()
+            .and_then(|db_url| {
+                establish_ro_connection(db_url)
+                    .ok()
+                    .map(|conn| Arc::new(Mutex::new(conn)))
+            });
 
         let mut me = Self {
             templatable_mcp_server_objects: Default::default(),
@@ -1707,7 +1712,7 @@ impl TemplatableMCPServerManager {
 }
 
 type ReqwestHttpTransport = rmcp::transport::StreamableHttpClientTransport<reqwest::Client>;
-type ReqwestSseTransport = rmcp::transport::SseClientTransport<reqwest::Client>;
+type ReqwestSseTransport = mcp::sse_transport::SseClientTransport<reqwest::Client>;
 
 /// Spawns a new MCP server from a given [`TransportType`].
 async fn spawn_server(
@@ -1879,9 +1884,9 @@ async fn spawn_server(
                     is_authenticated_transport = true;
 
                     logger.log("[info] MCP: Using (legacy) SSE transport (due to preflight failing with a 404)".to_string());
-                    let transport = rmcp::transport::SseClientTransport::start_with_client(
+                    let transport = mcp::sse_transport::SseClientTransport::start_with_client(
                         client,
-                        rmcp::transport::sse_client::SseClientConfig {
+                        mcp::sse_transport::SseClientConfig {
                             sse_endpoint: sse_server.url.into(),
                             ..Default::default()
                         },
@@ -1897,16 +1902,16 @@ async fn spawn_server(
                 Ok(Transport::Sse(None)) => {
                     logger.log("[info] MCP: Using (legacy) SSE transport (due to preflight failing with a 404)".to_string());
                     let transport = if headers.is_empty() {
-                        rmcp::transport::SseClientTransport::start(sse_server.url.clone())
+                        mcp::sse_transport::SseClientTransport::start(sse_server.url.clone())
                             .await
                             .map_err(|e| {
                                 rmcp::RmcpError::transport_creation::<ReqwestSseTransport>(e)
                             })?
                     } else {
                         let client = build_client_with_headers(&headers)?;
-                        rmcp::transport::SseClientTransport::start_with_client(
+                        mcp::sse_transport::SseClientTransport::start_with_client(
                             client,
-                            rmcp::transport::sse_client::SseClientConfig {
+                            mcp::sse_transport::SseClientConfig {
                                 sse_endpoint: sse_server.url.clone().into(),
                                 ..Default::default()
                             },
@@ -2067,17 +2072,14 @@ async fn send_initialize_request(
 /// This tells the MCP server who we are and what capabilities we have.
 fn make_client_info() -> rmcp::model::ClientInfo {
     rmcp::model::ClientInfo {
-        protocol_version: Default::default(),
-        capabilities: Default::default(),
         client_info: rmcp::model::Implementation {
             name: warp_core::channel::ChannelState::app_id().to_string(),
             version: warp_core::channel::ChannelState::app_version()
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
-            title: None,
-            icons: None,
-            website_url: None,
+            ..Default::default()
         },
+        ..Default::default()
     }
 }
 

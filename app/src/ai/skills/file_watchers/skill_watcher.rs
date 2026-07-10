@@ -159,15 +159,11 @@ impl SkillWatcher {
             }
         }
 
-        // Two subscriptions handle different aspects of skill loading:
-        //
-        // 1. RepositoryMetadataEvent::RepositoryUpdated - Loads initial skills from the file tree.
-        //    This fires after the tree is built, so we can query it for skill directories.
-        //
-        // 2. DetectedRepositoriesEvent::DetectedGitRepo - Sets up file watchers for incremental
-        //    updates (add/delete/move). This handles changes after initial load.
-        //
-        // The order of these events doesn't matter - both are idempotent and serve different purposes.
+        // RepositoryMetadataEvent::RepositoryUpdated fires after the file tree is
+        // built, so we can query it for skill directories. This covers both local
+        // project repos and environment repos registered via CloudEnvironmentPrep
+        // (which flow through DetectedRepositories -> DirectoryWatcher ->
+        // RepoMetadataModel).
         ctx.subscribe_to_model(&RepoMetadataModel::handle(ctx), |me, event, ctx| {
             use repo_metadata::wrapper_model::RepoMetadataEvent;
             use repo_metadata::RepositoryIdentifier;

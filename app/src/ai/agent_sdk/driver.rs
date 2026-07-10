@@ -421,6 +421,9 @@ impl AgentDriver {
                     }
                     continue; // Skip the single-var insert below since we handled all vars inline.
                 }
+                ManagedSecretValue::OpenaiApiKey { api_key, .. } => {
+                    ("OPENAI_API_KEY", api_key.as_str())
+                }
             };
             if std::env::var(env_name).is_ok_and(|v| !v.is_empty()) {
                 log::warn!("Skipping managed secret {env_name}: already set in environment");
@@ -1372,7 +1375,9 @@ impl AgentDriver {
                 | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. }
                 | BlocklistAIHistoryEvent::ClearedActiveConversation { .. }
                 | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
-                | BlocklistAIHistoryEvent::ConversationAgentIdAssigned { .. } => (),
+                | BlocklistAIHistoryEvent::ConversationAgentIdAssigned { .. }
+                | BlocklistAIHistoryEvent::ConversationOwnershipTransferred { .. }
+                | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. } => (),
             }
         });
 

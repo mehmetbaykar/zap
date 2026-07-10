@@ -313,6 +313,9 @@ impl CommandSearchView {
                                     },
                                     ctx,
                                 );
+                                if let Some(query) = mixer.current_query().cloned() {
+                                    mixer.run_query(query, ctx);
+                                }
                                 ctx.notify();
                             }
                         }
@@ -1009,5 +1012,5 @@ pub mod styles {
 }
 
 #[cfg(test)]
-#[path = "view_test.rs"]
+#[path = "view_tests.rs"]
 mod tests;

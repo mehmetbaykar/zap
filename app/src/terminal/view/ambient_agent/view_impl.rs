@@ -3,15 +3,11 @@
 use warp_cli::agent::Harness;
 
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
-use crate::ai::AIRequestUsageModel;
 use warpui::prelude::Empty;
 
 use crate::ai::blocklist::{agent_view::AgentViewEntryOrigin, BlocklistAIHistoryModel};
-use crate::terminal::view::ambient_agent::AmbientAgentInitialUserQuery;
-use crate::terminal::view::rich_content::RichContentInsertionPosition;
 use crate::terminal::view::TerminalView;
 use crate::terminal::CLIAgent;
-use crate::workspaces::user_workspaces::UserWorkspaces;
 use warp_core::ui::appearance::Appearance;
 use warpui::elements::Align;
 use warpui::{AppContext, Element, EntityId, SingletonEntity, ViewContext};
@@ -63,18 +59,11 @@ impl TerminalView {
         });
     }
 
-    pub(in crate::terminal::view) fn show_out_of_credits_modal(&self, ctx: &mut ViewContext<Self>) {
-        let is_on_paid_plan = UserWorkspaces::as_ref(ctx)
-            .current_workspace()
-            .is_some_and(|workspace| workspace.billing_metadata.is_user_on_paid_plan());
-
-        if is_on_paid_plan {
-            // De-cloud branch: no longer shows the agent capacity modal
-        } else {
-            AIRequestUsageModel::handle(ctx).update(ctx, |model, ctx| {
-                model.refresh_request_usage_async(ctx);
-            });
-        }
+    /// Shows the out-of-credits modal. No-op (cloud removed).
+    pub(in crate::terminal::view) fn show_out_of_credits_modal(
+        &self,
+        _ctx: &mut ViewContext<Self>,
+    ) {
     }
 
     /// Handles ambient agent view model events.
@@ -120,56 +109,16 @@ impl TerminalView {
                     ctx.notify();
                     return;
                 }
-                if false {
-                    if self
-                        .ambient_agent_view_model
-                        .as_ref(ctx)
-                        .is_third_party_harness()
-                    {
-                        // Non-oz runs: render the submitted prompt via the queued-prompt UI.
-                        // The block is removed later by `HarnessCommandStarted` / failure /
-                        // cancel / auth handlers.
-                        let prompt = self
-                            .ambient_agent_view_model
-                            .as_ref(ctx)
-                            .request()
-                            .map(|request| request.prompt.clone())
-                            .unwrap_or_default();
-                        if !prompt.is_empty() {
-                            self.insert_ambient_agent_queued_user_query_block(prompt, ctx);
-                        }
-                    } else {
-                        let initial_user_query = ctx.add_view(|ctx| {
-                            AmbientAgentInitialUserQuery::new(
-                                self.ambient_agent_view_model.clone(),
-                                ctx,
-                            )
-                        });
-                        self.insert_rich_content(
-                            None,
-                            initial_user_query,
-                            None,
-                            RichContentInsertionPosition::Append {
-                                insert_below_long_running_block: true,
-                            },
-                            ctx,
-                        );
-                        self.ambient_agent_view_model.update(ctx, |model, _| {
-                            model.set_has_inserted_ambient_agent_user_query_block(true);
-                        });
-                    }
-                } else {
-                    // Reset tip cooldown so the first tip shows for 60 seconds
-                    let tip_model = self
-                        .ambient_agent_view_model
-                        .as_ref(ctx)
-                        .ui_state
-                        .tip_model
-                        .clone();
-                    tip_model.update(ctx, |model, model_ctx| {
-                        model.reset_cooldown(model_ctx);
-                    });
-                }
+                // Reset tip cooldown so the first tip shows for 60 seconds
+                let tip_model = self
+                    .ambient_agent_view_model
+                    .as_ref(ctx)
+                    .ui_state
+                    .tip_model
+                    .clone();
+                tip_model.update(ctx, |model, model_ctx| {
+                    model.reset_cooldown(model_ctx);
+                });
                 // Re-render to show loading state.
                 ctx.notify();
             }
@@ -350,6 +299,7 @@ impl TerminalView {
             Harness::Claude => matches!(cli_agent, CLIAgent::Claude),
             Harness::OpenCode => matches!(cli_agent, CLIAgent::OpenCode),
             Harness::Gemini => matches!(cli_agent, CLIAgent::Gemini),
+            Harness::Codex => matches!(cli_agent, CLIAgent::Codex),
             Harness::Unknown => false,
         }
     }

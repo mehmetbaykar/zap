@@ -120,6 +120,9 @@ pub(crate) fn harness_kind(harness: Harness) -> Result<HarnessKind, AgentDriverE
         Harness::Claude => Ok(HarnessKind::ThirdParty(Box::new(ClaudeHarness))),
         Harness::OpenCode => Ok(HarnessKind::Unsupported(Harness::OpenCode)),
         Harness::Gemini => Ok(HarnessKind::ThirdParty(Box::new(GeminiHarness))),
+        // Codex CLI support for the standalone agent driver (upstream's `codex.rs`
+        // harness) was not ported in this merge; treat it like `OpenCode` until it is.
+        Harness::Codex => Ok(HarnessKind::Unsupported(Harness::Codex)),
         Harness::Unknown => Err(AgentDriverError::InvalidRuntimeState),
     }
 }
@@ -342,5 +345,5 @@ pub(super) fn write_temp_file(
 }
 
 #[cfg(test)]
-#[path = "mod_test.rs"]
+#[path = "mod_tests.rs"]
 mod tests;

@@ -99,6 +99,7 @@ use warp_util::path::LineAndColumnArg;
 
 // Import keybinding constants from code view to ensure consistency
 use crate::code::view::SAVE_FILE_BINDING_NAME;
+use crate::notebooks::file::MarkdownDisplayMode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AIDocumentAction {
@@ -303,7 +304,9 @@ impl AIDocumentView {
                     let appearance = Appearance::as_ref(ctx);
                     let font_settings = FontSettings::as_ref(ctx);
                     let styles = rich_text_styles(appearance, font_settings);
-                    NotebooksEditorModel::new_unbound(styles, ctx)
+                    let mut model = NotebooksEditorModel::new_unbound(styles, ctx);
+                    model.set_default_mermaid_display_mode(MarkdownDisplayMode::Rendered, ctx);
+                    model
                 })
             });
 
@@ -958,12 +961,17 @@ impl View for AIDocumentView {
         "AIDocumentView"
     }
 
-    fn render(&self, _app: &AppContext) -> Box<dyn warpui::Element> {
+    fn render(&self, app: &AppContext) -> Box<dyn warpui::Element> {
+        let mut content_column =
+            Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+
         let editor = Container::new(ChildView::new(&self.editor).finish())
             .with_padding_left(8.)
             .with_padding_right(8.)
             .finish();
-        let mut stack = Stack::new().with_child(editor);
+        content_column.add_child(warpui::elements::Expanded::new(1.0, editor).finish());
+
+        let mut stack = Stack::new().with_child(content_column.finish());
 
         if self.is_version_menu_open {
             stack.add_positioned_overlay_child(

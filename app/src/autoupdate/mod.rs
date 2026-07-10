@@ -184,6 +184,10 @@ pub struct AutoupdateState {
     /// but to queue them instead.
     request_queue: VecDeque<RequestType>,
     http_client: Arc<http_client::Client>,
+    /// Whether the polling loop has been explicitly started. Requests are silently queued but not
+    /// executed until `start_polling` is called. This ensures no version-check requests are made
+    /// before onboarding completes.
+    polling_started: bool,
 }
 
 impl AutoupdateState {
@@ -195,6 +199,7 @@ impl AutoupdateState {
             downloaded_update: None,
             download_progress: None,
             request_queue: VecDeque::new(),
+            polling_started: false,
         }
     }
 
@@ -204,28 +209,35 @@ impl AutoupdateState {
     }
 
     pub fn register(ctx: &mut AppContext, http_client: Arc<http_client::Client>) {
-        ctx.add_singleton_model(move |ctx| {
+        ctx.add_singleton_model(move |_ctx| Self::new(http_client));
+    }
+
+    /// Start the autoupdate polling loop. Idempotent: subsequent calls are no-ops.
+    ///
+    /// Must be called explicitly once onboarding (if any) has completed. For returning users
+    /// who bypass onboarding, this should be called during app startup.
+    pub fn start_polling(&mut self, ctx: &mut ModelContext<Self>) {
+        if self.polling_started {
+            return;
+        }
+        if FeatureFlag::Autoupdate.is_enabled() && AppExecutionMode::as_ref(ctx).can_autoupdate() {
+            log::info!("Starting autoupdate polling loop");
+            self.polling_started = true;
+            // Start the polling loop; whether a background check is actually issued is
+            // controlled by user settings.
+            self.poll_for_update(ctx);
+            // When the app is activated, enqueue one possible daily check; it also reads the
+            // user settings before running.
             let state_handle = WindowManager::handle(ctx);
-            let mut me = Self::new(http_client);
-            if FeatureFlag::Autoupdate.is_enabled()
-                && AppExecutionMode::as_ref(ctx).can_autoupdate()
-            {
-                // Start the polling loop; whether a background check is actually issued is
-                // controlled by user settings.
-                me.poll_for_update(ctx);
-                // When the app is activated, enqueue one possible daily check; it also reads the
-                // user settings before running.
-                ctx.subscribe_to_model(&state_handle, |me, event, ctx| {
-                    let windowing::StateEvent::ValueChanged { current, previous } = event;
-                    if previous.stage == ApplicationStage::Inactive
-                        && current.stage == ApplicationStage::Active
-                    {
-                        me.enqueue_request(RequestType::DailyCheck, ctx);
-                    }
-                });
-            }
-            me
-        });
+            ctx.subscribe_to_model(&state_handle, |me, event, ctx| {
+                let windowing::StateEvent::ValueChanged { current, previous } = event;
+                if previous.stage == ApplicationStage::Inactive
+                    && current.stage == ApplicationStage::Active
+                {
+                    me.enqueue_request(RequestType::DailyCheck, ctx);
+                }
+            });
+        }
     }
 
     /// Check if any requests are pending. If there are and we're ready to submit a new request,
@@ -239,6 +251,17 @@ impl AutoupdateState {
     /// Check if there are any requests in the queue. Return the next one, but only if there isn't
     /// already a request in-flight.
     fn get_next_request(&mut self, ctx: &mut ModelContext<Self>) -> Option<RequestType> {
+        // WASM cannot apply updates, so no request type should ever contact the server.
+        if cfg!(target_family = "wasm") {
+            return None;
+        }
+
+        // Don't execute any requests until polling has been explicitly started (i.e. onboarding
+        // has completed). Requests enqueued before that point are silently deferred.
+        if !self.polling_started {
+            return None;
+        }
+
         if !self.should_start_update_check() {
             return None;
         }
@@ -263,6 +286,11 @@ impl AutoupdateState {
 
     /// After queueing the request, immediately try executing it.
     fn enqueue_request(&mut self, request_type: RequestType, ctx: &mut ModelContext<Self>) {
+        // WASM cannot execute any update requests; skip enqueuing entirely so the
+        // queue never grows with work that can never be consumed.
+        if cfg!(target_family = "wasm") {
+            return;
+        }
         self.request_queue.push_back(request_type);
         self.try_execute_request(ctx);
     }
@@ -1302,5 +1330,5 @@ fn release_assets_directory_url(channel: Channel, version: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "mod_test.rs"]
+#[path = "mod_tests.rs"]
 mod tests;

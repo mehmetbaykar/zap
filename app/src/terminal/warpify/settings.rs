@@ -536,5 +536,5 @@ impl WarpifySettings {
 }
 
 #[cfg(test)]
-#[path = "settings_test.rs"]
+#[path = "settings_tests.rs"]
 mod tests;

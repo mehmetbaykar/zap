@@ -725,6 +725,69 @@ pub fn render_citation(
     )
 }
 
+/// Renders the Ask-User-Question speedbump footer: a short description label, a
+/// dropdown for the `ask_user_question` permission, and a right-aligned
+/// "Manage AI Autonomy permissions" link. Matches the visual rhythm of
+/// [`render_autonomy_checkbox_setting_speedbump_footer`].
+pub fn render_autonomy_dropdown_setting_speedbump_footer<A>(
+    description: &'static str,
+    dropdown: &warpui::ViewHandle<crate::view_components::dropdown::Dropdown<A>>,
+    settings_link_handle: MouseStateHandle,
+    app: &AppContext,
+) -> Box<dyn Element>
+where
+    A: warpui::Action + Clone,
+{
+    let appearance = Appearance::as_ref(app);
+    let theme = appearance.theme();
+    Flex::row()
+        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+        .with_main_axis_size(MainAxisSize::Max)
+        .with_child(
+            Container::new(
+                Text::new(
+                    description,
+                    appearance.ui_font_family(),
+                    appearance.monospace_font_size() - 1.,
+                )
+                .with_color(blended_colors::text_sub(theme, theme.surface_1()))
+                .with_selectable(false)
+                .finish(),
+            )
+            .with_margin_right(8.)
+            .finish(),
+        )
+        .with_child(warpui::elements::ChildView::new(dropdown).finish())
+        .with_child(
+            Expanded::new(
+                1.,
+                Align::new(
+                    appearance
+                        .ui_builder()
+                        .link(
+                            "Manage AI Autonomy permissions".into(),
+                            None,
+                            Some(Box::new(move |ctx| {
+                                ctx.dispatch_typed_action(
+                                    WorkspaceAction::ShowSettingsPageWithSearch {
+                                        search_query: "Autonomy".to_string(),
+                                        section: Some(SettingsSection::AI),
+                                    },
+                                );
+                            })),
+                            settings_link_handle,
+                        )
+                        .build()
+                        .finish(),
+                )
+                .right()
+                .finish(),
+            )
+            .finish(),
+        )
+        .finish()
+}
+
 /// TODO: All AIBlock footer-related rendering logic should probably be put into its own View.
 /// This function is needed both above (i.e. `block.rs`) and below (i.e. `output.rs`), and as such
 /// cannot reside in `output.rs` because we don't want to make `mod output` public.
@@ -877,7 +940,6 @@ impl View for AIBlock {
         } else {
             vec![]
         };
-
         if should_render_query_and_header {
             if let Some((
                 query_for_display,
@@ -1158,10 +1220,9 @@ impl View for AIBlock {
                     false
                 }
             });
-        let should_add_top_padding = !should_hide_first_block_query_and_header
-            && (contains_user_query_and_is_not_pin_to_top
-                || renders_below_requested_command_view
-                || (!is_previous_blocklist_item_ai_block && !self.is_passive_conversation(app)));
+        let should_add_top_padding = contains_user_query_and_is_not_pin_to_top
+            || renders_below_requested_command_view
+            || (!is_previous_blocklist_item_ai_block && !self.is_passive_conversation(app));
 
         if should_add_top_padding {
             content = content.with_padding_top(CONTENT_VERTICAL_PADDING);

@@ -1,3 +1,4 @@
+use crate::features::FeatureFlag;
 use lazy_static::lazy_static;
 use parking_lot::FairMutex;
 use pathfinder_geometry::vector::vec2f;
@@ -7,15 +8,14 @@ use std::cmp::{Ordering, PartialEq};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
-use crate::features::FeatureFlag;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::Icon;
 use warp_editor::render::element::VerticalExpansionBehavior;
 use warpui::clipboard::ClipboardContent;
 use warpui::elements::new_scrollable::{NewScrollable, ScrollableAppearance, SingleAxisConfig};
 use warpui::elements::{
-    ChildAnchor, ClippedScrollStateHandle, ConstrainedBox, Dismiss, Empty,
-    PositionedElementAnchor, PositionedElementOffsetBounds, ScrollbarWidth,
+    ChildAnchor, ClippedScrollStateHandle, ConstrainedBox, Dismiss, Empty, PositionedElementAnchor,
+    PositionedElementOffsetBounds, ScrollbarWidth,
 };
 use warpui::ui_components::components::UiComponent as _;
 use warpui::{
@@ -1253,6 +1253,11 @@ impl RequestedCommandView {
                             appearance.theme().surface_2(),
                         ));
                     }
+                } else if requested_command_block.is_some_and(|block| block.finished()) {
+                    // If a finished command block exists but there's no action status,
+                    // treat the same as a finished command (normal text styling).
+                    title = self.get_header_title_text().into();
+                    font_override = Some(appearance.monospace_font_family());
                 } else {
                     // If there is no action status and response is not streaming, it was cancelled
                     // mid-flight.
@@ -1385,19 +1390,27 @@ impl RequestedCommandView {
                 ));
             }
             Some(AIActionStatus::Finished(result)) => {
-                // Determine if command should be expandable based on whether it actually executed
-                let should_be_expandable = match &result.result {
-                    AIAgentActionResultType::RequestCommandOutput(command_result) => {
-                        match command_result {
-                            // All completed commands are expandable (including interrupted ones)
-                            RequestCommandOutputResult::Completed { .. } => true,
-                            // Cancelled before execution are not expandable
-                            RequestCommandOutputResult::CancelledBeforeExecution => false,
-                            _ => result.result.is_successful() || result.result.is_failed(),
+                // Determine if command should be expandable based on whether it actually executed.
+                // If a finished command block exists for this action, the command definitely ran,
+                // so it should be expandable regardless of the action result type. This handles
+                // cases where the action result is stale (e.g. a LongRunningCommandSnapshot
+                // converted to CancelledBeforeExecution on restore, even though the command
+                // completed successfully).
+                let has_finished_command_block =
+                    requested_command_block.is_some_and(|block| block.finished());
+                let should_be_expandable = has_finished_command_block
+                    || match &result.result {
+                        AIAgentActionResultType::RequestCommandOutput(command_result) => {
+                            match command_result {
+                                // All completed commands are expandable (including interrupted ones)
+                                RequestCommandOutputResult::Completed { .. } => true,
+                                // Cancelled before execution are not expandable
+                                RequestCommandOutputResult::CancelledBeforeExecution => false,
+                                _ => result.result.is_successful() || result.result.is_failed(),
+                            }
                         }
-                    }
-                    _ => result.result.is_successful() || result.result.is_failed(),
-                };
+                        _ => result.result.is_successful() || result.result.is_failed(),
+                    };
 
                 if should_be_expandable {
                     config = config.with_interaction_mode(InteractionMode::ManuallyExpandable(
@@ -1420,7 +1433,15 @@ impl RequestedCommandView {
                     ));
                 }
             }
-            _ => (),
+            _ => {
+                // Even without a known action status, if a finished command block exists
+                // for this action, the command ran and the header should be expandable.
+                if requested_command_block.is_some_and(|block| block.finished()) {
+                    config = config.with_interaction_mode(InteractionMode::ManuallyExpandable(
+                        self.get_expansion_config(requested_command_block, app),
+                    ));
+                }
+            }
         };
 
         config.render(app)
@@ -2130,5 +2151,5 @@ pub fn format_command_text(text: &str) -> String {
 }
 
 #[cfg(test)]
-#[path = "requested_command_test.rs"]
+#[path = "requested_command_tests.rs"]
 mod tests;

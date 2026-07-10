@@ -19,6 +19,7 @@ use watcher::HomeDirectoryWatcher;
 
 use super::settings::initialize_settings_for_tests;
 use crate::ai::agent_providers::AgentProviderSecrets;
+use crate::ai::blocklist::agent_view::orchestration_pin_model::OrchestrationPinModel;
 use crate::ai::blocklist::BlocklistAIPermissions;
 use crate::ai::blocklist::SerializedBlockListItem;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
@@ -74,6 +75,9 @@ pub fn initialize_app_for_terminal_view(app: &mut App) {
     app.add_singleton_model(LocalWorkflows::new);
     app.add_singleton_model(|_| History::default());
     app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+    // Pin model subscribes to BlocklistAIHistoryModel events, so it must be
+    // registered after the history model is in place.
+    app.add_singleton_model(|ctx| OrchestrationPinModel::new(Default::default(), ctx));
     app.add_singleton_model(|_| CLIAgentSessionsModel::new());
     app.add_singleton_model(BlocklistAIPermissions::new);
     app.add_singleton_model(UndoCloseStack::new);

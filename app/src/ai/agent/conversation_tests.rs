@@ -154,7 +154,11 @@ fn run_shell_command_tool() -> api::message::tool_call::Tool {
     })
 }
 
-fn tool_call_message_with_tool(id: &str, call_id: &str, tool: api::message::tool_call::Tool) -> api::Message {
+fn tool_call_message_with_tool(
+    id: &str,
+    call_id: &str,
+    tool: api::message::tool_call::Tool,
+) -> api::Message {
     api::Message {
         id: id.to_string(),
         task_id: "root-task".to_string(),
@@ -212,6 +216,7 @@ fn empty_agent_conversation_data_for_test() -> AgentConversationData {
         artifacts_json: None,
         parent_agent_id: None,
         agent_name: None,
+        orchestration_harness_type: None,
         parent_conversation_id: None,
         run_id: None,
         autoexecute_override: None,
@@ -219,6 +224,8 @@ fn empty_agent_conversation_data_for_test() -> AgentConversationData {
         compaction_state_json: None,
         byop_repair_state_json: None,
         cli_subagent_block_snapshots_json: None,
+        pinned: false,
+        is_remote_child: false,
     }
 }
 
@@ -347,6 +354,48 @@ fn restored_conversation_defaults_autoexecute_override_when_not_persisted() {
         conversation.autoexecute_override(),
         AIConversationAutoexecuteMode::RespectUserSettings
     );
+}
+
+#[test]
+fn restored_conversation_uses_persisted_last_event_sequence() {
+    let conversation_data: AgentConversationData =
+        serde_json::from_str(r#"{"server_conversation_token":null,"last_event_sequence":42}"#)
+            .unwrap();
+
+    let conversation = restored_conversation(Some(conversation_data));
+
+    assert_eq!(conversation.last_event_sequence(), Some(42));
+}
+
+#[test]
+fn restored_conversation_uses_persisted_remote_child_marker() {
+    let conversation_data: AgentConversationData =
+        serde_json::from_str(r#"{"server_conversation_token":null,"is_remote_child":true}"#)
+            .unwrap();
+
+    let conversation = restored_conversation(Some(conversation_data));
+
+    assert!(conversation.is_remote_child());
+}
+
+#[test]
+fn child_conversation_detection_uses_parent_agent_id() {
+    let conversation_data: AgentConversationData = serde_json::from_str(
+        r#"{"server_conversation_token":null,"parent_agent_id":"parent-run-id"}"#,
+    )
+    .unwrap();
+
+    let conversation = restored_conversation(Some(conversation_data));
+
+    assert!(conversation.is_child_agent_conversation());
+    assert_eq!(conversation.parent_conversation_id(), None);
+}
+
+#[test]
+fn cli_agent_transcript_vehicle_is_excluded_from_navigation() {
+    let conversation = AIConversation::new(false, true);
+
+    assert!(conversation.should_exclude_from_navigation());
 }
 
 #[test]
@@ -504,11 +553,7 @@ fn test_cli_subagent_serialized_block_preserves_block_id_and_metadata() {
             api::Task {
                 id: "root-task".to_string(),
                 messages: vec![
-                    tool_call_message_with_tool(
-                        "tool-call-1",
-                        "call-1",
-                        run_shell_command_tool(),
-                    ),
+                    tool_call_message_with_tool("tool-call-1", "call-1", run_shell_command_tool()),
                     tool_call_result_message_with_result(
                         "tool-result-1",
                         "call-1",

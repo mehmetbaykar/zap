@@ -76,7 +76,6 @@ email_address = { git = "https://github.com/warpdotdev/rust-email_address", bran
 embed_plist = "1.2"
 enclose = "1.1.8"
 enum-iterator.workspace = true
-event-listener = "5.4.0"
 field_mask.workspace = true
 flate2 = "1.0.17"
 float-cmp.workspace = true
@@ -183,6 +182,7 @@ tikv-jemallocator = { version = "0.6", optional = true, features = [
     "override_allocator_on_supported_platforms",
 ] }
 toml = "0.8.13"
+toml_edit.workspace = true
 tracing.workspace = true
 ui_components.workspace = true
 unicase = "2.7.0"
@@ -272,15 +272,15 @@ tokio.workspace = true
 tokio-util.workspace = true
 
 # AWS SDK (loading credentials for BYO LLM)
-aws-config = { version = "1.8.12", features = ["credentials-login"] }
+aws-config = { version = "1.8.16", features = ["credentials-login"] }
 aws-credential-types = "1"
-aws-sdk-sts = "1"
+aws-sdk-sts = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-types = "1"
 
+mcp.workspace = true
 rmcp = { workspace = true, features = [
     "auth",
     "transport-streamable-http-client-reqwest",
-    "transport-sse-client-reqwest",
     "transport-child-process",
 ] }
 notify-debouncer-full.workspace = true
@@ -437,7 +437,6 @@ crash_reporting = [
 default = [
     "agent_mode",
     "render_continuous_block_selections_with_single_border",
-    "settings_import",
     "shared_with_me",
     "block_toolbelt_save_as_workflow",
     "remove_alt_screen_padding",
@@ -568,6 +567,7 @@ default = [
     "open_code_notifications",
     "cli_agent_rich_input",
     "vertical_tabs",
+    "vertical_tabs_summary_mode",
     "tab_configs",
     "agent_harness",
     "hoa_onboarding_flow",
@@ -578,6 +578,9 @@ default = [
     "settings_file",
     "ssh_tmux_wrapper",
     "onekey_prompt",
+    "directory_tab_colors",
+    "configurable_context_window",
+    "pending_user_query_indicator",
 ]
 # Enable this feature to automatically perform heap profiling.  NOTE: This will
 # substantially slow down program execution.
@@ -603,6 +606,8 @@ grep_tool = []
 # For the most part, including GUI code in headless builds is fine; the main use case is
 # for things that pull in external dependencies.
 gui = ["voice_input"]
+nld_classifier_v1 = ["input_classifier/nld_classifier_v1"]
+nld_classifier_v2 = ["input_classifier/nld_classifier_v2"]
 msys2_shells = []
 onekey_prompt = []
 file_retrieval_tools = []
@@ -644,6 +649,7 @@ list_skills = []
 # include dependencies that should only exist in such environments.
 local_tty = []
 local_computer_use = []
+local_claude_codex_child_harnesses = []
 # This feature is enabled in build.rs when compiling for platforms which
 # have APIs for interacting with a local filesystem.  It can be used to
 # conditionally include dependencies that should only exist in such
@@ -680,6 +686,9 @@ predict_am_queries = []
 quake_mode = []
 record_app_active_events = []
 recording_mode = []
+full_source_code_embedding = []
+remote_codebase_indexing = ["full_source_code_embedding"]
+
 # This feature should only be enabled when building a release bundle with
 # the bundle script, and can be used to conditionally enable functionality
 # accordingly.
@@ -691,7 +700,6 @@ richtext_multiselect = []
 runtime_feature_flags = []
 selectable_prompt = []
 settings_file = []
-settings_import = []
 sequential_storage = []
 skip_login = []
 # This feature should only be enabled when building a self-contained binary with the bundle script.
@@ -715,13 +723,15 @@ alacritty_settings_import = []
 shared_with_me = []
 ai_rules = []
 am_workflows = []
-less_horizontal_terminal_padding = []
 shell_selector = []
 block_toolbelt_save_as_workflow = []
 blocklist_markdown_table_rendering = []
 blocklist_markdown_images = []
 minimalist_ui = []
 remove_alt_screen_padding = []
+less_horizontal_terminal_padding = []
+shared_session_long_running_commands = []
+loginless_conversion = []
 external_agent_mode_context = []
 avatar_in_tab_bar = []
 ssh_drag_and_drop = []
@@ -741,8 +751,8 @@ use_tantivy_search = []
 agent_management_popup = []
 simulate_github_unauthed = []
 reload_stale_conversation_files = []
-nld_fasttext_model = ["input_classifier/fasttext"]
 nld_onnx_model = ["input_classifier/onnx_candle"]
+shared_block_title_generation = []
 retry_truncated_code_responses = []
 ai_context_menu = []
 at_menu_outside_of_ai_mode = []
@@ -819,6 +829,9 @@ file_based_mcp = []
 skill_arguments = []
 active_conversation_requires_interaction = []
 incremental_auto_reload = []
+orchestration = []
+orchestration_v2 = ["orchestration"]
+orchestration_pill_bar = []
 pending_user_query_indicator = []
 queue_slash_command = []
 inline_menu_headers = []
@@ -829,6 +842,8 @@ vertical_tabs = []
 vertical_tabs_summary_mode = []
 tab_configs = []
 agent_harness = []
+oz_handoff = []
+handoff_local_cloud = []
 hoa_notifications = []
 open_code_notifications = []
 transfer_control_tool = []
@@ -839,7 +854,11 @@ hoa_onboarding_flow = []
 git_operations_in_code_review = []
 hoa_remote_control = []
 codex_notifications = []
+cloud_mode_setup_v2 = []
+cloud_mode_input_v2 = []
 configurable_context_window = []
+handoff_cloud_cloud = ["cloud_mode_setup_v2"]
+git_credential_refresh = []
 
 [package.metadata.bundle.bin.zap-oss]
 category = "public.app-category.developer-tools"

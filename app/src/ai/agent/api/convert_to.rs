@@ -200,9 +200,10 @@ pub(super) fn convert_input(
             AIAgentInput::SummarizeConversation {
                 prompt,
                 overflow: _,
+                context,
             } => {
                 return Ok(api::request::Input {
-                    context: None,
+                    context: Some(convert_context(context.as_ref())),
                     r#type: Some(api::request::input::Type::SummarizeConversation(
                         api::request::input::SummarizeConversation {
                             prompt: prompt.unwrap_or_default(),

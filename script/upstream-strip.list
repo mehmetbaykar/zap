@@ -1,0 +1,193 @@
+# upstream-strip.list — paths the fork deletes that upstream keeps evolving.
+# Per SPEC.md: on every upstream merge slice, delete/modify conflicts on these paths
+# resolve as 'keep deleted' (git rm). Regenerate additions from: git status --porcelain | grep ^DU
+# Classes: fork-deleted cloud crates, cloud-only app modules, telemetry, Warp-brand docs.
+# Slice 1 (c325d146a..8da83b42a) resolved set:
+.agents/skills/write-product-spec/SKILL.md
+.agents/skills/write-tech-spec/SKILL.md
+.github/actions/bundle_arch_package/action.yml
+.github/workflows/ci.yml
+.github/workflows/create_release.yml
+.github/workflows/delete_release.yml
+.github/workflows/feature_flag_cleanup.yml
+app/channels/oss/dev.warp.WarpOss.desktop
+app/src/ai/active_agent_views_model_tests.rs
+app/src/ai/active_agent_views_model.rs
+app/src/ai/agent_management/agent_management_model_tests.rs
+app/src/ai/agent_management/cloud_setup_guide_view.rs
+app/src/ai/agent_management/details_action_buttons.rs
+app/src/ai/agent_management/telemetry.rs
+app/src/ai/agent_management/view.rs
+app/src/ai/agent_sdk/ambient_tests.rs
+app/src/ai/agent_sdk/ambient.rs
+app/src/ai/agent_sdk/artifact_upload.rs
+app/src/ai/agent_sdk/driver_tests.rs
+app/src/ai/agent_sdk/driver/environment.rs
+app/src/ai/agent_sdk/driver/error_classification_tests.rs
+app/src/ai/agent_sdk/driver/harness/claude_transcript.rs
+app/src/ai/agent_sdk/driver/snapshot_tests.rs
+app/src/ai/agent_sdk/driver/snapshot.rs
+app/src/ai/agent_sdk/harness_support.rs
+app/src/ai/agent_sdk/mod_tests.rs
+app/src/ai/agent_sdk/retry_tests.rs
+app/src/ai/agent_sdk/retry.rs
+app/src/ai/agent_sdk/secret.rs
+app/src/ai/agent_sdk/telemetry.rs
+app/src/ai/agent/api/convert_conversation_tests.rs
+app/src/ai/agent/api/convert_from_tests.rs
+app/src/ai/agent/api/impl_tests.rs
+app/src/ai/agent/api/impl.rs
+app/src/ai/ambient_agents/spawn_tests.rs
+app/src/ai/blocklist/action_model/execute/fetch_conversation.rs
+app/src/ai/blocklist/action_model/execute/get_files.rs
+app/src/ai/blocklist/action_model/execute/request_computer_use.rs
+app/src/ai/blocklist/action_model/execute/search_codebase.rs
+app/src/ai/blocklist/action_model/execute/send_message.rs
+app/src/ai/blocklist/action_model/execute/start_agent_tests.rs
+app/src/ai/blocklist/action_model/execute/start_agent.rs
+app/src/ai/blocklist/action_model/execute/upload_artifact_tests.rs
+app/src/ai/blocklist/agent_view/agent_input_footer/environment_selector.rs
+app/src/ai/blocklist/block/view_impl/orchestration_tests.rs
+app/src/ai/blocklist/block/view_impl/orchestration.rs
+app/src/ai/blocklist/orchestration_events_tests.rs
+app/src/ai/blocklist/orchestration_events.rs
+app/src/ai/blocklist/task_status_sync_model_tests.rs
+app/src/ai/blocklist/task_status_sync_model.rs
+app/src/ai/cloud_agent_settings.rs
+app/src/ai/cloud_environments/mod.rs
+app/src/ai/conversation_details_panel_tests.rs
+app/src/ai/conversation_details_panel.rs
+app/src/ai/generate_code_review_content/mod.rs
+app/src/ai/get_relevant_files/controller.rs
+app/src/ai/outline/native.rs
+app/src/ai/outline/wasm.rs
+app/src/ai/persisted_workspace.rs
+app/src/auth/auth_manager_tests.rs
+app/src/auth/auth_manager.rs
+app/src/auth/auth_manager/user_persistence_tests.rs
+app/src/auth/auth_manager/user_persistence.rs
+app/src/auth/auth_state.rs
+app/src/auth/auth_view_modal.rs
+app/src/auth/credentials.rs
+app/src/auth/login_slide.rs
+app/src/auth/paste_auth_token_modal.rs
+app/src/auth/user_tests.rs
+app/src/auth/user.rs
+app/src/autoupdate/linux_tests.rs
+app/src/drive/sharing/dialog/mod.rs
+app/src/pane_group/child_agent.rs
+app/src/pane_group/mod_tests.rs
+app/src/search/ai_context_menu/notebooks/data_source_test.rs
+app/src/server/cloud_objects/update_manager_tests.rs
+app/src/server/cloud_objects/update_manager.rs
+app/src/server/events_tests.rs
+app/src/server/server_api.rs
+app/src/server/server_api/ai_tests.rs
+app/src/server/server_api/ai.rs
+app/src/server/server_api/auth_tests.rs
+app/src/server/server_api/auth.rs
+app/src/server/server_api/harness_support_tests.rs
+app/src/server/server_api/harness_support.rs
+app/src/server/server_api/managed_secrets.rs
+app/src/server/server_api/presigned_upload_tests.rs
+app/src/server/server_api/presigned_upload.rs
+app/src/server/sync_queue_tests.rs
+app/src/server/sync_queue.rs
+app/src/server/telemetry/context_provider.rs
+app/src/server/telemetry/mod.rs
+app/src/settings_view/agent_assisted_environment_modal.rs
+app/src/settings_view/billing_and_usage_page.rs
+app/src/settings_view/mod_tests.rs
+app/src/settings_view/platform_page.rs
+app/src/settings_view/platform/create_api_key_modal.rs
+app/src/settings_view/update_environment_form.rs
+app/src/settings/cloud_preferences_syncer_tests.rs
+app/src/terminal/buy_credits_banner.rs
+app/src/terminal/input/cloud_mode_v2_history_menu.rs
+app/src/terminal/shared_session/share_modal/body_tests.rs
+app/src/terminal/shared_session/share_modal/body.rs
+app/src/terminal/shared_session/shared_handlers.rs
+app/src/terminal/shared_session/sharer/network_tests.rs
+app/src/terminal/shared_session/sharer/network.rs
+app/src/terminal/shared_session/viewer/event_loop.rs
+app/src/terminal/shared_session/viewer/mod_tests.rs
+app/src/terminal/shared_session/viewer/network_tests.rs
+app/src/terminal/shared_session/viewer/network.rs
+app/src/terminal/shared_session/viewer/terminal_manager.rs
+app/src/terminal/view/ambient_agent/block/query.rs
+app/src/terminal/view/ambient_agent/block/setup_command_text.rs
+app/src/terminal/view/ambient_agent/block/setup_command.rs
+app/src/terminal/view/init_project/model.rs
+app/src/terminal/view/shared_session/view_impl_test.rs
+app/src/util/link_detection_test.rs
+app/src/workspaces/gql_convert.rs
+crates/ai/src/index/full_source_code_embedding/changed_files_tests.rs
+crates/ai/src/index/full_source_code_embedding/changed_files.rs
+crates/ai/src/index/full_source_code_embedding/chunker/semantic.rs
+crates/ai/src/index/full_source_code_embedding/codebase_index.rs
+crates/ai/src/index/full_source_code_embedding/manager.rs
+crates/ai/src/index/full_source_code_embedding/merkle_tree/hash_tests.rs
+crates/ai/src/index/full_source_code_embedding/merkle_tree/hash.rs
+crates/ai/src/index/full_source_code_embedding/merkle_tree/node_tests.rs
+crates/ai/src/index/full_source_code_embedding/merkle_tree/node.rs
+crates/ai/src/index/full_source_code_embedding/merkle_tree/serialized_tree_tests.rs
+crates/ai/src/index/full_source_code_embedding/merkle_tree/serialized_tree.rs
+crates/ai/src/index/full_source_code_embedding/merkle_tree/tree_tests.rs
+crates/ai/src/index/full_source_code_embedding/merkle_tree/tree.rs
+crates/ai/src/index/full_source_code_embedding/mod.rs
+crates/ai/src/index/full_source_code_embedding/snapshot.rs
+crates/graphql/src/api/ai.rs
+crates/graphql/src/api/billing.rs
+crates/graphql/src/api/experiment.rs
+crates/graphql/src/api/mod.rs
+crates/graphql/src/api/mutations/create_file_artifact_upload_target.rs
+crates/graphql/src/api/mutations/create_team.rs
+crates/graphql/src/api/mutations/generate_api_key.rs
+crates/graphql/src/api/queries/get_feature_model_choices.rs
+crates/graphql/src/api/queries/get_user.rs
+crates/graphql/src/api/queries/get_workspaces_metadata_for_user.rs
+crates/graphql/src/api/queries/mod.rs
+crates/graphql/src/api/queries/task_secrets.rs
+crates/graphql/src/api/workspace.rs
+crates/graphql/src/managed_secrets.rs
+crates/graphql/src/scalars/mod.rs
+crates/integration/src/test/websockets.rs
+crates/lsp/README.md
+crates/lsp/src/manager.rs
+crates/lsp/src/servers/rust.rs
+crates/warp_cli/src/harness_support.rs
+crates/warp_graphql_schema/api/client-schema.ts
+crates/warp_graphql_schema/api/schema.graphql
+crates/warp_server_client/src/cloud_object/mod.rs
+crates/warpui_core/src/app_focus_telemetry_tests.rs
+crates/warpui_core/src/app_focus_telemetry.rs
+crates/warpui_core/src/telemetry/event_store_tests.rs
+crates/warpui_core/src/telemetry/event_store.rs
+FAQ.md
+WARP.md
+# add-strip: .agents/skills/diagnose-ci-failures/SKILL.md
+# add-strip: .agents/skills/fix-errors/SKILL.md
+# add-strip: .agents/skills/implement-specs/SKILL.md
+# add-strip: .agents/skills/resolve-merge-conflicts/SKILL.md
+# add-strip: .agents/skills/resolve-merge-conflicts/scripts/extract_conflict_context.py
+# add-strip: .agents/skills/review-pr/SKILL.md
+# add-strip: .agents/skills/spec-driven-implementation/SKILL.md
+# add-strip: .agents/skills/update-skill/SKILL.md
+# add-strip: .agents/skills/update-skill/references/best-practices.md
+# add-strip: app/src/ai/agent/mod_test.rs
+# add-strip: app/src/ai/blocklist/history_model_test.rs
+# add-strip: app/src/ai/mcp/mod_test.rs
+# add-strip: app/src/code_review/diff_state.rs
+# add-strip: app/src/terminal/find/model/block_list_test.rs
+# add-strip: app/src/terminal/input_test.rs
+# add-strip: app/src/terminal/model/grid/grid_handler_test.rs
+# add-strip: app/src/terminal/model/terminal_model_test.rs
+# add-strip: app/src/terminal/view_test.rs
+# add-strip: app/src/util/sync.rs
+# add-strip: app/src/workspace/view_test.rs
+# add-strip: crates/editor/src/content/buffer_test.rs
+# add-strip: crates/input_classifier/models/fasttext/cmd_lang_classifier_v4.bin
+# add-strip: crates/input_classifier/models/onnx/bert_tiny.onnx
+# add-strip: crates/input_classifier/src/fasttext/mod.rs
+# add-strip: crates/warp_util/src/content_version_test.rs
+# add-strip: crates/warpui_core/src/text_layout_test.rs

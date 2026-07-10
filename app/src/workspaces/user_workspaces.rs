@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     ai::llms::LLMModelHost,
-    auth::{UserUid, TEST_USER_UID},
+    auth::{AuthStateProvider, UserUid, TEST_USER_UID},
     channel::ChannelState,
     cloud_object::{
         model::persistence::ObjectStoreModel, ObjectType, Owner, Space, StoredObjectEventEntrypoint,
@@ -261,7 +261,7 @@ impl UserWorkspaces {
     /// Returns `true` if active AI is allowed for the current workspace, based on billing config.
     ///
     /// In the future, we should store active AI enablement on the policy directly. For now, we
-    /// proxy whether active AI by checking if prompt suggestions, next command, or code suggestions are enabled.
+    /// proxy whether active AI by checking whether any active AI feature is enabled.
     pub fn is_active_ai_allowed(&self) -> bool {
         self.current_team().is_none_or(|team| {
             team.billing_metadata
@@ -271,6 +271,7 @@ impl UserWorkspaces {
                     policy.is_prompt_suggestions_toggleable
                         || policy.is_next_command_enabled
                         || policy.is_code_suggestions_toggleable
+                        || policy.is_git_operations_ai_enabled
                 })
         })
     }
@@ -328,6 +329,19 @@ impl UserWorkspaces {
             })
     }
 
+    /// Whether Git Operations AI is enabled for the current user, based on the active policies.
+    /// Note that the value may be incorrect if called before the team's billing metadata has been fetched.
+    pub fn is_git_operations_ai_enabled(&self) -> bool {
+        self.current_team()
+            // If the user has no team, they can toggle Git Operations AI (no restrictions).
+            .is_none_or(|team| {
+                team.billing_metadata
+                    .tier
+                    .warp_ai_policy
+                    .is_some_and(|policy| policy.is_git_operations_ai_enabled)
+            })
+    }
+
     /// Whether voice input should be toggleable for the current user, based on the active policies.
     /// Note that the value may be incorrect if called before the team's billing metadata has been fetched.
     /// If voice input support is not compiled into this build, always returns `false`.
@@ -349,6 +363,26 @@ impl UserWorkspaces {
     /// For solo users (no workspace), this is controlled by the `SoloUserByok` feature flag.
     pub fn is_byo_api_key_enabled(&self) -> bool {
         true
+    }
+
+    /// Whether custom inference endpoints are enabled for the current user.
+    /// Anonymous or logged-out users are not allowed to use custom inference.
+    /// Enterprise workspaces require the enterprise custom inference flag, Warp Plan, or dogfood.
+    pub fn is_custom_inference_enabled(&self, app: &AppContext) -> bool {
+        if AuthStateProvider::as_ref(app)
+            .get()
+            .is_anonymous_or_logged_out()
+        {
+            return false;
+        }
+
+        self.current_workspace()
+            .map(|workspace| {
+                workspace.billing_metadata.customer_type != CustomerType::Enterprise
+                    || FeatureFlag::CustomInferenceEndpointsEnterprise.is_enabled()
+                    || ChannelState::channel().is_dogfood()
+            })
+            .unwrap_or(true)
     }
 
     pub fn aws_bedrock_host_settings(&self) -> Option<&super::workspace::LlmHostSettings> {

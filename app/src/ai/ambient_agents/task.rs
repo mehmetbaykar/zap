@@ -70,39 +70,31 @@ pub struct HarnessConfig {
         deserialize_with = "deserialize_harness"
     )]
     pub harness_type: Harness,
+    /// The model to use with this harness. None means use the harness default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
 }
 
 impl HarnessConfig {
     /// Builds a harness config from just the harness type.
     pub fn from_harness_type(harness_type: Harness) -> Self {
-        Self { harness_type }
-    }
-}
-
-/// Parses a harness type name (e.g. `"claude"`) into a [`Harness`] variant.
-/// Unknown values fall back to [`Harness::Unknown`] so we don't
-/// misrepresent a future-server harness as Oz; UI surfaces should treat
-/// `Unknown` as a non-Oz, non-runnable harness.
-pub(crate) fn harness_from_name(name: &str) -> Harness {
-    match name {
-        "claude" => Harness::Claude,
-        "opencode" => Harness::OpenCode,
-        "gemini" => Harness::Gemini,
-        "oz" => Harness::Oz,
-        other => {
-            log::warn!("Unknown harness config name: {other:?}; treating as Unknown");
-            Harness::Unknown
+        Self {
+            harness_type,
+            model_id: None,
         }
     }
 }
 
 fn serialize_harness<S: Serializer>(harness: &Harness, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(&harness.to_string())
+    serializer.serialize_str(harness.config_name())
 }
 
 fn deserialize_harness<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Harness, D::Error> {
     let name = String::deserialize(deserializer)?;
-    Ok(harness_from_name(&name))
+    Ok(Harness::from_config_name(&name).unwrap_or_else(|| {
+        log::warn!("Unknown harness config name: {name:?}; treating as Unknown");
+        Harness::Unknown
+    }))
 }
 
 /// Authentication secrets for third-party harnesses.
@@ -111,6 +103,9 @@ pub struct HarnessAuthSecretsConfig {
     /// Name of a managed secret for Claude Code harness authentication.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_auth_secret_name: Option<String>,
+    /// Name of a managed secret for Codex harness authentication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_auth_secret_name: Option<String>,
 }
 
 impl AgentConfigSnapshot {
@@ -243,7 +238,9 @@ pub struct AmbientAgentTask {
     pub source: Option<AgentSource>,
     pub session_id: Option<String>,
     pub session_link: Option<String>,
-    pub creator: Option<TaskCreatorInfo>,
+    pub creator: Option<TaskPrincipalInfo>,
+    #[serde(default)]
+    pub executor: Option<TaskPrincipalInfo>,
     pub conversation_id: Option<String>,
     pub request_usage: Option<RequestUsage>,
     pub is_sandbox_running: bool,
@@ -264,6 +261,24 @@ pub struct AmbientAgentTask {
     pub children: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RunExecution<'a> {
+    pub session_id: Option<&'a str>,
+    pub session_link: Option<&'a str>,
+    pub request_usage: Option<&'a RequestUsage>,
+    pub is_sandbox_running: bool,
+}
+
+impl RunExecution<'_> {
+    pub fn has_joinable_session(&self) -> bool {
+        self.session_id.is_some() || self.session_link.is_some()
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.is_sandbox_running && self.has_joinable_session()
+    }
+}
+
 /// Represents a single attachment input from the client.
 #[derive(Clone, Debug, Serialize)]
 pub struct AttachmentInput {
@@ -273,11 +288,55 @@ pub struct AttachmentInput {
 }
 
 impl AmbientAgentTask {
-    /// Total credits used (inference + compute).
+    pub fn run_id(&self) -> AmbientAgentTaskId {
+        self.task_id
+    }
+
+    pub fn conversation_id(&self) -> Option<&str> {
+        self.conversation_id.as_deref()
+    }
+
+    pub fn active_run_execution(&self) -> RunExecution<'_> {
+        RunExecution {
+            session_id: self.session_id.as_deref(),
+            session_link: self.session_link.as_deref().filter(|link| !link.is_empty()),
+            request_usage: self.request_usage.as_ref(),
+            is_sandbox_running: self.is_sandbox_running,
+        }
+    }
+
+    pub fn active_execution_session_id(&self) -> Option<&str> {
+        let execution = self.active_run_execution();
+        if self.state == AmbientAgentTaskState::InProgress && execution.is_active() {
+            execution.session_id
+        } else {
+            None
+        }
+    }
+
+    pub fn active_execution_conversation_id(&self) -> Option<&str> {
+        if self.has_active_execution() {
+            self.conversation_id()
+        } else {
+            None
+        }
+    }
+
+    pub fn has_active_execution(&self) -> bool {
+        self.state == AmbientAgentTaskState::InProgress && self.active_run_execution().is_active()
+    }
+
+    pub fn is_terminal_run_state(&self) -> bool {
+        self.state.is_terminal()
+    }
+
+    /// Total credits used (inference + compute + platform).
     pub fn credits_used(&self) -> Option<f32> {
-        self.request_usage
-            .as_ref()
-            .map(|u| (u.inference_cost.unwrap_or(0.0) + u.compute_cost.unwrap_or(0.0)) as f32)
+        self.active_run_execution().request_usage.map(|u| {
+            (u.inference_cost.unwrap_or(0.0)
+                + u.compute_cost.unwrap_or(0.0)
+                + u.platform_cost.unwrap_or(0.0)) as f32
+        })
     }
 
     /// Duration from started_at to updated_at.
@@ -292,9 +351,14 @@ impl AmbientAgentTask {
         self.creator.as_ref().and_then(|c| c.display_name.clone())
     }
 
+    /// Principal the run executed as, formatted for user-facing surfaces.
+    pub fn executor_display_name(&self) -> Option<String> {
+        self.executor.as_ref().and_then(|e| e.display_name.clone())
+    }
+
     /// Returns true if the underlying session for the ambient agent is no longer running.
     pub fn is_no_longer_running(&self) -> bool {
-        !self.is_sandbox_running && !self.state.is_working()
+        !self.active_run_execution().is_sandbox_running && !self.state.is_working()
     }
 }
 
@@ -402,7 +466,7 @@ impl std::fmt::Display for AmbientAgentTaskState {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
-pub struct TaskCreatorInfo {
+pub struct TaskPrincipalInfo {
     #[serde(rename = "type")]
     pub creator_type: String,
     pub uid: String,
@@ -412,10 +476,40 @@ pub struct TaskCreatorInfo {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct TaskStatusMessage {
     pub message: String,
+    #[serde(default, alias = "errorCode")]
+    pub error_code: Option<TaskStatusErrorCode>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatusErrorCode {
+    #[serde(alias = "ENVIRONMENT_SETUP_FAILED")]
+    EnvironmentSetupFailed,
+    #[serde(other)]
+    Unknown,
+}
+
+impl TaskStatusErrorCode {
+    pub fn is_environment_setup_failure(&self) -> bool {
+        matches!(self, TaskStatusErrorCode::EnvironmentSetupFailed)
+    }
+}
+
+impl TaskStatusMessage {
+    pub fn is_environment_setup_failure(&self) -> bool {
+        self.error_code
+            .as_ref()
+            .is_some_and(TaskStatusErrorCode::is_environment_setup_failure)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct RequestUsage {
     pub inference_cost: Option<f64>,
     pub compute_cost: Option<f64>,
+    pub platform_cost: Option<f64>,
 }
+
+#[cfg(test)]
+#[path = "task_tests.rs"]
+mod tests;

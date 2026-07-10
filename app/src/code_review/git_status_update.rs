@@ -20,7 +20,7 @@ use {
 };
 
 #[cfg(feature = "local_fs")]
-use super::diff_state::DiffStats;
+use super::diff_state::{diff_metadata_against_head, DiffStats};
 #[cfg(feature = "local_fs")]
 use crate::context_chips::display_chip::GitBranchTrackingStatus;
 
@@ -263,7 +263,7 @@ impl GitRepoStatusModel {
         if update.is_empty() {
             return false;
         }
-        if update.commit_updated || update.index_lock_detected {
+        if update.commit_updated || update.index_lock_detected || update.remote_ref_updated {
             return true;
         }
         // Check if any non-ignored file was touched.
@@ -291,7 +291,7 @@ impl GitRepoStatusModel {
         repo_path: &Path,
         current_branch_name: &str,
     ) -> GitBranchTrackingStatus {
-        let upstream = crate::util::git::run_git_command(
+        let upstream = warp_util::git::run_git_command(
             repo_path,
             &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         )
@@ -310,7 +310,7 @@ impl GitRepoStatusModel {
             return GitBranchTrackingStatus::new(current_branch_name.to_string(), None, 0, 0);
         };
 
-        let counts = crate::util::git::run_git_command(
+        let counts = warp_util::git::run_git_command(
             repo_path,
             &[
                 "rev-list",
@@ -355,8 +355,7 @@ impl GitRepoStatusModel {
         // shows the short SHA instead of the literal "HEAD").
         let current_branch_name = detect_current_branch_display(&repo_path).await?;
         // Diff stats against HEAD.
-        let stats_against_head =
-            super::diff_state::DiffStateModel::diff_metadata_against_head(&repo_path).await?;
+        let stats_against_head = diff_metadata_against_head(&repo_path).await?;
         let branch_tracking_status =
             Self::branch_tracking_status(&repo_path, &current_branch_name).await;
 

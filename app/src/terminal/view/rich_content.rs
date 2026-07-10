@@ -3,7 +3,7 @@ use warpui::{prelude::ChildView, Element, EntityId, View, ViewContext, ViewHandl
 use crate::{
     ai::{
         agent::{conversation::AIConversationId, AIAgentExchangeId},
-        blocklist::{agent_view::AgentViewEntryOrigin, AIBlock},
+        blocklist::{agent_view::AgentViewEntryOrigin, block::PendingUserQueryBlock, AIBlock},
     },
     env_vars::env_var_collection_block::EnvVarCollectionBlock,
     terminal::{
@@ -168,7 +168,10 @@ impl RichContent {
     }
 
     pub fn is_pending_user_query(&self) -> bool {
-        matches!(self.metadata, Some(RichContentMetadata::PendingUserQuery))
+        matches!(
+            self.metadata,
+            Some(RichContentMetadata::PendingUserQuery { .. })
+        )
     }
 
     pub fn ai_block_metadata(&self) -> Option<&AIBlockMetadata> {
@@ -233,7 +236,10 @@ pub enum RichContentMetadata {
     AgentViewZeroState,
     TerminalViewZeroState,
     PluginInstructionsBlock,
-    PendingUserQuery,
+    PendingUserQuery {
+        pending_user_query_block_handle: ViewHandle<PendingUserQueryBlock>,
+    },
+    HarnessSessionHeader,
 }
 
 impl TerminalView {

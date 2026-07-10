@@ -43,5 +43,5 @@ impl ContentVersion {
 }
 
 #[cfg(test)]
-#[path = "content_version_test.rs"]
+#[path = "content_version_tests.rs"]
 mod tests;

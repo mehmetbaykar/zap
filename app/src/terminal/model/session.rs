@@ -165,6 +165,10 @@ impl Sessions {
                     sessions.set_remote_server_setup_state(*session_id, state.clone());
                     ctx.notify();
                 }
+                RemoteServerManagerEvent::BufferUpdated { .. }
+                | RemoteServerManagerEvent::BufferConflictDetected { .. } => {
+                    // Handled directly by GlobalBufferModel's subscription.
+                }
                 RemoteServerManagerEvent::SessionConnecting { .. }
                 | RemoteServerManagerEvent::SessionDeregistered { .. }
                 | RemoteServerManagerEvent::SessionConnectionFailed { .. }
@@ -174,11 +178,15 @@ impl Sessions {
                 | RemoteServerManagerEvent::RepoMetadataSnapshot { .. }
                 | RemoteServerManagerEvent::RepoMetadataUpdated { .. }
                 | RemoteServerManagerEvent::RepoMetadataDirectoryLoaded { .. }
-                | RemoteServerManagerEvent::BufferUpdated { .. }
+                | RemoteServerManagerEvent::CodebaseIndexStatusesSnapshot { .. }
+                | RemoteServerManagerEvent::CodebaseIndexStatusUpdated { .. }
                 | RemoteServerManagerEvent::BinaryCheckComplete { .. }
                 | RemoteServerManagerEvent::BinaryInstallComplete { .. }
                 | RemoteServerManagerEvent::ClientRequestFailed { .. }
-                | RemoteServerManagerEvent::ServerMessageDecodingError { .. } => {}
+                | RemoteServerManagerEvent::ServerMessageDecodingError { .. }
+                | RemoteServerManagerEvent::DiffStateSnapshotReceived { .. }
+                | RemoteServerManagerEvent::DiffStateMetadataUpdateReceived { .. }
+                | RemoteServerManagerEvent::DiffStateFileDeltaReceived { .. } => {}
                 RemoteServerManagerEvent::SessionReconnected {
                     session_id: sid,
                     client,
@@ -1411,9 +1419,6 @@ impl Session {
                 log::warn!(
                     "Failed to read history using PowerShell commands: {powershell_error:?}"
                 );
-                log::error!(
-                    "Failed to read history using PowerShell commands: {powershell_error:?}"
-                );
                 Ok(contents)
             }
             Err(e) => Err(ReadHistoryContentsError::PowerShellAndAsyncFsError {
@@ -1529,6 +1534,13 @@ impl Session {
     #[cfg(feature = "integration_tests")]
     pub fn external_commands(&self) -> &OnceCell<HashSet<SmolStr>> {
         &self.external_commands
+    }
+
+    /// Returns a reference to the session's command executor for integration
+    /// test assertions (e.g. to verify `RemoteServerCommandExecutor` is wired).
+    #[cfg(any(test, feature = "integration_tests"))]
+    pub fn command_executor(&self) -> Arc<dyn CommandExecutor> {
+        self.command_executor.read().clone()
     }
 
     pub async fn execute_command(
@@ -1887,5 +1899,5 @@ pub mod testing {
 }
 
 #[cfg(test)]
-#[path = "session_test.rs"]
+#[path = "session_tests.rs"]
 mod test;

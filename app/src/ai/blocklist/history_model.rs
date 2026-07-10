@@ -7,6 +7,7 @@ use chrono::{DateTime, Local, NaiveDateTime};
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use warp_cli::agent::Harness;
 use warp_multi_agent_api::client_action::{Action, StartNewConversation};
 use warp_multi_agent_api::message::tool_call::Tool;
 use warp_multi_agent_api::response_event::stream_finished::{
@@ -50,7 +51,7 @@ use crate::{
 };
 
 #[cfg(feature = "local_fs")]
-use crate::persistence::{database_file_path, establish_ro_connection};
+use crate::persistence::{database_file_path_for_scope, establish_ro_connection, PersistenceScope};
 
 use super::controller::response_stream::ResponseStreamId;
 use super::persistence::{PersistedAIInput, PersistedAIInputType};
@@ -232,11 +233,13 @@ impl BlocklistAIHistoryModel {
         multi_agent_conversations: &[AgentConversation],
     ) -> Self {
         #[cfg(feature = "local_fs")]
-        let db_connection = database_file_path().to_str().and_then(|db_url| {
-            establish_ro_connection(db_url)
-                .ok()
-                .map(|conn| Arc::new(Mutex::new(conn)))
-        });
+        let db_connection = database_file_path_for_scope(&PersistenceScope::App)
+            .to_str()
+            .and_then(|db_url| {
+                establish_ro_connection(db_url)
+                    .ok()
+                    .map(|conn| Arc::new(Mutex::new(conn)))
+            });
 
         let prompt_history = prompt_history
             .into_iter()
@@ -388,6 +391,7 @@ impl BlocklistAIHistoryModel {
         terminal_view_id: EntityId,
         name: String,
         parent_conversation_id: AIConversationId,
+        orchestration_harness: Option<Harness>,
         ctx: &mut ModelContext<Self>,
     ) -> AIConversationId {
         let parent_agent_id = self
@@ -402,7 +406,7 @@ impl BlocklistAIHistoryModel {
 
         let auto_execute = true; // Child auto-executes by default.
         let conversation_id =
-            self.start_new_conversation(terminal_view_id, auto_execute, false, ctx);
+            self.start_new_conversation(terminal_view_id, auto_execute, false, false, ctx);
         {
             let conversation = self
                 .conversation_mut(&conversation_id)
@@ -411,6 +415,9 @@ impl BlocklistAIHistoryModel {
                 conversation.set_parent_agent_id(id);
             }
             conversation.set_agent_name(name);
+            if let Some(harness) = orchestration_harness {
+                conversation.set_orchestration_harness(harness);
+            }
         }
         self.set_parent_for_conversation(conversation_id, parent_conversation_id);
         conversation_id
@@ -441,6 +448,29 @@ impl BlocklistAIHistoryModel {
             .get(parent_id)
             .map(|v| v.as_slice())
             .unwrap_or_default()
+    }
+
+    /// Updates the persisted `pinned` state for a conversation and writes
+    /// the change to SQLite. Used by the orchestration pin singleton to
+    /// keep the per-conversation source of truth in sync with toggles.
+    pub fn set_conversation_pinned(
+        &mut self,
+        conversation_id: AIConversationId,
+        pinned: bool,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let Some(conversation) = self.conversations_by_id.get_mut(&conversation_id) else {
+            log::warn!(
+                "set_conversation_pinned called for conversation {conversation_id:?} that is \
+                 not loaded; pin state change to {pinned} will not be persisted."
+            );
+            return;
+        };
+        if conversation.is_pinned() == pinned {
+            return;
+        }
+        conversation.set_pinned(pinned);
+        conversation.write_updated_conversation_state(ctx);
     }
 
     /// Sets a live conversation's server token, and updates the mapping in the history
@@ -660,6 +690,7 @@ impl BlocklistAIHistoryModel {
                 }
             }
 
+            let new_status = conversation.status().clone();
             self.conversations_by_id
                 .insert(conversation_id, conversation);
 
@@ -668,7 +699,8 @@ impl BlocklistAIHistoryModel {
             ctx.emit(BlocklistAIHistoryEvent::UpdatedConversationStatus {
                 conversation_id,
                 terminal_view_id,
-                is_restored: true,
+                update: ConversationStatusUpdate::Restored,
+                new_status,
             });
         }
 
@@ -703,6 +735,13 @@ impl BlocklistAIHistoryModel {
             return;
         }
 
+        // Track previous owners we removed the conversation from so we can
+        // emit ownership-transfer events outside of the borrow of
+        // `live_conversation_ids_for_terminal_view`. The conversation rendering
+        // model assumes a single canonical owner per conversation, so each
+        // previous owner needs a chance to drop its now-stale rendered AI
+        // blocks.
+        let mut previous_owners: Vec<EntityId> = Vec::new();
         for (other_terminal_view, other_terminal_view_live_conversation_ids) in self
             .live_conversation_ids_for_terminal_view
             .iter_mut()
@@ -713,6 +752,7 @@ impl BlocklistAIHistoryModel {
                 .position(|id| *id == conversation_id)
             {
                 other_terminal_view_live_conversation_ids.remove(pos);
+                previous_owners.push(*other_terminal_view);
             }
 
             if self
@@ -727,6 +767,13 @@ impl BlocklistAIHistoryModel {
                     terminal_view_id: *other_terminal_view,
                 });
             }
+        }
+        for previous_terminal_view_id in previous_owners {
+            ctx.emit(BlocklistAIHistoryEvent::ConversationOwnershipTransferred {
+                conversation_id,
+                previous_terminal_view_id,
+                new_terminal_view_id: terminal_view_id,
+            });
         }
 
         self.active_conversation_for_terminal_view
@@ -784,9 +831,11 @@ impl BlocklistAIHistoryModel {
         terminal_view_id: EntityId,
         is_autoexecute_override: bool,
         is_viewing_shared_session: bool,
+        is_cli_agent_transcript: bool,
         ctx: &mut ModelContext<Self>,
     ) -> AIConversationId {
-        let mut new_conversation = AIConversation::new(is_viewing_shared_session);
+        let mut new_conversation =
+            AIConversation::new(is_viewing_shared_session, is_cli_agent_transcript);
         if is_autoexecute_override {
             new_conversation.toggle_autoexecute_override();
         }
@@ -1007,7 +1056,8 @@ impl BlocklistAIHistoryModel {
             exchange_ids_to_transfer.len()
         );
 
-        let new_conversation_id = self.start_new_conversation(terminal_view_id, false, false, ctx);
+        let new_conversation_id =
+            self.start_new_conversation(terminal_view_id, false, false, false, ctx);
         for exchange_id in exchange_ids_to_transfer {
             let old_conversation = self
                 .conversations_by_id
@@ -1060,10 +1110,18 @@ impl BlocklistAIHistoryModel {
     ///
     /// The `prefix` parameter specifies the prefix added to the root task description
     /// (e.g., `FORK_PREFIX` for forks, `PRE_REWIND_PREFIX` for pre-rewind backups).
+    ///
+    /// When `preserve_task_ids` is true, the forked conversation reuses the source's task ids
+    /// instead of minting new ones. Used by local-to-cloud handoff so the local
+    /// fork's task store matches the cloud-side fork. The cloud agent's
+    /// `ClientAction`s reference those task ids; if we minted new ones locally
+    /// they would fail to resolve.
     pub fn fork_conversation(
         &mut self,
         source_conversation: &AIConversation,
         prefix: &str,
+        preserve_task_ids: bool,
+        title_override: Option<&str>,
         app: &AppContext,
     ) -> Result<AIConversation, anyhow::Error> {
         let tasks: Vec<warp_multi_agent_api::Task> = source_conversation
@@ -1071,7 +1129,8 @@ impl BlocklistAIHistoryModel {
             .filter_map(|t| t.source().cloned())
             .collect();
 
-        let updated_tasks_with_new_ids = update_forked_task_properties(tasks.clone(), prefix);
+        let updated_tasks_with_new_ids =
+            update_forked_task_properties(tasks.clone(), prefix, preserve_task_ids, title_override);
         let byop_repair_state_json = byop_fork_repair_state_json(
             &tasks,
             &updated_tasks_with_new_ids,
@@ -1125,15 +1184,16 @@ impl BlocklistAIHistoryModel {
             // Forked conversation loses its parentage
             parent_agent_id: None,
             agent_name: None,
+            orchestration_harness_type: None,
             parent_conversation_id: None,
+            is_remote_child: false,
             run_id: None,
             autoexecute_override: Some(source_conversation.autoexecute_override().into()),
-            // The event cursor belongs to the source conversation's run; the
-            // forked conversation will establish its own cursor.
             last_event_sequence: None,
             compaction_state_json: None,
             byop_repair_state_json,
             cli_subagent_block_snapshots_json: None,
+            pinned: false,
         };
         let forked_conversation_id = AIConversationId::new();
         if let Err(e) = sqlite_sender.send(ModelEvent::UpdateMultiAgentConversation {
@@ -1168,6 +1228,7 @@ impl BlocklistAIHistoryModel {
         from_exchange_id: AIAgentExchangeId,
         fork_from_exact_exchange: bool,
         prefix: &str,
+        title_override: Option<&str>,
         app: &AppContext,
     ) -> Result<AIConversation, anyhow::Error> {
         let conversation = source_conversation;
@@ -1258,7 +1319,8 @@ impl BlocklistAIHistoryModel {
             ));
         }
 
-        let updated_tasks_with_new_ids = update_forked_task_properties(truncated_tasks, prefix);
+        let updated_tasks_with_new_ids =
+            update_forked_task_properties(truncated_tasks, prefix, false, title_override);
         let byop_repair_state_json = byop_fork_repair_state_json(
             &source_tasks,
             &updated_tasks_with_new_ids,
@@ -1315,15 +1377,16 @@ impl BlocklistAIHistoryModel {
             // Forked conversation loses its parentage.
             parent_agent_id: None,
             agent_name: None,
+            orchestration_harness_type: None,
             parent_conversation_id: None,
+            is_remote_child: false,
             run_id: None,
             autoexecute_override: Some(conversation.autoexecute_override().into()),
-            // The event cursor belongs to the source conversation's run; the
-            // forked conversation will establish its own cursor.
             last_event_sequence: None,
             compaction_state_json: None,
             byop_repair_state_json,
             cli_subagent_block_snapshots_json: None,
+            pinned: false,
         };
 
         let forked_conversation_id = AIConversationId::new();
@@ -1549,6 +1612,12 @@ impl BlocklistAIHistoryModel {
             .conversations_by_id
             .get(&conversation_id)
             .and_then(|c| c.title().map(|t| t.to_string()));
+        // Capture the run_id BEFORE the in-memory record is dropped so it
+        // can be forwarded on the DeletedConversation event.
+        let run_id = self
+            .conversations_by_id
+            .get(&conversation_id)
+            .and_then(|c| c.run_id());
 
         self.remove_conversation_from_memory(conversation_id, terminal_view_id, ctx);
 
@@ -1584,6 +1653,7 @@ impl BlocklistAIHistoryModel {
             terminal_view_id,
             conversation_id,
             conversation_title,
+            run_id,
         });
     }
 
@@ -1594,6 +1664,14 @@ impl BlocklistAIHistoryModel {
         terminal_view_id: Option<EntityId>,
         ctx: &mut ModelContext<Self>,
     ) {
+        // Capture the run_id BEFORE the in-memory record is dropped so the
+        // RemoveConversation event can carry it (event subscribers can no
+        // longer look it up via `conversation()` after this function returns).
+        let run_id = self
+            .conversations_by_id
+            .get(&conversation_id)
+            .and_then(|c| c.run_id());
+
         // Clean up reverse indices before removing the conversation. Guard
         // token-index removals with an equality check: the live conversation's
         // token and the metadata's token can diverge after a rebind, and we
@@ -1645,6 +1723,7 @@ impl BlocklistAIHistoryModel {
             ctx.emit(BlocklistAIHistoryEvent::RemoveConversation {
                 terminal_view_id,
                 conversation_id,
+                run_id,
             });
         }
     }
@@ -1955,6 +2034,38 @@ impl BlocklistAIHistoryModel {
         None
     }
 
+    /// Returns the canonical local conversation ID for a server token, creating
+    /// and caching one if this client has not seen the token before.
+    pub fn get_or_set_canonical_conversation_id_for_server_token(
+        &mut self,
+        server_token: &ServerConversationToken,
+    ) -> AIConversationId {
+        if let Some(conversation_id) = self.server_token_to_conversation_id.get(server_token) {
+            return *conversation_id;
+        }
+
+        let conversation_id = self
+            .conversations_by_id
+            .iter()
+            .find_map(|(conversation_id, conversation)| {
+                (conversation.server_conversation_token() == Some(server_token))
+                    .then_some(*conversation_id)
+            })
+            .or_else(|| {
+                self.all_conversations_metadata
+                    .iter()
+                    .find_map(|(conversation_id, metadata)| {
+                        (metadata.server_conversation_token.as_ref() == Some(server_token))
+                            .then_some(*conversation_id)
+                    })
+            })
+            .unwrap_or_else(AIConversationId::new);
+
+        self.server_token_to_conversation_id
+            .insert(server_token.clone(), conversation_id);
+        conversation_id
+    }
+
     /// Mark conversations as historical
     /// Historical conversations consist of non-live conversations that were read from the disk or server on startup,
     /// and conversations (recorded here) that were live this session but have now been cleared.
@@ -2072,6 +2183,16 @@ fn agent_id_key(conversation: &AIConversation) -> Option<String> {
     conversation.agent_link_id()
 }
 
+/// Whether an `UpdatedConversationStatus` event represents a restoration
+/// (the conversation was re-loaded into a terminal view; the underlying
+/// `ConversationStatus` did not change) or a real status set, in which case
+/// the previous status is included.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConversationStatusUpdate {
+    Restored,
+    Changed { prev_status: ConversationStatus },
+}
+
 #[derive(Clone, Debug)]
 pub enum BlocklistAIHistoryEvent {
     /// A new conversation was started.
@@ -2125,7 +2246,10 @@ pub enum BlocklistAIHistoryEvent {
     UpdatedConversationStatus {
         conversation_id: AIConversationId,
         terminal_view_id: EntityId,
-        is_restored: bool,
+        /// Distinguishes a restoration from a real status set.
+        update: ConversationStatusUpdate,
+        /// The conversation's status after this update.
+        new_status: ConversationStatus,
     },
 
     /// The active conversation was set to another conversation in the history.
@@ -2162,19 +2286,26 @@ pub enum BlocklistAIHistoryEvent {
 
     /// This is emitted when an ephemeral/abandoned conversation is cleaned up
     /// (e.g. empty conversations the user never used, rejected passive code suggestions).
+    /// `run_id` carries the conversation's last known server run identifier
+    /// (captured before the in-memory record was dropped) so subscribers can
+    /// still act on it without a history-model lookup.
     RemoveConversation {
         terminal_view_id: EntityId,
         conversation_id: AIConversationId,
+        run_id: Option<String>,
     },
 
     /// This is emitted when a user explicitly deletes an existing conversation.
     /// `terminal_view_id` is `None` when deleting a historical-only conversation that
     /// is not currently bound to any terminal view (e.g. right-click delete from the
     /// conversation list for a session that was never opened in this run).
+    /// `run_id` is captured before the in-memory record was dropped — see
+    /// the note on [`Self::RemoveConversation`].
     DeletedConversation {
         terminal_view_id: Option<EntityId>,
         conversation_id: AIConversationId,
         conversation_title: Option<String>,
+        run_id: Option<String>,
     },
 
     /// Emitted when conversations are restored in a terminal view.
@@ -2202,6 +2333,26 @@ pub enum BlocklistAIHistoryEvent {
     ConversationAgentIdAssigned {
         conversation_id: AIConversationId,
         terminal_view_id: EntityId,
+    },
+
+    /// Emitted when a conversation moves between terminal views — i.e. when
+    /// `set_active_conversation_id` removes the conversation from the live
+    /// list of one or more `previous_terminal_view_id`s. The previous owners
+    /// must drop any rendered AI blocks for this conversation so the new
+    /// owner is the sole renderer; otherwise we end up with a transcript
+    /// split across panes (some blocks in the old view, new exchanges in the
+    /// new view). The `terminal_view_id()` accessor returns the previous
+    /// owner so existing per-view event filters do the right thing.
+    ConversationOwnershipTransferred {
+        conversation_id: AIConversationId,
+        previous_terminal_view_id: EntityId,
+        new_terminal_view_id: EntityId,
+    },
+
+    /// Emitted when a conversation's orchestration config is updated reactively
+    /// from an incoming `OrchestrationConfigSnapshot` message.
+    OrchestrationConfigUpdated {
+        conversation_id: AIConversationId,
     },
 }
 
@@ -2256,6 +2407,10 @@ impl BlocklistAIHistoryEvent {
             | BlocklistAIHistoryEvent::UpgradedTask {
                 terminal_view_id, ..
             }
+            | BlocklistAIHistoryEvent::ConversationOwnershipTransferred {
+                previous_terminal_view_id: terminal_view_id,
+                ..
+            }
             | BlocklistAIHistoryEvent::UpdatedConversationArtifacts {
                 terminal_view_id, ..
             }
@@ -2270,6 +2425,10 @@ impl BlocklistAIHistoryEvent {
             BlocklistAIHistoryEvent::DeletedConversation {
                 terminal_view_id, ..
             } => *terminal_view_id,
+            // terminal_view_id.
+            // OrchestrationConfigUpdated is conversation-scoped and has no
+            // terminal_view_id.
+            BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. } => None,
         }
     }
 }
@@ -2516,12 +2675,39 @@ fn reconcile_dangling_tool_calls_in_forked_task(
 /// Updates the given tasks, which are presumed to be clones of tasks from a source conversation to be
 /// used to back a fork or copy of the source conversation.
 ///
-/// Reassigns new task IDs to each forked task to ensure task IDs remain globally unique and updates
-/// description of the root task, prepending it with the given prefix.
+/// When `preserve_task_ids` is false, reassigns new task IDs to each forked task to ensure task IDs
+/// remain globally unique. When true, leaves task IDs as-is so the local fork's task store matches
+/// an externally-known set of task ids whose ClientActions must resolve in the local fork.
+///
+/// Always prepends the given prefix to the root task's description.
 fn update_forked_task_properties(
     tasks: Vec<warp_multi_agent_api::Task>,
     prefix: &str,
+    preserve_task_ids: bool,
+    title_override: Option<&str>,
 ) -> Vec<warp_multi_agent_api::Task> {
+    let root_description = |current: &str| match title_override {
+        Some(title) => title.to_owned(),
+        None => format!("{prefix}{current}"),
+    };
+
+    if preserve_task_ids {
+        return tasks
+            .into_iter()
+            .map(|mut t| {
+                let is_root = t
+                    .dependencies
+                    .as_ref()
+                    .map(|deps| deps.parent_task_id.is_empty())
+                    .unwrap_or(true);
+                if is_root {
+                    t.description = root_description(&t.description);
+                }
+                t
+            })
+            .collect();
+    }
+
     let mut old_to_new_task_ids = HashMap::new();
     fn get_new_task_id(new_ids: &mut HashMap<String, String>, old_task_id: &str) -> String {
         new_ids
@@ -2552,7 +2738,7 @@ fn update_forked_task_properties(
                 deps.parent_task_id =
                     get_new_task_id(&mut old_to_new_task_ids, &deps.parent_task_id).clone();
             } else {
-                t.description = format!("{}{}", prefix, t.description);
+                t.description = root_description(&t.description);
             }
             t
         })
@@ -2813,5 +2999,5 @@ pub const FORK_PREFIX: &str = "(Fork) ";
 pub const PRE_REWIND_PREFIX: &str = "(Pre-Rewind) ";
 
 #[cfg(test)]
-#[path = "history_model_test.rs"]
+#[path = "history_model_tests.rs"]
 mod tests;

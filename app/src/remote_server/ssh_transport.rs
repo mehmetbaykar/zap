@@ -14,11 +14,12 @@ use warpui::r#async::{executor, FutureExt as _};
 
 use remote_server::auth::RemoteServerAuthContext;
 use remote_server::client::RemoteServerClient;
+use remote_server::manager::RemoteServerExitStatus;
 use remote_server::setup::{
     parse_uname_output, remote_server_daemon_dir, PreinstallCheckResult, RemotePlatform,
 };
-use remote_server::ssh::ssh_args;
-use remote_server::transport::{Connection, RemoteTransport};
+use remote_server::ssh::{ssh_args, SshCommandError};
+use remote_server::transport::{Connection, Error, InstallOutcome, InstallSource, RemoteTransport};
 
 /// SSH transport: connects via a ControlMaster socket.
 ///
@@ -54,15 +55,17 @@ impl SshTransport {
 
     pub fn remote_daemon_socket_path(&self) -> String {
         format!(
-            "{}/server.sock",
-            remote_server_daemon_dir(&self.auth_context.remote_server_identity_key())
+            "{}/{}",
+            remote_server_daemon_dir(&self.auth_context.remote_server_identity_key()),
+            remote_server::setup::daemon_socket_name(),
         )
     }
 
     pub fn remote_daemon_pid_path(&self) -> String {
         format!(
-            "{}/server.pid",
-            remote_server_daemon_dir(&self.auth_context.remote_server_identity_key())
+            "{}/{}",
+            remote_server_daemon_dir(&self.auth_context.remote_server_identity_key()),
+            remote_server::setup::daemon_pid_name(),
         )
     }
 
@@ -74,48 +77,29 @@ impl SshTransport {
     }
 }
 
-#[derive(Debug)]
-enum InstallError {
-    ScriptFailed { exit_code: i32, stderr: String },
-    Other(anyhow::Error),
-}
-
-impl fmt::Display for InstallError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ScriptFailed { exit_code, stderr } => {
-                write!(f, "install script failed (exit {exit_code}): {stderr}")
-            }
-            Self::Other(error) => write!(f, "{error:#}"),
-        }
-    }
-}
-
-impl From<anyhow::Error> for InstallError {
-    fn from(error: anyhow::Error) -> Self {
-        Self::Other(error)
-    }
-}
-
-async fn detect_remote_platform(socket_path: &Path) -> Result<RemotePlatform> {
+/// Runs `uname -sm` on the remote host via the ControlMaster socket and
+/// parses the output into a [`RemotePlatform`].
+async fn detect_remote_platform(socket_path: &Path) -> Result<RemotePlatform, Error> {
     let output = remote_server::ssh::run_ssh_command(
         socket_path,
         "uname -sm",
         remote_server::setup::CHECK_TIMEOUT,
     )
     .await?;
-
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        return parse_uname_output(&stdout);
+        parse_uname_output(&stdout)
+    } else {
+        let code = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(Error::Other(anyhow::anyhow!(
+            "uname -sm exited with code {code}: {stderr}"
+        )))
     }
-
-    let code = output.status.code().unwrap_or(-1);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(anyhow!("uname -sm exited with code {code}: {stderr}"))
 }
 
-async fn verify_installed_binary(socket_path: &Path) -> Result<()> {
+/// Confirms a just-installed binary actually runs at the expected path.
+async fn verify_installed_binary(socket_path: &Path) -> Result<(), Error> {
     let output = remote_server::ssh::run_ssh_command(
         socket_path,
         &remote_server::setup::binary_check_command(),
@@ -129,30 +113,9 @@ async fn verify_installed_binary(socket_path: &Path) -> Result<()> {
 
     let code = output.status.code().unwrap_or(-1);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(anyhow!(
+    Err(Error::Other(anyhow!(
         "installed binary check failed with code {code}: {stderr}"
-    ))
-}
-
-async fn run_install_script(
-    socket_path: &Path,
-    staging_tarball_path: Option<&str>,
-    timeout: std::time::Duration,
-) -> core::result::Result<(), InstallError> {
-    let script = remote_server::setup::install_script(staging_tarball_path);
-    match remote_server::ssh::run_ssh_script(socket_path, &script, timeout).await {
-        Ok(output) if output.status.success() => Ok(()),
-        Ok(output) => {
-            let exit_code = output.status.code().unwrap_or(-1);
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Err(InstallError::ScriptFailed { exit_code, stderr })
-        }
-        Err(error) => Err(InstallError::Other(error)),
-    }
-}
-
-fn should_skip_scp_fallback(error: &InstallError) -> bool {
-    matches!(error, InstallError::ScriptFailed { exit_code: 2, .. })
+    )))
 }
 
 // ===========================================================================
@@ -406,7 +369,10 @@ async fn cross_compile_remote_server(backend: &DevBuildBackend) -> Result<PathBu
 /// Dev-mode install: cross-compiles the local `warp` and uploads it to the remote remote-server path.
 ///
 /// The upload target exactly matches `remote_server_binary()`, ensuring the
-/// subsequent `check_binary()` / proxy launch can find it.
+/// subsequent `check_binary()` / proxy launch can find it. Verification that
+/// the upload actually runs is left to `install_binary()`'s unified
+/// post-install check, which covers this path along with the download and
+/// SCP-fallback paths.
 async fn dev_install_local_binary(socket_path: &Path) -> Result<()> {
     // Prerequisite checks: missing any one returns an error, and the caller falls back to download install.
     if !musl_target_installed().await {
@@ -470,103 +436,20 @@ async fn dev_install_local_binary(socket_path: &Path) -> Result<()> {
         return Err(anyhow!("remote chmod failed (exit {code}): {stderr}"));
     }
 
-    // Reuse the existing verification logic to confirm the uploaded binary runs.
-    verify_installed_binary(socket_path).await
-}
-
-async fn download_remote_server_tarball(download_url: &str, tarball_path: &Path) -> Result<()> {
-    let output = async {
-        command::r#async::Command::new("curl")
-            .arg("-fSL")
-            .arg("--connect-timeout")
-            .arg("15")
-            .arg(download_url)
-            .arg("-o")
-            .arg(tarball_path.as_os_str())
-            .kill_on_drop(true)
-            .output()
-            .await
-    }
-    .with_timeout(remote_server::setup::SCP_INSTALL_TIMEOUT)
-    .await
-    .map_err(|_| {
-        anyhow!(
-            "local tarball download timed out after {:?}",
-            remote_server::setup::SCP_INSTALL_TIMEOUT
-        )
-    })?
-    .map_err(|e| anyhow!("local curl failed to execute: {e}"))?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let code = output.status.code().unwrap_or(-1);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(anyhow!(
-        "local tarball download failed with code {code}: {stderr}"
-    ))
-}
-
-async fn scp_install_fallback(socket_path: &Path) -> Result<()> {
-    let platform = detect_remote_platform(socket_path).await?;
-    let download_url = remote_server::setup::download_tarball_url(&platform);
-    let remote_server_dir = remote_server::setup::remote_server_dir();
-    let mkdir_cmd = format!("mkdir -p {remote_server_dir}");
-    let mkdir_output = remote_server::ssh::run_ssh_command(
-        socket_path,
-        &mkdir_cmd,
-        remote_server::setup::CHECK_TIMEOUT,
-    )
-    .await?;
-
-    if !mkdir_output.status.success() {
-        let code = mkdir_output.status.code().unwrap_or(-1);
-        let stderr = String::from_utf8_lossy(&mkdir_output.stderr);
-        return Err(anyhow!(
-            "remote-server dir creation failed with code {code}: {stderr}"
-        ));
-    }
-
-    let tempdir = tempfile::tempdir()?;
-    let tarball_path = tempdir.path().join("zap.tar.gz");
-    download_remote_server_tarball(&download_url, &tarball_path).await?;
-
-    let remote_tarball_path = format!("{remote_server_dir}/zap-upload.tar.gz");
-    remote_server::ssh::scp_upload(
-        socket_path,
-        &tarball_path,
-        &remote_tarball_path,
-        remote_server::setup::SCP_INSTALL_TIMEOUT,
-    )
-    .await?;
-
-    run_install_script(
-        socket_path,
-        Some(&remote_tarball_path),
-        remote_server::setup::SCP_INSTALL_TIMEOUT,
-    )
-    .await
-    .map_err(|error| anyhow!("staged install failed: {error}"))?;
-
-    verify_installed_binary(socket_path).await
+    Ok(())
 }
 
 impl RemoteTransport for SshTransport {
     fn detect_platform(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<RemotePlatform, String>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<RemotePlatform, Error>> + Send>> {
         let socket_path = self.socket_path.clone();
-        Box::pin(async move {
-            detect_remote_platform(&socket_path)
-                .await
-                .map_err(|e| format!("{e:#}"))
-        })
+        Box::pin(async move { detect_remote_platform(&socket_path).await })
     }
 
     fn run_preinstall_check(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<PreinstallCheckResult, String>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<PreinstallCheckResult, Error>> + Send>> {
         let socket_path = self.socket_path.clone();
         Box::pin(async move {
             match remote_server::ssh::run_ssh_script(
@@ -581,41 +464,46 @@ impl RemoteTransport for SshTransport {
                     Ok(PreinstallCheckResult::parse(&stdout))
                 }
                 Ok(output) => {
-                    let code = output.status.code().unwrap_or(-1);
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    Err(format!(
-                        "Preinstall check exited with code {code}: {stderr}"
-                    ))
+                    let exit_code = output.status.code().unwrap_or(-1);
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    Err(Error::ScriptFailed { exit_code, stderr })
                 }
-                Err(e) => Err(format!("{e:#}")),
+                Err(e) => Err(e.into()),
             }
         })
     }
 
-    fn check_binary(&self) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send>> {
+    fn check_binary(&self) -> Pin<Box<dyn Future<Output = Result<bool, Error>> + Send>> {
         let socket_path = self.socket_path.clone();
         Box::pin(async move {
-            let bin_path = remote_server::setup::remote_server_binary();
-            log::info!("Checking for remote server binary at {bin_path}");
-            match remote_server::ssh::run_ssh_command(
+            let cmd = remote_server::setup::binary_check_command();
+            log::info!("Running binary check: {cmd}");
+            let output = remote_server::ssh::run_ssh_command(
                 &socket_path,
-                &remote_server::setup::binary_check_command(),
+                &cmd,
                 remote_server::setup::CHECK_TIMEOUT,
             )
-            .await
-            {
-                // `{binary} --version` exiting 0 means it exists and runs.
-                // 126/127 means missing or not executable; any other non-zero exit is treated as a genuine check failure.
-                Ok(output) => match output.status.code() {
-                    Some(0) => Ok(true),
-                    Some(126) | Some(127) => Ok(false),
-                    Some(code) => {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        Err(format!("binary check exited with code {code}: {stderr}"))
-                    }
-                    None => Err("binary check terminated by signal".into()),
-                },
-                Err(e) => Err(format!("{e:#}")),
+            .await?;
+            // `<binary> --version` exits 0 when present, executable, and
+            // functional. Exit 127 means the binary was not found, and 126
+            // means it exists but is not executable. Any other non-zero
+            // exit (e.g. SSH exit 255 for a dead connection, or signal
+            // termination) is treated as a transport-level failure.
+            let code = output.status.code();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            log::info!("Binary check result: exit={code:?} stdout={stdout}");
+            match code {
+                Some(0) => Ok(true),
+                Some(126) | Some(127) => Ok(false),
+                Some(code) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    Err(Error::Other(anyhow::anyhow!(
+                        "binary check exited with code {code}: {stderr}"
+                    )))
+                }
+                None => Err(Error::Other(anyhow::anyhow!(
+                    "binary check terminated by signal"
+                ))),
             }
         })
     }
@@ -653,24 +541,32 @@ impl RemoteTransport for SshTransport {
         })
     }
 
-    fn install_binary(&self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+    fn install_binary(&self) -> Pin<Box<dyn Future<Output = InstallOutcome> + Send>> {
         let socket_path = self.socket_path.clone();
         Box::pin(async move {
-            log::info!(
-                "Installing remote server binary to {}",
-                remote_server::setup::remote_server_binary()
-            );
+            let binary_path = remote_server::setup::remote_server_binary();
+            log::info!("Installing remote server binary to {binary_path}");
 
             // Zap fork: a DEBUG source build (no release tag) takes the dev-mode
             // path, cross-compiling the local `warp` and uploading it, rather
             // than downloading a stale GitHub release. On failure (missing
             // cross-compile prerequisites etc.) it prints a warning and falls
-            // back to download install, keeping the dev experience intact. Release
-            // builds skip this entire block, leaving behavior unchanged.
+            // back to the regular install flow below, keeping the dev experience
+            // intact. Release builds skip this entire block, leaving behavior
+            // unchanged.
             if remote_server::setup::is_dev_source_build() {
                 log::info!("dev remote-server: detected DEBUG source build, switching to local cross-compile install");
                 match dev_install_local_binary(&socket_path).await {
-                    Ok(()) => return Ok(()),
+                    Ok(()) => {
+                        let mut outcome = InstallOutcome {
+                            source: Some(InstallSource::Client),
+                            result: Ok(()),
+                        };
+                        if let Err(error) = verify_installed_binary(&socket_path).await {
+                            outcome.result = Err(error);
+                        }
+                        return outcome;
+                    }
                     Err(error) => {
                         log::warn!(
                             "dev remote-server: local cross-compile install unavailable, falling back to download install: {error:#}"
@@ -680,23 +576,48 @@ impl RemoteTransport for SshTransport {
                 }
             }
 
-            match run_install_script(&socket_path, None, remote_server::setup::INSTALL_TIMEOUT)
-                .await
-            {
-                Ok(()) => verify_installed_binary(&socket_path)
-                    .await
-                    .map_err(|error| format!("{error:#}")),
-                Err(error) if should_skip_scp_fallback(&error) => Err(error.to_string()),
-                Err(error) => {
-                    log::warn!("remote-server install failed, trying SCP fallback: {error}");
-                    match scp_install_fallback(&socket_path).await {
-                        Ok(()) => Ok(()),
-                        Err(fallback_error) => {
-                            Err(format!("{error}; SCP fallback failed: {fallback_error:#}"))
+            let mut outcome = match install_on_server(&socket_path).await {
+                Ok(()) => InstallOutcome {
+                    source: Some(InstallSource::Server),
+                    result: Ok(()),
+                },
+                Err(server_err) => {
+                    let should_try_scp = !should_skip_scp_fallback(&server_err);
+
+                    if should_try_scp {
+                        log::info!("Remote server has no curl/wget, falling back to SCP upload");
+                        match scp_install_fallback(&socket_path).await {
+                            Ok(()) => InstallOutcome {
+                                source: Some(InstallSource::Client),
+                                result: Ok(()),
+                            },
+                            Err(e) => InstallOutcome {
+                                source: Some(InstallSource::Client),
+                                result: Err(Error::Other(e)),
+                            },
+                        }
+                    } else {
+                        InstallOutcome {
+                            source: Some(InstallSource::Server),
+                            result: Err(server_err),
                         }
                     }
                 }
+            };
+
+            // Post-install verification: confirm the binary actually
+            // landed at the expected path and is functional. This catches
+            // silent install failures (e.g. tilde-expansion bugs) that
+            // would otherwise surface as a cryptic "Response channel
+            // closed" error during the IPC handshake.
+            if outcome.result.is_ok() {
+                log::info!("Running post-install verification for {binary_path}");
+                if let Err(error) = verify_installed_binary(&socket_path).await {
+                    outcome.result = Err(error);
+                }
             }
+
+            outcome
         })
     }
 
@@ -736,11 +657,12 @@ impl RemoteTransport for SshTransport {
                 .take()
                 .ok_or_else(|| anyhow::anyhow!("Failed to capture child stderr"))?;
 
-            let (client, event_rx) =
+            let (client, event_rx, failure_rx) =
                 RemoteServerClient::from_child_streams(stdin, stdout, stderr, &executor);
             Ok(Connection {
                 client,
                 event_rx,
+                failure_rx,
                 child,
                 control_path: Some(socket_path),
             })
@@ -768,29 +690,130 @@ impl RemoteTransport for SshTransport {
             }
         })
     }
+
+    /// SSH exit code 255 indicates a connection-level error (broken pipe,
+    /// connection reset, host unreachable) — the ControlMaster's TCP
+    /// connection is dead. A signal kill also suggests the transport was
+    /// torn down. In either case, reconnecting through the same
+    /// ControlMaster is futile.
+    fn is_reconnectable(&self, exit_status: Option<&RemoteServerExitStatus>) -> bool {
+        match exit_status {
+            Some(s) => s.code != Some(255) && !s.signal_killed,
+            // No exit status available — optimistically allow reconnect.
+            None => true,
+        }
+    }
+}
+
+/// Exit codes where SCP fallback would not help because the failure
+/// is on the remote host itself (not a network/download issue).
+fn should_skip_scp_fallback(error: &Error) -> bool {
+    // Unsupported arch/OS — SCP won't change the architecture
+    matches!(error, Error::ScriptFailed { exit_code , .. } if *exit_code == 2)
+}
+
+/// Runs the install script on the remote host to download and install
+/// the binary directly from the CDN.
+async fn install_on_server(socket_path: &Path) -> Result<(), Error> {
+    let script = remote_server::setup::install_script(None);
+    match remote_server::ssh::run_ssh_script(
+        socket_path,
+        &script,
+        remote_server::setup::INSTALL_TIMEOUT,
+    )
+    .await
+    {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => {
+            let exit_code = output.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            Err(Error::ScriptFailed { exit_code, stderr })
+        }
+        Err(SshCommandError::TimedOut { .. }) => Err(Error::TimedOut),
+        Err(e) => Err(Error::Other(e.into())),
+    }
+}
+
+/// SCP install fallback: downloads the tarball locally, uploads it to
+/// the remote via SCP, then re-invokes the install script with the
+/// staging path baked in so the shared extraction tail runs.
+async fn scp_install_fallback(socket_path: &Path) -> anyhow::Result<()> {
+    use std::process::Stdio;
+
+    // Detect the remote platform so we can construct the correct download URL.
+    // This is a redundant uname call (the manager already ran detect_platform
+    // earlier), but it only happens on the rare SCP fallback path and avoids
+    // threading the platform through the trait.
+    let platform = detect_remote_platform(socket_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("SCP fallback: {e:#}"))?;
+
+    let url = remote_server::setup::download_tarball_url(&platform);
+    let remote_tarball_path = format!(
+        "{}/zap-upload.tar.gz",
+        remote_server::setup::remote_server_dir()
+    );
+    let timeout = remote_server::setup::SCP_INSTALL_TIMEOUT;
+
+    // 1. Download the tarball locally into a temp directory.
+    let tmp_dir =
+        tempfile::tempdir().map_err(|e| anyhow::anyhow!("Failed to create local temp dir: {e}"))?;
+    let temp_client_tarball_path = tmp_dir.path().join("zap.tar.gz");
+
+    log::info!("Downloading tarball locally from {url}");
+    let output = command::r#async::Command::new("curl")
+        // -f: fail silently on HTTP errors (non-zero exit instead of HTML error page)
+        // -S: show errors even when -f is used
+        // -L: follow redirects (the CDN may 302 to a regional edge)
+        .arg("-fSL")
+        .arg("--connect-timeout")
+        .arg("15")
+        .arg(&url)
+        .arg("-o")
+        .arg(&temp_client_tarball_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .output()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to spawn local curl: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!(
+            "Local curl failed (exit {:?}): {stderr}",
+            output.status.code()
+        ));
+    }
+
+    // 2. Upload to the remote via SCP.
+    log::info!("Uploading tarball to remote at {remote_tarball_path}");
+    remote_server::ssh::scp_upload(
+        socket_path,
+        &temp_client_tarball_path,
+        &remote_tarball_path,
+        timeout,
+    )
+    .await?;
+
+    // 3. Run the install script with the staging path baked in.
+    //    The script's `staging_tarball_path` variable is non-empty, so it
+    //    skips the download and extracts from the uploaded tarball.
+    log::info!("Running extraction via install script with tarball at {remote_tarball_path}");
+
+    let script = remote_server::setup::install_script(Some(&remote_tarball_path));
+
+    let output = remote_server::ssh::run_ssh_script(socket_path, &script, timeout).await?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let code = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(anyhow::anyhow!(
+            "Extraction script failed (exit {code}): {stderr}"
+        ))
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use warpui::r#async::BoxFuture;
-    fn static_auth_context() -> Arc<RemoteServerAuthContext> {
-        Arc::new(RemoteServerAuthContext::new(
-            || -> BoxFuture<'static, Option<String>> { Box::pin(async { None }) },
-            || "user id/with spaces".to_string(),
-        ))
-    }
-
-    #[test]
-    fn remote_proxy_command_quotes_identity_key() {
-        let transport = SshTransport::new(
-            PathBuf::from("/tmp/control-master.sock"),
-            static_auth_context(),
-        );
-
-        let command = transport.remote_proxy_command();
-
-        assert!(command.contains("remote-server-proxy --identity-key"));
-        assert!(command.contains("'user id/with spaces'"));
-    }
-}
+#[path = "ssh_transport_tests.rs"]
+mod tests;

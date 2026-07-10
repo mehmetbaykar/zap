@@ -360,5 +360,5 @@ impl From<FolderId> for SyncId {
 }
 
 #[cfg(test)]
-#[path = "ids_test.rs"]
+#[path = "ids_tests.rs"]
 mod tests;

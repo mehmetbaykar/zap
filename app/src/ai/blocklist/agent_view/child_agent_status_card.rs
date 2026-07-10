@@ -8,7 +8,9 @@ use warpui::{
     AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
 };
 
-use crate::ai::agent::conversation::{AIConversation, AIConversationId, ConversationStatus};
+use crate::ai::agent::conversation::{
+    AIConversation, AIConversationId, ConversationStatus, StatusColorStyle,
+};
 use crate::ai::agent::AIAgentOutputMessageType;
 use crate::ai::blocklist::agent_view::conversation_navigation_links::conversation_navigation_card_with_icon;
 use crate::ai::blocklist::agent_view::{AgentViewController, AgentViewControllerEvent};
@@ -200,7 +202,9 @@ impl View for ChildAgentStatusCard {
             let raw_title = child
                 .title()
                 .unwrap_or_else(|| crate::t!("common-untitled"));
-            let status_icon = child.status().status_icon_and_color(appearance.theme());
+            let status_icon = child
+                .status()
+                .status_icon_and_color(appearance.theme(), StatusColorStyle::Standard);
 
             // T3-7: in_progress child agents surface the current action in the title,
             // "Untitled · ↳ Searching codebase..." / "Refactor X · ↳ Reading files...".

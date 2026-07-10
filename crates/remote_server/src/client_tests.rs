@@ -2,9 +2,13 @@ use futures::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::proto::{
-    client_message, read_file_chunk_response, resolve_path_response, run_command_response,
-    server_message, write_file_chunk_response, ClientMessage, ErrorCode, FileSystemEntryKind,
-    InitializeResponse, ReadFileChunkResponse, ReadFileChunkSuccess, ResolvePathResponse,
+    client_message, get_fragment_metadata_from_hash_response, read_file_chunk_response,
+    resolve_path_response, run_command_response, server_message, write_file_chunk_response,
+    ClientMessage, CodebaseIndexStatus, CodebaseIndexStatusState, CodebaseIndexStatusUpdated,
+    CodebaseIndexStatusesSnapshot, ErrorCode, FileOperationError, FileSystemEntryKind,
+    FragmentMetadata, FragmentMetadataLookupError, FragmentMetadataLookupErrorCode,
+    GetFragmentMetadataFromHashResponse, GetFragmentMetadataFromHashSuccess, InitializeResponse,
+    MissingFragmentMetadata, ReadFileChunkResponse, ReadFileChunkSuccess, ResolvePathResponse,
     ResolvePathSuccess, RunCommandResponse, RunCommandSuccess, ServerMessage,
     WriteFileChunkResponse, WriteFileChunkSuccess,
 };
@@ -40,6 +44,73 @@ async fn mock_server_with<F>(
     }
 }
 
+fn not_enabled_codebase_status(repo_path: &str) -> CodebaseIndexStatus {
+    CodebaseIndexStatus {
+        repo_path: repo_path.to_string(),
+        state: CodebaseIndexStatusState::NotEnabled.into(),
+        last_updated_epoch_millis: Some(123),
+        progress_completed: None,
+        progress_total: None,
+        failure_message: None,
+        root_hash: None,
+    }
+}
+
+#[tokio::test]
+async fn codebase_index_push_messages_become_client_events() {
+    let (client_stream, server_stream) = tokio::io::duplex(4096);
+    let (server_read, server_write) = tokio::io::split(server_stream);
+    let (client_read, client_write) = tokio::io::split(client_stream);
+    drop(server_read);
+
+    let executor = executor::Background::default();
+    let (_client, event_rx, _failure_rx) =
+        RemoteServerClient::new(client_read.compat(), client_write.compat_write(), &executor);
+    let mut writer = server_write.compat_write();
+
+    protocol::write_server_message(
+        &mut writer,
+        &ServerMessage {
+            request_id: String::new(),
+            message: Some(server_message::Message::CodebaseIndexStatusesSnapshot(
+                CodebaseIndexStatusesSnapshot {
+                    statuses: vec![not_enabled_codebase_status("/repo")],
+                },
+            )),
+        },
+    )
+    .await
+    .unwrap();
+    protocol::write_server_message(
+        &mut writer,
+        &ServerMessage {
+            request_id: String::new(),
+            message: Some(server_message::Message::CodebaseIndexStatusUpdated(
+                CodebaseIndexStatusUpdated {
+                    status: Some(not_enabled_codebase_status("/repo")),
+                },
+            )),
+        },
+    )
+    .await
+    .unwrap();
+    writer.flush().await.unwrap();
+
+    match event_rx.recv().await.unwrap() {
+        ClientEvent::CodebaseIndexStatusesSnapshotReceived { statuses } => {
+            assert_eq!(statuses.len(), 1);
+            assert_eq!(statuses[0].repo_path, "/repo");
+        }
+        other => panic!("Expected CodebaseIndexStatusesSnapshotReceived, got {other:?}"),
+    }
+    match event_rx.recv().await.unwrap() {
+        ClientEvent::CodebaseIndexStatusUpdated { status } => {
+            assert_eq!(status.repo_path, "/repo");
+        }
+        other => panic!("Expected CodebaseIndexStatusUpdated, got {other:?}"),
+    }
+}
+
 /// Sets up a duplex stream, spawns `mock_server_with` with the given responder,
 /// and returns a connected `RemoteServerClient`, its event receiver, and the
 /// background executor (which must be kept alive for the test duration).
@@ -64,7 +135,7 @@ where
     ));
 
     let executor = executor::Background::default();
-    let (client, event_rx) =
+    let (client, event_rx, _failure_rx) =
         RemoteServerClient::new(client_read.compat(), client_write.compat_write(), &executor);
     (client, event_rx, executor)
 }
@@ -120,12 +191,102 @@ async fn initialize_sends_auth_token_when_provided() {
 }
 
 #[tokio::test]
+async fn get_fragment_metadata_from_hash_round_trip() {
+    let (client, _disconnect_rx, _executor) = setup_mock_client(|msg| {
+        match &msg.message {
+            Some(client_message::Message::GetFragmentMetadataFromHash(request)) => {
+                assert_eq!(request.repo_path, "/repo");
+                assert_eq!(request.root_hash, "root-hash");
+                assert_eq!(request.content_hashes, vec!["found-hash", "missing-hash"]);
+            }
+            other => panic!("Expected GetFragmentMetadataFromHash, got {other:?}"),
+        }
+        server_message::Message::GetFragmentMetadataFromHashResponse(
+            GetFragmentMetadataFromHashResponse {
+                result: Some(get_fragment_metadata_from_hash_response::Result::Success(
+                    GetFragmentMetadataFromHashSuccess {
+                        fragments: vec![FragmentMetadata {
+                            content_hash: "found-hash".to_string(),
+                            path: "/repo/src/lib.rs".to_string(),
+                            start_line: 1,
+                            end_line: 3,
+                            byte_start: 0,
+                            byte_end: 42,
+                        }],
+                        missing_hashes: vec![MissingFragmentMetadata {
+                            content_hash: "missing-hash".to_string(),
+                            error: Some(FileOperationError {
+                                message: "missing".to_string(),
+                            }),
+                        }],
+                    },
+                )),
+            },
+        )
+    });
+
+    let response = client
+        .get_fragment_metadata_from_hash(
+            "/repo".to_string(),
+            "root-hash".to_string(),
+            vec!["found-hash".to_string(), "missing-hash".to_string()],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.fragments.len(), 1);
+    assert_eq!(response.fragments[0].content_hash, "found-hash");
+    assert_eq!(response.missing_hashes.len(), 1);
+    assert_eq!(response.missing_hashes[0].content_hash, "missing-hash");
+}
+
+#[tokio::test]
+async fn get_fragment_metadata_from_hash_error_maps_to_typed_client_error() {
+    let (client, _disconnect_rx, _executor) = setup_mock_client(|msg| {
+        match &msg.message {
+            Some(client_message::Message::GetFragmentMetadataFromHash(request)) => {
+                assert_eq!(request.repo_path, "/repo");
+            }
+            other => panic!("Expected GetFragmentMetadataFromHash, got {other:?}"),
+        }
+        server_message::Message::GetFragmentMetadataFromHashResponse(
+            GetFragmentMetadataFromHashResponse {
+                result: Some(get_fragment_metadata_from_hash_response::Result::Error(
+                    FragmentMetadataLookupError {
+                        code: FragmentMetadataLookupErrorCode::IndexNotSynced.into(),
+                        message: "Codebase index has no synced root hash".to_string(),
+                        current_root_hash: None,
+                    },
+                )),
+            },
+        )
+    });
+
+    let error = client
+        .get_fragment_metadata_from_hash(
+            "/repo".to_string(),
+            "root-hash".to_string(),
+            vec!["hash".to_string()],
+        )
+        .await
+        .unwrap_err();
+
+    match error {
+        ClientError::FragmentMetadataLookup { code, message } => {
+            assert_eq!(code, FragmentMetadataLookupErrorCode::IndexNotSynced);
+            assert_eq!(message, "Codebase index has no synced root hash");
+        }
+        other => panic!("Expected FragmentMetadataLookup error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn authenticate_sends_fire_and_forget_message() {
     let (client_stream, server_stream) = tokio::io::duplex(4096);
     let (server_read, _server_write) = tokio::io::split(server_stream);
     let (client_read, client_write) = tokio::io::split(client_stream);
     let executor = executor::Background::default();
-    let (client, _event_rx) =
+    let (client, _event_rx, _failure_rx) =
         RemoteServerClient::new(client_read.compat(), client_write.compat_write(), &executor);
 
     client.authenticate("rotated-secret");
@@ -149,7 +310,7 @@ async fn disconnected_on_closed_stream() {
 
     let (client_read, client_write) = tokio::io::split(client_stream);
     let executor = executor::Background::default();
-    let (client, disconnect_rx) =
+    let (client, disconnect_rx, _failure_rx) =
         RemoteServerClient::new(client_read.compat(), client_write.compat_write(), &executor);
 
     // An initialize call on a dead stream must complete with an error rather than hang.

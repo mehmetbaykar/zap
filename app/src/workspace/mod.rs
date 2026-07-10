@@ -23,7 +23,6 @@ pub mod util;
 pub mod view;
 
 use crate::ai::skills::SkillManager;
-use crate::ai::AIRequestUsageModel;
 use crate::channel::Channel;
 use crate::code;
 use crate::features::FeatureFlag;
@@ -77,8 +76,9 @@ pub fn panel_header_corner_radius() -> warpui::elements::CornerRadius {
 /// Kept in sync with the availability check in `Workspace::send_feedback` so
 /// the command palette label and the menu item behavior never diverge.
 pub fn is_feedback_skill_available(ctx: &AppContext) -> bool {
+    // Zap: BYOP has no cloud AI-request quota (the `AIRequestUsageModel` cloud shim was
+    // removed); AI is always available here, matching `AISettings::is_any_ai_enabled` above.
     AISettings::as_ref(ctx).is_any_ai_enabled(ctx)
-        && AIRequestUsageModel::as_ref(ctx).has_any_ai_remaining(ctx)
         && SkillManager::as_ref(ctx)
             .active_bundled_skill("feedback", ctx)
             .is_some()

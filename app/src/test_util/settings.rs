@@ -56,6 +56,10 @@ pub fn initialize_settings_for_tests_with_mode(
     DebugSettings::register(app);
     AppIconSettings::register(app);
     EmacsBindingsSettings::register(app);
+    crate::settings::language::LanguageSettings::register(app);
+    crate::settings::network::NetworkSettings::register(app);
+    crate::settings::AutoupdateSettings::register(app);
+    crate::settings::CloudSyncSettings::register(app);
 
     #[cfg(feature = "local_fs")]
     {

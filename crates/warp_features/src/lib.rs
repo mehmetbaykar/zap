@@ -96,10 +96,6 @@ pub enum FeatureFlag {
     /// Enables the settings file feature.
     SettingsFile,
 
-    /// Enables the settings import onboarding block and pre-parsing
-    /// configs on app startup.
-    SettingsImport,
-
     /// Enables rect selection.
     RectSelection,
 
@@ -123,10 +119,6 @@ pub enum FeatureFlag {
 
     /// Routes SSH sessions through the tmux-backed SSH wrapper.
     SSHTmuxWrapper,
-
-    /// Reduces the amount of horizontal padding in the blocklist
-    /// from 20px to 16px.
-    LessHorizontalTerminalPadding,
 
     /// Enables the shell selector, allowing us to open a new tab in
     /// a shell other than the default shell.
@@ -232,6 +224,9 @@ pub enum FeatureFlag {
     /// Enables prediction of Agent Mode queries.
     PredictAMQueries,
 
+    /// Enables codebase indexing inside remote server daemon processes.
+    RemoteCodebaseIndexing,
+
     /// If enabled, command palette searches will use Tantivy search instead of the default fuzzy search.
     UseTantivySearch,
 
@@ -273,9 +268,6 @@ pub enum FeatureFlag {
 
     /// Enables inline review comments on specific lines of code.
     ContextLineReviewComments,
-
-    /// Enables the natural language classification model.
-    NLDClassifierModelEnabled,
 
     /// Enables the fast-forward autoexecute button
     FastForwardAutoexecuteButton,
@@ -564,6 +556,9 @@ pub enum FeatureFlag {
     /// When enabled, the HOA onboarding flow is suppressed.
     ZapLaunchModal,
 
+    /// Enables the orchestration launch modal announcing multi-agent orchestration features.
+    OrchestrationLaunchModal,
+
     /// Updated tab styling (background colors, border, close button positioning, margins).
     NewTabStyling,
 
@@ -656,6 +651,11 @@ pub enum FeatureFlag {
     /// When enabled, solo users (not on a team) can use BYO API keys.
     SoloUserByok,
 
+    /// Enables the Custom Inference settings UI for adding user-provided third-party / OpenAI-compatible inference endpoints.
+    CustomInferenceEndpoints,
+    /// Enables Custom Inference endpoints for enterprise users.
+    CustomInferenceEndpointsEnterprise,
+
     /// Replaces the in-block warpification banner with a warpify footer.
     WarpifyFooter,
 
@@ -703,6 +703,44 @@ pub enum FeatureFlag {
     /// collapsible tree with typed colors and per-row Copy JSON, instead of
     /// a flat pretty-printed blob.
     McpJsonTreeView,
+
+    /// Enables creating API keys scoped to named agents in the API key
+    /// management UI. When enabled the "Team" option in the key-type
+    /// selector is replaced with "Agent" and users can pick which agent
+    /// identity the key authenticates as.
+    NamedAgents,
+    /// Gates the driver behavior that writes GitHub credentials to disk
+    /// (`~/.git-credentials`, `~/.config/gh/hosts.yaml`) and runs the
+    /// background refresh loop that keeps them fresh during a task run.
+    GitCredentialRefresh,
+
+    /// Replaces the raw harness CLI command with a styled header showing CLI name + status icon.
+    HarnessSessionHeader,
+
+    /// Enables the NLD classifier model (fork NLD stack).
+    NLDClassifierModelEnabled,
+
+    /// Reduces horizontal terminal padding (fork UI preference).
+    LessHorizontalTerminalPadding,
+
+    /// Allows spawning Claude Code / Codex CLIs as local child-agent harnesses.
+    LocalClaudeCodexChildHarnesses,
+
+    /// Legacy upstream flags kept as inert variants: referenced by merged code
+    /// paths, but never enabled in this fork (no Warp cloud).
+    CloudMode,
+    CloudConversations,
+    CloudModeInputV2,
+    CloudModeSetupV2,
+    CreatingSharedSessions,
+    ViewingSharedSessions,
+    FullSourceCodeEmbedding,
+    HandoffCloudCloud,
+
+    /// Multi-agent orchestration (local child agents) — v2 event-log plumbing.
+    OrchestrationV2,
+    /// Pill bar UI listing child-agent conversations.
+    OrchestrationPillBar,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -754,7 +792,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::PendingUserQueryIndicator,
     FeatureFlag::QueueSlashCommand,
     // End manually enabled Code features.
-    FeatureFlag::DirectoryTabColors,
     FeatureFlag::EditableMarkdownMermaid,
     FeatureFlag::CodeReviewScrollPreservation,
     FeatureFlag::RememberFastForwardState,
@@ -768,6 +805,10 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::TerminalLifecycleRecovery,
     FeatureFlag::JupyterNotebookRendering,
     FeatureFlag::McpJsonTreeView,
+    FeatureFlag::NamedAgents,
+    FeatureFlag::SoloUserByok,
+    FeatureFlag::CustomInferenceEndpoints,
+    FeatureFlag::RemoteCodebaseIndexing,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Zap).
@@ -775,6 +816,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
 pub const PREVIEW_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::MarkdownTables,
     FeatureFlag::GitOperationsInCodeReview,
+    FeatureFlag::GitCredentialRefresh,
 ];
 
 /// Features enabled for all release builds (i.e.: everything but WarpLocal).
@@ -1036,5 +1078,5 @@ impl From<TriState> for Option<bool> {
 }
 
 #[cfg(test)]
-#[path = "features_test.rs"]
+#[path = "features_tests.rs"]
 mod tests;

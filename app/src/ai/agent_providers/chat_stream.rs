@@ -1629,6 +1629,7 @@ fn build_chat_request(
             AIAgentInput::SummarizeConversation {
                 prompt,
                 overflow: _,
+                context: _,
             } => {
                 // Zap BYOP local session compaction entry point — 1:1 aligned with opencode `compaction.ts processCompaction`.
                 //

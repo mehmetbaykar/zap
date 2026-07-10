@@ -30,7 +30,9 @@ fn init_byop_test_app(app: &mut warpui::App) {
     // updates (upstream warp #10085), which reads the execution-profiles singleton;
     // register it like the other model-refresh tests do.
     app.add_singleton_model(crate::cloud_object::model::persistence::ObjectStoreModel::mock);
-    app.add_singleton_model(|_| crate::ai::mcp::templatable_manager::TemplatableMCPServerManager::default());
+    app.add_singleton_model(|_| {
+        crate::ai::mcp::templatable_manager::TemplatableMCPServerManager::default()
+    });
     app.add_singleton_model(|ctx| {
         crate::ai::execution_profiles::profiles::AIExecutionProfilesModel::new(
             &crate::LaunchMode::new_for_unit_test(),
@@ -61,7 +63,7 @@ fn smoke_build_byop_models_by_feature_exposes_configured_models() {
 
         app.read(|ctx| {
             let choices: Vec<_> = LLMPreferences::as_ref(ctx)
-                .get_base_llm_choices_for_agent_mode()
+                .get_base_llm_choices_for_agent_mode(ctx)
                 .collect();
             assert_eq!(choices.len(), 1, "expected one BYOP model in picker");
             assert!(

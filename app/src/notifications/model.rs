@@ -18,11 +18,11 @@ use std::collections::HashMap;
 
 use warp_core::features::FeatureFlag;
 use warp_core::send_telemetry_from_ctx;
-use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
+use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, ViewHandle};
 
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::artifacts::Artifact;
-use crate::ai::blocklist::BlocklistAIHistoryEvent;
+use crate::ai::blocklist::{BlocklistAIHistoryEvent, ConversationStatusUpdate};
 use crate::notifications::item::{
     NotificationCategory, NotificationId, NotificationItem, NotificationItems, NotificationOrigin,
     NotificationSourceAgent,
@@ -32,7 +32,7 @@ use crate::settings::AISettings;
 use crate::terminal::cli_agent_sessions::{
     CLIAgentSessionStatus, CLIAgentSessionsModel, CLIAgentSessionsModelEvent,
 };
-use crate::terminal::CLIAgent;
+use crate::terminal::{CLIAgent, TerminalView};
 use crate::workspace::util::is_terminal_view_in_same_tab;
 use crate::workspace::{Workspace, WorkspaceRegistry};
 use crate::BlocklistAIHistoryModel;
@@ -151,14 +151,19 @@ impl NotificationsModel {
                         CLIAgent::Antigravity => "Notification from Antigravity",
                         _ => "Task completed.",
                     };
+                    let metadata = TerminalViewMetadata::lookup(*terminal_view_id, ctx);
                     self.add_notification(
                         title,
                         message.to_owned(),
                         NotificationCategory::Complete,
-                        NotificationSourceAgent::CLI(*agent),
+                        NotificationSourceAgent::CLI {
+                            agent: *agent,
+                            is_ambient: metadata.is_ambient,
+                        },
                         NotificationOrigin::CLISession(*terminal_view_id),
                         *terminal_view_id,
                         vec![],
+                        metadata.branch,
                         ctx,
                     );
                 }
@@ -166,16 +171,21 @@ impl NotificationsModel {
                     let title = session_context
                         .display_title()
                         .unwrap_or_else(|| format!("{} needs attention", agent.display_name()));
+                    let metadata = TerminalViewMetadata::lookup(*terminal_view_id, ctx);
                     self.add_notification(
                         title,
                         message
                             .clone()
                             .unwrap_or_else(|| "Waiting for input.".to_owned()),
                         NotificationCategory::Request,
-                        NotificationSourceAgent::CLI(*agent),
+                        NotificationSourceAgent::CLI {
+                            agent: *agent,
+                            is_ambient: metadata.is_ambient,
+                        },
                         NotificationOrigin::CLISession(*terminal_view_id),
                         *terminal_view_id,
                         vec![],
+                        metadata.branch,
                         ctx,
                     );
                 }
@@ -227,7 +237,8 @@ impl NotificationsModel {
             terminal_view_id,
             conversation_id,
             // Conversations restored at startup should not trigger a notification.
-            is_restored: false,
+            update: ConversationStatusUpdate::Changed { .. },
+            ..
         } = event
         else {
             return;
@@ -242,7 +253,9 @@ impl NotificationsModel {
             return;
         };
 
-        if updated_conversation.should_exclude_from_navigation() {
+        if updated_conversation.should_exclude_from_navigation()
+            && !updated_conversation.is_child_agent_conversation()
+        {
             return;
         }
 
@@ -267,19 +280,54 @@ impl NotificationsModel {
     ) {
         let origin = NotificationOrigin::Conversation(conversation_id);
 
+        let ai_history_model = BlocklistAIHistoryModel::as_ref(ctx);
+        let conversation = ai_history_model.conversation(&conversation_id);
+        let is_child = conversation.is_some_and(|c| c.is_child_agent_conversation());
+
+        // For child conversations, check if the child's own conversation still exists in memory
+        // (navigate directly) or if the parent conversation does (the child is visible via the
+        // parent's ChildAgentStatusCard — navigate to the parent's pane). For non-child
+        // conversations, just check whether the conversation itself still exists in memory.
+        // This replaces the original `ActiveAgentViewsModel::is_conversation_open` check.
+        let (is_open, effective_terminal_view_id, title) = if is_child {
+            let child_open = conversation.is_some();
+            let parent_open = !child_open
+                && conversation
+                    .and_then(|c| c.parent_conversation_id())
+                    .is_some_and(|parent_id| ai_history_model.conversation(&parent_id).is_some());
+            let nav_terminal_view_id = if child_open {
+                terminal_view_id
+            } else {
+                conversation
+                    .and_then(|c| c.parent_conversation_id())
+                    .and_then(|parent_id| {
+                        ai_history_model.terminal_view_id_for_conversation(&parent_id)
+                    })
+                    .unwrap_or(terminal_view_id)
+            };
+            let child_name = conversation
+                .and_then(|c| c.agent_name())
+                .map(|name| name.to_owned())
+                .or(latest_query)
+                .unwrap_or_else(|| "Child agent".to_owned());
+            (child_open || parent_open, nav_terminal_view_id, child_name)
+        } else {
+            let title = latest_query.unwrap_or_else(|| "Agent task".to_owned());
+            (conversation.is_some(), terminal_view_id, title)
+        };
+
         // The conversation no longer exists in memory (evicted / deleted) -> there is no navigable
         // target, so just clear the related notifications.
-        // This replaces the original `ActiveAgentViewsModel::is_conversation_open` check.
-        if BlocklistAIHistoryModel::as_ref(ctx)
-            .conversation(&conversation_id)
-            .is_none()
-        {
+        if !is_open {
             self.pending_artifacts.remove(&conversation_id);
             self.remove_notification_by_source(origin, ctx);
             return;
         }
 
-        let title = latest_query.unwrap_or_else(|| "Agent task".to_owned());
+        let metadata = TerminalViewMetadata::lookup(effective_terminal_view_id, ctx);
+        let oz_agent = NotificationSourceAgent::Oz {
+            is_ambient: metadata.is_ambient,
+        };
 
         match status {
             // The agent starts working again -> the previous notification is invalidated.
@@ -288,27 +336,39 @@ impl NotificationsModel {
             }
             ConversationStatus::Success => {
                 let artifacts = self.flush_pending_artifacts(conversation_id);
+                let message = if is_child {
+                    "Child agent completed."
+                } else {
+                    "Task completed."
+                };
                 self.add_notification(
                     title,
-                    "Task completed.".to_owned(),
+                    message.to_owned(),
                     NotificationCategory::Complete,
-                    NotificationSourceAgent::Oz,
+                    oz_agent,
                     origin,
-                    terminal_view_id,
+                    effective_terminal_view_id,
                     artifacts,
+                    metadata.branch,
                     ctx,
                 );
             }
             ConversationStatus::Cancelled => {
                 let artifacts = self.flush_pending_artifacts(conversation_id);
+                let message = if is_child {
+                    "Child agent was cancelled."
+                } else {
+                    "Task was cancelled."
+                };
                 self.add_notification(
                     title,
-                    "Task was cancelled.".to_owned(),
+                    message.to_owned(),
                     NotificationCategory::Complete,
-                    NotificationSourceAgent::Oz,
+                    oz_agent,
                     origin,
-                    terminal_view_id,
+                    effective_terminal_view_id,
                     artifacts,
+                    metadata.branch,
                     ctx,
                 );
             }
@@ -317,23 +377,30 @@ impl NotificationsModel {
                     title,
                     blocked_action.clone(),
                     NotificationCategory::Request,
-                    NotificationSourceAgent::Oz,
+                    oz_agent,
                     origin,
-                    terminal_view_id,
+                    effective_terminal_view_id,
                     vec![],
+                    metadata.branch,
                     ctx,
                 );
             }
             ConversationStatus::Error => {
                 let artifacts = self.flush_pending_artifacts(conversation_id);
+                let message = if is_child {
+                    "Child agent encountered an error."
+                } else {
+                    "Something went wrong."
+                };
                 self.add_notification(
                     title,
-                    "Something went wrong.".to_owned(),
+                    message.to_owned(),
                     NotificationCategory::Error,
-                    NotificationSourceAgent::Oz,
+                    oz_agent,
                     origin,
-                    terminal_view_id,
+                    effective_terminal_view_id,
                     artifacts,
+                    metadata.branch,
                     ctx,
                 );
             }
@@ -371,6 +438,7 @@ impl NotificationsModel {
         origin: NotificationOrigin,
         terminal_view_id: EntityId,
         artifacts: Vec<Artifact>,
+        branch: Option<String>,
         ctx: &mut ModelContext<Self>,
     ) {
         if !*AISettings::as_ref(ctx).show_agent_notifications {
@@ -378,7 +446,6 @@ impl NotificationsModel {
         }
 
         let is_visible = is_terminal_view_visible(terminal_view_id, ctx);
-        let branch = resolve_git_branch_for_terminal_view(terminal_view_id, ctx);
         let item = NotificationItem::new(
             title,
             message,
@@ -421,17 +488,41 @@ fn is_terminal_view_visible(terminal_view_id: EntityId, app: &AppContext) -> boo
         || is_terminal_view_in_same_tab(&active_id, &terminal_view_id, app)
 }
 
-fn resolve_git_branch_for_terminal_view(
+/// Per-notification metadata derived from a single [`TerminalView`] lookup. Both fields
+/// are read on the same emit path, so we resolve the view once and pass the projection
+/// down rather than walking the workspace tree for each.
+struct TerminalViewMetadata {
+    is_ambient: bool,
+    branch: Option<String>,
+}
+
+impl TerminalViewMetadata {
+    fn lookup(terminal_view_id: EntityId, app: &AppContext) -> Self {
+        let Some(terminal_view) = find_terminal_view_by_id(terminal_view_id, app) else {
+            return Self {
+                is_ambient: false,
+                branch: None,
+            };
+        };
+        let view = terminal_view.as_ref(app);
+        Self {
+            is_ambient: view.is_ambient_agent_session(app),
+            branch: view.current_git_branch(app),
+        }
+    }
+}
+
+fn find_terminal_view_by_id(
     terminal_view_id: EntityId,
     app: &AppContext,
-) -> Option<String> {
+) -> Option<ViewHandle<TerminalView>> {
     for (_, workspace_handle) in WorkspaceRegistry::as_ref(app).all_workspaces(app) {
         for pane_group in workspace_handle.as_ref(app).tab_views() {
             let pane_group = pane_group.as_ref(app);
             for pane_id in pane_group.terminal_pane_ids() {
                 if let Some(terminal_view) = pane_group.terminal_view_from_pane_id(pane_id, app) {
                     if terminal_view.id() == terminal_view_id {
-                        return terminal_view.as_ref(app).current_git_branch(app);
+                        return Some(terminal_view);
                     }
                 }
             }

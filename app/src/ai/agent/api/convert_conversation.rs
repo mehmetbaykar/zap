@@ -346,7 +346,7 @@ impl ConvertToExchanges for &api::Task {
                         api::message::system_query::Type::ResumeConversation(_)
                         | api::message::system_query::Type::GeneratePassiveSuggestions(_)
                         // TODO: Implement this for real. ZB adding this to bump proto version for unrelated API changes.
-                        | api::message::system_query::Type::SummarizeConversation(_)=> false,
+                        | api::message::system_query::Type::SummarizeConversation(_) => false,
                     }
                 }
                 api::message::Message::ToolCallResult(tool_call_result) => {
@@ -491,6 +491,10 @@ pub(crate) fn convert_tool_call_result_to_input(
                         command: result.command.clone(),
                         output: finished.output.clone(),
                         exit_code: ExitCode::from(finished.exit_code),
+                        // The pinned proto's ShellCommandFinished no longer carries
+                        // start/finish timestamps; keep the native fields but leave unset.
+                        start_ts: None,
+                        completed_ts: None,
                     }
                 }
                 Some(api::run_shell_command_result::Result::LongRunningCommandSnapshot(
@@ -537,6 +541,9 @@ pub(crate) fn convert_tool_call_result_to_input(
                         block_id: finished.command_id.clone().into(),
                         output: finished.output.clone(),
                         exit_code: ExitCode::from(finished.exit_code),
+                        // ShellCommandFinished no longer carries start/finish timestamps.
+                        start_ts: None,
+                        completed_ts: None,
                     },
                     Some(api::write_to_long_running_shell_command_result::Result::Error(api::ShellCommandError{
                         r#type: Some(api::shell_command_error::Type::CommandNotFound(()))
@@ -1077,6 +1084,10 @@ pub(crate) fn convert_tool_call_result_to_input(
                         block_id: finished.command_id.clone().into(),
                         output: finished.output.clone(),
                         exit_code: ExitCode::from(finished.exit_code),
+                        // The pinned proto's ShellCommandFinished no longer carries
+                        // start/finish timestamps; keep the native fields but leave unset.
+                        start_ts: None,
+                        completed_ts: None,
                     }
                 }
                 Some(
@@ -1127,6 +1138,9 @@ pub(crate) fn convert_tool_call_result_to_input(
                     block_id: finished.command_id.clone().into(),
                     output: finished.output.clone(),
                     exit_code: ExitCode::from(finished.exit_code),
+                    // ShellCommandFinished no longer carries start/finish timestamps.
+                    start_ts: None,
+                    completed_ts: None,
                 },
                 Some(api::transfer_shell_command_control_to_user_result::Result::Error(
                     api::ShellCommandError {
@@ -1640,7 +1654,7 @@ fn convert_passive_suggestion_result_to_input(
         context,
     })
 }
-fn proto_timestamp_to_local_datetime(seconds: i64, nanos: i32) -> DateTime<Local> {
+pub(crate) fn proto_timestamp_to_local_datetime(seconds: i64, nanos: i32) -> DateTime<Local> {
     let nanos = if nanos < 0 { 0 } else { nanos as u32 };
 
     Local

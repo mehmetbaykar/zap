@@ -200,6 +200,10 @@ impl Args {
         // app, so the CLI reports the build's release tag.
         command = command.version(version_string());
 
+        // Wire up `--version` / `-V` using the same version metadata used elsewhere in the
+        // app, so the CLI reports the build's release tag.
+        command = command.version(version_string());
+
         // Substitute the actual binary name into help output. Ideally clap would do this for us.
         let bin_name =
             binary_name().unwrap_or_else(|| ChannelState::channel().cli_command_name().to_string());

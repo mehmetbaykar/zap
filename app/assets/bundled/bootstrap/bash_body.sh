@@ -1158,7 +1158,6 @@ esac
     # completed, we want the values to be what they would have been if we hadn't
     # set initial values.
     #
-    #
     if [[ $HISTFILESIZE == $WARP_INITIAL_HISTFILESIZE ]]; then
         unset HISTFILESIZE
     fi

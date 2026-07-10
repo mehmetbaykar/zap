@@ -518,10 +518,12 @@ where
             item: display_fn(&item),
             mouse_state_handle,
             on_remove_action: on_remove_action(item),
+            is_disabled: !is_editable,
+            tooltip_mouse_state: None,
         })
         .collect();
 
-    let list = render_input_list(None, input_items, editor, !is_editable, appearance);
+    let list = render_input_list(None, input_items, editor, appearance);
     let list_element = if !is_editable {
         wrap_disabled_with_workspace_override_tooltip(list, tooltip_mouse_state, appearance)
     } else {

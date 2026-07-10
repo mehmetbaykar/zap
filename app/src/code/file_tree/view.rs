@@ -42,6 +42,7 @@ use warpui::{
 use warpui::{BlurContext, ModelHandle};
 
 use crate::code::active_file::{ActiveFileEvent, ActiveFileModel};
+use crate::code::buffer_location::BufferLocation;
 use crate::coding_panel_enablement_state::CodingPanelEnablementState;
 use crate::editor::{EditorOptions, EditorView, TextOptions};
 #[cfg(feature = "local_fs")]
@@ -733,9 +734,13 @@ impl FileTreeView {
     fn handle_code_event(&mut self, event: &ActiveFileEvent, ctx: &mut ViewContext<Self>) {
         // When a file is focused, scroll to show it in the file tree
         match event {
-            ActiveFileEvent::ActiveFileChanged { file_info } => {
-                let Ok(file_std) = StandardizedPath::try_from_local(file_info) else {
-                    return;
+            ActiveFileEvent::ActiveFileChanged { location } => {
+                let file_std = match location {
+                    BufferLocation::Local(path) => match StandardizedPath::try_from_local(path) {
+                        Ok(std_path) => std_path,
+                        Err(_) => return,
+                    },
+                    BufferLocation::Remote(remote) => remote.path.clone(),
                 };
                 // Prefer the currently-selected item's root if the file lives under it;
                 // otherwise fall back to the deepest matching root directory.
@@ -1291,7 +1296,7 @@ impl FileTreeView {
                         {
                             Some(state.entry.clone())
                         }
-                        Some(IndexedRepoState::Pending) => {
+                        Some(IndexedRepoState::Pending(_)) => {
                             // Repo is being (re-)indexed. Keep whatever entry
                             // we already have so the tree doesn't flash to a
                             // loading state during the transition.
@@ -1570,7 +1575,7 @@ impl FileTreeView {
                 Some(IndexedRepoState::Indexed(state)) => {
                     root_dir.entry = state.entry.clone();
                 }
-                Some(IndexedRepoState::Pending) => {
+                Some(IndexedRepoState::Pending(_)) => {
                     // Repo is being (re-)indexed. Keep whatever entry we already
                     // have so the tree doesn't flash back to a loading state
                     // during the Pending → Indexed transition.

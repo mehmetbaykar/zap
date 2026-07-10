@@ -28,10 +28,10 @@ use std::sync::mpsc::SyncSender;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use crate::cloud_object::StoredObject;
-use crate::util::sync::Condition;
 use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
 use warp_core::features::FeatureFlag;
+use warp_util::sync::Condition;
 
 use super::generic_string_model::GenericStringObjectId;
 
@@ -1355,5 +1355,5 @@ impl Entity for ObjectStoreModel {
 impl SingletonEntity for ObjectStoreModel {}
 
 #[cfg(test)]
-#[path = "model_test.rs"]
+#[path = "model_tests.rs"]
 mod tests;
