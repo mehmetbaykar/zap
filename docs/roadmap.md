@@ -1,39 +1,29 @@
 # Roadmap
 
-Zap's agent stack will be built as a standalone open-source service, independent of the Warp client. The terminal becomes one client among many — a TUI, an IDE plugin or a cloud worker can all drive the same engine.
+Zap is **upstream Warp without the bullshit**: the full Warp product — terminal, agentic stack (agent loop, providers, MCP, skills, tool execution), and TUI — with every cloud, subscription, login, and telemetry dependency removed and replaced by local equivalents. We do not build a separate agent harness from scratch; upstream's is the best available, and our job is keeping it de-clouded and current.
 
-## Phase 1 — Build the agent harness core
+Authoritative strategy and process: see `SPEC.md` (2026-07-10).
 
-- Design and build a standalone open-source agent service from scratch — agent loop, tool runtime, conversation/session state, prompt templating, provider routing — not tied to Warp's existing client code. Zap becomes its first consumer.
-- Define a stable IPC / JSON-RPC protocol: prompts, streaming tokens, tool calls, file diffs, status, attachments.
-- Ship the harness as a reusable open-source service — a headless daemon, a standalone TUI, IDE plugins and other terminals can all talk to it.
-- Local-only by default; credentials, history, skills and MCP servers stay on disk.
-- Versioned protocol + capability negotiation so clients and harness can upgrade independently.
-- Pluggable tool registry: built-in shell / read / edit / search tools plus user-provided ones over a uniform RPC surface.
+## Phase 1 — Catch-up merges (now)
 
-## Phase 2 — Hosted agent runtime
+- Restore the true git merge relationship with warpdotdev/warp: ~7 catch-up merge slices from merge-base `c325d146a` to upstream tip, each buildable and gate-tested.
+- All previously-skipped non-cloud features land via the merges (tab-groups, queued prompts, custom model routers, codebase auto-indexing, project rules, agent_sdk growth, `crates/mcp` structure).
+- Cloud/subscription code stripped per the policy table; shims (`report_error!` → `log::error!`, auth gates → local constants) keep future upstream code compiling untouched.
+- `warp_tui` included as a non-default workspace member.
 
-- Run the same harness on a server, accepting tasks from any client.
-- Async task delegation: kick off long-running work, monitor progress, come back later.
-- Isolated execution sandboxes per task (containers / VMs), with configurable preinstalled toolchains and setup scripts.
-- Repo-aware execution: clone, branch, run tests, lint, type-check; surface verifiable terminal logs and test output.
-- Git workflow integration: create branches, commits and pull requests with diff + log citations.
-- Per-task secrets and network policy (default offline; explicit allowlist when egress is needed).
-- Multi-task parallelism with quota, scheduling and cancellation.
-- Repo / org / project memory files (`AGENTS.md` / equivalents) honored across runs.
-- Fully self-hostable: single-node Docker, multi-node cluster, or bring-your-own Kubernetes. No mandatory SaaS dependency.
+## Phase 2 — Steady state
 
-## Phase 3 — Multi-surface collaboration
+- Weekly operator-initiated merge of upstream `main`; small conflict sets; baseline-diff test gate.
+- zerx-lab/zap merged occasionally as a secondary source (their original fixes only; shared history dedupes).
+- Provider-side OAuth (grok, harness CLIs) adapted provider↔app direct as upstream ships them.
+- Test-debt burndown: drive the inherited `-p warp` failures to zero.
 
-- Single account / identity shared across Zap terminal, headless TUI, IDE plugins and web UI.
-- Session handoff: start on web, continue in the terminal; or hand a terminal session off to a desktop reviewer.
-- Background agents and multi-agent teams: a lead agent decomposes work and dispatches subtasks to peer agents.
-- Routines: run a task on a schedule, via API call, or in response to repository / CI / issue-tracker events.
-- Inbound channels: push tasks from chat (Slack / Discord / Telegram / webhooks) into the harness.
-- Outbound integrations: GitHub / GitLab / Gitea, issue trackers, CI systems, MCP servers, code review.
-- Live observability of remote runs: streaming logs, intermediate diffs, mid-flight steering and cancellation.
-- Shareable conversation / task links for team review, with permission scopes.
-- End-to-end open source: harness, sandbox runtime, web UI and integrations — all self-hostable.
+## Phase 3 — Local harness orchestration
 
-> Roadmap items are exploratory and may shift as the harness lands and real usage feedback arrives.
+- Adopt upstream's child-agent orchestration (Claude Code / Codex CLIs as local harnesses), availability gated on local CLI detection instead of Warp accounts.
 
+## Principles (unchanged, ever)
+
+- Local-only by default: credentials, history, skills, and MCP servers stay on disk.
+- BYOP: bring-your-own-provider API keys or direct provider OAuth; no Warp account, no proxy through anyone's cloud.
+- No telemetry.
