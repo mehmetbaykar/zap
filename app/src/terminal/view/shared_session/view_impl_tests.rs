@@ -1,19 +1,11 @@
 use pathfinder_geometry::vector::vec2f;
-use std::collections::HashMap;
-use warp_multi_agent_api::{self as api, client_action as api_client_action};
-
-use crate::ai::agent::AIAgentInput;
-use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
-use crate::terminal::shared_session::protocol::SessionSourceType;
-use warpui::platform::WindowStyle;
-use warpui::{App, ViewHandle};
+use warpui::App;
 
 use crate::context_chips::prompt_type::PromptType;
 
 use crate::terminal::model::blocks::{ToTotalIndex as _, INLINE_BANNER_HEIGHT};
 use crate::terminal::session_settings::SessionSettings;
 use crate::terminal::view::shared_session::test_utils::terminal_view_for_viewer;
-use crate::terminal::TerminalView;
 use crate::test_util::add_window_with_terminal;
 use crate::test_util::terminal::initialize_app_for_terminal_view;
 use crate::{assert_lines_approx_eq, FeatureFlag};

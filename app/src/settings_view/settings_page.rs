@@ -35,6 +35,7 @@ use super::features_page::FeaturesPageView;
 use super::keybindings::KeybindingsView;
 use super::mcp_servers_page::MCPServersSettingsPageView;
 use super::network_page::NetworkPageView;
+use super::scripting_page::ScriptingSettingsPageView;
 use super::warp_drive_page::WarpDriveSettingsPageView;
 use super::warpify_page::WarpifyPageView;
 use super::SettingsSection;
@@ -50,6 +51,7 @@ pub const HEADER_PADDING: f32 = 15.;
 pub const SUBHEADER_MARGIN_BOTTOM: f32 = 4.;
 pub const PAGE_TITLE_MARGIN_BOTTOM: f32 = 4.;
 pub(super) const PAGE_PADDING: f32 = 28.;
+pub(super) const HEADER_FONT_SIZE: f32 = 23.;
 const ALTERNATING_LIST_CLOSE_BUTTON_DIAMETER: f32 = 20.0;
 const ALTERNATING_LIST_ITEM_PADDING: f32 = 8.0;
 const GREY_TEXT_OPACITY: u8 = 60;
@@ -102,6 +104,7 @@ pub enum SettingsPageViewHandle {
     // `ReferralsPageView` and the corresponding ServerApi client traits.
     // Zap Wave 7-3: the `CloudEnvironments` variant was physically removed along with the ambient-agent UI subsystem.
     Warpify(ViewHandle<WarpifyPageView>),
+    Scripting(ViewHandle<ScriptingSettingsPageView>),
     AI(ViewHandle<AISettingsPageView>),
     MCPServers(ViewHandle<MCPServersSettingsPageView>),
     ZapDrive(ViewHandle<WarpDriveSettingsPageView>),
@@ -124,6 +127,7 @@ impl SettingsPageViewHandle {
             // Zap Wave 6-8: the `SharedBlocks` / `Referrals` arms were physically removed along with the variants.
             // Zap Wave 7-3: the `CloudEnvironments` arm was physically removed along with the ambient-agent UI.
             Warpify(view_handle) => ChildView::new(view_handle).finish(),
+            Scripting(view_handle) => ChildView::new(view_handle).finish(),
             AI(view_handle) => ChildView::new(view_handle).finish(),
             MCPServers(view_handle) => ChildView::new(view_handle).finish(),
             ZapDrive(view_handle) => ChildView::new(view_handle).finish(),

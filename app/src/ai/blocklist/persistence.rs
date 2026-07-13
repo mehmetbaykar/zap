@@ -275,6 +275,10 @@ impl From<&AIAgentActionType> for PersistedAIAgentActionType {
             | AIAgentActionType::CreateDocuments(_)
             | AIAgentActionType::ReadShellCommandOutput { .. }
             | AIAgentActionType::ReadSkill(_)
+            | AIAgentActionType::StartAgent { .. }
+            | AIAgentActionType::SendMessageToAgent { .. }
+            | AIAgentActionType::RunAgents(_)
+            | AIAgentActionType::WaitForEvents(_)
             | AIAgentActionType::TransferShellCommandControlToUser { .. } => Self::NotPersisted,
             AIAgentActionType::UseComputer(request) => Self::UseComputer {
                 action_summary: request.action_summary.clone(),
@@ -288,8 +292,6 @@ impl From<&AIAgentActionType> for PersistedAIAgentActionType {
             AIAgentActionType::AskUserQuestion { questions } => Self::AskUserQuestion {
                 questions: questions.clone(),
             },
-            // Orchestrate is rendered from the in-history tool call message;
-            // there is no per-action state we need to persist locally.
         }
     }
 }

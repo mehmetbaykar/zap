@@ -5,6 +5,7 @@ pub mod block;
 pub mod code_block;
 mod context_model;
 mod controller;
+pub(crate) mod orchestration_topology;
 mod passive_suggestions;
 pub(crate) mod queued_query;
 pub(super) use controller::RequestInput;
@@ -28,6 +29,7 @@ pub(crate) use action_model::{
     apply_edits, read_local_file_context, BlocklistAIActionEvent, BlocklistAIActionModel,
     FileReadResult, PromptSuggestionExecutor, PromptSuggestionExecutorEvent, ReadFileContextResult,
     RequestFileEditsFormatKind, ShellCommandExecutor, ShellCommandExecutorEvent,
+    StartAgentExecutor, StartAgentExecutorEvent, StartAgentRequest,
 };
 #[cfg(any(test, feature = "integration_tests"))]
 pub(crate) use block::model::testing::FakeAIBlockModel;
@@ -46,8 +48,9 @@ pub(crate) use controller::{
     SlashCommandRequest,
 };
 pub(crate) use history_model::{
-    AIQueryHistory, AIQueryHistoryOutputStatus, BlocklistAIHistoryEvent, BlocklistAIHistoryModel,
-    ConversationStatusUpdate, FORK_PREFIX, PRE_REWIND_PREFIX,
+    AIQueryHistory, AIQueryHistoryOutputStatus, BeginConversationRenameError,
+    BlocklistAIHistoryEvent, BlocklistAIHistoryModel, ConversationStatusUpdate, FORK_PREFIX,
+    PRE_REWIND_PREFIX,
 };
 pub(crate) use input_model::{
     BlocklistAIInputEvent, BlocklistAIInputModel, InputConfig, InputType,

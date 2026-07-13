@@ -7,13 +7,14 @@ use serde::{Deserialize, Serialize};
 use warp_util::path::LineAndColumnArg;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, ViewHandle, WindowId};
 
-use super::buffer_location::BufferLocation;
+use super::buffer_location::{BufferLocation, RemotePath as BufferRemotePath};
 use super::view::CodeView;
 use crate::ai::agent::AIAgentActionId;
 use crate::ai::skills::SkillOpenOrigin;
 use crate::code_review::code_review_view::CodeReviewView;
 use crate::pane_group::{PaneGroup, PaneId};
 use crate::workspace::PaneViewLocator;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 pub struct CodeEditorSummary<'a> {
     pub unsaved_changes: Vec<&'a CodeEditorStatus>,
@@ -114,7 +115,7 @@ pub enum CodeSource {
     /// Opened from an active AI agent conversation.
     AIAction { id: AIAgentActionId },
     /// Opened from project rules (WARP.md) file.
-    ProjectRules { path: PathBuf },
+    ProjectRules { location: LocalOrRemotePath },
     /// Opened from file tree.
     FileTree { path: PathBuf },
     /// A remote file opened by clicking in the remote file tree (Zap-only).
@@ -159,11 +160,14 @@ impl CodeSource {
         match self {
             Self::New { .. } | Self::AIAction { .. } | Self::RemoteFileTree { .. } => None,
             Self::Link { path, .. }
-            | Self::ProjectRules { path }
             | Self::FileTree { path }
             | Self::CommandPalette { path }
             | Self::Finder { path }
             | Self::Skill { path, .. } => Some(path.clone()),
+            Self::ProjectRules { location } => match location {
+                LocalOrRemotePath::Local(path) => Some(path.clone()),
+                LocalOrRemotePath::Remote(_) => None,
+            },
         }
     }
 
@@ -177,8 +181,14 @@ impl CodeSource {
             Self::RemoteFileTree { remote_path } => {
                 Some(BufferLocation::Remote(remote_path.clone()))
             }
+            Self::ProjectRules { location } => Some(match location {
+                LocalOrRemotePath::Local(path) => BufferLocation::Local(path.clone()),
+                LocalOrRemotePath::Remote(remote) => BufferLocation::Remote(BufferRemotePath::new(
+                    remote.host_id.clone(),
+                    remote.path.clone(),
+                )),
+            }),
             Self::Link { path, .. }
-            | Self::ProjectRules { path }
             | Self::FileTree { path }
             | Self::CommandPalette { path }
             | Self::Finder { path }
@@ -229,7 +239,14 @@ impl CodeSource {
     /// `AIAction` is ephemeral (tied to a live conversation) and should not
     /// be restored. `RemoteFileTree` depends on an active SSH connection and is likewise not restored.
     pub fn is_restorable(&self) -> bool {
-        !matches!(self, Self::AIAction { .. } | Self::RemoteFileTree { .. })
+        !matches!(
+            self,
+            Self::AIAction { .. }
+                | Self::RemoteFileTree { .. }
+                | Self::ProjectRules {
+                    location: LocalOrRemotePath::Remote(_),
+                }
+        )
     }
 }
 

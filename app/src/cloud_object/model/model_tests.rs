@@ -44,7 +44,7 @@ fn create_object_store_model(
 ) -> ModelHandle<ObjectStoreModel> {
     // Make sure to register the ObjectStoreModel singleton - some StoredObject methods
     // find it and other dependencies via the AppContext.
-    app.add_singleton_model(|_ctx| ObjectStoreModel::new(None, objects, None))
+    app.add_singleton_model(|_ctx| ObjectStoreModel::new(None, objects))
 }
 
 lazy_static! {
@@ -72,7 +72,7 @@ fn initialize_app(app: &mut App, cached_objects: Vec<Box<dyn StoredObject>>) {
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
     app.add_singleton_model(AuthManager::new_for_test);
     app.add_singleton_model(|ctx| UserWorkspaces::mock(vec![TEST_WORKSPACE.clone()], ctx));
-    app.add_singleton_model(|_ctx| ObjectStoreModel::new(None, cached_objects, None));
+    app.add_singleton_model(|_ctx| ObjectStoreModel::new(None, cached_objects));
     app.add_singleton_model(|ctx| UpdateManager::new(None, ctx));
     app.add_singleton_model(|_| UserProfiles::new(Vec::new()));
     app.add_singleton_model(ObjectStoreViewModel::new);

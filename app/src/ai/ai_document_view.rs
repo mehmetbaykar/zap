@@ -948,7 +948,7 @@ impl View for AIDocumentView {
         "AIDocumentView"
     }
 
-    fn render(&self, app: &AppContext) -> Box<dyn warpui::Element> {
+    fn render(&self, _: &AppContext) -> Box<dyn warpui::Element> {
         let mut content_column =
             Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 

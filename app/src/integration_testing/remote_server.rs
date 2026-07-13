@@ -11,8 +11,7 @@ use warpui::{async_assert, async_assert_eq, App, SingletonEntity, WindowId};
 
 use crate::integration_testing::view_getters::single_terminal_view_for_tab;
 use crate::remote_server::manager::{
-    RemoteServerErrorKind, RemoteServerManager, RemoteServerManagerEvent, RemoteServerOperation,
-    RemoteSessionState,
+    RemoteServerManager, RemoteServerManagerEvent, RemoteSessionState,
 };
 use crate::terminal::model::session::command_executor::remote_server_executor::RemoteServerCommandExecutor;
 pub type RemoteServerActionCallback = Box<dyn Fn(&mut App, WindowId, &mut StepDataMap) + 'static>;
@@ -26,7 +25,6 @@ const REMOTE_SERVER_LAZY_LOAD_EVENTS_KEY: &str = "remote_server_lazy_load_events
 #[derive(Default)]
 struct LazyLoadEvents {
     loaded_host_ids: HashSet<HostId>,
-    failures_by_session: HashMap<SessionId, Vec<RemoteServerErrorKind>>,
 }
 
 /// Returns a `TestStep` that records `NavigatedToDirectory` events emitted by
@@ -60,9 +58,8 @@ pub fn record_remote_server_navigation_events() -> TestStep {
     )
 }
 
-/// Returns a `TestStep` that records `LoadRepoMetadataDirectory` success and
-/// failure events emitted by `RemoteServerManager` into this integration test's
-/// step data.
+/// Returns a `TestStep` that records `LoadRepoMetadataDirectory` success events
+/// emitted by `RemoteServerManager` into this integration test's step data.
 pub fn record_remote_server_lazy_load_events() -> TestStep {
     TestStep::new("Record remote server lazy-load events").with_action(
         |app, _window_id, step_data| {
@@ -75,26 +72,16 @@ pub fn record_remote_server_lazy_load_events() -> TestStep {
 
             app.update(|ctx| {
                 let mgr = RemoteServerManager::handle(ctx);
-                ctx.subscribe_to_model(&mgr, move |_mgr, event, _ctx| match event {
-                    RemoteServerManagerEvent::RepoMetadataDirectoryLoaded { host_id, .. } => {
+                ctx.subscribe_to_model(&mgr, move |_mgr, event, _ctx| {
+                    if let RemoteServerManagerEvent::RepoMetadataDirectoryLoaded {
+                        host_id, ..
+                    } = event
+                    {
                         lazy_load_events
                             .borrow_mut()
                             .loaded_host_ids
                             .insert(host_id.clone());
                     }
-                    RemoteServerManagerEvent::ClientRequestFailed {
-                        session_id,
-                        operation: RemoteServerOperation::LoadRepoMetadataDirectory,
-                        error_kind,
-                    } => {
-                        lazy_load_events
-                            .borrow_mut()
-                            .failures_by_session
-                            .entry(*session_id)
-                            .or_default()
-                            .push(*error_kind);
-                    }
-                    _ => {}
                 });
             });
         },
@@ -138,8 +125,7 @@ fn assert_remote_server_setup_ready(tab_idx: usize) -> AssertionCallback {
 }
 
 /// Asserts that the `LoadRepoMetadataDirectory` request emitted a successful
-/// `RepoMetadataDirectoryLoaded` event and did not emit `ClientRequestFailed`
-/// for the active session.
+/// `RepoMetadataDirectoryLoaded` event for the active session.
 pub fn assert_remote_server_loaded_repo_metadata_directory(
     tab_idx: usize,
 ) -> AssertionWithDataCallback {
@@ -164,11 +150,6 @@ pub fn assert_remote_server_loaded_repo_metadata_directory(
                 );
             };
             let lazy_load_events = lazy_load_events.borrow();
-            if let Some(failures) = lazy_load_events.failures_by_session.get(&session_id) {
-                return AssertionOutcome::failure(format!(
-                    "LoadRepoMetadataDirectory failed for session {session_id:?}: {failures:?}"
-                ));
-            }
             async_assert!(
                 lazy_load_events.loaded_host_ids.contains(host_id),
                 "No RepoMetadataDirectoryLoaded event recorded for LoadRepoMetadataDirectory"
@@ -228,7 +209,7 @@ pub fn assert_command_executor_is_remote_server(tab_idx: usize) -> AssertionCall
 }
 
 /// Returns a `TestStep` action that writes a file on the remote host via
-/// the `RemoteServerClient::write_file` proto API. The write is dispatched
+/// the `HostRequestHandle::write_file` API. The write is dispatched
 /// on a background thread using `tokio::runtime::Runtime::block_on` since
 /// the action callback is synchronous.
 pub fn write_file_via_remote_server(
@@ -238,21 +219,22 @@ pub fn write_file_via_remote_server(
 ) -> RemoteServerActionCallback {
     Box::new(move |app, window_id, _| {
         let terminal_view = single_terminal_view_for_tab(app, window_id, tab_idx);
-        let maybe_client = terminal_view.read(app, |view, ctx| {
+        let maybe_handle = terminal_view.read(app, |view, ctx| {
             let session_id = view.active_block_session_id()?;
-            RemoteServerManager::as_ref(ctx)
-                .client_for_session(session_id)
-                .cloned()
+            let host_id = RemoteServerManager::as_ref(ctx)
+                .host_id_for_session(session_id)?
+                .clone();
+            Some(RemoteServerManager::as_ref(ctx).host_request_handle(&host_id))
         });
 
-        if let Some(client) = maybe_client {
+        if let Some(handle) = maybe_handle {
             let path = path.clone();
             let content = content.clone();
             // Spawn on a background thread because the action callback is sync
-            // but write_file is async.
+            // but send is async.
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-                let result = rt.block_on(client.write_file(path.clone(), content));
+                let result = rt.block_on(handle.write_file(path.clone(), content));
                 if let Err(e) = &result {
                     log::error!("write_file_via_remote_server failed for {path}: {e}");
                 }

@@ -25,17 +25,17 @@ use super::server_model::{ConnectionId, ServerModel};
 /// Binds a Unix domain socket and writes a PID file, then delegates the
 /// WarpUI app startup to [`super::run_daemon_app`] with the Unix-specific
 /// `ServerModel` constructor.
-pub fn run_daemon(identity_key: String) -> anyhow::Result<()> {
-    // socket_path: ~/.warp[-channel]/remote-server/{identity_key}/server.sock
+pub fn run_daemon() -> anyhow::Result<()> {
+    // socket_path: ~/.warp[-channel]/remote-server/daemon/server.sock
     //   The Unix domain socket the daemon binds on.  Proxy processes connect
     //   to it and bridge their SSH stdio channel through it.
     //
-    // pid_path:    ~/.warp[-channel]/remote-server/{identity_key}/server.pid
+    // pid_path:    ~/.warp[-channel]/remote-server/daemon/server.pid
     //   Contains the daemon's PID.  Proxy processes read it and use
     //   kill(pid, 0) to detect whether the daemon is still alive before
     //   deciding whether to start a new one.
-    let socket_path = proxy::socket_path(&identity_key);
-    let pid_path = proxy::pid_path(&identity_key);
+    let socket_path = proxy::socket_path();
+    let pid_path = proxy::pid_path();
 
     if let Some(parent) = socket_path.parent() {
         proxy::ensure_private_daemon_dir(parent)?;

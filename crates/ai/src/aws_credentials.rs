@@ -2,7 +2,6 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Local};
 use warp_core::ui::Icon;
-use warp_multi_agent_api as api;
 
 /// Temporary AWS credentials loaded from the AWS SDK.
 /// These are not persisted and are only used at runtime.
@@ -46,17 +45,6 @@ pub enum AwsCredentialsState {
     Failed {
         message: String,
     },
-}
-
-impl From<AwsCredentials> for api::request::settings::api_keys::AwsCredentials {
-    fn from(creds: AwsCredentials) -> Self {
-        Self {
-            access_key: creds.access_key,
-            secret_key: creds.secret_key,
-            session_token: creds.session_token.unwrap_or_default(),
-            region: String::new(),
-        }
-    }
 }
 
 fn format_status_timestamp(time: SystemTime) -> String {

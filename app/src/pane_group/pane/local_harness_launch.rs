@@ -223,13 +223,7 @@ pub(super) async fn prepare_local_harness_child_launch(
             build_local_claude_child_command(&local_claude_child_prompt(&prompt))
         }
         Harness::Codex => {
-            let HarnessKind::ThirdParty(third_party_harness) =
-                harness_kind(harness).map_err(|error: AgentDriverError| error.to_string())?
-            else {
-                unreachable!("Codex resolves to a third-party harness")
-            };
-            third_party_harness
-                .validate()
+            validate_cli_installed("codex", Some("https://developers.openai.com/codex/cli"))
                 .map_err(|error: AgentDriverError| error.to_string())?;
 
             // Local Codex child panes must rely on the user's existing local

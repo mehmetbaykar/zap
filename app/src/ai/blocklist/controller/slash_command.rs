@@ -17,9 +17,11 @@ use crate::{
 };
 
 use super::{
-    input_context_for_request, parse_context_attachments, BlocklistAIController,
-    BlocklistAIControllerEvent, RequestInput,
+    add_pending_file_attachments, input_context_for_request, parse_context_attachments,
+    BlocklistAIController, BlocklistAIControllerEvent, RequestInput,
 };
+use crate::ai::blocklist::context_model::{PendingAttachment, PendingFile};
+use crate::ai::blocklist::queued_query::{QueuedQueryId, QueuedQueryModel};
 
 pub enum SlashCommandRequest {
     CreateNewProject {
@@ -79,25 +81,59 @@ impl SlashCommandRequest {
     pub(super) fn send_request(
         self,
         controller: &mut BlocklistAIController,
-        is_queued_prompt: bool,
+        queued_query_id: Option<QueuedQueryId>,
+        conversation_id_override: Option<AIConversationId>,
         ctx: &mut ModelContext<BlocklistAIController>,
     ) {
-        let conversation_id = self.conversation_id(controller, ctx);
+        let is_queued_prompt = queued_query_id.is_some();
+        let conversation_id =
+            conversation_id_override.or_else(|| self.conversation_id(controller, ctx));
         // For skill invocations, include user-attached context (images, blocks, and selected
         // text) so the skill's agent sees the same attachments a non-slash-command user query
         // would. Other slash commands continue to pass `false` to preserve existing behavior.
         let is_invoke_skill = matches!(self, Self::InvokeSkill { .. });
+        let prompt_attachments = if is_invoke_skill {
+            match (queued_query_id, conversation_id) {
+                (Some(query_id), Some(conversation_id)) => QueuedQueryModel::as_ref(ctx)
+                    .attachments_for(conversation_id, query_id)
+                    .to_vec(),
+                (Some(_), None) => vec![],
+                (None, _) => controller
+                    .context_model
+                    .as_ref(ctx)
+                    .pending_attachments()
+                    .to_vec(),
+            }
+        } else {
+            vec![]
+        };
+        let mut image_context = Vec::new();
+        let mut prompt_files = Vec::new();
+        for attachment in prompt_attachments {
+            match attachment {
+                PendingAttachment::Image(image) if is_queued_prompt => {
+                    image_context.push(AIAgentContext::Image(image));
+                }
+                PendingAttachment::Image(_) => {}
+                PendingAttachment::File(file) => prompt_files.push(file),
+            }
+        }
         let context = input_context_for_request(
-            is_invoke_skill,
+            is_invoke_skill && !is_queued_prompt,
             controller.context_model.as_ref(ctx),
             controller.active_session.as_ref(ctx),
             conversation_id,
-            vec![],
+            image_context,
             ctx,
         );
         let entrypoint = self.entrypoint();
         let is_summarize = matches!(self, Self::Summarize { .. });
-        let inputs = self.input(context, controller.context_model.as_ref(ctx), ctx);
+        let inputs = self.input(
+            context,
+            prompt_files,
+            controller.context_model.as_ref(ctx),
+            ctx,
+        );
         if inputs.is_empty() {
             return;
         }
@@ -160,7 +196,7 @@ impl SlashCommandRequest {
                 // only clears that context for `AIAgentInput::UserQuery`, so we mirror its
                 // reset here for `InvokeSkill` to avoid pending attachments sticking around
                 // and getting re-sent on subsequent messages.
-                if is_invoke_skill {
+                if is_invoke_skill && !is_queued_prompt {
                     controller.context_model.update(ctx, |context_model, ctx| {
                         context_model.reset_context_to_default(ctx);
                     });
@@ -198,6 +234,7 @@ impl SlashCommandRequest {
     fn input(
         self,
         context: Arc<[AIAgentContext]>,
+        prompt_files: Vec<PendingFile>,
         context_model: &crate::ai::blocklist::BlocklistAIContextModel,
         app: &AppContext,
     ) -> Vec<AIAgentInput> {
@@ -234,17 +271,18 @@ impl SlashCommandRequest {
             }
             SlashCommandRequest::InvokeSkill { skill, user_query } => {
                 let user_query = if FeatureFlag::SkillArguments.is_enabled() {
-                    user_query
+                    let user_query = user_query
                         .map(|query| query.trim().to_string())
-                        .filter(|query| !query.is_empty())
-                        .map(|query| crate::ai::agent::InvokeSkillUserQuery {
-                            referenced_attachments: parse_context_attachments(
-                                &query,
-                                context_model,
-                                app,
-                            ),
-                            query,
-                        })
+                        .unwrap_or_default();
+                    (!user_query.is_empty() || !prompt_files.is_empty()).then(|| {
+                        let mut referenced_attachments =
+                            parse_context_attachments(&user_query, context_model, app);
+                        add_pending_file_attachments(&mut referenced_attachments, prompt_files);
+                        crate::ai::agent::InvokeSkillUserQuery {
+                            query: user_query,
+                            referenced_attachments,
+                        }
+                    })
                 } else {
                     None
                 };

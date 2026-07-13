@@ -1200,6 +1200,72 @@ impl GlobalBufferModel {
         BufferState::new(file_id, buffer)
     }
 
+    /// Re-open an existing remote buffer and replace its contents with the
+    /// latest state returned by the remote host.
+    #[cfg_attr(not(feature = "local_tty"), allow(unused_variables))]
+    pub fn reopen_remote_buffer(&mut self, file_id: FileId, ctx: &mut ModelContext<Self>) {
+        #[cfg(feature = "local_tty")]
+        {
+            let Some(state) = self.buffers.get(&file_id) else {
+                return;
+            };
+            let BufferSource::Remote { remote_path, .. } = &state.source else {
+                return;
+            };
+
+            let path = remote_path.path.as_str().to_string();
+            let manager = remote_server::manager::RemoteServerManager::handle(ctx);
+            let Some(client) = manager
+                .as_ref(ctx)
+                .client_for_host(&remote_path.host_id)
+                .cloned()
+            else {
+                ctx.emit(GlobalBufferModelEvent::FailedToLoad {
+                    file_id,
+                    error: Rc::new(FileLoadError::DoesNotExist),
+                });
+                return;
+            };
+
+            ctx.spawn(
+                async move {
+                    client
+                        .open_buffer(path)
+                        .await
+                        .map_err(|error| error.to_string())
+                },
+                move |me, result, ctx| match result {
+                    Ok(response) => {
+                        let Some(state) = me.buffers.get_mut(&file_id) else {
+                            return;
+                        };
+                        if let BufferSource::Remote { sync_clock, .. } = &mut state.source {
+                            *sync_clock = Some(SyncClock::from_wire(response.server_version, 0));
+                        }
+                        let Some(buffer) = state.buffer.upgrade(ctx) else {
+                            return;
+                        };
+                        let version = ContentVersion::new();
+                        buffer.update(ctx, |buffer, ctx| {
+                            buffer.replace_all(&response.content, ctx);
+                        });
+                        ctx.emit(GlobalBufferModelEvent::BufferLoaded {
+                            file_id,
+                            content_version: version,
+                        });
+                    }
+                    Err(error) => {
+                        log::warn!("Failed to re-open remote buffer: {error}");
+                        ctx.emit(GlobalBufferModelEvent::FailedToLoad {
+                            file_id,
+                            error: Rc::new(FileLoadError::DoesNotExist),
+                        });
+                    }
+                },
+            );
+        }
+    }
+
     /// Handle an incoming `BufferUpdatedPush` from the remote server.
     ///
     /// Accepts incremental edits (1-indexed char offsets matching `CharOffset`)

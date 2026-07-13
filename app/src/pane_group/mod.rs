@@ -62,7 +62,6 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{mpsc::SyncSender, Arc};
 
-use itertools::Itertools;
 use lazy_static::lazy_static;
 
 use markdown_parser::FormattedTextFragment;
@@ -149,6 +148,7 @@ use crate::workspace::{
     self, CommandSearchOptions, PaneViewLocator, TabBarLocation, WorkspaceAction,
 };
 
+pub(crate) mod child_agent;
 pub mod focus_state;
 pub mod pane;
 pub mod tree;
@@ -2744,7 +2744,6 @@ impl PaneGroup {
                 model.get_or_async_fetch_task_data(task_id);
             });
         }
-
         self.pending_ambient_agent_conversation_restorations = pending.into_iter().collect();
 
         let conversations_model = AgentConversationsModel::handle(ctx);
@@ -3276,6 +3275,7 @@ impl PaneGroup {
                         LoadedConversationData::CLIAgent(cli_conversation),
                         true,
                         RestoreConversationEntryBehavior::PreserveAgentViewState,
+                        false,
                         |_, _| {},
                         ctx,
                     );

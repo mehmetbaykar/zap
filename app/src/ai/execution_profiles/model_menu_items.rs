@@ -7,11 +7,12 @@ use warpui::elements::{
     Text,
 };
 use warpui::fonts::{Properties, Style};
-use warpui::{Action, AppContext, Element, SingletonEntity as _};
+use warpui::{Action, AppContext, Element};
 
+use crate::ai::agent_providers::llm_id as byop_llm_id;
 use crate::ai::llms::{
     is_using_api_key_for_provider, should_show_bedrock_icon_for_model, DisableReason, LLMId,
-    LLMInfo, LLMPreferences,
+    LLMInfo,
 };
 use crate::menu::{MenuItem, MenuItemFields, MenuTooltipPosition};
 
@@ -82,11 +83,9 @@ fn make_item_fields<A: Action + Clone>(
     } else {
         llm.menu_display_name()
     };
-    let is_custom_endpoint = LLMPreferences::as_ref(app)
-        .custom_llm_info_for_id(&llm.id)
-        .is_some();
+    let is_byop_model = byop_llm_id::is_byop(&llm.id);
     let is_using_bedrock = should_show_bedrock_icon_for_model(llm, app);
-    let is_using_api_key = is_custom_endpoint || is_using_api_key_for_provider(&llm.provider, app);
+    let is_using_api_key = is_byop_model || is_using_api_key_for_provider(&llm.provider, app);
     let leading_icon = if is_using_bedrock {
         Icon::Aws
     } else {

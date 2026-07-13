@@ -16,8 +16,9 @@ use super::schema::{
     mcp_server_installations, mcp_server_panes, notebook_panes, notebooks, object_actions,
     object_metadata, object_permissions, pane_branches, pane_leaves, pane_nodes, panels,
     project_rules, projects, server_experiments, settings_panes, ssh_nodes, ssh_onekey_credentials,
-    ssh_servers, sync_meta, tabs, team_members, team_settings, teams, terminal_panes,
-    user_profiles, welcome_panes, windows, workflow_panes, workflows, workspace_teams, workspaces,
+    ssh_servers, sync_meta, tab_groups, tabs, team_members, team_settings, teams, terminal_panes,
+    user_profiles, welcome_panes, windows, workflow_panes, workflows, workspace_language_server,
+    workspace_metadata, workspace_teams, workspaces,
 };
 
 #[derive(Insertable)]
@@ -184,6 +185,42 @@ pub struct NewProjectRules {
     pub project_root: String,
 }
 
+#[derive(Clone, Identifiable, Queryable, AsChangeset)]
+#[diesel(table_name = workspace_metadata)]
+pub struct WorkspaceMetadata {
+    pub id: i32,
+    pub repo_path: String,
+    pub navigated_ts: Option<NaiveDateTime>,
+    pub modified_ts: Option<NaiveDateTime>,
+    pub queried_ts: Option<NaiveDateTime>,
+}
+
+#[derive(Clone, Insertable, AsChangeset)]
+#[diesel(table_name = workspace_metadata)]
+pub struct NewWorkspaceMetadata {
+    pub repo_path: String,
+    pub navigated_ts: Option<NaiveDateTime>,
+    pub modified_ts: Option<NaiveDateTime>,
+    pub queried_ts: Option<NaiveDateTime>,
+}
+
+#[derive(Clone, Identifiable, Insertable, Queryable, AsChangeset)]
+#[diesel(table_name = workspace_language_server)]
+pub struct WorkspaceLanguageServer {
+    pub id: i32,
+    pub workspace_id: i32,
+    pub language_server_name: String,
+    pub enabled: String,
+}
+
+#[derive(Clone, Insertable, AsChangeset)]
+#[diesel(table_name = workspace_language_server)]
+pub struct NewWorkspaceLanguageServer {
+    pub workspace_id: i32,
+    pub language_server_name: String,
+    pub enabled: String,
+}
+
 #[derive(Default, Clone, Debug, Insertable, Queryable, AsChangeset)]
 #[diesel(table_name = projects)]
 pub struct Project {
@@ -315,6 +352,7 @@ pub struct Tab {
     pub window_id: i32,
     pub custom_title: Option<String>,
     pub color: Option<String>,
+    pub tab_group_id: Option<i32>,
 }
 
 #[derive(Insertable)]
@@ -323,6 +361,29 @@ pub struct NewTab {
     pub window_id: i32,
     pub custom_title: Option<String>,
     pub color: Option<String>,
+    pub tab_group_id: Option<i32>,
+}
+
+/// Persisted form of a tab group. `name` is optional — untitled groups omit
+/// it and the UI falls back to a default label.
+#[derive(Identifiable, Queryable, Associations)]
+#[diesel(belongs_to(Window))]
+#[diesel(table_name = tab_groups)]
+pub struct TabGroup {
+    pub id: i32,
+    pub window_id: i32,
+    pub name: Option<String>,
+    pub color: Option<String>,
+    pub collapsed: bool,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = tab_groups)]
+pub struct NewTabGroup {
+    pub window_id: i32,
+    pub name: Option<String>,
+    pub color: Option<String>,
+    pub collapsed: bool,
 }
 
 /// The panes data model includes pane_nodes, pane_leaves and pane_branches.
@@ -1327,7 +1388,6 @@ pub struct ConversationUsageMetadata {
     pub was_summarized: bool,
     pub context_window_usage: f32,
     pub credits_spent: f32,
-    #[serde(default)]
     pub credits_spent_for_last_block: Option<f32>,
     #[serde(default)]
     pub token_usage: Vec<ModelTokenUsage>,

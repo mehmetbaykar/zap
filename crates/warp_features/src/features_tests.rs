@@ -18,3 +18,10 @@ fn terminal_lifecycle_recovery_is_dogfood_only_by_default() {
     assert!(!PREVIEW_FLAGS.contains(&FeatureFlag::TerminalLifecycleRecovery));
     assert!(!RELEASE_FLAGS.contains(&FeatureFlag::TerminalLifecycleRecovery));
 }
+
+#[test]
+fn local_child_harnesses_are_local_only_by_default() {
+    assert!(LOCAL_FLAGS.contains(&FeatureFlag::LocalClaudeCodexChildHarnesses));
+    assert!(!DEBUG_FLAGS.contains(&FeatureFlag::LocalClaudeCodexChildHarnesses));
+    assert!(!DOGFOOD_FLAGS.contains(&FeatureFlag::LocalClaudeCodexChildHarnesses));
+}

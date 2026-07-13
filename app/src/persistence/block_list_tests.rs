@@ -5,11 +5,6 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, Local};
-use diesel::sqlite::SqliteConnection;
-use diesel::{Connection, ExpressionMethods, QueryDsl, RunQueryDsl};
-use diesel_migrations::MigrationHarness;
-
 use super::{
     process_ai_queries_for_nld_history_match, process_ai_queries_for_uparrow_prompt,
     read_recent_ai_queries, upsert_ai_query_with_limit,
@@ -18,6 +13,10 @@ use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{AIAgentExchangeId, AIAgentInput, UserQueryMode};
 use crate::ai::blocklist::{AIQueryHistoryOutputStatus, PersistedAIInput, PersistedAIInputType};
 use crate::ai::llms::LLMId;
+use chrono::{DateTime, Duration, Local};
+use diesel::sqlite::SqliteConnection;
+use diesel::{Connection, ExpressionMethods, QueryDsl, RunQueryDsl};
+use diesel_migrations::MigrationHarness;
 
 /// Builds an in-memory SQLite database with all migrations applied.
 fn test_connection() -> SqliteConnection {
@@ -45,7 +44,6 @@ fn make_query(text: &str) -> Arc<PersistedAIInput> {
         coding_model_id: LLMId::from("test-coding-model"),
     })
 }
-
 /// Clones `query` with an explicit `start_ts` so ordering-sensitive tests are deterministic
 /// (the NLD reader orders by `start_ts`, which `make_query`'s `Local::now()` cannot guarantee
 /// across rapid inserts).
@@ -82,7 +80,6 @@ fn input_json_for_exchange(conn: &mut SqliteConnection, exchange: &str) -> Strin
         .first::<String>(conn)
         .expect("row for exchange should exist")
 }
-
 /// Returns the text of the first query input on a [`PersistedAIInput`].
 fn first_query_text(query: &PersistedAIInput) -> &str {
     match query.inputs.first().expect("query should have an input") {
@@ -176,7 +173,6 @@ fn upsert_ai_query_updates_existing_exchange_without_evicting() {
         "existing row should have been updated in place, got: {input_json}"
     );
 }
-
 /// Builds a [`PersistedAIInput`] whose inputs serialize to `[]`, mirroring legacy rows
 /// written before empty inputs were skipped at write time.
 fn make_empty_input_query() -> Arc<PersistedAIInput> {

@@ -1,3 +1,11 @@
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
+use std::process::Stdio;
+
+#[cfg(unix)]
+use command::blocking::Command;
+
 use super::*;
 
 #[test]
@@ -89,61 +97,15 @@ fn parse_uname_missing_arch() {
 }
 
 #[test]
-fn identity_dir_name_is_short_hash() {
-    let name = remote_server_identity_dir_name("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
-    assert_eq!(name.len(), 8, "identity dir should be 8 hex chars: {name}");
-    assert!(
-        name.chars().all(|c| c.is_ascii_hexdigit()),
-        "identity dir should be hex: {name}"
-    );
-}
-
-#[test]
-fn identity_dir_name_is_deterministic() {
-    let key = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+fn daemon_and_data_dirs_are_static_per_remote_os_user() {
     assert_eq!(
-        remote_server_identity_dir_name(key),
-        remote_server_identity_dir_name(key)
+        remote_server_daemon_dir(),
+        format!("{}/daemon", remote_server_dir())
     );
-}
-
-#[test]
-fn identity_dir_name_differs_for_different_keys() {
-    assert_ne!(
-        remote_server_identity_dir_name("key-a"),
-        remote_server_identity_dir_name("key-b")
-    );
-}
-
-#[test]
-fn data_dir_uses_percent_encoded_identity_key() {
-    let data_dir = remote_server_daemon_data_dir("user@example.com/ssh host");
     assert_eq!(
-        data_dir,
-        format!(
-            "{}/user%40example%2Ecom%2Fssh%20host/data",
-            remote_server_dir()
-        )
+        remote_server_daemon_data_dir(),
+        format!("{}/data", remote_server_dir())
     );
-}
-
-#[test]
-fn data_dir_handles_empty_identity_key() {
-    let data_dir = remote_server_daemon_data_dir("");
-    assert_eq!(data_dir, format!("{}/empty/data", remote_server_dir()));
-}
-
-#[test]
-fn daemon_dir_and_data_dir_use_different_identity_paths() {
-    let key = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
-    let daemon_dir = remote_server_daemon_dir(key);
-    let data_dir = remote_server_daemon_data_dir(key);
-    // Daemon dir uses the 8-char hash.
-    assert!(daemon_dir.contains(&remote_server_identity_dir_name(key)));
-    // Data dir uses the full key (no collision risk for persistent state).
-    assert!(data_dir.contains(key));
-    // They must be different paths.
-    assert!(!data_dir.starts_with(&daemon_dir));
 }
 
 #[test]
@@ -304,6 +266,202 @@ fn install_script_uses_zap_asset_and_staging_placeholder() {
     assert!(!script.contains("/download/cli"));
 }
 
+#[test]
+fn bundled_resources_dir_is_global_and_version_independent() {
+    let dir = remote_server_bundled_resources_dir();
+    assert_eq!(
+        dir,
+        format!("{}/{}", remote_server_dir(), BUNDLED_RESOURCES_DIR_NAME)
+    );
+    // The whole point of the global location: no version in the path.
+    assert!(!dir.contains(remote_server_artifact_version()));
+}
+
+#[test]
+fn binary_check_runs_version() {
+    assert_eq!(
+        binary_check_command(),
+        format!("{} --version", remote_server_binary())
+    );
+}
+
+#[test]
+fn removal_command_removes_binary_but_leaves_global_resources() {
+    let command = remote_server_removal_command();
+    assert_eq!(command, format!("rm -f {}", remote_server_binary()));
+    assert!(!command.contains(BUNDLED_RESOURCES_DIR_NAME));
+}
+
+#[test]
+fn install_script_substitutes_bundled_resources_dir_name() {
+    let script = install_script(None);
+    assert!(!script.contains("{bundled_resources_dir_name}"));
+    assert!(script.contains(&format!("$install_dir/{BUNDLED_RESOURCES_DIR_NAME}")));
+}
+
+#[cfg(unix)]
+fn make_test_tarball(
+    test_root: &std::path::Path,
+    tarball_name: &str,
+    skill_content: &str,
+    include_decoy: bool,
+) -> std::path::PathBuf {
+    let tar_source = test_root.join(format!("tar-source-{tarball_name}"));
+    let resources = tar_source.join("resources/bundled/skills/test-skill");
+    let tarball = test_root.join(format!("{tarball_name}.tar.gz"));
+    fs::create_dir_all(&resources).unwrap();
+    fs::write(
+        tar_source.join("oz-test"),
+        "#!/usr/bin/env bash\n[ \"$1\" = \"--version\" ]\n",
+    )
+    .unwrap();
+    fs::write(resources.join("SKILL.md"), skill_content).unwrap();
+    if include_decoy {
+        // Decoy: skills may ship companion files whose names also start
+        // with `oz`. The installer must not mistake them for the executable.
+        fs::write(
+            resources.join("oz-decoy.sh"),
+            "#!/usr/bin/env bash\nexit 1\n",
+        )
+        .unwrap();
+    }
+
+    let tar_output = Command::new("tar")
+        .arg("-czf")
+        .arg(&tarball)
+        .arg("-C")
+        .arg(&tar_source)
+        .arg("oz-test")
+        .arg("resources")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("failed to create test tarball");
+    assert!(
+        tar_output.status.success(),
+        "tar failed: {}",
+        String::from_utf8_lossy(&tar_output.stderr)
+    );
+    tarball
+}
+
+#[cfg(unix)]
+fn run_install_script(tarball: &std::path::Path, fake_home: &std::path::Path) {
+    let script = install_script(Some(tarball.to_str().unwrap()));
+    let install_output = Command::new("bash")
+        .arg("-c")
+        .arg(&script)
+        .env("HOME", fake_home)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("failed to run install script");
+    assert!(
+        install_output.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&install_output.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn install_script_installs_binary_and_global_resources() {
+    let test_root = std::env::temp_dir().join(format!(
+        "remote-server-global-install-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let fake_home = test_root.join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let tarball = make_test_tarball(&test_root, "first", "test skill", true);
+    run_install_script(&tarball, &fake_home);
+
+    let resolve_remote_path = |path: String| path.replacen('~', fake_home.to_str().unwrap(), 1);
+    let binary = resolve_remote_path(remote_server_binary());
+    let resources = resolve_remote_path(remote_server_bundled_resources_dir());
+    let skill_md = std::path::Path::new(&resources).join("bundled/skills/test-skill/SKILL.md");
+
+    assert!(fs::metadata(&binary).unwrap().is_file());
+    assert!(fs::metadata(&resources).unwrap().is_dir());
+    assert_eq!(fs::read_to_string(&skill_md).unwrap(), "test skill");
+    assert!(std::path::Path::new(&resources)
+        .join("bundled/skills/test-skill/oz-decoy.sh")
+        .is_file());
+
+    let check_output = Command::new("bash")
+        .arg("-c")
+        .arg(binary_check_command())
+        .env("HOME", &fake_home)
+        .output()
+        .expect("failed to run binary check command");
+    assert!(check_output.status.success());
+
+    // A later install fully replaces the global resources (last install
+    // wins): updated content lands and files absent from the new artifact
+    // disappear, proving a swap rather than a merge.
+    let second_tarball = make_test_tarball(&test_root, "second", "updated skill", false);
+    run_install_script(&second_tarball, &fake_home);
+    assert_eq!(fs::read_to_string(&skill_md).unwrap(), "updated skill");
+    assert!(!std::path::Path::new(&resources)
+        .join("bundled/skills/test-skill/oz-decoy.sh")
+        .exists());
+
+    // Removal deletes the binary but leaves the global resources for the
+    // next install to overwrite.
+    let removal_output = Command::new("bash")
+        .arg("-c")
+        .arg(remote_server_removal_command())
+        .env("HOME", &fake_home)
+        .output()
+        .expect("failed to run removal command");
+    assert!(removal_output.status.success());
+    assert!(!std::path::Path::new(&binary).exists());
+    assert!(fs::metadata(&resources).unwrap().is_dir());
+
+    fs::remove_dir_all(test_root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn install_script_tolerates_tarball_without_resources() {
+    let test_root = std::env::temp_dir().join(format!(
+        "remote-server-no-resources-install-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let fake_home = test_root.join("home");
+    let tar_source = test_root.join("tar-source");
+    let tarball = test_root.join("oz.tar.gz");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::create_dir_all(&tar_source).unwrap();
+    fs::write(
+        tar_source.join("oz-test"),
+        "#!/usr/bin/env bash\n[ \"$1\" = \"--version\" ]\n",
+    )
+    .unwrap();
+
+    let tar_output = Command::new("tar")
+        .arg("-czf")
+        .arg(&tarball)
+        .arg("-C")
+        .arg(&tar_source)
+        .arg("oz-test")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("failed to create test tarball");
+    assert!(tar_output.status.success());
+
+    run_install_script(&tarball, &fake_home);
+
+    let resolve_remote_path = |path: String| path.replacen('~', fake_home.to_str().unwrap(), 1);
+    let binary = resolve_remote_path(remote_server_binary());
+    let resources = resolve_remote_path(remote_server_bundled_resources_dir());
+    assert!(fs::metadata(&binary).unwrap().is_file());
+    assert!(!std::path::Path::new(&resources).exists());
+
+    fs::remove_dir_all(test_root).unwrap();
+}
+
 /// Regression: the install script's tilde-expansion logic must work
 /// across the bash versions we actually invoke at install time
 /// (`run_ssh_script` pipes the script into `bash -s` on the remote).
@@ -334,10 +492,6 @@ fn install_script_uses_zap_asset_and_staging_placeholder() {
 #[cfg(unix)]
 #[test]
 fn install_script_tilde_expansion_resolves_correctly() {
-    use std::process::Stdio;
-
-    use command::blocking::Command;
-
     let bash = if std::path::Path::new("/bin/bash").exists() {
         "/bin/bash"
     } else {
@@ -485,19 +639,15 @@ fn daemon_pid_name_is_short() {
 #[test]
 fn socket_path_fits_within_sun_path_worst_case() {
     // Worst case: preview channel (longest base dir) + 32-char username
-    // (Linux max) + hashed identity (8 chars) + hashed socket (20 chars).
+    // (Linux max) + daemon directory + hashed socket (20 chars).
     //
-    // Path: /home/{user}/.warp-preview/remote-server/{hash8}/server-{hash8}.sock
-    //       6 + 32 + 1 + 29 + 8 + 1 + 20 = 97 bytes → well under 103 (macOS)
+    // Path: /home/{user}/.warp-preview/remote-server/daemon/server-{hash8}.sock
     let long_home = "/home/a]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]";
-    let identity_dir = remote_server_identity_dir_name("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
-    assert_eq!(identity_dir.len(), 8);
-
     let hashed_socket = "server-a1b2c3d4.sock";
     let old_socket = "server-v0.2026.05.13.09.15.stable_01.sock";
 
     // Use .warp-preview (longest channel base dir) for worst case.
-    let daemon_dir = format!("{long_home}/.warp-preview/remote-server/{identity_dir}");
+    let daemon_dir = format!("{long_home}/.warp-preview/remote-server/daemon");
 
     let hashed_path = format!("{daemon_dir}/{hashed_socket}");
 
@@ -510,10 +660,9 @@ fn socket_path_fits_within_sun_path_worst_case() {
         hashed_path,
     );
 
-    // The OLD naming scheme (full version + unhashed identity) should
-    // exceed the limit, confirming the regression.
-    let old_identity = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"; // 36 chars unhashed
-    let old_daemon_dir = format!("{long_home}/.warp-preview/remote-server/{old_identity}");
+    // The old full-version socket name should exceed the limit, confirming
+    // the regression.
+    let old_daemon_dir = format!("{long_home}/.warp-preview/remote-server/daemon");
     let old_full_path = format!("{old_daemon_dir}/{old_socket}");
     assert!(
         old_full_path.len() > 107,

@@ -11,17 +11,11 @@
 .github/workflows/delete_release.yml
 .github/workflows/feature_flag_cleanup.yml
 app/channels/oss/dev.warp.WarpOss.desktop
-app/src/ai/active_agent_views_model_tests.rs
-app/src/ai/active_agent_views_model.rs
-app/src/ai/agent_management/agent_management_model_tests.rs
 app/src/ai/agent_management/cloud_setup_guide_view.rs
-app/src/ai/agent_management/details_action_buttons.rs
 app/src/ai/agent_management/telemetry.rs
-app/src/ai/agent_management/view.rs
 app/src/ai/agent_sdk/ambient_tests.rs
 app/src/ai/agent_sdk/ambient.rs
 app/src/ai/agent_sdk/artifact_upload.rs
-app/src/ai/agent_sdk/driver_tests.rs
 app/src/ai/agent_sdk/driver/environment.rs
 app/src/ai/agent_sdk/driver/error_classification_tests.rs
 app/src/ai/agent_sdk/driver/harness/claude_transcript.rs
@@ -33,35 +27,17 @@ app/src/ai/agent_sdk/retry_tests.rs
 app/src/ai/agent_sdk/retry.rs
 app/src/ai/agent_sdk/secret.rs
 app/src/ai/agent_sdk/telemetry.rs
-app/src/ai/agent/api/convert_conversation_tests.rs
-app/src/ai/agent/api/convert_from_tests.rs
 app/src/ai/agent/api/impl_tests.rs
 app/src/ai/agent/api/impl.rs
 app/src/ai/ambient_agents/spawn_tests.rs
-app/src/ai/blocklist/action_model/execute/fetch_conversation.rs
 app/src/ai/blocklist/action_model/execute/get_files.rs
-app/src/ai/blocklist/action_model/execute/request_computer_use.rs
-app/src/ai/blocklist/action_model/execute/search_codebase.rs
-app/src/ai/blocklist/action_model/execute/send_message.rs
-app/src/ai/blocklist/action_model/execute/start_agent_tests.rs
-app/src/ai/blocklist/action_model/execute/start_agent.rs
 app/src/ai/blocklist/action_model/execute/upload_artifact_tests.rs
 app/src/ai/blocklist/agent_view/agent_input_footer/environment_selector.rs
-app/src/ai/blocklist/block/view_impl/orchestration_tests.rs
-app/src/ai/blocklist/block/view_impl/orchestration.rs
-app/src/ai/blocklist/orchestration_events_tests.rs
-app/src/ai/blocklist/orchestration_events.rs
 app/src/ai/blocklist/task_status_sync_model_tests.rs
 app/src/ai/blocklist/task_status_sync_model.rs
 app/src/ai/cloud_agent_settings.rs
 app/src/ai/cloud_environments/mod.rs
-app/src/ai/conversation_details_panel_tests.rs
-app/src/ai/conversation_details_panel.rs
 app/src/ai/generate_code_review_content/mod.rs
-app/src/ai/get_relevant_files/controller.rs
-app/src/ai/outline/native.rs
-app/src/ai/outline/wasm.rs
-app/src/ai/persisted_workspace.rs
 app/src/auth/auth_manager_tests.rs
 app/src/auth/auth_manager.rs
 app/src/auth/auth_manager/user_persistence_tests.rs
@@ -75,9 +51,6 @@ app/src/auth/user_tests.rs
 app/src/auth/user.rs
 app/src/autoupdate/linux_tests.rs
 app/src/drive/sharing/dialog/mod.rs
-app/src/pane_group/child_agent.rs
-app/src/pane_group/mod_tests.rs
-app/src/search/ai_context_menu/notebooks/data_source_test.rs
 app/src/server/cloud_objects/update_manager_tests.rs
 app/src/server/cloud_objects/update_manager.rs
 app/src/server/events_tests.rs
@@ -97,7 +70,6 @@ app/src/server/telemetry/context_provider.rs
 app/src/server/telemetry/mod.rs
 app/src/settings_view/agent_assisted_environment_modal.rs
 app/src/settings_view/billing_and_usage_page.rs
-app/src/settings_view/mod_tests.rs
 app/src/settings_view/platform_page.rs
 app/src/settings_view/platform/create_api_key_modal.rs
 app/src/settings_view/update_environment_form.rs
@@ -117,25 +89,8 @@ app/src/terminal/shared_session/viewer/terminal_manager.rs
 app/src/terminal/view/ambient_agent/block/query.rs
 app/src/terminal/view/ambient_agent/block/setup_command_text.rs
 app/src/terminal/view/ambient_agent/block/setup_command.rs
-app/src/terminal/view/init_project/model.rs
 app/src/terminal/view/shared_session/view_impl_test.rs
-app/src/util/link_detection_test.rs
 app/src/workspaces/gql_convert.rs
-crates/ai/src/index/full_source_code_embedding/changed_files_tests.rs
-crates/ai/src/index/full_source_code_embedding/changed_files.rs
-crates/ai/src/index/full_source_code_embedding/chunker/semantic.rs
-crates/ai/src/index/full_source_code_embedding/codebase_index.rs
-crates/ai/src/index/full_source_code_embedding/manager.rs
-crates/ai/src/index/full_source_code_embedding/merkle_tree/hash_tests.rs
-crates/ai/src/index/full_source_code_embedding/merkle_tree/hash.rs
-crates/ai/src/index/full_source_code_embedding/merkle_tree/node_tests.rs
-crates/ai/src/index/full_source_code_embedding/merkle_tree/node.rs
-crates/ai/src/index/full_source_code_embedding/merkle_tree/serialized_tree_tests.rs
-crates/ai/src/index/full_source_code_embedding/merkle_tree/serialized_tree.rs
-crates/ai/src/index/full_source_code_embedding/merkle_tree/tree_tests.rs
-crates/ai/src/index/full_source_code_embedding/merkle_tree/tree.rs
-crates/ai/src/index/full_source_code_embedding/mod.rs
-crates/ai/src/index/full_source_code_embedding/snapshot.rs
 crates/cloud_object_client
 crates/cloud_object_models
 crates/cloud_objects
@@ -155,9 +110,6 @@ crates/graphql/src/api/workspace.rs
 crates/graphql/src/managed_secrets.rs
 crates/graphql/src/scalars/mod.rs
 crates/integration/src/test/websockets.rs
-crates/lsp/README.md
-crates/lsp/src/manager.rs
-crates/lsp/src/servers/rust.rs
 crates/warp_cli/src/harness_support.rs
 crates/warp_graphql_schema/api/client-schema.ts
 crates/warp_graphql_schema/api/schema.graphql
@@ -167,40 +119,11 @@ crates/warpui_core/src/app_focus_telemetry.rs
 crates/warpui_core/src/telemetry/event_store_tests.rs
 crates/warpui_core/src/telemetry/event_store.rs
 FAQ.md
-WARP.md
-# add-strip: .agents/skills/diagnose-ci-failures/SKILL.md
-# add-strip: .agents/skills/fix-errors/SKILL.md
-# add-strip: .agents/skills/implement-specs/SKILL.md
-# add-strip: .agents/skills/resolve-merge-conflicts/SKILL.md
-# add-strip: .agents/skills/resolve-merge-conflicts/scripts/extract_conflict_context.py
-# add-strip: .agents/skills/review-pr/SKILL.md
-# add-strip: .agents/skills/spec-driven-implementation/SKILL.md
-# add-strip: .agents/skills/update-skill/SKILL.md
-# add-strip: .agents/skills/update-skill/references/best-practices.md
-# add-strip: app/src/ai/agent/mod_test.rs
-# add-strip: app/src/ai/blocklist/history_model_test.rs
-# add-strip: app/src/ai/mcp/mod_test.rs
-# add-strip: app/src/code_review/diff_state.rs
-# add-strip: app/src/terminal/find/model/block_list_test.rs
-# add-strip: app/src/terminal/input_test.rs
-# add-strip: app/src/terminal/model/grid/grid_handler_test.rs
-# add-strip: app/src/terminal/model/terminal_model_test.rs
-# add-strip: app/src/terminal/view_test.rs
-# add-strip: app/src/util/sync.rs
-# add-strip: app/src/workspace/view_test.rs
-# add-strip: crates/editor/src/content/buffer_test.rs
-# add-strip: crates/input_classifier/models/fasttext/cmd_lang_classifier_v4.bin
-# add-strip: crates/input_classifier/models/onnx/bert_tiny.onnx
-# add-strip: crates/input_classifier/src/fasttext/mod.rs
-# add-strip: crates/warp_util/src/content_version_test.rs
-# add-strip: crates/warpui_core/src/text_layout_test.rs
 # Slice 2 (8da83b42a..a44b70306) cloud/billing additions rejected:
 app/assets/bundled/svg/credit-card.svg
 app/assets/bundled/svg/qr-code-02.svg
 app/src/ai/ambient_agents/github_auth_url.rs
 app/src/ai/blocklist/local_agent_task_sync_model_tests.rs
-app/src/ai/blocklist/orchestration_topology.rs
-app/src/ai/blocklist/orchestration_topology_tests.rs
 app/src/ai/blocklist/usage/conversation_usage_view_tests.rs
 app/src/ai/blocklist/usage/rollup.rs
 app/src/ai/blocklist/usage/rollup_tests.rs
@@ -223,8 +146,6 @@ specs/QUALITY-702/TECH.md
 specs/QUALITY-715/TECH.md
 specs/QUALITY-726/PRODUCT.md
 specs/QUALITY-726/TECH.md
-specs/REMOTE-1385/PRODUCT.md
-specs/REMOTE-1385/TECH.md
 specs/REMOTE-1499/PRODUCT.md
 specs/REMOTE-1499/STAGE-1.md
 specs/REMOTE-1499/TECH.md
@@ -238,3 +159,55 @@ specs/orch-viewer-polling/TECH.md
 specs/qr-code/PRODUCT.md
 specs/qr-code/TECH.md
 specs/rtc-task-invalidation-phase1/TECH.md
+# Slice 3 (a44b70306..09be9c1ff) cloud/login/telemetry additions rejected:
+app/src/ai/agent_sdk/api_key.rs
+app/src/ai/agent_sdk/artifact_upload_tests.rs
+app/src/ai/agent_sdk/driver/cloud_provider
+app/src/ai/agent_sdk/driver/environment_tests.rs
+app/src/ai/agent_sdk/driver/error_classification.rs
+app/src/ai/agent_sdk/driver/git_credentials.rs
+app/src/ai/agent_sdk/driver/harness/claude_code/wake_driver.rs
+app/src/ai/agent_sdk/driver/harness/claude_code/wake_driver_tests.rs
+app/src/ai/agent_sdk/setup_observability.rs
+app/src/ai/agent_sdk/setup_observability_tests.rs
+app/src/ai/ambient_agents/telemetry.rs
+app/src/ai/blocklist/handoff
+app/src/ai/blocklist/local_agent_task_sync_model.rs
+app/src/ai/blocklist/orchestration_event_streamer.rs
+app/src/ai/blocklist/orchestration_event_streamer_tests.rs
+app/src/ai/blocklist/telemetry.rs
+app/src/auth/user_properties.rs
+app/src/pane_group/ambient_pane_restoration.rs
+app/src/pane_group/child_agent/hydration.rs
+app/src/remote_server/auth_context.rs
+app/src/server/iap_tests.rs
+app/src/server/server_api
+app/src/settings_view/admin_actions.rs
+app/src/settings_view/admin_actions_tests.rs
+app/src/settings_view/billing_and_usage
+app/src/settings_view/billing_and_usage_dispatch.rs
+app/src/settings_view/billing_and_usage_dispatch_tests.rs
+app/src/settings_view/billing_and_usage_page_v2.rs
+app/src/settings_view/platform/expire_api_key_button.rs
+app/src/terminal/share_block_modal.rs
+app/src/terminal/share_block_modal_tests.rs
+app/src/terminal/shared_session/network/heartbeat.rs
+app/src/terminal/shared_session/replay_agent_conversations.rs
+app/src/terminal/shared_session/viewer/event_loop_tests.rs
+app/src/terminal/shared_session/viewer/orchestration_viewer_model.rs
+app/src/terminal/shared_session/viewer/orchestration_viewer_model_tests.rs
+app/src/terminal/shared_session/viewer/terminal_manager_tests.rs
+app/src/terminal/view/shared_session/cloud_conversation_continuation_tests.rs
+app/src/tracing
+crates/cloud_object_persistence
+crates/graphql
+crates/onboarding/src/slides/free_user_no_ai_slide.rs
+crates/remote_server/src/auth.rs
+crates/warp_graphql_schema
+crates/warp_server_auth
+crates/warp_server_client
+specs/APP-4562/PRODUCT.md
+specs/APP-4562/TECH.md
+specs/APP-4579/CLIENT_TECH.md
+specs/APP-4579/PRODUCT.md
+specs/REMOTE-1499/STAGE-2.md

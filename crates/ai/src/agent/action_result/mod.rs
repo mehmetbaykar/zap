@@ -1,5 +1,9 @@
 mod convert;
 
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
+
 use std::fmt::Display;
 use std::ops::Range;
 use std::time::SystemTime;
@@ -77,10 +81,29 @@ pub enum AIAgentActionResultType {
     /// The output of requesting computer use.
     RequestComputerUse(RequestComputerUseResult),
 
+    /// The result of starting a local child agent.
+    StartAgent(StartAgentResult),
+
+    /// The result of sending a message to another local agent.
+    SendMessageToAgent(SendMessageToAgentResult),
+
     /// The output of transferring shell command control to the user.
     TransferShellCommandControlToUser(TransferShellCommandControlToUserResult),
     /// The result of asking the user a question.
     AskUserQuestion(AskUserQuestionResult),
+
+    /// The result of launching a batch of local child agents.
+    RunAgents(RunAgentsResult),
+
+    /// The result of waiting for local agent events.
+    WaitForEvents(WaitForEventsResult),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum StartAgentVersion {
+    #[default]
+    V1,
+    V2,
 }
 
 impl AIAgentActionResultType {
@@ -129,8 +152,12 @@ impl Display for AIAgentActionResultType {
             AIAgentActionResultType::UseComputer(result) => result.fmt(f),
             AIAgentActionResultType::InsertReviewComments(result) => result.fmt(f),
             AIAgentActionResultType::RequestComputerUse(result) => result.fmt(f),
+            AIAgentActionResultType::StartAgent(result) => result.fmt(f),
+            AIAgentActionResultType::SendMessageToAgent(result) => result.fmt(f),
             AIAgentActionResultType::TransferShellCommandControlToUser(result) => result.fmt(f),
             AIAgentActionResultType::AskUserQuestion(result) => result.fmt(f),
+            AIAgentActionResultType::RunAgents(result) => result.fmt(f),
+            AIAgentActionResultType::WaitForEvents(result) => result.fmt(f),
             AIAgentActionResultType::OpenCodeReview | AIAgentActionResultType::InitProject => {
                 Ok(())
             }
@@ -651,11 +678,19 @@ impl AIAgentActionResultType {
             AIAgentActionResultType::ReadShellCommandOutput(_) => "The shell command output",
             AIAgentActionResultType::UseComputer(_) => "The computer use result",
             AIAgentActionResultType::RequestComputerUse(_) => "The computer use request result",
+            AIAgentActionResultType::StartAgent(_) => "The result of starting a child agent",
+            AIAgentActionResultType::SendMessageToAgent(_) => "The result of sending a message",
             AIAgentActionResultType::TransferShellCommandControlToUser(_) => {
                 "The result of transferring shell command control to user"
             }
             AIAgentActionResultType::AskUserQuestion(_) => {
                 "The user's answers to clarifying questions"
+            }
+            AIAgentActionResultType::RunAgents(_) => {
+                "The result of an orchestration batch of local child agents"
+            }
+            AIAgentActionResultType::WaitForEvents(_) => {
+                "The result of waiting for local agent events"
             }
         }
     }
@@ -684,11 +719,15 @@ impl AIAgentActionResultType {
             | Self::RequestComputerUse(RequestComputerUseResult::Approved { .. })
             | Self::OpenCodeReview
             | Self::ReadSkill(ReadSkillResult::Success { .. })
+            | Self::StartAgent(StartAgentResult::Success { .. })
+            | Self::SendMessageToAgent(SendMessageToAgentResult::Success { .. })
             | Self::TransferShellCommandControlToUser(
                 TransferShellCommandControlToUserResult::Snapshot { .. }
                 | TransferShellCommandControlToUserResult::CommandFinished { .. },
             ) => true,
             Self::AskUserQuestion(AskUserQuestionResult::Success { .. }) => true,
+            Self::RunAgents(RunAgentsResult::Launched { .. }) => true,
+            Self::WaitForEvents(WaitForEventsResult::Completed) => true,
             _ => false,
         }
     }
@@ -709,10 +748,15 @@ impl AIAgentActionResultType {
             | Self::UseComputer(UseComputerResult::Error(_))
             | Self::InsertReviewComments(InsertReviewCommentsResult::Error { .. })
             | Self::RequestComputerUse(RequestComputerUseResult::Error(_))
+            | Self::StartAgent(StartAgentResult::Error { .. })
+            | Self::SendMessageToAgent(SendMessageToAgentResult::Error(_))
             | Self::AskUserQuestion(AskUserQuestionResult::Error(_))
             | Self::TransferShellCommandControlToUser(
                 TransferShellCommandControlToUserResult::Error(_),
-            ) => true,
+            )
+            | Self::RunAgents(RunAgentsResult::Failure { .. } | RunAgentsResult::Denied { .. }) => {
+                true
+            }
             _ => false,
         }
     }
@@ -748,8 +792,12 @@ impl AIAgentActionResultType {
                 WriteToLongRunningShellCommandResult::Cancelled,
             )
             | Self::ReadSkill(ReadSkillResult::Cancelled)
+            | Self::StartAgent(StartAgentResult::Cancelled { .. })
+            | Self::SendMessageToAgent(SendMessageToAgentResult::Cancelled)
             // SkippedByAutoApprove is intentionally excluded: the agent should continue.
-            | Self::AskUserQuestion(AskUserQuestionResult::Cancelled) => true,
+            | Self::AskUserQuestion(AskUserQuestionResult::Cancelled)
+            | Self::RunAgents(RunAgentsResult::Cancelled)
+            | Self::WaitForEvents(WaitForEventsResult::Cancelled) => true,
             _ => false,
         }
     }
@@ -1046,6 +1094,130 @@ impl Display for InsertReviewCommentsResult {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StartAgentResult {
+    Success {
+        agent_id: String,
+        #[serde(default)]
+        version: StartAgentVersion,
+    },
+    Error {
+        error: String,
+        #[serde(default)]
+        version: StartAgentVersion,
+    },
+    Cancelled {
+        #[serde(default)]
+        version: StartAgentVersion,
+    },
+}
+
+impl StartAgentResult {
+    pub fn version(&self) -> StartAgentVersion {
+        match self {
+            StartAgentResult::Success { version, .. }
+            | StartAgentResult::Error { version, .. }
+            | StartAgentResult::Cancelled { version } => *version,
+        }
+    }
+}
+
+impl Display for StartAgentResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StartAgentResult::Success { agent_id, .. } => {
+                write!(f, "Started agent with id {agent_id}")
+            }
+            StartAgentResult::Error { error, .. } => write!(f, "Start agent error: {error}"),
+            StartAgentResult::Cancelled { .. } => write!(f, "Start agent cancelled"),
+        }
+    }
+}
+
+/// Terminal outcome of a local orchestration batch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RunAgentsResult {
+    Launched {
+        model_id: String,
+        harness_type: String,
+        execution_mode: RunAgentsLaunchedExecutionMode,
+        /// One outcome per requested child, in request order.
+        agents: Vec<RunAgentsAgentOutcome>,
+    },
+    /// Launch was declined for a non-error reason, such as user disapproval.
+    Denied {
+        reason: String,
+    },
+    /// The local launch sequence could not begin.
+    Failure {
+        error: String,
+    },
+    Cancelled,
+}
+
+/// Execution mode reported by a successful orchestration launch.
+///
+/// Only local execution is supported; cloud/remote modes are intentionally
+/// absent from the native contract.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RunAgentsLaunchedExecutionMode {
+    Local,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunAgentsAgentOutcome {
+    pub name: String,
+    pub kind: RunAgentsAgentOutcomeKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RunAgentsAgentOutcomeKind {
+    Launched { agent_id: String },
+    Failed { error: String },
+}
+
+impl Display for RunAgentsResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Launched { agents, .. } => {
+                let launched = agents
+                    .iter()
+                    .filter(|agent| {
+                        matches!(agent.kind, RunAgentsAgentOutcomeKind::Launched { .. })
+                    })
+                    .count();
+                write!(
+                    f,
+                    "Orchestrate launched ({launched}/{} agents started)",
+                    agents.len()
+                )
+            }
+            Self::Denied { reason } => write!(f, "Orchestrate launch denied: {reason}"),
+            Self::Failure { error } => write!(f, "Orchestrate failure: {error}"),
+            Self::Cancelled => write!(f, "Orchestrate cancelled"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SendMessageToAgentResult {
+    Success { message_id: String },
+    Error(String),
+    Cancelled,
+}
+
+impl Display for SendMessageToAgentResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SendMessageToAgentResult::Success { message_id } => {
+                write!(f, "Sent message with id {message_id}")
+            }
+            SendMessageToAgentResult::Error(error) => write!(f, "Send message error: {error}"),
+            SendMessageToAgentResult::Cancelled => write!(f, "Send message cancelled"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub enum TransferShellCommandControlToUserResult {
     Snapshot {
@@ -1152,6 +1324,23 @@ impl Display for AskUserQuestionResult {
                     question_ids.len()
                 )
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WaitForEventsResult {
+    /// A matching local event arrived or the idle watchdog expired.
+    Completed,
+    /// The conversation was cancelled while waiting.
+    Cancelled,
+}
+
+impl Display for WaitForEventsResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Completed => write!(f, "Wait for events completed"),
+            Self::Cancelled => write!(f, "Wait for events cancelled"),
         }
     }
 }

@@ -753,6 +753,11 @@ impl TryFrom<AIAgentActionResult> for api::request::input::user_inputs::user_inp
             AIAgentActionResultType::RequestComputerUse(request_computer_use_result) => Some(
                 convert_request_computer_use_result(request_computer_use_result)?,
             ),
+            // Local child-agent orchestration is not represented by the fork's pinned proto.
+            AIAgentActionResultType::StartAgent(_)
+            | AIAgentActionResultType::SendMessageToAgent(_)
+            | AIAgentActionResultType::RunAgents(_)
+            | AIAgentActionResultType::WaitForEvents(_) => None,
             AIAgentActionResultType::TransferShellCommandControlToUser(transfer_control_result) => {
                 Some(transfer_control_result.try_into()?)
             }

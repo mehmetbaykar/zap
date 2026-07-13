@@ -201,6 +201,12 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
                     AIAgentActionResultType::UseComputer(_)
                     | AIAgentActionResultType::RequestComputerUse(_) => {}
 
+                    // Local orchestration results contain only identifiers or canonical errors.
+                    AIAgentActionResultType::StartAgent(_)
+                    | AIAgentActionResultType::SendMessageToAgent(_)
+                    | AIAgentActionResultType::RunAgents(_)
+                    | AIAgentActionResultType::WaitForEvents(_) => {}
+
                     // TransferShellCommandControlToUser result - similar to WriteToLongRunningShellCommand
                     AIAgentActionResultType::TransferShellCommandControlToUser(result) => {
                         match result {
@@ -218,8 +224,7 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
                     }
                     AIAgentActionResultType::AskUserQuestion(result) => {
                         redact_ask_user_question_result(result);
-                    } // Orchestrate results contain agent IDs / canonical error
-                      // strings only; no user-provided text to redact.
+                    }
                 }
             }
             AIAgentInput::FetchReviewComments { repo_path, context } => {

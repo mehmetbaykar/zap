@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use crate::terminal::shared_session::protocol::SessionSourceType;
 use warp_core::settings::Setting as _;
 use warpui::{App, AppContext, SingletonEntity, ViewContext};
 
@@ -18,10 +17,6 @@ use crate::ai::blocklist::{AIBlock, ClientIdentifiers};
 use crate::ai::llms::LLMId;
 use crate::features::FeatureFlag;
 use crate::settings::AISettings;
-use crate::terminal::cli_agent_sessions::{
-    CLIAgentInputState, CLIAgentSession, CLIAgentSessionContext, CLIAgentSessionStatus,
-    CLIAgentSessionsModel,
-};
 use crate::terminal::model::ansi::{BootstrappedValue, Handler as _, InitShellValue};
 use crate::terminal::CLIAgent;
 use crate::test_util::add_window_with_terminal;
@@ -373,6 +368,7 @@ fn cli_agent_footer_renders_for_viewer_of_shared_ambient_agent_session() {
                         remote_host: None,
                         draft_text: None,
                         custom_command_prefix: None,
+                        received_rich_notification: false,
                         should_auto_toggle_input: false,
                     },
                     ctx,

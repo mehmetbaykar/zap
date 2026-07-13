@@ -19,6 +19,7 @@ use ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
 use repo_metadata::repositories::{DetectedRepositories, DetectedRepositoriesEvent};
 use warpui::{Entity, ModelContext, SingletonEntity};
 
+use crate::ai::metadata_project_rules::read_project_rule_contents;
 use crate::persistence::ModelEvent;
 
 /// See the module-level documentation for details.
@@ -80,7 +81,7 @@ impl ProjectRulesPersister {
             let repo_path = repository.as_ref(ctx).root_dir().to_local_path_lossy();
 
             ProjectContextModel::handle(ctx).update(ctx, |model, ctx| {
-                let _ = model.index_and_store_rules(repo_path, ctx);
+                let _ = model.index_and_store_rules(repo_path, read_project_rule_contents, ctx);
             });
         });
 

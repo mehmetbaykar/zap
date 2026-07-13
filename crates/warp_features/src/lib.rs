@@ -10,8 +10,6 @@ pub enum FeatureFlag {
     CrashReporting,
     DebugMode,
     Autoupdate,
-    WithSandboxTelemetry,
-    RecordAppActiveEvents,
 
     WelcomeTips,
     ThinStrokes,
@@ -115,9 +113,6 @@ pub enum FeatureFlag {
 
     /// Enables AI rules for use with Agent Mode.
     AIRules,
-
-    /// Routes SSH sessions through the tmux-backed SSH wrapper.
-    SSHTmuxWrapper,
 
     /// Enables the shell selector, allowing us to open a new tab in
     /// a shell other than the default shell.
@@ -223,9 +218,6 @@ pub enum FeatureFlag {
     /// Enables prediction of Agent Mode queries.
     PredictAMQueries,
 
-    /// Enables codebase indexing inside remote server daemon processes.
-    RemoteCodebaseIndexing,
-
     /// If enabled, command palette searches will use Tantivy search instead of the default fuzzy search.
     UseTantivySearch,
 
@@ -310,6 +302,8 @@ pub enum FeatureFlag {
     /// Enables return changed lines on apply diff result
     ChangedLinesOnlyApplyDiffResult,
 
+    /// Enables new Search Codebase UI
+
     /// Enables us to render linked code blocks
     LinkedCodeBlocks,
 
@@ -384,12 +378,6 @@ pub enum FeatureFlag {
 
     /// Enables the one-time modal on app startup for existing users for the Code launch.
     CodeLaunchModal,
-
-    /// Enables API key authentication for Agent SDK
-    APIKeyAuthentication,
-
-    /// Enables API key management UI in settings
-    APIKeyManagement,
 
     /// Enables OAuth support for MCP.
     McpOauth,
@@ -540,11 +528,11 @@ pub enum FeatureFlag {
     /// If disabled, the server will send None as the SkillsContext.
     ListSkills,
 
+    /// When enabled, we expose LSP as a tool to the agent.
+    LSPAsATool,
+
     /// Enables conversation artifacts.
     ConversationArtifacts,
-
-    /// Enables auto-syncing ambient plans to Zap Drive.
-    SyncAmbientPlans,
 
     /// Enables platform skills support (--skill flag) for agent runs.
     ///
@@ -557,9 +545,6 @@ pub enum FeatureFlag {
     /// Enables the Zap launch modal announcing Zap going open-source.
     /// When enabled, the HOA onboarding flow is suppressed.
     ZapLaunchModal,
-
-    /// Enables the orchestration launch modal announcing multi-agent orchestration features.
-    OrchestrationLaunchModal,
 
     /// Updated tab styling (background colors, border, close button positioning, margins).
     NewTabStyling,
@@ -595,6 +580,8 @@ pub enum FeatureFlag {
     /// Gates the `/queue` slash command, which lets users queue a follow-up prompt
     /// while the agent is mid-response.
     QueueSlashCommand,
+    /// Extends queued prompts to Cloud Mode setup and follow-up draining.
+    QueuedPromptsV2,
 
     /// Enables an agent tool for the CLI subagent to explicitly transfer command control to the
     /// user.
@@ -609,6 +596,9 @@ pub enum FeatureFlag {
 
     /// Enables header rows on all inline menus (label, tabs, resize handle).
     InlineMenuHeaders,
+    /// Clears the current prompt when opening the inline model selector from the
+    /// model chip, then restores that prompt when the selector closes.
+    RestorePromptOnInlineModelSelectorSearch,
 
     /// Enables associating a tab color with a directory so tabs automatically
     /// adopt the configured color when their working directory matches.
@@ -640,6 +630,10 @@ pub enum FeatureFlag {
     /// Requires HOANotifications to also be enabled.
     CodexNotifications,
 
+    /// Enables the Codex Warp plugin marketplace integration.
+    /// When disabled, Codex uses native OSC9 notifications.
+    CodexPlugin,
+
     /// Enables the install/update chip for the Gemini CLI Zap extension.
     /// Requires HOANotifications to also be enabled.
     GeminiNotifications,
@@ -647,16 +641,14 @@ pub enum FeatureFlag {
     /// Enables tab configs — user-definable TOML templates for launching custom tab layouts.
     TabConfigs,
 
+    /// Enables Warp local control through the standalone warpctrl CLI.
+    WarpControlCli,
+
     /// Enables the ask_user_question tool allowing the agent to ask clarifying questions.
     AskUserQuestion,
 
     /// When enabled, solo users (not on a team) can use BYO API keys.
     SoloUserByok,
-
-    /// Enables the Custom Inference settings UI for adding user-provided third-party / OpenAI-compatible inference endpoints.
-    CustomInferenceEndpoints,
-    /// Enables Custom Inference endpoints for enterprise users.
-    CustomInferenceEndpointsEnterprise,
 
     /// Replaces the in-block warpification banner with a warpify footer.
     WarpifyFooter,
@@ -667,9 +659,6 @@ pub enum FeatureFlag {
 
     /// Enables commit, push, and create-PR actions in the code review panel.
     GitOperationsInCodeReview,
-
-    /// Gates the remote control chip and `/remote-control` slash command in the CLI agent footer.
-    HOARemoteControl,
 
     /// Trims trailing blank rows from CLI agent block output so unused vertical
     /// space is not rendered while the agent is running.
@@ -693,6 +682,9 @@ pub enum FeatureFlag {
     /// the server falls back to its default.
     ConfigurableContextWindow,
 
+    /// Enables configurable expanded context windows for eligible GPT models.
+    GPTConfigurableContextWindow,
+
     /// Enables the global HTTP proxy settings page and the proxy-override logic in `Client::new()`.
     /// When disabled, the UI entry point is hidden and `Client::new()` falls back to the reqwest default (reading environment variables).
     /// See Issue #72.
@@ -706,11 +698,6 @@ pub enum FeatureFlag {
     /// a flat pretty-printed blob.
     McpJsonTreeView,
 
-    /// Enables creating API keys scoped to named agents in the API key
-    /// management UI. When enabled the "Team" option in the key-type
-    /// selector is replaced with "Agent" and users can pick which agent
-    /// identity the key authenticates as.
-    NamedAgents,
     /// Gates the driver behavior that writes GitHub credentials to disk
     /// (`~/.git-credentials`, `~/.config/gh/hosts.yaml`) and runs the
     /// background refresh loop that keeps them fresh during a task run.
@@ -749,6 +736,11 @@ pub enum FeatureFlag {
 
     /// Gates the Grouped Tabs feature.
     GroupedTabs,
+
+    /// Gates the Pinned Tabs feature, which lets users pin individual tabs
+    /// and whole tab groups so they stay at the front of the tab list and
+    /// are protected from reordering.
+    PinnedTabs,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -767,6 +759,8 @@ static FEATURES_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 /// Features used in debugging.
 pub const DEBUG_FLAGS: &[FeatureFlag] = &[FeatureFlag::DebugMode, FeatureFlag::RuntimeFeatureFlags];
+/// Features enabled only for the WarpLocal developer build.
+pub const LOCAL_FLAGS: &[FeatureFlag] = &[FeatureFlag::LocalClaudeCodexChildHarnesses];
 
 /// Features enabled for the development team.  The expectation is that, over
 /// time, these will move on to PREVIEW_FLAGS before being launched.
@@ -775,8 +769,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::RemoveAutosuggestionDuringTabCompletions,
     FeatureFlag::ResizeFix,
     FeatureFlag::AgentModeWorkflows,
-    #[cfg(not(windows))]
-    FeatureFlag::SSHTmuxWrapper,
     FeatureFlag::AgentModeAnalytics,
     FeatureFlag::LazySceneBuilding,
     FeatureFlag::SshDragAndDrop,
@@ -803,21 +795,22 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::EditableMarkdownMermaid,
     FeatureFlag::CodeReviewScrollPreservation,
     FeatureFlag::RememberFastForwardState,
+    FeatureFlag::CodexPlugin,
     FeatureFlag::GeminiNotifications,
     FeatureFlag::LocalDockerSandbox,
     FeatureFlag::VerticalTabsSummaryMode,
     FeatureFlag::ConfigurableContextWindow,
+    FeatureFlag::GPTConfigurableContextWindow,
     FeatureFlag::DragTabsToWindows,
     FeatureFlag::ServerFileBrowser,
     FeatureFlag::TerminalLifecycleRecovery,
     FeatureFlag::JupyterNotebookRendering,
     FeatureFlag::McpJsonTreeView,
-    FeatureFlag::NamedAgents,
     FeatureFlag::SoloUserByok,
-    FeatureFlag::CustomInferenceEndpoints,
-    FeatureFlag::RemoteCodebaseIndexing,
-    FeatureFlag::GroupedTabs,
+    #[cfg(not(windows))]
+    FeatureFlag::SshRemoteServer,
     FeatureFlag::AsyncFind,
+    FeatureFlag::RestorePromptOnInlineModelSelectorSearch,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Zap).
@@ -826,6 +819,7 @@ pub const PREVIEW_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::MarkdownTables,
     FeatureFlag::GitOperationsInCodeReview,
     FeatureFlag::GitCredentialRefresh,
+    FeatureFlag::GroupedTabs,
 ];
 
 /// Features enabled for all release builds (i.e.: everything but WarpLocal).
@@ -860,7 +854,6 @@ impl FeatureFlag {
             FeatureFlag::ForceLogin
                 | FeatureFlag::AvatarInTabBar
                 | FeatureFlag::AgentModeComputerUse
-                | FeatureFlag::HOARemoteControl
         ) {
             return false;
         }
@@ -885,7 +878,9 @@ impl FeatureFlag {
         // Allow calling this in integration tests because we sometimes use it in the app
         // during flows that integration tests cover.
         if cfg!(test) && cfg!(not(feature = "integration_tests")) {
-            panic!("Tried to globally enable {self:?} in a test. Use FeatureFlag::{self:?}.override_enabled instead");
+            panic!(
+                "Tried to globally enable {self:?} in a test. Use FeatureFlag::{self:?}.override_enabled instead"
+            );
         }
         FLAG_STATES[self as usize].store(enabled, Ordering::Relaxed);
     }
@@ -933,6 +928,7 @@ impl FeatureFlag {
             JupyterNotebookRendering => Some("Renders .ipynb files as a formatted notebook instead of raw JSON."),
             SettingsFile => Some("Enables configuring Zap via a user-editable `settings.toml` file, with hot reload and error reporting for invalid values."),
             GitOperationsInCodeReview => Some("Enables commit, push, and create-PR actions directly from the code review panel."),
+            GroupedTabs => Some("Enables organizing tabs into named, collapsible groups."),
             _ => None,
         }
     }

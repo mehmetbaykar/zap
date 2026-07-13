@@ -1,7 +1,6 @@
-//! Unit tests for `web_runtime::run_webfetch` (mockito, no external network).
+//! Unit tests for `web_runtime::run_webfetch` (no external network).
 
 use super::*;
-use mockito::{Matcher, Server};
 
 fn build_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -49,41 +48,32 @@ async fn rejects_http_urls() {
 }
 
 // ---------------------------------------------------------------------------
-// Content-type branches — call send_fetch directly, since mockito only provides HTTP
+// Content-type branches
 // ---------------------------------------------------------------------------
 
-/// Helper: runs a webfetch-like flow against the mockito server, skipping the HTTPS check
-/// (mockito only provides HTTP). Tests the content-processing pipeline without going through URL scheme validation.
-/// Reuses `response_to_fetch_output` to avoid drift from the production logic.
-async fn run_webfetch_test(
-    server_url: &str,
-    path: &str,
+fn fetch_output_from_test_parts(
+    body: &[u8],
+    content_type: &str,
     format: Option<FetchFormat>,
 ) -> Result<FetchOutput> {
-    let client = build_client();
-    let url = format!("{server_url}{path}");
     let fmt = format.unwrap_or_default();
-    let accept = fmt.accept_header();
-    let timeout = std::time::Duration::from_secs(DEFAULT_FETCH_TIMEOUT_SECS);
-
-    let resp = send_fetch(&client, &url, accept, CHROME_UA, timeout).await?;
-    response_to_fetch_output(resp, &url, &fmt).await
+    fetch_output_from_bytes(
+        StatusCode::OK,
+        content_type.to_owned(),
+        body,
+        "https://example.test/resource",
+        &fmt,
+    )
 }
 
-#[tokio::test]
-async fn html_to_markdown() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("GET", "/page")
-        .with_status(200)
-        .with_header("content-type", "text/html; charset=utf-8")
-        .with_body("<html><body><h1>Hello</h1><p>World</p></body></html>")
-        .create_async()
-        .await;
-
-    let out = run_webfetch_test(&server.url(), "/page", None)
-        .await
-        .expect("ok");
+#[test]
+fn html_to_markdown() {
+    let out = fetch_output_from_test_parts(
+        b"<html><body><h1>Hello</h1><p>World</p></body></html>",
+        "text/html; charset=utf-8",
+        None,
+    )
+    .expect("ok");
     assert!(
         out.output.contains("Hello"),
         "missing Hello: {}",
@@ -103,36 +93,15 @@ async fn html_to_markdown() {
     assert!(out.attachments.is_empty());
 }
 
-#[tokio::test]
-async fn text_plain_passthrough() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("GET", "/text")
-        .with_status(200)
-        .with_header("content-type", "text/plain")
-        .with_body("just some text")
-        .create_async()
-        .await;
-
-    let out = run_webfetch_test(&server.url(), "/text", None)
-        .await
-        .expect("ok");
+#[test]
+fn text_plain_passthrough() {
+    let out = fetch_output_from_test_parts(b"just some text", "text/plain", None).expect("ok");
     assert_eq!(out.output, "just some text");
 }
 
-#[tokio::test]
-async fn json_pretty_print() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("GET", "/api")
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(r#"{"a":1,"b":[2,3]}"#)
-        .create_async()
-        .await;
-
-    let out = run_webfetch_test(&server.url(), "/api", None)
-        .await
+#[test]
+fn json_pretty_print() {
+    let out = fetch_output_from_test_parts(br#"{"a":1,"b":[2,3]}"#, "application/json", None)
         .expect("ok");
     assert!(
         out.output.starts_with("```json\n"),
@@ -147,9 +116,8 @@ async fn json_pretty_print() {
     assert!(out.output.ends_with("\n```"));
 }
 
-#[tokio::test]
-async fn image_attachment_base64() {
-    let mut server = Server::new_async().await;
+#[test]
+fn image_attachment_base64() {
     // 1x1 transparent PNG
     let png_bytes: Vec<u8> = vec![
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
@@ -158,17 +126,7 @@ async fn image_attachment_base64() {
         0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
         0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
-    let _m = server
-        .mock("GET", "/img.png")
-        .with_status(200)
-        .with_header("content-type", "image/png")
-        .with_body(png_bytes.clone())
-        .create_async()
-        .await;
-
-    let out = run_webfetch_test(&server.url(), "/img.png", None)
-        .await
-        .expect("ok");
+    let out = fetch_output_from_test_parts(&png_bytes, "image/png", None).expect("ok");
     assert_eq!(out.attachments.len(), 1);
     let att = &out.attachments[0];
     assert_eq!(att.mime, "image/png");
@@ -182,39 +140,23 @@ async fn image_attachment_base64() {
 // format parameter
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-async fn format_html_returns_raw() {
-    let mut server = Server::new_async().await;
+#[test]
+fn format_html_returns_raw() {
     let raw = "<html><body><h1>Raw</h1></body></html>";
-    let _m = server
-        .mock("GET", "/x")
-        .with_status(200)
-        .with_header("content-type", "text/html")
-        .with_body(raw)
-        .create_async()
-        .await;
-
-    let out = run_webfetch_test(&server.url(), "/x", Some(FetchFormat::Html))
-        .await
+    let out = fetch_output_from_test_parts(raw.as_bytes(), "text/html", Some(FetchFormat::Html))
         .expect("ok");
     assert_eq!(out.output, raw);
     assert_eq!(out.format, "html");
 }
 
-#[tokio::test]
-async fn format_text_strips_html() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("GET", "/x")
-        .with_status(200)
-        .with_header("content-type", "text/html")
-        .with_body("<html><body><p>One</p><p>Two</p><script>alert(1)</script></body></html>")
-        .create_async()
-        .await;
-
-    let out = run_webfetch_test(&server.url(), "/x", Some(FetchFormat::Text))
-        .await
-        .expect("ok");
+#[test]
+fn format_text_strips_html() {
+    let out = fetch_output_from_test_parts(
+        b"<html><body><p>One</p><p>Two</p><script>alert(1)</script></body></html>",
+        "text/html",
+        Some(FetchFormat::Text),
+    )
+    .expect("ok");
     assert!(out.output.contains("One"));
     assert!(out.output.contains("Two"));
     assert!(
@@ -225,75 +167,42 @@ async fn format_text_strips_html() {
     assert_eq!(out.format, "text");
 }
 
-#[tokio::test]
-async fn default_format_is_markdown() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("GET", "/x")
-        .with_status(200)
-        .with_header("content-type", "text/html")
-        .with_body("<html><body><h2>x</h2></body></html>")
-        .create_async()
-        .await;
-    let out = run_webfetch_test(&server.url(), "/x", None).await.unwrap();
+#[test]
+fn default_format_is_markdown() {
+    let out =
+        fetch_output_from_test_parts(b"<html><body><h2>x</h2></body></html>", "text/html", None)
+            .unwrap();
     assert_eq!(out.format, "markdown");
 }
 
-#[tokio::test]
-async fn accept_header_negotiation_for_markdown() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("GET", "/x")
-        .match_header(
-            "accept",
-            Matcher::Regex(r"text/markdown\s*;\s*q=1\.0".into()),
-        )
-        .with_status(200)
-        .with_header("content-type", "text/plain")
-        .with_body("ok")
-        .create_async()
-        .await;
-
-    let out = run_webfetch_test(&server.url(), "/x", None)
-        .await
-        .expect("ok");
-    assert_eq!(out.output, "ok");
+#[test]
+fn accept_header_negotiation_for_markdown() {
+    assert!(FetchFormat::Markdown
+        .accept_header()
+        .starts_with("text/markdown;q=1.0"));
 }
 
 // ---------------------------------------------------------------------------
 // Size / status
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-async fn rejects_oversized_content_length() {
-    let big = vec![b'x'; MAX_RESPONSE_SIZE + 1024];
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("GET", "/big")
-        .with_status(200)
-        .with_header("content-type", "text/plain")
-        .with_body(big)
-        .create_async()
-        .await;
-
-    let err = run_webfetch_test(&server.url(), "/big", None)
-        .await
-        .unwrap_err();
+#[test]
+fn rejects_oversized_content_length() {
+    let err = validate_fetch_response_metadata(
+        StatusCode::OK,
+        Some(MAX_RESPONSE_SIZE + 1024),
+        "https://example.test/big",
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("too large"), "got: {msg}");
 }
 
-#[tokio::test]
-async fn http_error_status_propagates() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("GET", "/404")
-        .with_status(404)
-        .create_async()
-        .await;
-    let err = run_webfetch_test(&server.url(), "/404", None)
-        .await
-        .unwrap_err();
+#[test]
+fn http_error_status_propagates() {
+    let err =
+        validate_fetch_response_metadata(StatusCode::NOT_FOUND, None, "https://example.test/404")
+            .unwrap_err();
     assert!(err.to_string().contains("404"), "got: {err}");
 }
 
@@ -390,7 +299,7 @@ fn blocked_ip_ipv6_ranges() {
 async fn ssrf_safe_client_builds_with_redirect_policy() {
     let client = build_ssrf_safe_client().expect("build client");
     // Verify the client builds successfully with the custom SSRF redirect policy and DNS resolver.
-    // TODO: once mockito supports redirects, add a real internal-IP redirect integration test.
+    // Redirect behavior is covered through the pure policy inputs; no local socket is needed here.
     assert!(client.get("https://example.invalid").build().is_ok());
 }
 

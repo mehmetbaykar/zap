@@ -9,22 +9,5 @@ pub(crate) fn sanitized_basename(path_or_filename: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sanitized_basename_accepts_plain_filename() {
-        assert_eq!(
-            sanitized_basename("report.txt"),
-            Some("report.txt".to_string())
-        );
-    }
-
-    #[test]
-    fn sanitized_basename_extracts_from_path() {
-        assert_eq!(
-            sanitized_basename("outputs/report.txt"),
-            Some("report.txt".to_string())
-        );
-    }
-}
+#[path = "artifact_download_tests.rs"]
+mod tests;

@@ -223,22 +223,9 @@ impl ConversationEndedTombstoneView {
                 })
             });
 
-        // In wasm, continuing locally is impossible so we instead
-        // offer to open the conversation in warp (where you can continue locally).
+        // Zap does not expose Warp-hosted conversation URLs in the web build.
         #[cfg(target_family = "wasm")]
-        let open_in_warp_button = conversation_id
-            .filter(|_| !display_data.hide_continue_actions)
-            .map(|conv_id| {
-                ctx.add_typed_action_view(move |_| {
-                    ActionButton::new(crate::t!("terminal-open-in-warp"), PrimaryTheme)
-                        .with_tooltip(crate::t!("terminal-open-conversation-in-warp-tooltip"))
-                        .on_click(move |ctx| {
-                            ctx.dispatch_typed_action(
-                                ConversationEndedTombstoneAction::OpenInWarp(conv_id),
-                            );
-                        })
-                })
-            });
+        let open_in_warp_button = None;
 
         let view = Self {
             display_data,
@@ -568,26 +555,7 @@ impl TypedActionView for ConversationEndedTombstoneView {
                 });
             }
             #[cfg(target_family = "wasm")]
-            ConversationEndedTombstoneAction::OpenInWarp(conversation_id) => {
-                let conversation = BlocklistAIHistoryModel::handle(ctx)
-                    .as_ref(ctx)
-                    .conversation(conversation_id);
-
-                if let Some(conversation) = conversation {
-                    if let Some(token) = conversation.server_conversation_token() {
-                        let url_string = token.conversation_link();
-                        if let Ok(url) = url::Url::parse(&url_string) {
-                            ctx.dispatch_typed_action(&WorkspaceAction::OpenLinkOnDesktop(url));
-                        } else {
-                            log::error!("Failed to parse conversation URL: {}", url_string);
-                        }
-                    } else {
-                        log::warn!("No server conversation token available for conversation");
-                    }
-                } else {
-                    log::error!("Conversation not found in history model");
-                }
-            }
+            ConversationEndedTombstoneAction::OpenInWarp(..) => {}
         }
     }
 }

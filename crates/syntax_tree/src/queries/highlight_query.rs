@@ -10,7 +10,7 @@ use streaming_iterator::StreamingIterator;
 use string_offset::{ByteOffset, CharOffset};
 use warp_editor::content::buffer::{Buffer, ToBufferByteOffset, ToBufferCharOffset};
 use warp_editor::content::text::Bytes;
-use warpui::color::ColorU;
+use warpui_core::color::ColorU;
 
 thread_local! {
     static INJECTION_PARSER: RefCell<Parser> = RefCell::new(Parser::new());

@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use ai::project_context::model::ProjectRulePath;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local};
 use instant::Instant;
 use uuid::Uuid;
 use warp_core::command::ExitCode;
@@ -38,7 +38,6 @@ use crate::app_state::AppState;
 use crate::auth::PersistedCurrentUserInformation;
 use crate::cloud_object::model::actions::ObjectAction;
 use crate::cloud_object::model::generic_string_model::StoredStringObject;
-
 use crate::cloud_object::{ObjectIdType, StoredObject, StoredObjectMetadata};
 use crate::drive::folders::FolderObject;
 use crate::notebooks::NotebookObject;
@@ -59,7 +58,7 @@ pub use sqlite::establish_ro_connection;
 
 pub enum PersistenceScope {
     App,
-    RemoteServerDaemon { identity_key: String },
+    RemoteServerDaemon,
 }
 
 /// Initializes the persistence "subsystem".
@@ -195,13 +194,13 @@ pub struct PersistedData {
     /// Session restoration data
     pub app_state: AppState,
 
-    /// Shareable objects.
+    /// Locally persisted object-store entries.
     pub cloud_objects: Vec<Box<dyn StoredObject>>,
+
     pub workspaces: Vec<WorkspaceMetadata>,
     pub current_workspace_uid: Option<WorkspaceUid>,
     pub command_history: Vec<PersistedCommand>,
     pub user_profiles: Vec<UserProfileWithUID>,
-    pub time_of_next_force_object_refresh: Option<DateTime<Utc>>,
     pub object_actions: Vec<ObjectAction>,
     pub experiments: Vec<ServerExperiment>,
     pub ai_queries: Vec<PersistedAIInput>,
@@ -293,8 +292,11 @@ pub enum ModelEvent {
         profiles: Vec<UserProfileWithUID>,
     },
     ClearUserProfiles,
-    RecordTimeOfNextRefresh {
-        timestamp: DateTime<Utc>,
+    InsertObjectAction {
+        object_action: ObjectAction,
+    },
+    SyncObjectActions {
+        actions_to_sync: Vec<ObjectAction>,
     },
     SaveExperiments {
         experiments: Vec<ServerExperiment>,
@@ -305,12 +307,6 @@ pub enum ModelEvent {
     PauseAndRemoveDatabase,
     #[cfg(feature = "local_fs")]
     ReconstructAndResume,
-    InsertObjectAction {
-        object_action: ObjectAction,
-    },
-    SyncObjectActions {
-        actions_to_sync: Vec<ObjectAction>,
-    },
     /// Close the SQLite writer thread when the app is about to quit.
     Terminate,
     UpsertAIQuery {

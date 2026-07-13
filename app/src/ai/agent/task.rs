@@ -6,7 +6,6 @@ use std::fmt::Display;
 use std::ops::Deref;
 
 use ai::skills::SkillPathOrigin;
-use chrono::DateTime;
 use field_mask::{FieldMaskError, FieldMaskOperation};
 use helper::{MessageExt, SubagentExt, ToolCallExt};
 use itertools::Itertools;
@@ -29,7 +28,6 @@ use super::{
     Shared,
 };
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
-use crate::server::datetime_ext::DateTimeExt;
 use crate::terminal::model::block::BlockId;
 use crate::AIAgentTodoList;
 
@@ -130,13 +128,13 @@ mod optimistic {
 
     #[derive(Debug, Clone)]
     pub(super) enum Task {
-        Root,
+        Root { description: String },
         CLIAgent(CLIAgentSubtask),
     }
 
     impl Task {
         pub(super) fn is_root(&self) -> bool {
-            matches!(self, Task::Root)
+            matches!(self, Task::Root { .. })
         }
 
         pub(super) fn is_cli_subagent(&self) -> bool {
@@ -178,7 +176,9 @@ impl Task {
     pub(super) fn new_optimistic_root() -> Self {
         Self {
             id: TaskId::new(Uuid::new_v4().to_string()),
-            data: TaskImpl::Optimistic(optimistic::Task::Root),
+            data: TaskImpl::Optimistic(optimistic::Task::Root {
+                description: String::new(),
+            }),
             exchanges: vec![],
         }
     }
@@ -250,7 +250,7 @@ impl Task {
         skill_path_origin: &SkillPathOrigin,
     ) -> Result<Self, UpgradeOptimisticTaskError> {
         match self.data {
-            TaskImpl::Optimistic(optimistic::Task::Root) => {
+            TaskImpl::Optimistic(optimistic::Task::Root { .. }) => {
                 if parent_task.is_some() {
                     return Err(UpgradeOptimisticTaskError::RootWithUnexpectedParent);
                 }
@@ -346,7 +346,7 @@ impl Task {
             input: vec![],
             output_status: AIAgentOutputStatus::Streaming { output: None },
             added_message_ids: Default::default(),
-            start_time: DateTime::now().into(),
+            start_time: chrono::Local::now(),
             finish_time: None,
             time_to_first_token_ms: None,
             working_directory: existing_exchange.working_directory.clone(),
@@ -468,7 +468,7 @@ impl Task {
             TaskImpl::Optimistic(optimistic::Task::CLIAgent(subtask)) => {
                 Some(subtask.block_id.clone())
             }
-            TaskImpl::Optimistic(optimistic::Task::Root) => None,
+            TaskImpl::Optimistic(optimistic::Task::Root { .. }) => None,
         }
     }
 
@@ -481,7 +481,7 @@ impl Task {
             input: vec![],
             output_status: AIAgentOutputStatus::Streaming { output: None },
             added_message_ids: Default::default(),
-            start_time: DateTime::now().into(),
+            start_time: chrono::Local::now(),
             finish_time: None,
             time_to_first_token_ms: None,
             working_directory: existing_exchange.working_directory.clone(),
@@ -582,9 +582,11 @@ impl Task {
     }
 
     pub fn description(&self) -> &str {
-        self.source()
-            .map(|source| source.description.as_str())
-            .unwrap_or("")
+        match &self.data {
+            TaskImpl::Server(server_data) => server_data.source.description.as_str(),
+            TaskImpl::Optimistic(optimistic::Task::Root { description }) => description,
+            TaskImpl::Optimistic(optimistic::Task::CLIAgent(_)) => "",
+        }
     }
 
     pub fn exchanges(&self) -> impl Iterator<Item = &AIAgentExchange> {
@@ -630,7 +632,7 @@ impl Task {
             // produces an orphan row in `agent_tasks` that survives the later
             // server-side upgrade and breaks restore by competing with the
             // real server root for parentless-task selection. See QUALITY-774.
-            TaskImpl::Optimistic(optimistic::Task::Root) => None,
+            TaskImpl::Optimistic(optimistic::Task::Root { .. }) => None,
             TaskImpl::Optimistic(optimistic::Task::CLIAgent(_)) => None,
         }
     }
@@ -674,10 +676,13 @@ impl Task {
     }
 
     pub(super) fn update_description(&mut self, description: String) {
-        let Ok(source) = self.try_get_source_mut() else {
-            return;
-        };
-        source.description = description;
+        match &mut self.data {
+            TaskImpl::Server(server_data) => server_data.source.description = description,
+            TaskImpl::Optimistic(optimistic::Task::Root {
+                description: current_description,
+            }) => *current_description = description,
+            TaskImpl::Optimistic(optimistic::Task::CLIAgent(_)) => {}
+        }
     }
 
     pub(super) fn update_task_server_data(&mut self, new_server_data: String) {

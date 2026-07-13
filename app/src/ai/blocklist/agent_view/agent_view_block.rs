@@ -205,7 +205,7 @@ impl View for AgentViewEntryBlock {
             // If the agent_view_block's conversation no longer exists,
             // we assume that it has been deleted.
             return render_deleted_state(
-                self.origin,
+                self.origin.clone(),
                 self.cached_title.clone(),
                 appearance,
                 are_block_dividers_enabled,
@@ -281,7 +281,7 @@ impl View for AgentViewEntryBlock {
             Some(crate::t!("common-restored"))
         } else if !self.is_new
             && !matches!(
-                self.origin,
+                &self.origin,
                 AgentViewEntryOrigin::LongRunningCommand
                     | AgentViewEntryOrigin::AgentRequestedNewConversation
             )
@@ -318,7 +318,7 @@ impl View for AgentViewEntryBlock {
         );
 
         let conversation_id = self.conversation_id;
-        let origin = self.origin;
+        let origin = self.origin.clone();
         Hoverable::new(self.state_handles.block.clone(), move |hoverable_state| {
             let background = if hoverable_state.is_hovered() {
                 blended_colors::fg_overlay_2(appearance.theme())
@@ -326,7 +326,7 @@ impl View for AgentViewEntryBlock {
                 blended_colors::fg_overlay_1(appearance.theme())
             };
             render_block_container(
-                origin,
+                origin.clone(),
                 row.finish(),
                 background.into(),
                 appearance,

@@ -3,7 +3,7 @@
 //! All fields are optional; missing values fall back to WarpTheme's derived colors.
 
 use serde::{Deserialize, Serialize};
-use warpui::color::ColorU;
+use warpui_core::color::ColorU;
 
 use crate::ui::color::hex_color_alpha;
 

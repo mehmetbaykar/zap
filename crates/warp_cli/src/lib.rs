@@ -23,6 +23,7 @@ pub mod completions;
 pub mod config_file;
 // Zap Wave 7-2: the `environment` CLI was physically removed along with the cloud ambient agent's main subsystem.
 pub mod json_filter;
+pub mod local_control;
 pub mod mcp;
 pub mod model;
 pub mod provider;
@@ -53,22 +54,9 @@ pub struct ParentOpts {
     pub handle: Option<process_handle::ProcessHandle>,
 }
 
-/// Hidden worker args used to scope remote-server proxy/daemon sockets by
-/// Zap identity without exposing credentials.
-#[derive(Debug, Clone, Default, clap::Args)]
-pub struct RemoteServerIdentityArgs {
-    /// Non-secret identity partition key for the remote-server daemon.
-    #[arg(long = "identity-key", hide = true)]
-    pub identity_key: String,
-}
-
 /// Global options that apply to all CLI commands.
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct GlobalOptions {
-    /// API key for server authentication.
-    #[arg(long = "api-key", global = true, env = "WARP_API_KEY")]
-    pub api_key: Option<String>,
-
     /// Set the output format.
     #[arg(
         long = "output-format",
@@ -240,11 +228,6 @@ impl Args {
         &self.global_options
     }
 
-    /// Returns the API key if provided.
-    pub fn api_key(&self) -> Option<&String> {
-        self.global_options.api_key.as_ref()
-    }
-
     /// Returns the output format.
     pub fn output_format(&self) -> OutputFormat {
         self.global_options.output_format
@@ -286,14 +269,14 @@ pub enum WorkerCommand {
     /// to the daemon via a Unix domain socket.
     #[cfg(not(target_family = "wasm"))]
     #[clap(hide = true)]
-    RemoteServerProxy(RemoteServerIdentityArgs),
+    RemoteServerProxy,
 
     /// Run the long-lived remote development server daemon.
     /// Listens on a Unix domain socket and accepts multiple concurrent
     /// connections from proxy processes.
     #[cfg(not(target_family = "wasm"))]
     #[clap(hide = true)]
-    RemoteServerDaemon(RemoteServerIdentityArgs),
+    RemoteServerDaemon,
 
     /// Run a headless ripgrep search worker.
     #[cfg(not(target_family = "wasm"))]

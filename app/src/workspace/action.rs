@@ -20,6 +20,7 @@ use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::AIAgentExchangeId;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::ai::blocklist::PendingAttachment;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
 use crate::auth::LoginGatedFeature;
 use crate::drive::items::WarpDriveItemId;
@@ -150,6 +151,13 @@ pub enum WorkspaceAction {
         tab_index: usize,
         anchor: TabContextMenuAnchor,
     },
+    /// Toggles the multi-tab selection right-click menu.
+    /// Dispatched by the UI when the right-clicked tab is part of a multi-tab
+    /// selection (cmd-click or shift-click).
+    ToggleTabSelectionRightClickMenu {
+        tab_index: usize,
+        anchor: TabContextMenuAnchor,
+    },
     ToggleVerticalTabsPaneContextMenu {
         tab_index: usize,
         target: VerticalTabsPaneContextMenuTarget,
@@ -171,6 +179,60 @@ pub enum WorkspaceAction {
     CloseTabGroup(TabGroupId),
     /// Toggle collapsed state for the given tab group.
     ToggleTabGroupCollapsed(TabGroupId),
+    /// Opens an inline editor over the given group's header for renaming.
+    RenameTabGroup(TabGroupId),
+    /// Creates a new tab group containing the tab at the given index.
+    NewTabGroupFromTab(usize),
+    /// Moves the tab at `tab_index` into `group_id`, appending it to the
+    /// end of the group's contiguous run.
+    MoveTabToGroup {
+        tab_index: usize,
+        group_id: TabGroupId,
+    },
+    /// Removes the tab at the given index from its current group.
+    RemoveTabFromGroup(usize),
+    /// Selects every tab between the active tab and the shift-clicked row (inclusive).
+    ShiftSelectTabRange {
+        locator: PaneViewLocator,
+    },
+    /// Toggles whether the tab at `locator` is part of the active multi-selection.
+    /// Dispatched on cmd-click of a vertical tab row.
+    ToggleTabMultiSelection {
+        locator: PaneViewLocator,
+    },
+    /// Clears the tab multi-selection. Dispatched from the UI when the user takes
+    /// an action that should cancel any active selections.
+    ClearTabMultiSelection,
+    /// Creates a new tab group from the current tab multi-selection.
+    NewTabGroupFromSelectedTabs,
+    /// Moves every selected tab into `group_id`.
+    MoveSelectedTabsToGroup {
+        group_id: TabGroupId,
+    },
+    /// Removes every selected tab from its group (requires a single shared group).
+    RemoveSelectedTabsFromGroup,
+    ToggleTabGroupRightClickMenu {
+        group_id: TabGroupId,
+        anchor: TabContextMenuAnchor,
+    },
+    UngroupTabs(TabGroupId),
+    NewTabInGroup(TabGroupId),
+    MoveTabGroupUp(TabGroupId),
+    MoveTabGroupDown(TabGroupId),
+    CloseTabsOutsideGroup(TabGroupId),
+    CloseTabsAboveGroup(TabGroupId),
+    CloseTabsBelowGroup(TabGroupId),
+    /// Pins the tab at the given index. If the tab is part of a group, it
+    /// is first extracted from the group and then pinned as ungrouped.
+    PinTab(usize),
+    /// Unpins the tab at the given index.
+    UnpinTab(usize),
+    /// Pins the entire tab group: sets the group as pinned
+    /// and moves the group block to the end of the pinned region.
+    PinTabGroup(TabGroupId),
+    /// Unpins the entire tab group: clears the pinned flag on the group
+    /// and moves the group block to the start of the unpinned region.
+    UnpinTabGroup(TabGroupId),
     AddDefaultTab,
     AddTerminalTab {
         hide_homepage: bool,
@@ -286,6 +348,12 @@ pub enum WorkspaceAction {
         tab_position: RectF,
     },
     DropTab,
+    StartGroupDrag(TabGroupId),
+    DragGroup {
+        group_id: TabGroupId,
+        position: RectF,
+    },
+    DropGroup,
     /// Toggles the left panel. In Code Mode V1 this toggles Zap Drive.
     /// In Code Mode V2 this toggles the left panel which contains both the project explorer and
     /// Zap Drive. This happens as explicit action from the user.
@@ -302,6 +370,7 @@ pub enum WorkspaceAction {
     OpenCodeReviewPanel(PaneViewLocator),
     /// Toggles the vertical tabs panel. This happens as an explicit action from the user.
     ToggleVerticalTabsPanel,
+    OpenVerticalTabsPanel,
     ToggleVerticalTabsSettingsPopup,
     SetVerticalTabsDisplayGranularity(VerticalTabsDisplayGranularity),
     SetVerticalTabsTabItemMode(VerticalTabsTabItemMode),
@@ -318,9 +387,6 @@ pub enum WorkspaceAction {
     /// if the focused pane is the rendered file viewer (`FilePane`), otherwise the focused
     /// terminal session's working directory. No-op if neither yields a path.
     CopyCurrentPath,
-    /// An action only registered in dev and local builds, which writes the user's current access
-    /// token to the system clipboard to aid debugging and development.
-    CopyAccessTokenToClipboard,
     DismissWorkspaceBanner(WorkspaceBanner),
     /// An action only registered in dev and local builds, which crashes the
     /// Triggers an app crash immediately when called.
@@ -491,6 +557,8 @@ pub enum WorkspaceAction {
         summarization_prompt: Option<String>,
         /// Initial prompt to send in the forked conversation (sent after summarization if enabled).
         initial_prompt: Option<String>,
+        /// Attachments (images/files) to send along with the initial prompt in the forked pane.
+        initial_attachments: Vec<PendingAttachment>,
         /// Where to open the forked conversation.
         destination: ForkedConversationDestination,
     },
@@ -557,9 +625,12 @@ pub enum WorkspaceAction {
     NavigatePrevPaneOrPanel,
     NavigateNextPaneOrPanel,
     ToggleProjectExplorer,
+    OpenProjectExplorer,
     ToggleGlobalSearch,
+    ToggleHiddenFiles,
     OpenGlobalSearch,
     ToggleConversationListView,
+    OpenConversationListView,
     /// Reset the AWS Bedrock login banner dismissed state (for debugging).
     #[cfg(debug_assertions)]
     DebugResetAwsBedrockLoginBannerDismissed,
@@ -700,6 +771,7 @@ impl WorkspaceAction {
             | MoveTabLeft(_)
             | MoveTabRight(_)
             | DropTab
+            | DropGroup
             | RenameTab(_)
             | ResetTabName(_)
             | RenamePane(_)
@@ -716,6 +788,24 @@ impl WorkspaceAction {
             | CloseTabsRightActiveTab
             | CloseTabGroup(_)
             | ToggleTabGroupCollapsed(_)
+            | RenameTabGroup(_)
+            | NewTabGroupFromTab(_)
+            | MoveTabToGroup { .. }
+            | RemoveTabFromGroup(_)
+            | NewTabGroupFromSelectedTabs
+            | MoveSelectedTabsToGroup { .. }
+            | RemoveSelectedTabsFromGroup
+            | UngroupTabs(_)
+            | NewTabInGroup(_)
+            | MoveTabGroupUp(_)
+            | MoveTabGroupDown(_)
+            | CloseTabsOutsideGroup(_)
+            | CloseTabsAboveGroup(_)
+            | CloseTabsBelowGroup(_)
+            | PinTab(_)
+            | UnpinTab(_)
+            | PinTabGroup(_)
+            | UnpinTabGroup(_)
             | ToggleTabColor { .. }
             | AddDefaultTab
             | AddTerminalTab { .. }
@@ -743,7 +833,8 @@ impl WorkspaceAction {
             | SummarizeAIConversation { .. }
             | OpenRepository { .. }
             | SelectTabConfig(_)
-            | ToggleVerticalTabsPanel => true, // actions that actually change a state of the state of user's
+            | ToggleVerticalTabsPanel
+            | OpenVerticalTabsPanel => true, // actions that actually change a state of the state of user's
             // workspace would most likely require a save, so that if the app gets
             // restarted, the user can continue working
             AutoupdateFailureLink
@@ -776,6 +867,8 @@ impl WorkspaceAction {
             | ToggleSyntaxHighlighting
             | OpenLaunchConfigSaveModal
             | ToggleTabRightClickMenu { .. }
+            | ToggleTabSelectionRightClickMenu { .. }
+            | ToggleTabGroupRightClickMenu { .. }
             | ToggleVerticalTabsPaneContextMenu { .. }
             | OpenNewSessionMenu { .. }
             | ToggleTabConfigsMenu
@@ -804,6 +897,8 @@ impl WorkspaceAction {
             | OpenInExplorer { .. }
             | DragTab { .. }
             | StartTabDrag
+            | DragGroup { .. }
+            | StartGroupDrag(_)
             | ToggleLeftPanel
             | ToggleWarpDrive
             | ZapDrive
@@ -822,7 +917,6 @@ impl WorkspaceAction {
             | ToggleWelcomeTips
             | CopyTextToClipboard(_)
             | CopyCurrentPath
-            | CopyAccessTokenToClipboard
             | OpenTabConfigRepoPicker { .. }
             | OpenNewWorktreeModal
             | OpenNewWorktreeRepoPicker
@@ -870,15 +964,21 @@ impl WorkspaceAction {
             | OpenMCPServerCollection
             | FocusTerminalViewInWorkspace { .. }
             | FocusPane(..)
+            | ShiftSelectTabRange { .. }
+            | ToggleTabMultiSelection { .. }
+            | ClearTabMultiSelection
             | StartNewConversation { .. }
             | UndoRevertInCodeReviewPane { .. }
             | JumpToLatestToast
             | NavigatePrevPaneOrPanel
             | NavigateNextPaneOrPanel
             | ToggleProjectExplorer
+            | OpenProjectExplorer
             | ToggleGlobalSearch
+            | ToggleHiddenFiles
             | OpenGlobalSearch
             | ToggleConversationListView
+            | OpenConversationListView
             | ToggleNotificationMailbox { .. }
             | ToggleAIDocumentPane { .. }
             | HideAIDocumentPanes

@@ -237,6 +237,8 @@ pub struct AmbientAgentTask {
     #[serde(default, deserialize_with = "deserialize_ambient_agent_source")]
     pub source: Option<AgentSource>,
     pub session_id: Option<String>,
+    /// Legacy Warp-hosted join link retained only for deserializing old task records.
+    /// Zap never exposes or follows it.
     pub session_link: Option<String>,
     pub creator: Option<TaskPrincipalInfo>,
     #[serde(default)]
@@ -264,14 +266,13 @@ pub struct AmbientAgentTask {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RunExecution<'a> {
     pub session_id: Option<&'a str>,
-    pub session_link: Option<&'a str>,
     pub request_usage: Option<&'a RequestUsage>,
     pub is_sandbox_running: bool,
 }
 
 impl RunExecution<'_> {
     pub fn has_joinable_session(&self) -> bool {
-        self.session_id.is_some() || self.session_link.is_some()
+        self.session_id.is_some()
     }
 
     pub fn is_active(&self) -> bool {
@@ -305,7 +306,6 @@ impl AmbientAgentTask {
     pub fn active_run_execution(&self) -> RunExecution<'_> {
         RunExecution {
             session_id: self.session_id.as_deref(),
-            session_link: self.session_link.as_deref().filter(|link| !link.is_empty()),
             request_usage: self.request_usage.as_ref(),
             is_sandbox_running: self.is_sandbox_running,
         }

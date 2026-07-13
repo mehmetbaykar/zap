@@ -12,6 +12,7 @@ use keybindings::KeybindingsView;
 use mcp_servers_page::MCPServersSettingsPageView;
 use nav::{SettingsNavItem, SettingsUmbrella};
 use pathfinder_geometry::vector::Vector2F;
+use scripting_page::ScriptingSettingsPageView;
 use settings_file_footer::{render_footer, SettingsFooterKind, SettingsFooterMouseStates};
 use settings_page::{
     MatchData, SettingsPage, SettingsPageEvent, SettingsPageMeta, SettingsPageViewHandle,
@@ -68,6 +69,7 @@ mod ai_page;
 mod appearance_page;
 mod cloud_sync_page;
 mod code_page;
+mod custom_inference_modal;
 mod directory_color_add_picker;
 mod execution_profile_view;
 mod features;
@@ -78,10 +80,12 @@ pub mod mcp_servers_page;
 mod nav;
 mod network_page;
 pub mod pane_manager;
+mod remove_custom_endpoint_confirmation_dialog;
 // Zap Wave 3-1: `platform` / `platform_page` were physically removed along with the
 // `OzCloudAPIKeys` settings entry + the Zap Inc cloud API key management UI.
 // Zap Wave 6-8: `referrals_page` / `show_blocks_view` were physically removed along with the
 // `ReferralsClient` / `BlockClient` traits — both pages were entirely stub Err / empty lists, with no local value.
+mod scripting_page;
 mod settings_file_footer;
 pub(crate) mod settings_page;
 // Zap Wave 7-3: `telemetry` was physically removed along with its only variant `EnvironmentsPageOpened` (ambient-agent UI).
@@ -212,6 +216,7 @@ pub enum SettingsSection {
     Features,
     Keybindings,
     ZapDrive,
+    Scripting,
     Warpify,
     /// Internal backing-page identifier for AISettingsPageView. Multiple subpages
     /// (WarpAgent, AgentProfiles, Knowledge, ThirdPartyCLIAgents) share this single
@@ -254,6 +259,7 @@ impl Display for SettingsSection {
             SettingsSection::Features => crate::t!("settings-section-features"),
             SettingsSection::Keybindings => crate::t!("settings-section-keybindings"),
             SettingsSection::ZapDrive => crate::t!("settings-section-warp-drive"),
+            SettingsSection::Scripting => "Scripting".to_string(),
             SettingsSection::Warpify => crate::t!("settings-section-warpify"),
             SettingsSection::AI => crate::t!("settings-section-ai"),
             SettingsSection::WarpAgent => crate::t!("settings-section-warp-agent"),
@@ -338,6 +344,7 @@ impl FromStr for SettingsSection {
             "Code" => Ok(Self::Code),
             "Features" => Ok(Self::Features),
             "Keyboard shortcuts" => Ok(Self::Keybindings),
+            "Scripting" => Ok(Self::Scripting),
             "Warpify" => Ok(Self::Warpify),
             "ZapDrive" | "Zap Drive" => Ok(Self::ZapDrive),
             // This page was called "Oz" at one point, keep for backward compatibility.
@@ -419,8 +426,7 @@ pub mod flags {
     pub const MOUSE_REPORTING_CONTEXT_FLAG: &str = "Mouse_Reporting";
     pub const SCROLL_REPORTING_CONTEXT_FLAG: &str = "Scroll_Reporting";
     pub const FOCUS_REPORTING_CONTEXT_FLAG: &str = "Focus_Reporting";
-    #[deprecated = "Use `SSH_TMUX_WRAPPER_CONTEXT_FLAG` for new ssh warpification logic"]
-    pub const LEGACY_SSH_WRAPPER_CONTEXT_FLAG: &str = "SSH_Wrapper";
+    pub const SSH_REUSE_CONTROL_MASTER_CONTEXT_FLAG: &str = "SSH_Reuse_Control_Master";
     pub const SSH_WARPIFICATION_CONTEXT_FLAG: &str = "SSH_Warpification";
     pub const SSH_TMUX_WRAPPER_CONTEXT_FLAG: &str = "SSH_Tmux_Wrapper";
     pub const SSH_AUTO_DISCOVERY_CONTEXT_FLAG: &str = "SSH_Auto_Discovery";
@@ -490,6 +496,14 @@ pub mod flags {
     pub const THINKING_DISPLAY_SHOW_AND_COLLAPSE: &str = "Thinking_Display_ShowAndCollapse";
     pub const THINKING_DISPLAY_ALWAYS_SHOW: &str = "Thinking_Display_AlwaysShow";
     pub const THINKING_DISPLAY_NEVER_SHOW: &str = "Thinking_Display_NeverShow";
+    pub const ORCHESTRATION_MESSAGE_DISPLAY_SHOW_AND_COLLAPSE: &str =
+        "Orchestration_Message_Display_ShowAndCollapse";
+    pub const ORCHESTRATION_MESSAGE_DISPLAY_ALWAYS_SHOW: &str =
+        "Orchestration_Message_Display_AlwaysShow";
+    pub const ORCHESTRATION_MESSAGE_DISPLAY_ALWAYS_COLLAPSE: &str =
+        "Orchestration_Message_Display_AlwaysCollapse";
+    pub const PROMPT_SUBMISSION_INTERRUPT: &str = "Prompt_Submission_Interrupt";
+    pub const PROMPT_SUBMISSION_QUEUE: &str = "Prompt_Submission_Queue";
     pub const SHOW_TERMINAL_INPUT_MESSAGE_LINE_FLAG: &str = "Show_Terminal_Input_Message_Line";
     pub const PRESERVE_INPUT_FOCUS_ON_BLOCK_SELECTION_FLAG: &str =
         "Preserve_Input_Focus_On_Block_Selection";
@@ -1032,6 +1046,7 @@ macro_rules! update_page {
             // Zap Wave 3-1: the `OzCloudAPIKeys` arm was physically removed along with the variant.
             // Zap Wave 6-8: the `SharedBlocks` / `Referrals` arms were physically removed along with the variants.
             // Zap Wave 7-3: the `CloudEnvironments` arm was physically removed along with the ambient-agent UI.
+            SettingsPageViewHandle::Scripting(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::AI(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::About(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Code(handle) => $ctx.update_view(handle, $update),
@@ -1138,6 +1153,13 @@ impl SettingsView {
         // the handle / event subscription were removed along with it.
 
         // Zap Drive page
+        let scripting_page_handle = if FeatureFlag::WarpControlCli.is_enabled() {
+            Some(ctx.add_typed_action_view(ScriptingSettingsPageView::new))
+        } else {
+            None
+        };
+
+        // Zap Drive page
         let warp_drive_page_handle =
             ctx.add_typed_action_view(warp_drive_page::WarpDriveSettingsPageView::new);
 
@@ -1195,6 +1217,10 @@ impl SettingsView {
             SettingsPage::new(warp_drive_page_handle),
         ];
 
+        if let Some(scripting_page_handle) = scripting_page_handle {
+            settings_pages.push(SettingsPage::new(scripting_page_handle));
+        }
+
         settings_pages.extend(vec![
             SettingsPage::new(mcp_servers_page_handle),
             SettingsPage::new(about_page_handle),
@@ -1232,9 +1258,20 @@ impl SettingsView {
             nav_items.insert(about_pos, SettingsNavItem::Page(SettingsSection::Network));
         }
 
+        if FeatureFlag::WarpControlCli.is_enabled() {
+            let about_pos = nav_items
+                .iter()
+                .position(|item| matches!(item, SettingsNavItem::Page(SettingsSection::About)))
+                .unwrap_or(nav_items.len());
+            nav_items.insert(about_pos, SettingsNavItem::Page(SettingsSection::Scripting));
+        }
+
         // Resolve the initial page: map internal backing-page sections to their default subpage.
         let initial_page = match page {
             Some(SettingsSection::AI) => SettingsSection::WarpAgent,
+            Some(SettingsSection::Scripting) if !FeatureFlag::WarpControlCli.is_enabled() => {
+                SettingsSection::WarpAgent
+            }
             Some(section) if section.is_subpage() => section,
             other => other.unwrap_or_default(),
         };
@@ -1769,6 +1806,9 @@ impl SettingsView {
             AISettingsPageEvent::OpenExecutionProfileEditor(profile_id) => {
                 ctx.emit(SettingsViewEvent::OpenExecutionProfileEditor(*profile_id));
             }
+            AISettingsPageEvent::ShowModal | AISettingsPageEvent::HideModal => {
+                ctx.notify();
+            }
         }
     }
 
@@ -1914,6 +1954,7 @@ impl SettingsView {
             // Zap Wave 3-1: the `OzCloudAPIKeys` arm was physically removed along with the variant.
             // Zap Wave 6-8: the `SharedBlocks` / `Referrals` arms were physically removed along with the variants.
             SettingsPageViewHandle::Warpify(v) => v.as_ref(app).should_render(app),
+            SettingsPageViewHandle::Scripting(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::AI(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::MCPServers(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Code(v) => v.as_ref(app).should_render(app),
@@ -2109,6 +2150,9 @@ impl SettingsView {
         match page_handle {
             // Zap Wave 3-1: the `OzCloudAPIKeys` modal arm was physically removed along with the UI.
             SettingsPageViewHandle::MCPServers(view) => {
+                view.read(app, |view, _| view.get_modal_content(app))
+            }
+            SettingsPageViewHandle::AI(view) => {
                 view.read(app, |view, _| view.get_modal_content(app))
             }
             // The CloudSync modal renders and centers itself within the page via Stack; not handled here

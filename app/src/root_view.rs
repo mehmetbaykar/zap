@@ -19,9 +19,7 @@ use crate::linear::LinearIssueWork;
 use crate::notebooks::manager::NotebookSource;
 use crate::settings::apply_onboarding_settings;
 use crate::settings::AISettings;
-use onboarding::{
-    AgentOnboardingEvent, AgentOnboardingView, OnboardingIntention, SelectedSettings,
-};
+use onboarding::{AgentOnboardingEvent, AgentOnboardingView, OnboardingIntention};
 
 use crate::auth::UserAuthenticationError;
 use crate::persistence::ModelEvent;
@@ -1757,7 +1755,7 @@ impl RootView {
         let themes = onboarding_theme_picker_themes();
         let onboarding_view = ctx.add_typed_action_view(move |ctx| {
             let (mut models, default_model_id) =
-                build_onboarding_models(LLMPreferences::as_ref(ctx), ctx);
+                build_onboarding_models(LLMPreferences::as_ref(ctx));
             let default_model_id =
                 apply_free_tier_default_model_override(&mut models, default_model_id, ctx);
 
@@ -1782,7 +1780,7 @@ impl RootView {
             move |_, llm_preferences, event, ctx| match event {
                 LLMPreferencesEvent::UpdatedAvailableLLMs => {
                     let (mut models, default_model_id) =
-                        build_onboarding_models(llm_preferences.as_ref(ctx), ctx);
+                        build_onboarding_models(llm_preferences.as_ref(ctx));
                     let default_model_id =
                         apply_free_tier_default_model_override(&mut models, default_model_id, ctx);
                     onboarding_view_clone.update(ctx, |onboarding_view, ctx| {

@@ -21,6 +21,7 @@ use crate::terminal::view::CliAgentRouting;
 use crate::workspace::util::get_context_target_terminal_view;
 use crate::workspace::TabBarDropTargetData;
 use crate::{code::EditorTabBarDropTargetData, pane_group::pane::ActionOrigin};
+use lsp::LspManagerModel;
 use pathfinder_color::ColorU;
 use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::vec2f;
@@ -34,6 +35,7 @@ use warp_editor::render::element::VerticalExpansionBehavior;
 use warp_util::path::LineAndColumnArg;
 use warpui::elements::Rect;
 use warpui::fonts::Style;
+use warpui::text::point::Point;
 use warpui::text_layout::ClipConfig;
 
 #[cfg(feature = "local_fs")]
@@ -74,7 +76,7 @@ use super::{
     diff_viewer::DiffViewer,
     editor::view::{CodeEditorEvent, CodeEditorView},
     editor_management::{CodeManager, CodeSource},
-    local_code_editor::{LocalCodeEditorEvent, LocalCodeEditorView},
+    local_code_editor::{LocalCodeEditorEvent, LocalCodeEditorView, ShowFindReferencesCard},
 };
 
 use crate::{send_telemetry_from_ctx, TelemetryEvent};
@@ -552,6 +554,13 @@ impl CodeView {
                     editor.with_selection_as_context(Box::new(get_context_target_terminal_view));
             }
 
+            editor = editor.with_find_references_provider(
+                ShowFindReferencesCard {
+                    editor_window_id: ctx.window_id(),
+                    parent_scrollable_position_id: None,
+                },
+                ctx,
+            );
             editor.add_footer(ctx);
             editor
         })
@@ -638,7 +647,13 @@ impl CodeView {
                 local_editor = local_editor
                     .with_selection_as_context(Box::new(get_context_target_terminal_view));
             }
-            local_editor
+            local_editor.with_find_references_provider(
+                ShowFindReferencesCard {
+                    editor_window_id: ctx.window_id(),
+                    parent_scrollable_position_id: None,
+                },
+                ctx,
+            )
         })
     }
 
@@ -801,6 +816,33 @@ impl CodeView {
                     global_buffer.discard_unsaved_changes(path, ctx);
                 });
             }
+            LocalCodeEditorEvent::GotoDefinition {
+                path,
+                line,
+                column,
+                source_server_id,
+            } => {
+                let lsp_manager = LspManagerModel::handle(ctx);
+                lsp_manager.update(ctx, |manager, _| {
+                    manager.maybe_register_external_file(path, *source_server_id);
+                });
+
+                let line_1based = *line + 1;
+                me.open_or_focus_existing(
+                    Some(BufferLocation::Local(path.clone())),
+                    Some(LineAndColumnArg {
+                        line_num: line_1based,
+                        column_num: Some(*column),
+                    }),
+                    ctx,
+                );
+                if let Some(editor) = me.tab_at(me.active_tab_index()).map(|tab| &tab.editor_view) {
+                    editor.update(ctx, |editor, ctx| {
+                        editor.cursor_at(Point::new(line_1based as u32, *column as u32), ctx);
+                    });
+                }
+                me.focus_contents(ctx);
+            }
             LocalCodeEditorEvent::CommentSaved { .. }
             | LocalCodeEditorEvent::RequestOpenComment(_)
             | LocalCodeEditorEvent::DeleteComment { .. } => {
@@ -808,6 +850,10 @@ impl CodeView {
             }
             LocalCodeEditorEvent::RunTabConfigSkill { path } => {
                 ctx.emit(CodeViewEvent::RunTabConfigSkill { path: path.clone() });
+            }
+            LocalCodeEditorEvent::OpenLspLogs { log_path } => {
+                me.open_or_focus_existing(Some(BufferLocation::Local(log_path.clone())), None, ctx);
+                me.focus_contents(ctx);
             }
             LocalCodeEditorEvent::DelayedRenderingFlushed => (),
         });

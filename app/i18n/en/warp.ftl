@@ -726,45 +726,6 @@ settings-mcp-update-modal-cancel = Cancel
 settings-mcp-update-modal-update = Update
 settings-mcp-update-modal-no-updates = No updates available
 
-# --- ANCHOR-SUB-PLATFORM (agent-settings-platform) ---
-# Strings under this anchor: from settings_view/platform_page.rs
-# Naming prefix: settings-platform-*
-settings-platform-section-title = Agent API Keys
-settings-platform-description = Create and manage API keys to allow local agents to access your Zap account.
-    For more information, visit the
-settings-platform-documentation-link = Documentation.
-settings-platform-create-button = + Create API Key
-settings-platform-modal-title-new = New API key
-settings-platform-modal-title-save = Save your key
-settings-platform-toast-deleted = API key deleted
-settings-platform-column-name = Name
-settings-platform-column-key = Key
-settings-platform-column-scope = Scope
-settings-platform-column-created = Created
-settings-platform-column-last-used = Last used
-settings-platform-column-expires-at = Expires at
-settings-platform-value-never = Never
-settings-platform-scope-personal = Personal
-settings-platform-scope-team = Team
-settings-platform-zero-state-title = No API Keys
-settings-platform-zero-state-description = Create a key to manage external access to Zap
-settings-platform-create-api-key-description-personal = This API key is tied to your user and can make requests against your Zap account.
-settings-platform-create-api-key-description-team = This API key is tied to your team and can make requests on behalf of your team.
-settings-platform-create-api-key-name-placeholder = Zap API Key
-settings-platform-create-api-key-expiration-one-day = 1 day
-settings-platform-create-api-key-expiration-thirty-days = 30 days
-settings-platform-create-api-key-expiration-ninety-days = 90 days
-settings-platform-create-api-key-label-type = Type
-settings-platform-create-api-key-label-expiration = Expiration
-settings-platform-create-api-key-error-no-current-team = Unable to create a team API key because there is no current team.
-settings-platform-create-api-key-error-create-failed = Failed to create API key. Please try again.
-settings-platform-create-api-key-secret-once = This secret key is shown only once. Copy and store it securely.
-settings-platform-create-api-key-copied = Copied
-settings-platform-create-api-key-done = Done
-settings-platform-create-api-key-creating = Creating…
-settings-platform-create-api-key-create = Create key
-settings-platform-create-api-key-toast-secret-copied = Secret key copied.
-
 # --- ANCHOR-SUB-KEYBINDINGS (agent-settings-keybindings) ---
 settings-keybindings-search-placeholder = Search by name or by keys (ex. "cmd d")
 settings-keybindings-conflict-warning = This shortcut conflicts with other keybinds
@@ -2121,7 +2082,6 @@ keybinding-desc-workspace-toggle-sync-inputs-all-tabs = Toggle Synchronizing All
 # Workspace a11y / debug binding desc
 keybinding-desc-workspace-a11y-concise = [a11y] Set concise accessibility announcements
 keybinding-desc-workspace-a11y-verbose = [a11y] Set verbose accessibility announcements
-keybinding-desc-workspace-copy-access-token = Copy access token to clipboard
 
 # Env var collection binding desc
 keybinding-desc-env-var-collection-close = Close
@@ -2136,7 +2096,6 @@ keybinding-desc-terminal-show-history = Show History
 keybinding-desc-terminal-ask-ai-selection = Ask Zap AI about Selection
 keybinding-desc-terminal-ask-ai-last-block = Ask Zap AI about last block
 keybinding-desc-terminal-ask-ai = Ask Zap AI
-keybinding-desc-terminal-load-agent-conversation = Load agent mode conversation (from debug link in clipboard)
 keybinding-desc-terminal-toggle-session-recording = Toggle PTY Recording for Session
 
 # Notebook editor extra

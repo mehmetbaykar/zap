@@ -395,11 +395,22 @@ diesel::table! {
 }
 
 diesel::table! {
+    tab_groups (id) {
+        id -> Integer,
+        window_id -> Integer,
+        name -> Nullable<Text>,
+        color -> Nullable<Text>,
+        collapsed -> Bool,
+    }
+}
+
+diesel::table! {
     tabs (id) {
         id -> Integer,
         window_id -> Integer,
         custom_title -> Nullable<Text>,
         color -> Nullable<Text>,
+        tab_group_id -> Nullable<Integer>,
     }
 }
 
@@ -507,6 +518,25 @@ diesel::table! {
 }
 
 diesel::table! {
+    workspace_language_server (id) {
+        id -> Integer,
+        workspace_id -> Integer,
+        language_server_name -> Text,
+        enabled -> Text,
+    }
+}
+
+diesel::table! {
+    workspace_metadata (id) {
+        id -> Integer,
+        repo_path -> Text,
+        navigated_ts -> Nullable<Timestamp>,
+        modified_ts -> Nullable<Timestamp>,
+        queried_ts -> Nullable<Timestamp>,
+    }
+}
+
+diesel::table! {
     workspace_teams (id) {
         id -> Integer,
         workspace_server_uid -> Text,
@@ -540,9 +570,12 @@ diesel::joinable!(pane_nodes -> tabs (tab_id));
 diesel::joinable!(panels -> tabs (tab_id));
 diesel::joinable!(ssh_servers -> ssh_onekey_credentials (credential_id));
 diesel::joinable!(ssh_servers -> ssh_nodes (node_id));
+diesel::joinable!(tab_groups -> windows (window_id));
+diesel::joinable!(tabs -> tab_groups (tab_group_id));
 diesel::joinable!(tabs -> windows (window_id));
 diesel::joinable!(team_members -> teams (team_id));
 diesel::joinable!(team_settings -> teams (team_id));
+diesel::joinable!(workspace_language_server -> workspace_metadata (workspace_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     ambient_agent_panes,
@@ -551,11 +584,13 @@ diesel::allow_tables_to_appear_in_same_query!(
     pane_leaves,
     pane_nodes,
     panels,
+    tab_groups,
     tabs,
     windows,
 );
 diesel::allow_tables_to_appear_in_same_query!(code_pane_tabs, code_panes,);
 diesel::allow_tables_to_appear_in_same_query!(object_metadata, object_permissions,);
 diesel::allow_tables_to_appear_in_same_query!(team_members, team_settings, teams,);
+diesel::allow_tables_to_appear_in_same_query!(workspace_language_server, workspace_metadata,);
 diesel::allow_tables_to_appear_in_same_query!(sync_meta,);
 diesel::allow_tables_to_appear_in_same_query!(ssh_nodes, ssh_onekey_credentials, ssh_servers,);

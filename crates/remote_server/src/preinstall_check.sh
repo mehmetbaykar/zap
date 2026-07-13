@@ -13,7 +13,7 @@
 # etc.).
 #
 # Since the binary is static, libc probing is no longer used as a gate; it is
-# kept only as telemetry.
+# kept only as local diagnostics.
 
 set -u
 
@@ -25,7 +25,7 @@ required_glibc="2.17"
 echo "required_glibc=${required_glibc}"
 
 # 1. Identify the libc family, and in the glibc case the version (pure
-#    telemetry, does not affect status).
+#    diagnostics, does not affect status).
 libc_family="unknown"
 libc_version=""
 

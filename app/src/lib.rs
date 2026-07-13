@@ -1,4 +1,3 @@
-// Suppress warnings about rustdoc style.
 #![allow(clippy::doc_lazy_continuation)]
 // Orphan code left over after trimming upstream Warp is kept for now; suppress dead_code warnings
 // uniformly.
@@ -45,7 +44,11 @@ pub mod i18n;
 mod input_classifier;
 mod interval_timer;
 mod linear;
+#[cfg(feature = "local_fs")]
+mod local_control;
 mod local_managed_secrets;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod login_item;
 mod menu;
 mod modal;
 mod network;
@@ -144,8 +147,8 @@ use ai::agent_conversations_model::AgentConversationsModel;
 use ai::blocklist::{BlocklistAIHistoryModel, BlocklistAIPermissions};
 use ai::execution_profiles::editor::ExecutionProfileEditorManager;
 use ai::execution_profiles::profiles::AIExecutionProfilesModel;
-use auth::AuthStateProvider;
-use auth::{AuthManager, AuthState};
+use ai::metadata_project_rules::read_project_rule_contents;
+use auth::{AuthManager, AuthState, AuthStateProvider};
 use code::editor_management::CodeManager;
 use code::opened_files::OpenedFilesModel;
 use code_review::GlobalCodeReviewModel;
@@ -179,11 +182,16 @@ pub use persistence::testing as sqlite_testing;
 use ::settings::{Setting, ToggleableSetting};
 pub use warp_core::errors::{report_error, report_if_error};
 // Re-export the debounce function to simplify imports.
-pub use warp_core::r#async::debounce;
-
 #[cfg(feature = "plugin_host")]
 pub use plugin::{run_plugin_host, PLUGIN_HOST_FLAG};
-use warp_core::user_preferences::GetUserPreferences as _;
+pub use warp_core::r#async::debounce;
+// Re-export the safe logging macros at the crate root level for backwards compatibility
+pub use warp_core::{safe_debug, safe_error, safe_info, safe_warn};
+#[cfg(feature = "local_fs")]
+use warp_files::FileModel;
+use warp_logging::LogDestination;
+use warp_managed_secrets::ManagedSecretManager;
+use warpui::integration::TestDriver;
 use warpui::modals::{AlertDialogWithCallbacks, AppModalCallback};
 use warpui::platform::app::{ApproveTerminateResult, TerminationRequestSource};
 use window_settings::WindowSettings;
@@ -196,6 +204,7 @@ use crate::ai::facts::manager::AIFactManager;
 use crate::ai::llms::LLMPreferences;
 use crate::ai::mcp::MCPGalleryManager;
 use crate::ai::mcp::TemplatableMCPServerManager;
+use crate::ai::persisted_workspace::PersistedWorkspace;
 use crate::ai::restored_conversations::RestoredAgentConversations;
 use crate::ai::skills::SkillManager;
 use crate::autoupdate::{AutoupdateState, RelaunchModel};
@@ -204,6 +213,8 @@ use crate::cloud_object::model::actions::ObjectActions;
 use crate::cloud_object::model::view::ObjectStoreViewModel;
 use crate::cloud_object::update_manager::UpdateManager;
 use crate::code::global_buffer_model::GlobalBufferModel;
+#[cfg(feature = "local_fs")]
+use crate::code::language_server_shutdown_manager::LanguageServerShutdownManager;
 use crate::context_chips::prompt::Prompt;
 use crate::default_terminal::DefaultTerminal;
 use crate::drive::export::ExportManager;
@@ -254,10 +265,9 @@ use terminal::input;
 use terminal::session_settings::SessionSettings;
 use url::Url;
 use warp_core::execution_mode::{AppExecutionMode, ExecutionMode};
-use warp_managed_secrets::ManagedSecretManager;
 use workspace::sync_inputs::SyncedInputState;
 
-use warpui::{integration::TestDriver, App, AssetProvider, Event};
+use warpui::{App, Event};
 
 use self::features::FeatureFlag;
 use crate::app_state::AppState;
@@ -277,8 +287,6 @@ use crate::terminal::CustomSecretRegexUpdater;
 use crate::util::bindings::is_binding_cross_platform;
 use crate::workspace::{PaneViewLocator, Workspace, WorkspaceAction};
 use crate::workspaces::user_workspaces::{UserWorkspaces, UserWorkspacesEvent};
-use warp_logging::LogDestination;
-
 // Re-export the send_telemetry_from_ctx macro at the crate root level
 pub use warp_core::send_telemetry_from_app_ctx;
 pub use warp_core::send_telemetry_from_ctx;
@@ -286,12 +294,7 @@ pub use warp_core::send_telemetry_on_executor;
 pub use warp_core::send_telemetry_sync_from_app_ctx;
 pub use warp_core::send_telemetry_sync_from_ctx;
 
-// Re-export the safe logging macros at the crate root level for backwards compatibility
-pub use warp_core::{safe_debug, safe_error, safe_info, safe_warn};
-
 use crate::antivirus::AntivirusInfo;
-#[cfg(feature = "local_fs")]
-use warp_files::FileModel;
 use warpui::platform::TerminationMode;
 use warpui::windowing::state::ApplicationStage;
 use warpui::{AppContext, SingletonEntity, WindowId};
@@ -304,12 +307,7 @@ pub static ASSETS: Assets = Assets;
 #[allow(clippy::large_enum_variant)]
 pub enum LaunchMode {
     /// Run the regular GUI application.
-    App {
-        args: warp_cli::AppArgs,
-        /// API key for server authentication, if provided via `--api-key` or `WARP_API_KEY`.
-        /// Only used on dogfood channels.
-        api_key: Option<String>,
-    },
+    App { args: warp_cli::AppArgs },
 
     /// Run the Zap command-line SDK.
     CommandLine {
@@ -333,11 +331,7 @@ pub enum LaunchMode {
 
     /// Remote server daemon — long-lived headless process serving remote
     /// connections via a Unix domain socket.
-    RemoteServerDaemon {
-        /// Stable identity key used to partition the daemon's socket/PID
-        /// directory on the remote host.
-        identity_key: String,
-    },
+    RemoteServerDaemon,
 }
 
 impl LaunchMode {
@@ -347,7 +341,7 @@ impl LaunchMode {
             LaunchMode::CommandLine { .. }
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
-            | LaunchMode::RemoteServerDaemon { .. } => Cow::Owned(warp_cli::AppArgs::default()),
+            | LaunchMode::RemoteServerDaemon => Cow::Owned(warp_cli::AppArgs::default()),
         }
     }
 
@@ -361,7 +355,7 @@ impl LaunchMode {
             LaunchMode::App { .. }
             | LaunchMode::CommandLine { .. }
             | LaunchMode::RemoteServerProxy
-            | LaunchMode::RemoteServerDaemon { .. } => false,
+            | LaunchMode::RemoteServerDaemon => false,
         }
     }
 
@@ -371,7 +365,7 @@ impl LaunchMode {
             LaunchMode::App { .. }
             | LaunchMode::CommandLine { .. }
             | LaunchMode::RemoteServerProxy
-            | LaunchMode::RemoteServerDaemon { .. } => None,
+            | LaunchMode::RemoteServerDaemon => None,
         }
     }
 
@@ -390,8 +384,7 @@ impl LaunchMode {
             LaunchMode::Test { .. } => ExecutionMode::App,
             // RemoteServerProxy is a thin byte bridge; Sdk is the closest match.
             LaunchMode::RemoteServerProxy => ExecutionMode::Sdk,
-            // RemoteServerDaemon gets its own mode for distinct Sentry tagging.
-            LaunchMode::RemoteServerDaemon { .. } => ExecutionMode::RemoteServerDaemon,
+            LaunchMode::RemoteServerDaemon => ExecutionMode::RemoteServerDaemon,
         }
     }
 
@@ -401,7 +394,7 @@ impl LaunchMode {
             LaunchMode::App { .. }
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
-            | LaunchMode::RemoteServerDaemon { .. } => false,
+            | LaunchMode::RemoteServerDaemon => false,
         }
     }
 
@@ -412,7 +405,7 @@ impl LaunchMode {
                 CliCommand::Agent(AgentCommand::Run(args)) => !args.gui,
                 _ => true,
             },
-            LaunchMode::RemoteServerProxy | LaunchMode::RemoteServerDaemon { .. } => true,
+            LaunchMode::RemoteServerProxy | LaunchMode::RemoteServerDaemon => true,
             LaunchMode::App { .. } | LaunchMode::Test { .. } => false,
         }
     }
@@ -435,7 +428,7 @@ impl LaunchMode {
             LaunchMode::CommandLine { .. }
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
-            | LaunchMode::RemoteServerDaemon { .. } => false,
+            | LaunchMode::RemoteServerDaemon => false,
         }
     }
 
@@ -446,7 +439,7 @@ impl LaunchMode {
             LaunchMode::App { .. }
             | LaunchMode::CommandLine { .. }
             | LaunchMode::Test { .. }
-            | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RemoteServerDaemon
             | LaunchMode::RemoteServerProxy => true,
         }
     }
@@ -457,7 +450,7 @@ impl LaunchMode {
             LaunchMode::App { .. }
             | LaunchMode::CommandLine { .. }
             | LaunchMode::Test { .. }
-            | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RemoteServerDaemon
             | LaunchMode::RemoteServerProxy => true,
         }
     }
@@ -474,7 +467,7 @@ impl LaunchMode {
             }
             // Proxy must log to stderr because stdout is the protocol channel.
             LaunchMode::RemoteServerProxy => Some(LogDestination::Stderr),
-            LaunchMode::RemoteServerDaemon { .. } => Some(LogDestination::File),
+            LaunchMode::RemoteServerDaemon => Some(LogDestination::File),
             LaunchMode::App { .. } | LaunchMode::Test { .. } => None,
         }
     }
@@ -550,6 +543,11 @@ pub fn run() -> Result<()> {
 
     // Ensure feature flags are initialized before parsing command-line arguments.
     features::init_feature_flags();
+    if let Some(args) = warp_cli::local_control::ControlArgs::from_control_mode_env() {
+        #[cfg(windows)]
+        warp_util::windows::attach_to_parent_console();
+        warp_cli::local_control::run_and_exit(args);
+    }
 
     // Parse command-line arguments.
     let args = warp_cli::Args::from_env();
@@ -587,19 +585,14 @@ pub fn run() -> Result<()> {
                 }
             }
             #[cfg(not(target_family = "wasm"))]
-            warp_cli::Command::Worker(warp_cli::WorkerCommand::RemoteServerProxy(args)) => {
+            warp_cli::Command::Worker(warp_cli::WorkerCommand::RemoteServerProxy) => {
                 init_common(&LaunchMode::RemoteServerProxy, None)?;
-                return crate::remote_server::run_proxy(args.identity_key.clone());
+                return crate::remote_server::run_proxy();
             }
             #[cfg(not(target_family = "wasm"))]
-            warp_cli::Command::Worker(warp_cli::WorkerCommand::RemoteServerDaemon(args)) => {
-                init_common(
-                    &LaunchMode::RemoteServerDaemon {
-                        identity_key: args.identity_key.clone(),
-                    },
-                    None,
-                )?;
-                return crate::remote_server::run_daemon(args.identity_key.clone());
+            warp_cli::Command::Worker(warp_cli::WorkerCommand::RemoteServerDaemon) => {
+                init_common(&LaunchMode::RemoteServerDaemon, None)?;
+                return crate::remote_server::run_daemon();
             }
             #[cfg(not(target_family = "wasm"))]
             warp_cli::Command::Worker(warp_cli::WorkerCommand::RipgrepSearch {
@@ -648,7 +641,6 @@ pub fn run() -> Result<()> {
                     command: cmd.as_ref().clone(),
                     global_options: GlobalOptions {
                         output_format: args.output_format(),
-                        api_key: args.api_key().cloned(),
                     },
                     debug: args.debug(),
                     is_sandboxed,
@@ -671,10 +663,8 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
-    let api_key = args.api_key().cloned();
     run_internal(LaunchMode::App {
         args: args.into_app_args(),
-        api_key,
     })
 }
 
@@ -775,7 +765,6 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
         log::info!("Triggering SQLite prewarm in background...");
         crate::persistence::prewarm_db_in_background();
     }
-
     // For wasm builds we have this special case to parse out the intent
     // from the url that is used to visite the app on web.
     #[cfg(target_family = "wasm")]
@@ -882,15 +871,16 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
     let pty_spawner =
         terminal::local_tty::spawner::PtySpawner::new().context("Failed to create pty spawner")?;
 
+    let callbacks = app_callbacks(launch_mode.is_integration_test());
     let mut app_builder = if launch_mode.is_headless() {
         warpui::platform::AppBuilder::new_headless(
-            app_callbacks(launch_mode.is_integration_test()),
+            callbacks,
             Box::new(ASSETS),
             launch_mode.take_test_driver(),
         )
     } else {
         warpui::platform::AppBuilder::new(
-            app_callbacks(launch_mode.is_integration_test()),
+            callbacks,
             Box::new(ASSETS),
             launch_mode.take_test_driver(),
         )
@@ -1029,10 +1019,9 @@ pub(crate) fn initialize_app(
     // written into pre_init_errors.
     let data_domain = ChannelState::data_domain();
 
-    // Daemon auth arrives through the client handshake, so avoid platform keychains that may
-    // require an interactive unlock prompt. Other headless modes still use secure storage for
-    // persisted login and BYO provider credentials.
-    if matches!(launch_mode, LaunchMode::RemoteServerDaemon { .. }) {
+    // The daemon is headless, so avoid platform keychains that may require an interactive unlock
+    // prompt. Other headless modes still use secure storage for persisted BYO provider credentials.
+    if matches!(launch_mode, LaunchMode::RemoteServerDaemon) {
         warpui_extras::secure_storage::register_unavailable(ctx);
     } else {
         // Register an implementation of the secure storage service.
@@ -1068,19 +1057,7 @@ pub(crate) fn initialize_app(
         ctx.set_zoom_factor(WindowSettings::as_ref(ctx).zoom_level.as_zoom_factor());
     }
 
-    // Extract API key from command line options, if applicable.
-    let api_key = match launch_mode {
-        LaunchMode::CommandLine { global_options, .. } => global_options.api_key.clone(),
-        LaunchMode::App { api_key, .. } if ChannelState::channel().is_dogfood() => api_key.clone(),
-        _ => None,
-    };
-    let api_key = if FeatureFlag::APIKeyAuthentication.is_enabled() {
-        api_key
-    } else {
-        None
-    };
-
-    let auth_state = Arc::new(AuthState::initialize(ctx, api_key));
+    let auth_state = Arc::new(AuthState::initialize(ctx, None));
     timer.mark_interval_end("AUTH_MANAGER_SET_USER");
 
     let update_http_client = Arc::new(http_client::Client::new());
@@ -1100,11 +1077,7 @@ pub(crate) fn initialize_app(
     // If any part of sqlite initialization fails, we just don't do session restoration (i.e.
     // feature degradation).
     let persistence_scope = match launch_mode {
-        LaunchMode::RemoteServerDaemon { identity_key } => {
-            persistence::PersistenceScope::RemoteServerDaemon {
-                identity_key: identity_key.clone(),
-            }
-        }
+        LaunchMode::RemoteServerDaemon => persistence::PersistenceScope::RemoteServerDaemon,
         LaunchMode::App { .. }
         | LaunchMode::CommandLine { .. }
         | LaunchMode::RemoteServerProxy
@@ -1155,7 +1128,6 @@ pub(crate) fn initialize_app(
         mut app_state,
         mut command_history,
         mut restored_user_profiles,
-        mut time_of_next_force_object_refresh,
         mut object_actions,
         mut experiments,
         mut ai_queries,
@@ -1175,7 +1147,6 @@ pub(crate) fn initialize_app(
                 Some(sqlite_data.app_state),
                 sqlite_data.command_history,
                 sqlite_data.user_profiles,
-                sqlite_data.time_of_next_force_object_refresh,
                 sqlite_data.object_actions,
                 sqlite_data.experiments,
                 sqlite_data.ai_queries,
@@ -1206,18 +1177,16 @@ pub(crate) fn initialize_app(
                 Default::default(),
                 Default::default(),
                 Default::default(),
-                Default::default(),
             )
         });
 
-    if matches!(launch_mode, LaunchMode::RemoteServerDaemon { .. }) {
+    if matches!(launch_mode, LaunchMode::RemoteServerDaemon) {
         cloud_objects = Default::default();
         cached_workspaces = Default::default();
         current_workspace_uid = None;
         app_state = None;
         command_history = Default::default();
         restored_user_profiles = Default::default();
-        time_of_next_force_object_refresh = None;
         object_actions = Default::default();
         experiments = Default::default();
         ai_queries = Default::default();
@@ -1344,11 +1313,8 @@ pub(crate) fn initialize_app(
     ctx.add_singleton_model(|_ctx| SyncedInputState::new());
 
     ctx.add_singleton_model(remote_server::manager::RemoteServerManager::new);
-    // Zap Wave 6-1: the `remote_server::wire_auth_token_rotation(ctx)` call was physically deleted
-    // along with the server API token rotation event + the `wire_auth_token_rotation` function body.
     #[cfg(not(target_family = "wasm"))]
     ctx.add_singleton_model(remote_server::codebase_index_model::RemoteCodebaseIndexModel::new);
-
     log::info!(
         "Starting warp with channel state {} and version {:?}",
         ChannelState::debug_str(),
@@ -1449,6 +1415,18 @@ pub(crate) fn initialize_app(
     #[cfg(not(target_family = "wasm"))]
     {
         ctx.add_singleton_model(DirectoryWatcher::new);
+        // Register the skill provider directories as force-included paths so
+        // the gitignore-pruning watch descend filter still watches gitignored
+        // skill directories (e.g. `.agents/skills`) for `Repository`
+        // subscribers (LSP, MCP). Registered before any repository begins
+        // watching so it gates descent on the very first registration.
+        DirectoryWatcher::handle(ctx).update(ctx, |watcher, _| {
+            watcher.register_force_included_paths(
+                ::ai::skills::SKILL_PROVIDER_DEFINITIONS
+                    .iter()
+                    .map(|provider| provider.skills_path.clone()),
+            );
+        });
         ctx.add_singleton_model(|_| DetectedRepositories::default());
         if let Some(home_dir) = dirs::home_dir() {
             ctx.add_singleton_model(|ctx| HomeDirectoryWatcher::new(home_dir, ctx));
@@ -1467,14 +1445,20 @@ pub(crate) fn initialize_app(
             });
         }
 
-        let emit_incremental_updates = matches!(launch_mode, LaunchMode::RemoteServerDaemon { .. });
+        let emit_incremental_updates = matches!(launch_mode, LaunchMode::RemoteServerDaemon);
         ctx.add_singleton_model(|ctx| {
             let model = if emit_incremental_updates {
                 RepoMetadataModel::new_with_incremental_updates(ctx)
             } else {
                 RepoMetadataModel::new(ctx)
             };
-            model.register_ignored_path_interests(
+            model.register_force_included_paths(
+                ::ai::skills::SKILL_PROVIDER_DEFINITIONS
+                    .iter()
+                    .map(|provider| provider.skills_path.clone()),
+                ctx,
+            );
+            model.set_project_skill_provider_paths(
                 ::ai::skills::SKILL_PROVIDER_DEFINITIONS
                     .iter()
                     .map(|provider| provider.skills_path.clone()),
@@ -1506,9 +1490,10 @@ pub(crate) fn initialize_app(
         });
     }
 
+    #[cfg(feature = "local_fs")]
     {
-        use code_review::git_status_update::GitStatusUpdateModel;
-        ctx.add_singleton_model(|_| GitStatusUpdateModel::new());
+        use code_review::git_repo_model::GitRepoModels;
+        ctx.add_singleton_model(|_| GitRepoModels::new());
     }
 
     ctx.add_singleton_model(|ctx| {
@@ -1556,9 +1541,6 @@ pub(crate) fn initialize_app(
     // Zap Wave 7-2: `settings_view::update_environment_form::init` was physically deleted along with
     // the cloud ambient agent main subsystem.
     env_vars::env_var_collection_block::init(ctx);
-    terminal::ssh::install_tmux::init(ctx);
-    terminal::ssh::warpify::init(ctx);
-    terminal::ssh::error::init(ctx);
     context_chips::display_menu::init(ctx);
     context_chips::node_version_popup::init(ctx);
     env_vars::view::env_var_collection::init(ctx);
@@ -1606,6 +1588,8 @@ pub(crate) fn initialize_app(
         }
         model
     });
+    #[cfg(feature = "local_fs")]
+    ctx.add_singleton_model(|_| LanguageServerShutdownManager::new());
     #[cfg(windows)]
     ctx.add_singleton_model(util::traffic_lights::windows::RendererState::new);
 
@@ -1631,11 +1615,7 @@ pub(crate) fn initialize_app(
         .collect::<Vec<_>>();
 
     let object_store_model = ctx.add_singleton_model(|_ctx| {
-        ObjectStoreModel::new(
-            persistence_writer.sender(),
-            cloud_objects,
-            time_of_next_force_object_refresh,
-        )
+        ObjectStoreModel::new(persistence_writer.sender(), cloud_objects)
     });
 
     // Zap (Wave 4): after SyncQueue was fully deleted, there is no longer `unsynced_actions` /
@@ -1717,7 +1697,6 @@ pub(crate) fn initialize_app(
     // Notification-center singleton model: must be registered after BlocklistAIHistoryModel and
     // CLIAgentSessionsModel, because its constructor subscribes to those two models.
     ctx.add_singleton_model(crate::notifications::model::NotificationsModel::new);
-
     ctx.add_singleton_model(|_| UserProfiles::new(restored_user_profiles));
 
     ctx.add_singleton_model(|_| ObjectActions::new(object_actions));
@@ -1764,6 +1743,9 @@ pub(crate) fn initialize_app(
 
     // SkillManager is used to cache SKILL.md files for all active terminal views and their working directories
     ctx.add_singleton_model(SkillManager::new);
+    ctx.add_singleton_model(PersistedWorkspace::new);
+    #[cfg(all(not(target_family = "wasm"), feature = "local_fs"))]
+    ai::skills::wire_remote_bundled_skills(ctx);
 
     // ObjectStoreViewModel subscribes to UpdateManager so that it can be notified when objects are
     // created or mutated in the local object store.
@@ -1847,23 +1829,16 @@ pub(crate) fn initialize_app(
 
     ctx.add_singleton_model(move |_| timer);
 
-    let is_ssh_tmux_wrapper_enabled = ctx
-        .private_user_preferences()
-        .read_value("SshTmuxWrapperOverride")
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok());
-
-    if let Some(is_ssh_tmux_wrapper_enabled) = is_ssh_tmux_wrapper_enabled {
-        FeatureFlag::SSHTmuxWrapper.set_user_preference(is_ssh_tmux_wrapper_enabled);
-    }
-
     ctx.add_singleton_model(|ctx| AIExecutionProfilesModel::new(launch_mode, ctx));
 
     ctx.add_singleton_model(DefaultTerminal::new);
 
     ctx.add_singleton_model(|ctx| {
-        ProjectContextModel::new_from_persisted(persisted_project_rules, ctx)
+        ProjectContextModel::new_from_persisted(
+            persisted_project_rules,
+            read_project_rule_contents,
+            ctx,
+        )
     });
 
     // Index global rules (e.g. ~/.agents/AGENTS.md) on a background task so
@@ -1897,6 +1872,15 @@ pub(crate) fn initialize_app(
         ];
         http_server::HttpServer::new(routers, ctx)
     });
+    #[cfg(feature = "local_fs")]
+    if matches!(
+        launch_mode,
+        LaunchMode::App { .. } | LaunchMode::Test { .. }
+    ) && FeatureFlag::WarpControlCli.is_enabled()
+    {
+        ctx.add_singleton_model(local_control::LocalControlBridge::new);
+        ctx.add_singleton_model(local_control::LocalControlServer::new);
+    }
 
     app_state
 }
@@ -2338,6 +2322,7 @@ fn is_cloud_agent_web_home_launch_url(url: &Url) -> bool {
             .query_pairs()
             .any(|(key, value)| key == "source" && value == "web_home")
 }
+
 fn launch(ctx: &mut warpui::AppContext, app_state: Option<AppState>, launch_mode: LaunchMode) {
     IntervalTimer::handle(ctx).update(ctx, |timer, _ctx| {
         timer.mark_interval_end("APP_LAUNCHED");
@@ -2380,6 +2365,20 @@ fn launch(ctx: &mut warpui::AppContext, app_state: Option<AppState>, launch_mode
             IntervalTimer::handle(ctx).update(ctx, |timer, _| {
                 timer.mark_interval_end("WINDOWS_CREATED");
             });
+
+            // TODO(ben): We should skip this for LaunchMode::Test.
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            {
+                use crate::login_item::maybe_register_app_as_login_item;
+                use crate::terminal::general_settings::GeneralSettingsChangedEvent;
+                // Note that we put this here because it depends on settings already having been initialized.
+                ctx.subscribe_to_model(&GeneralSettings::handle(ctx), |_, event, ctx| {
+                    if matches!(event, GeneralSettingsChangedEvent::LoginItem { .. }) {
+                        maybe_register_app_as_login_item(ctx);
+                    }
+                });
+                maybe_register_app_as_login_item(ctx);
+            }
         }
         #[cfg_attr(target_family = "wasm", allow(unused_variables))]
         LaunchMode::CommandLine {
@@ -2402,7 +2401,7 @@ fn launch(ctx: &mut warpui::AppContext, app_state: Option<AppState>, launch_mode
         // RemoteServerProxy and RemoteServerDaemon never go through
         // run_internal / launch; they call init_common directly and then
         // their own entry points.
-        LaunchMode::RemoteServerProxy | LaunchMode::RemoteServerDaemon { .. } => {
+        LaunchMode::RemoteServerProxy | LaunchMode::RemoteServerDaemon => {
             log::error!("Proxy/Daemon modes should not use the launch() path");
             std::process::exit(1);
         }
@@ -2469,8 +2468,6 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::Changelog,
         #[cfg(feature = "crash_reporting")]
         FeatureFlag::CrashReporting,
-        #[cfg(feature = "record_app_active_events")]
-        FeatureFlag::RecordAppActiveEvents,
         #[cfg(feature = "runtime_feature_flags")]
         FeatureFlag::RuntimeFeatureFlags,
         #[cfg(feature = "sequential_storage")]
@@ -2507,8 +2504,6 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::AgentModeWorkflows,
         #[cfg(feature = "ai_rules")]
         FeatureFlag::AIRules,
-        #[cfg(feature = "ssh_tmux_wrapper")]
-        FeatureFlag::SSHTmuxWrapper,
         #[cfg(feature = "onekey_prompt")]
         FeatureFlag::OneKeyPrompt,
         #[cfg(feature = "less_horizontal_terminal_padding")]
@@ -2572,8 +2567,6 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::CommandCorrectionKey,
         #[cfg(feature = "predict_am_queries")]
         FeatureFlag::PredictAMQueries,
-        #[cfg(feature = "remote_codebase_indexing")]
-        FeatureFlag::RemoteCodebaseIndexing,
         #[cfg(feature = "use_tantivy_search")]
         FeatureFlag::UseTantivySearch,
         #[cfg(feature = "grep_tool")]
@@ -2648,8 +2641,6 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::MultiProfile,
         #[cfg(feature = "conversation_artifacts")]
         FeatureFlag::ConversationArtifacts,
-        #[cfg(feature = "sync_ambient_plans")]
-        FeatureFlag::SyncAmbientPlans,
         #[cfg(feature = "get_started_tab")]
         FeatureFlag::GetStartedTab,
         #[cfg(feature = "welcome_tab")]
@@ -2695,10 +2686,6 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         // entry points.
         #[cfg(feature = "code_launch_modal")]
         FeatureFlag::CodeLaunchModal,
-        #[cfg(feature = "api_key_authentication")]
-        FeatureFlag::APIKeyAuthentication,
-        #[cfg(feature = "api_key_management")]
-        FeatureFlag::APIKeyManagement,
         #[cfg(feature = "mcp_oauth")]
         FeatureFlag::McpOauth,
         #[cfg(feature = "file_based_mcp")]
@@ -2837,8 +2824,6 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::HOAOnboardingFlow,
         #[cfg(feature = "git_operations_in_code_review")]
         FeatureFlag::GitOperationsInCodeReview,
-        #[cfg(feature = "hoa_remote_control")]
-        FeatureFlag::HOARemoteControl,
         #[cfg(feature = "codex_notifications")]
         FeatureFlag::CodexNotifications,
         #[cfg(feature = "trim_trailing_blank_lines")]

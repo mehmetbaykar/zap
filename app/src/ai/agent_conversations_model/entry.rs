@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use warp_cli::agent::Harness;
-use warp_core::features::FeatureFlag;
 use warpui::{AppContext, SingletonEntity};
 
 use super::{
@@ -45,7 +44,7 @@ impl AgentConversationEntryId {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentConversationNavigationSubject {
     Entry(AgentConversationEntryId),
-    #[allow(dead_code)]
+    /// Legacy identity accepted for compatibility; Zap never resolves it through Warp's servers.
     ServerToken(ServerConversationToken),
 }
 
@@ -313,14 +312,6 @@ fn task_session_id(task: &AmbientAgentTask) -> Option<SessionId> {
 }
 
 fn task_session_status(task: &AmbientAgentTask) -> SessionStatus {
-    if FeatureFlag::CloudConversations.is_enabled() {
-        return if task.active_run_execution().session_link.is_some() {
-            SessionStatus::Available
-        } else {
-            SessionStatus::Unavailable
-        };
-    }
-
     if task.active_run_execution().session_id.is_some() {
         SessionStatus::Available
     } else if (Utc::now() - task.created_at) > SESSION_EXPIRATION_TIME {
@@ -414,12 +405,7 @@ pub(super) fn entry_for_task(
         .active_execution_session_id()
         .and_then(parse_session_id)
         .is_some();
-    let can_open = has_active_session_id
-        || local_conversation_id.is_some()
-        || server_conversation_token.is_some();
-    let can_copy_link = task.has_active_execution()
-        && task.active_run_execution().session_link.is_some()
-        || server_conversation_token.is_some();
+    let can_open = has_active_session_id || local_conversation_id.is_some();
 
     AgentConversationEntry {
         id: AgentConversationEntryId::AmbientRun(task.task_id),
@@ -470,17 +456,13 @@ pub(super) fn entry_for_task(
                 .is_some_and(|id| history_model.conversation(&id).is_some()),
             has_local_persisted_data: conversation_metadata
                 .is_some_and(|metadata| metadata.is_restorable_locally),
-            has_cloud_data: conversation_metadata
-                .is_some_and(|metadata| metadata.server_conversation_token.is_some())
-                || task.conversation_id().is_some(),
+            has_cloud_data: false,
             has_ambient_run: true,
         },
         capabilities: AgentConversationCapabilities {
             can_open,
-            can_copy_link,
-            can_share: task.conversation_id().is_some()
-                || conversation_metadata
-                    .is_some_and(|metadata| metadata.server_conversation_token.is_some()),
+            can_copy_link: false,
+            can_share: false,
             can_delete: false,
             can_fork_locally: local_conversation_id.is_some(),
             can_cancel: status.is_cancellable(),
@@ -524,20 +506,6 @@ fn entry_for_conversation_parts(
     let has_local_persisted_data = conversation_metadata
         .is_some_and(|metadata| metadata.is_restorable_locally)
         || has_loaded_conversation;
-    let has_cloud_data = conversation_metadata
-        .is_some_and(|metadata| metadata.server_conversation_token.is_some())
-        || server_conversation_token_for_conversation(
-            conversation_id,
-            Some(&metadata.nav_data),
-            history_model,
-        )
-        .is_some();
-    let provenance = if has_cloud_data {
-        AgentConversationProvenance::CloudSyncedConversation
-    } else {
-        AgentConversationProvenance::LocalInteractive
-    };
-
     AgentConversationEntry {
         id: AgentConversationEntryId::Conversation(conversation_id),
         identity: AgentConversationIdentity {
@@ -551,7 +519,7 @@ fn entry_for_conversation_parts(
             ),
             session_id: None,
         },
-        provenance,
+        provenance: AgentConversationProvenance::LocalInteractive,
         display: AgentConversationDisplayData {
             title: conversation_title(&metadata, history_model),
             initial_query: metadata.nav_data.initial_query.clone(),
@@ -583,19 +551,14 @@ fn entry_for_conversation_parts(
         backing: AgentConversationBackingData {
             has_loaded_conversation,
             has_local_persisted_data,
-            has_cloud_data,
+            has_cloud_data: false,
             has_ambient_run: conversation_metadata
                 .is_some_and(AIConversationMetadata::is_ambient_agent_conversation),
         },
         capabilities: AgentConversationCapabilities {
-            can_open: has_local_persisted_data || has_cloud_data,
-            can_copy_link: server_conversation_token_for_conversation(
-                conversation_id,
-                Some(&metadata.nav_data),
-                history_model,
-            )
-            .is_some(),
-            can_share: has_cloud_data,
+            can_open: has_local_persisted_data,
+            can_copy_link: false,
+            can_share: false,
             can_delete: has_local_persisted_data,
             can_fork_locally: has_local_persisted_data,
             can_cancel: status.is_cancellable(),

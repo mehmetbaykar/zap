@@ -6,8 +6,13 @@ pub mod diff_size_limits;
 pub mod diff_state;
 pub mod editor_state;
 pub(crate) mod find_model;
+pub(crate) mod git_actions;
 pub(crate) mod git_dialog;
-pub mod git_status_update;
+pub mod git_repo_model;
+#[cfg(feature = "local_fs")]
+mod git_repo_models;
+#[cfg(feature = "local_fs")]
+pub mod github_repo_model;
 mod hidden_lines;
 pub mod telemetry_event;
 #[cfg_attr(not(feature = "local_fs"), allow(unused_imports))]
@@ -27,11 +32,11 @@ use warpui::{
     id, AppContext, Entity, EntityId, ModelContext, SingletonEntity, WeakViewHandle, WindowId,
 };
 
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
 use crate::terminal::view::TerminalView;
 use crate::terminal::CLIAgent;
 use crate::util::bindings::CustomAction;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 /// Arguments needed to open or toggle the code review panel.
 /// Bundled into a struct so that events can atomically open the

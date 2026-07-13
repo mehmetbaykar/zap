@@ -38,6 +38,22 @@ fn restored_conversation(conversation_data: Option<AgentConversationData>) -> AI
     .unwrap()
 }
 
+fn restored_conversation_with_root_description(description: &str) -> AIConversation {
+    AIConversation::new_restored(
+        AIConversationId::new(),
+        vec![api::Task {
+            id: "root-task".to_string(),
+            messages: vec![],
+            dependencies: None,
+            description: description.to_string(),
+            summary: String::new(),
+            server_data: String::new(),
+        }],
+        None,
+    )
+    .unwrap()
+}
+
 fn user_query_message(id: &str, request_id: &str, query: &str) -> api::Message {
     api::Message {
         id: id.to_string(),
@@ -342,6 +358,20 @@ fn reassign_exchange_ids_keeps_exchange_lookup_consistent() {
     for id in &new_ids {
         assert!(conversation.exchange_with_id(*id).is_some());
     }
+}
+
+#[test]
+fn title_uses_root_task_description() {
+    let conversation = restored_conversation_with_root_description("Root task title");
+
+    assert_eq!(conversation.title().as_deref(), Some("Root task title"));
+}
+
+#[test]
+fn title_falls_back_to_initial_query_when_root_description_is_empty() {
+    let conversation = restored_conversation_with_queries(&["Initial query"]);
+
+    assert_eq!(conversation.title().as_deref(), Some("Initial query"));
 }
 
 #[test]

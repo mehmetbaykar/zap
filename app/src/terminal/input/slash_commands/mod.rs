@@ -35,6 +35,7 @@ use crate::settings::AISettings;
 use crate::terminal::input::decorations::InputBackgroundJobOptions;
 use crate::terminal::input::inline_menu::{InlineMenuAction, InlineMenuType};
 use crate::terminal::input::message_bar::Message;
+use crate::terminal::input::models::InlineModelSelectorTab;
 use crate::terminal::input::slash_command_model::{
     SlashCommandEntryState, UpdatedSlashCommandModel,
 };
@@ -113,8 +114,8 @@ fn open_file_command_path(
     // The argument may contain shell-escaped characters (e.g. `\ ` for spaces) from auto-suggest.
     // Unescape them so the path matches the actual filesystem entry.
     let unescaped_path = session.shell_family().unescape(&parsed_path.path);
-    // Expand `~` to the user's home directory.
-    let expanded_path = shellexpand::tilde(&unescaped_path);
+    // Expand `~` against the session's home directory rather than the app process's home.
+    let expanded_path = shellexpand::tilde_with_context(&unescaped_path, || session.home_dir());
 
     let shell_path = session
         .convert_directory_to_typed_path_buf(current_dir.to_owned())
@@ -638,7 +639,10 @@ impl Input {
                 self.open_invoke_skill_selector(ctx);
             }
             models if command.name == commands::MODEL.name => {
-                self.open_model_selector(ctx);
+                self.open_model_selector_and_snapshot_prompt(
+                    InlineModelSelectorTab::BaseAgent,
+                    ctx,
+                );
             }
             profiles if command.name == commands::PROFILE.name => {
                 if !FeatureFlag::InlineProfileSelector.is_enabled() {
@@ -697,6 +701,7 @@ impl Input {
                     summarize_after_fork: false,
                     summarization_prompt: None,
                     initial_prompt: argument.cloned(),
+                    initial_attachments: vec![],
                     destination,
                 });
             }
@@ -726,6 +731,7 @@ impl Input {
                     summarize_after_fork: true,
                     summarization_prompt: None,
                     initial_prompt: argument.cloned(),
+                    initial_attachments: vec![],
                     destination,
                 });
             }
@@ -787,7 +793,7 @@ impl Input {
                         locked_for_pending_lrc: false,
                     });
                 } else {
-                    self.submit_queued_prompt(prompt, ctx);
+                    self.submit_user_query_now(prompt, ctx);
                 }
             }
             open_repo if command.name == commands::OPEN_REPO.name => {
@@ -914,9 +920,7 @@ impl Input {
             SlashCommandEntryState::SkillCommand(detected_skill) => {
                 let reference = detected_skill.reference.clone();
                 let user_query = detected_skill.argument.clone();
-                self.execute_skill_command(
-                    reference, user_query, /*is_queued_prompt*/ false, ctx,
-                )
+                self.execute_skill_command(reference, user_query, None, None, ctx)
             }
             SlashCommandEntryState::None
             | SlashCommandEntryState::Composing { .. }
@@ -964,9 +968,7 @@ impl Input {
             SlashCommandEntryState::SkillCommand(detected_skill) => {
                 let reference = detected_skill.reference.clone();
                 let user_query = detected_skill.argument.clone();
-                self.execute_skill_command(
-                    reference, user_query, /*is_queued_prompt*/ false, ctx,
-                )
+                self.execute_skill_command(reference, user_query, None, None, ctx)
             }
             SlashCommandEntryState::None
             | SlashCommandEntryState::Composing { .. }

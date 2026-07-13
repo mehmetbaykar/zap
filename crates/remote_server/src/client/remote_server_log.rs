@@ -5,13 +5,11 @@ use bounded_vec_deque::BoundedVecDeque;
 /// Maximum number of log lines to retain in the tail buffer.
 const LOG_TAIL_MAX_LINES: usize = 5;
 
-/// Maximum number of characters to include when draining the log buffer
-/// for telemetry payloads.
+/// Maximum number of characters to include when draining the log buffer.
 const LOG_TAIL_MAX_CHARS: usize = 2048;
 
 /// A shared buffer that retains the last [`LOG_TAIL_MAX_LINES`] lines
-/// from the remote server proxy. Used to attach server-side context to
-/// telemetry when the connection fails.
+/// from the remote server proxy for local failure diagnostics.
 #[derive(Clone, Debug)]
 pub struct RemoteServerLog(Arc<Mutex<BoundedVecDeque<String>>>);
 

@@ -96,8 +96,7 @@ pub trait StringModel: Clone + Debug + PartialEq + Send + Sync + 'static {
     }
 
     /// Returns a unique key for this object, if one exists. Unique keys are used
-    /// to enforce that only one object with a given key can exist in the generic string
-    /// object server database.
+    /// to enforce that only one object with a given key can exist in the local object store.
     fn uniqueness_key(&self) -> Option<GenericStringObjectUniqueKey>;
 }
 
@@ -149,9 +148,7 @@ where
 
 /// Implements the StoredObjectModel trait for all generic string models.
 ///
-/// This has common logic for storing string models to SQLite and updating from the
-/// server -- basically for anything not specific to the contents
-/// of the string model.
+/// This has common behavior that is not specific to the contents of the string model.
 impl<M, S> StoredObjectModel for GenericStringModel<M, S>
 where
     M: StringModel<

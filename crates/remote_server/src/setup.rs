@@ -85,8 +85,8 @@ impl From<&crate::transport::Error> for RemoteServerSetupState {
 pub struct PreinstallCheckResult {
     pub status: PreinstallStatus,
     pub libc: RemoteLibc,
-    /// Verbatim, trimmed script stdout. Forwarded to telemetry for
-    /// diagnosing `Unknown` outcomes on exotic distros.
+    /// Verbatim, trimmed script stdout for diagnosing `Unknown` outcomes on
+    /// exotic distros.
     pub raw: String,
 }
 
@@ -132,15 +132,6 @@ impl UnsupportedReason {
             crate::transport::Error::TimedOut
             | crate::transport::Error::ScriptFailed { .. }
             | crate::transport::Error::Other(_) => None,
-        }
-    }
-
-    pub fn as_telemetry_reason(&self) -> &'static str {
-        match self {
-            Self::GlibcTooOld { .. } => "glibc_too_old",
-            Self::NonGlibc { .. } => "non_glibc",
-            Self::UnsupportedOs { .. } => "unsupported_os",
-            Self::UnsupportedArch { .. } => "unsupported_arch",
         }
     }
 }
@@ -338,69 +329,14 @@ pub fn remote_server_dir() -> String {
     format!("~/{warp_dir}/remote-server")
 }
 
-/// Returns a short, deterministic directory name for a remote-server
-/// identity key, used for the daemon socket and PID file paths.
-///
-/// Hashes the key to 8 hex chars so the socket path stays within the
-/// `sun_path` limit across all channels.
-pub fn remote_server_identity_dir_name(identity_key: &str) -> String {
-    use std::hash::{Hash, Hasher};
-
-    if identity_key.is_empty() {
-        return "empty".to_string();
-    }
-
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    identity_key.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())[..8].to_string()
+/// Returns the remote OS user's directory used for the daemon socket and PID file.
+pub fn remote_server_daemon_dir() -> String {
+    format!("{}/daemon", remote_server_dir())
 }
 
-/// Percent-encodes an identity key for use in filesystem paths.
-///
-/// Keeps ASCII alphanumeric characters plus `-` and `_`; percent-encodes
-/// all other bytes.  Used by [`remote_server_daemon_data_dir`] for
-/// persistent data that must not collide across identities.
-fn percent_encode_identity_key(identity_key: &str) -> String {
-    if identity_key.is_empty() {
-        return "empty".to_string();
-    }
-
-    let mut encoded = String::with_capacity(identity_key.len());
-    for byte in identity_key.bytes() {
-        match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' => {
-                encoded.push(byte as char);
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
-}
-
-/// Returns the identity-scoped remote directory used for the daemon socket
-/// and PID file.  Uses the hashed identity dir name so the full socket
-/// path fits within `sun_path`.
-pub fn remote_server_daemon_dir(identity_key: &str) -> String {
-    format!(
-        "{}/{}",
-        remote_server_dir(),
-        remote_server_identity_dir_name(identity_key)
-    )
-}
-
-/// Returns the identity-scoped remote directory used for daemon-owned
-/// per-user data files (e.g. SQLite databases).
-///
-/// Uses the full percent-encoded identity key (not the hash) so that
-/// persistent data is never shared between distinct identities due to
-/// a hash collision.  The `sun_path` limit does not apply here because
-/// this path is only used for regular file I/O, not Unix sockets.
-pub fn remote_server_daemon_data_dir(identity_key: &str) -> String {
-    format!(
-        "{}/{}/data",
-        remote_server_dir(),
-        percent_encode_identity_key(identity_key)
-    )
+/// Returns the remote OS user's directory used for daemon-owned local data files.
+pub fn remote_server_daemon_data_dir() -> String {
+    format!("{}/data", remote_server_dir())
 }
 
 /// Returns a short, deterministic 8-hex-char hash of the app version string.
@@ -408,8 +344,7 @@ pub fn remote_server_daemon_data_dir(identity_key: &str) -> String {
 /// Used to version-discriminate daemon socket and PID files without
 /// embedding the full version string in the filename, which would push
 /// the Unix domain socket path over the `sun_path` limit (107 bytes on
-/// Linux, 103 on macOS) for users with moderately long identity keys or
-/// home directory paths.
+/// Linux, 103 on macOS) for users with long home directory paths.
 pub fn version_hash() -> Option<String> {
     use std::hash::{Hash, Hasher};
 
@@ -480,6 +415,15 @@ pub fn binary_check_command() -> String {
     format!("{} --version", remote_server_binary())
 }
 
+/// Returns the shell command to remove the current remote-server binary.
+///
+/// The global bundled resources directory is deliberately left in place:
+/// the next install overwrites it, and an older daemon that is still
+/// running parsed its skills at startup.
+pub fn remote_server_removal_command() -> String {
+    format!("rm -f {}", remote_server_binary())
+}
+
 /// Returns the version number used for versioned install paths. Prefers the
 /// compile-time-injected `GIT_RELEASE_TAG`; when there is no release tag it
 /// falls back to `CARGO_PKG_VERSION`, keeping channels that need versioned
@@ -503,8 +447,24 @@ pub fn remote_server_artifact_version() -> &'static str {
     }
 }
 
-/// The install script template lives in a separate `.sh` file for easier
-/// maintenance. Placeholders such as `{download_base_url}` are replaced by
+/// Name of the global, version-independent resources directory inside
+/// [`remote_server_dir`], populated by the install script from the
+/// artifact's `resources/` tree (bundled skills, settings schema).
+pub const BUNDLED_RESOURCES_DIR_NAME: &str = "bundled_resources";
+
+/// Returns the global, version-independent directory where the install
+/// script places the artifact's `resources/` tree. Shell-form path
+/// (`~/...`); the daemon expands it against its own home directory.
+///
+/// Deliberately not version-scoped: the last install wins, and slight
+/// version skew between the resources and a running daemon is accepted
+/// (the daemon parses its skills once at startup).
+pub fn remote_server_bundled_resources_dir() -> String {
+    format!("{}/{}", remote_server_dir(), BUNDLED_RESOURCES_DIR_NAME)
+}
+
+/// The install script template, loaded from a standalone `.sh` file for
+/// readability. Placeholders like `{download_base_url}` are substituted by
 /// [`install_script`].
 const INSTALL_SCRIPT_TEMPLATE: &str = include_str!("install_remote_server.sh");
 
@@ -518,6 +478,11 @@ pub fn install_script(staging_tarball_path: Option<&str>) -> String {
         .replace("{install_dir}", &remote_server_dir())
         .replace("{binary_name}", binary_name())
         .replace("{version_suffix}", &version_suffix)
+        .replace("{bundled_resources_dir_name}", BUNDLED_RESOURCES_DIR_NAME)
+        .replace(
+            "{no_http_client_exit_code}",
+            &NO_HTTP_CLIENT_EXIT_CODE.to_string(),
+        )
         .replace("{staging_tarball_path}", staging_tarball_path.unwrap_or(""))
 }
 
@@ -599,6 +564,9 @@ pub const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Timeout for the install script (curl/wget path).
 pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// Exit code emitted by the install script when neither curl nor wget exists.
+pub const NO_HTTP_CLIENT_EXIT_CODE: i32 = 3;
 
 /// Timeout for the SCP upload fallback path (local download + SCP +
 /// extraction). Higher than [`INSTALL_TIMEOUT`] because SCP transfers the

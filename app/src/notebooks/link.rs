@@ -15,7 +15,6 @@ use warpui::{AppContext, Entity, ModelContext, ModelHandle, SingletonEntity, Win
 use super::file::is_markdown_file;
 use crate::drive::ZapDriveObjectArgs;
 use crate::terminal::model::session::Session;
-use crate::uri::parse_url_paths::{get_item_data_from_warp_link, WarpWebLink};
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::EditorSettings;
 #[cfg(feature = "local_fs")]
@@ -258,15 +257,7 @@ impl NotebookLinks {
     /// * Other files are opened in the configured editor or system-default application.
     pub fn open(&self, link: LinkTarget, ctx: &mut ModelContext<Self>) {
         match link {
-            LinkTarget::Url(url) => {
-                if let Some(WarpWebLink::DriveObject(args)) = get_item_data_from_warp_link(&url) {
-                    return ctx.emit(LinkEvent::ZapDriveLink {
-                        open_warp_drive_args: *args,
-                    });
-                }
-
-                ctx.open_url(url.as_str())
-            }
+            LinkTarget::Url(url) => ctx.open_url(url.as_str()),
             LinkTarget::LocalFile {
                 path,
                 line_and_column,

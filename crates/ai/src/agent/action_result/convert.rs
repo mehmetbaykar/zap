@@ -1,4 +1,3 @@
-use chrono::{DateTime, Local};
 use warp_multi_agent_api::apply_file_diffs_result::success::UpdatedFileContent;
 use warp_multi_agent_api::ask_user_question_result::answer_item::{
     self, Answer as AskUserQuestionAnswer,
@@ -8,13 +7,6 @@ use warp_multi_agent_api::{self as api};
 use super::*;
 use crate::agent::action_result::ShellCommandError;
 use crate::agent::convert::ConvertToAPITypeError;
-
-fn local_datetime_to_timestamp(timestamp: DateTime<Local>) -> prost_types::Timestamp {
-    prost_types::Timestamp {
-        seconds: timestamp.timestamp(),
-        nanos: timestamp.timestamp_subsec_nanos() as i32,
-    }
-}
 
 impl TryFrom<RequestCommandOutputResult> for api::request::input::tool_call_result::Result {
     type Error = ConvertToAPITypeError;
@@ -26,8 +18,8 @@ impl TryFrom<RequestCommandOutputResult> for api::request::input::tool_call_resu
                 block_id,
                 output,
                 exit_code,
-                start_ts,
-                completed_ts,
+                start_ts: _,
+                completed_ts: _,
             } => Ok(
                 api::request::input::tool_call_result::Result::RunShellCommand(
                     #[allow(deprecated)]
@@ -121,7 +113,13 @@ impl TryFrom<WriteToLongRunningShellCommandResult>
                     },
                 ),
             ),
-            WriteToLongRunningShellCommandResult::CommandFinished { block_id, output, exit_code, start_ts, completed_ts } => Ok(
+            WriteToLongRunningShellCommandResult::CommandFinished {
+                block_id,
+                output,
+                exit_code,
+                start_ts: _,
+                completed_ts: _,
+            } => Ok(
                 api::request::input::tool_call_result::Result::WriteToLongRunningShellCommand(
                     api::WriteToLongRunningShellCommandResult {
                         result: Some(api::write_to_long_running_shell_command_result::Result::CommandFinished(
@@ -590,8 +588,8 @@ impl TryFrom<ReadShellCommandOutputResult> for api::request::input::tool_call_re
                 block_id,
                 output,
                 exit_code,
-                start_ts,
-                completed_ts,
+                start_ts: _,
+                completed_ts: _,
             } => Ok(
                 api::request::input::tool_call_result::Result::ReadShellCommandOutput(
                     api::ReadShellCommandOutputResult {
@@ -685,8 +683,8 @@ impl TryFrom<TransferShellCommandControlToUserResult>
                 block_id,
                 output,
                 exit_code,
-                start_ts,
-                completed_ts,
+                start_ts: _,
+                completed_ts: _,
             } => Ok(
                 api::request::input::tool_call_result::Result::TransferShellCommandControlToUser(
                     api::TransferShellCommandControlToUserResult {

@@ -13,23 +13,20 @@ use crate::ai::ambient_agents::{SpawnAgentRequest, TaskStatusMessage};
 /// This should be long enough that the shared session will be joinable.
 pub const TASK_STATUS_POLLING_DURATION: Duration = Duration::from_secs(80);
 
-/// Information about a session join link for an ambient agent task.
+/// Information about a local shared session for an ambient agent task.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionJoinInfo {
-    pub session_link: String,
+    pub session_id: String,
 }
 
 impl SessionJoinInfo {
     pub fn from_task(task: &AmbientAgentTask) -> Option<Self> {
-        // Prefer the server-provided session_link when available; it is a better signal
-        // that a session-sharing link is ready to be shown to the user.
-        if let Some(link) = task.session_link.as_ref().filter(|l| !l.is_empty()) {
-            return Some(Self {
-                session_link: link.to_string(),
-            });
-        }
-
-        None
+        task.session_id
+            .as_ref()
+            .filter(|session_id| !session_id.is_empty())
+            .map(|session_id| Self {
+                session_id: session_id.clone(),
+            })
     }
 }
 

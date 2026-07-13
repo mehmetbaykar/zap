@@ -22,7 +22,7 @@ use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, ViewHa
 
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::artifacts::Artifact;
-use crate::ai::blocklist::{BlocklistAIHistoryEvent, ConversationStatusUpdate};
+use crate::ai::blocklist::{BlocklistAIHistoryEvent, ConversationStatusUpdate, QueuedQueryModel};
 use crate::notifications::item::{
     NotificationCategory, NotificationId, NotificationItem, NotificationItems, NotificationOrigin,
     NotificationSourceAgent,
@@ -335,6 +335,14 @@ impl NotificationsModel {
                 self.remove_notification_by_source(origin, ctx);
             }
             ConversationStatus::Success => {
+                // Suppress the completion notification when a queued follow-up prompt will
+                // auto-send as soon as this conversation finishes. The conversation isn't
+                // really in a stopped state, so the notification would be noisy. Pending
+                // artifacts are left intact so they roll into the notification fired when the
+                // conversation eventually finishes with an empty queue.
+                if QueuedQueryModel::as_ref(ctx).has_autofireable_prompt(conversation_id) {
+                    return;
+                }
                 let artifacts = self.flush_pending_artifacts(conversation_id);
                 let message = if is_child {
                     "Child agent completed."

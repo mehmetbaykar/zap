@@ -15,42 +15,76 @@ import "diff_state.proto";
 message ClientMessage {
   string request_id = 1;
   oneof message {
-    Initialize initialize = 2;
-    Abort abort = 3;
-    NavigatedToDirectory navigated_to_directory = 4;
-    LoadRepoMetadataDirectory load_repo_metadata_directory = 5;
-    SessionBootstrapped session_bootstrapped = 6;
-    WriteFile write_file = 7;
-    DeleteFile delete_file = 8;
-    RunCommandRequest run_command = 9;
-    ReadFileContextRequest read_file_context = 10;
-    Authenticate authenticate = 11;
-    OpenBuffer open_buffer = 13;
-    BufferEdit buffer_edit = 14;
-    CloseBuffer close_buffer = 15;
-    SaveBuffer save_buffer = 16;
-    ResolveConflict resolve_conflict = 17;
-    GetDiffState get_diff_state = 18;
-    UnsubscribeDiffState unsubscribe_diff_state = 19;
-    DiscardFilesRequest discard_files = 20;
-    IndexCodebase index_codebase = 21;
-    DropCodebaseIndex drop_codebase_index = 22;
-    GetFragmentMetadataFromHash get_fragment_metadata_from_hash = 23;
-    // Zap: fields 24-28 are fork-specific (SSH remote file browser); not present upstream.
-    ListDirectory list_directory = 24;
-    ResolvePath resolve_path = 25;
-    CreateDirectory create_directory = 26;
-    ReadFileChunk read_file_chunk = 27;
-    WriteFileChunk write_file_chunk = 28;
-    GetBranches get_branches = 29;
-    ResyncCodebase resync_codebase = 30;
-    UploadHandoffSnapshot upload_handoff_snapshot = 31;
+    HostScopedRequest host_scoped = 2;
+    SessionScopedRequest session_scoped = 3;
+    Notification notification = 4;
+  }
+}
+
+// Request that targets the host, not a specific connection.
+// The daemon may deliver the response on any open connection
+// if the originating connection disconnects before the response
+// is ready.
+message HostScopedRequest {
+  // 4 (open_buffer) and 7 (get_diff_state) moved to SessionScopedRequest:
+  // they establish per-connection subscription state, so they must be
+  // delivered on (and answered by) a specific connection, never failed over.
+  reserved 4, 7, 9, 10, 11, 13, 19;
+  oneof message {
+    WriteFile write_file = 1;
+    DeleteFile delete_file = 2;
+    ReadFileContextRequest read_file_context = 3;
+    SaveBuffer save_buffer = 5;
+    ResolveConflict resolve_conflict = 6;
+    DiscardFilesRequest discard_files = 8;
+    GetBranches get_branches = 12;
+    GitCommitChainRequest git_commit_chain = 15;
+    GitPushRequest git_push = 16;
+    GitCreatePrRequest git_create_pr = 17;
+    GitGetPrInfoRequest git_get_pr_info = 18;
+    GitGetCommittedBranchFilesRequest git_get_committed_branch_files = 20;
+    // Zap: fork-specific SSH remote file-browser operations.
+    ListDirectory list_directory = 21;
+    ResolvePath resolve_path = 22;
+    CreateDirectory create_directory = 23;
+    ReadFileChunk read_file_chunk = 24;
+    WriteFileChunk write_file_chunk = 25;
+  }
+}
+
+// Request that targets a specific connection/session.
+// The response is always delivered on the originating connection.
+message SessionScopedRequest {
+  oneof message {
+    Initialize initialize = 1;
+    NavigatedToDirectory navigated_to_directory = 2;
+    LoadRepoMetadataDirectory load_repo_metadata_directory = 3;
+    RunCommandRequest run_command = 4;
+    // Subscription-establishing requests: the daemon registers per-connection
+    // state (buffer / diff-state subscriptions) keyed to the originating
+    // connection, so the response must come back on that same connection.
+    OpenBuffer open_buffer = 5;
+    GetDiffState get_diff_state = 6;
+  }
+}
+
+// Fire-and-forget message. No response is expected.
+// The daemon processes these inline and does not track them.
+message Notification {
+  reserved 2, 3;
+  oneof message {
+    Abort abort = 1;
+    SessionBootstrapped session_bootstrapped = 4;
+    BufferEdit buffer_edit = 5;
+    CloseBuffer close_buffer = 6;
+    UnsubscribeDiffState unsubscribe_diff_state = 7;
   }
 }
 // Top-level envelope for all server → client messages.
 // Push messages use an empty request_id to distinguish them from
 // request/response pairs.
 message ServerMessage {
+  reserved 24, 31;
   string request_id = 1;
   oneof message {
     InitializeResponse initialize_response = 2;
@@ -74,49 +108,26 @@ message ServerMessage {
     DiffStateMetadataUpdate diff_state_metadata_update = 20;
     DiffStateFileDelta diff_state_file_delta = 21;
     DiscardFilesResponse discard_files_response = 22;
-    GetFragmentMetadataFromHashResponse get_fragment_metadata_from_hash_response = 24;
-    // Zap: fields 25-29 are fork-specific (SSH remote file browser); not present upstream.
-    ListDirectoryResponse list_directory_response = 25;
-    ResolvePathResponse resolve_path_response = 26;
-    CreateDirectoryResponse create_directory_response = 27;
-    ReadFileChunkResponse read_file_chunk_response = 28;
-    WriteFileChunkResponse write_file_chunk_response = 29;
-    GetBranchesResponse get_branches_response = 30;
-    UploadHandoffSnapshotResponse upload_handoff_snapshot_response = 31;
+    GetBranchesResponse get_branches_response = 25;
+    GitCommitChainResponse git_commit_chain_response = 27;
+    GitPushResponse git_push_response = 28;
+    GitCreatePrResponse git_create_pr_response = 29;
+    GitGetPrInfoResponse git_get_pr_info_response = 30;
+    GitGetCommittedBranchFilesResponse git_get_committed_branch_files_response = 32;
+    BundledSkillsSnapshot bundled_skills_snapshot = 33;
+    // Zap: fork-specific SSH remote file-browser responses.
+    ListDirectoryResponse list_directory_response = 34;
+    ResolvePathResponse resolve_path_response = 35;
+    CreateDirectoryResponse create_directory_response = 36;
+    ReadFileChunkResponse read_file_chunk_response = 37;
+    WriteFileChunkResponse write_file_chunk_response = 38;
   }
 }
 
 // ── Initialize handshake
 // Sent by the client immediately after connecting to negotiate the protocol.
 message Initialize {
-  // Optional bearer token used by the daemon for Warp-server requests.
-  // Empty means no credential was available and does not clear an existing
-  // daemon credential.
-  string auth_token = 1;
-  // Client-resolved codebase index limits for parity with local indexing.
-  optional CodebaseIndexLimits codebase_index_limits = 5;
-}
-
-// Sent by the client when its bearer credential rotates after initialization.
-// This is a notification (fire-and-forget) — the server does not send a response.
-message Authenticate {
-  // Optional bearer token used by the daemon for Warp-server requests.
-  // Empty means no credential was available and does not clear an existing
-  // daemon credential.
-  string auth_token = 1;
-}
-
-// Sent by the client when its codebase indexing preferences change.
-// This is a notification (fire-and-forget) — the server does not send a response.
-message UpdatePreferences {
-  optional CodebaseIndexLimits codebase_index_limits = 2;
-}
-
-message CodebaseIndexLimits {
-  // Empty means unlimited.
-  optional uint64 max_indices_allowed = 1;
-  uint64 max_files_per_repo = 2;
-  uint64 embedding_generation_batch_size = 3;
+  reserved 1, 5;
 }
 
 // Sent by the client to cancel an in-progress request.
@@ -198,6 +209,33 @@ message ErrorResponse {
   string message = 2;
 }
 
+// ── Bundled skills ────────────────────────────────────────────────
+
+// One bundled skill, pre-parsed and handlebars-rendered by the daemon
+// against its own filesystem. Named with the `Proto` suffix (like
+// `FileContextProto`) to avoid colliding with the app's `BundledSkill`.
+message BundledSkillProto {
+  // Directory-based skill ID (unique within the bundled catalog).
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  // Absolute path to the skill's SKILL.md on this host.
+  string path = 4;
+  // Skill content with handlebars variables rendered for this host.
+  string content = 5;
+  // When set, the skill is only active while the named MCP integration
+  // is running on the client (e.g. "figma"). Evaluated client-side.
+  optional string requires_mcp = 6;
+}
+
+// Server → client push: the daemon's bundled skill catalog. Sent to a
+// connection after its Initialize completes (when parsing has already
+// finished) and broadcast to all connections when parsing completes.
+// Never blocks the initialize handshake.
+message BundledSkillsSnapshot {
+  repeated BundledSkillProto skills = 1;
+}
+
 // ── Shared repo metadata sub-messages ─────────────────────────────
 // Mirror the Rust types in repo_metadata/src/file_tree_update.rs.
 
@@ -228,6 +266,18 @@ message FileNodeMetadata {
 message RepoMetadataEntryUpdate {
   string parent_path_to_replace = 1;
   repeated RepoNodeMetadata subtree_metadata = 2;
+}
+
+message StandingQueryContent {
+  string path = 1;
+  bool is_directory = 2;
+}
+
+message StandingQueryResultsDelta {
+  repeated StandingQueryContent upserted_project_skills = 1;
+  repeated StandingQueryContent removed_project_skills = 2;
+  repeated StandingQueryContent upserted_project_rules = 3;
+  repeated StandingQueryContent removed_project_rules = 4;
 }
 
 // ── NavigatedToDirectory ──────────────────────────────────────────
@@ -351,70 +401,10 @@ message FileContextProto {
 }
 
 // ── Remote codebase indexing status ───────────────────────────────
-
-message IndexCodebase {
-  string repo_path = 1;
-  string auth_token = 2;
-}
-message ResyncCodebase {
-  string repo_path = 1;
-  string auth_token = 2;
-  CodebaseResyncMode mode = 3;
-}
-enum CodebaseResyncMode {
-  CODEBASE_RESYNC_MODE_FULL = 0;
-  CODEBASE_RESYNC_MODE_INCREMENTAL = 1;
-}
-
-message DropCodebaseIndex {
-  string repo_path = 1;
-  string auth_token = 2;
-}
-message GetFragmentMetadataFromHash {
-  string repo_path = 1;
-  string root_hash = 2;
-  repeated string content_hashes = 3;
-}
-
-message FragmentMetadata {
-  string content_hash = 1;
-  string path = 2;
-  uint32 start_line = 3;
-  uint32 end_line = 4;
-  uint64 byte_start = 5;
-  uint64 byte_end = 6;
-}
-
-message MissingFragmentMetadata {
-  string content_hash = 1;
-  FileOperationError error = 2;
-}
-enum FragmentMetadataLookupErrorCode {
-  FRAGMENT_METADATA_LOOKUP_ERROR_CODE_UNSPECIFIED = 0;
-  REMOTE_CODEBASE_INDEXING_NOT_ENABLED = 1;
-  INVALID_REPO_PATH = 2;
-  INVALID_ROOT_HASH = 3;
-  INDEX_NOT_FOUND = 4;
-  INDEX_NOT_SYNCED = 5;
-  ROOT_HASH_MISMATCH = 6;
-}
-
-message FragmentMetadataLookupError {
-  FragmentMetadataLookupErrorCode code = 1;
-  string message = 2;
-  optional string current_root_hash = 3;
-}
-message GetFragmentMetadataFromHashSuccess {
-  repeated FragmentMetadata fragments = 1;
-  repeated MissingFragmentMetadata missing_hashes = 2;
-}
-
-message GetFragmentMetadataFromHashResponse {
-  oneof result {
-    GetFragmentMetadataFromHashSuccess success = 1;
-    FragmentMetadataLookupError error = 2;
-  }
-}
+//
+// Zap intentionally keeps only the daemon-to-client status protocol. The
+// hosted indexing mutation requests are omitted, but a compatible daemon can
+// still report availability, progress, failures, and retrieval metadata.
 
 enum CodebaseIndexStatusState {
   CODEBASE_INDEX_STATUS_STATE_UNSPECIFIED = 0;
@@ -427,6 +417,7 @@ enum CodebaseIndexStatusState {
   CODEBASE_INDEX_STATUS_STATE_STALE = 7;
   CODEBASE_INDEX_STATUS_STATE_FAILED = 8;
 }
+
 message CodebaseIndexStatus {
   string repo_path = 1;
   CodebaseIndexStatusState state = 2;
@@ -453,6 +444,7 @@ message RepoMetadataSnapshot {
   string repo_path = 1;
   repeated RepoMetadataEntryUpdate entries = 2;
   bool sync_complete = 3;
+  StandingQueryResultsDelta standing_results = 4;
 }
 
 // Incremental repo metadata update. Mirrors RepoMetadataUpdate in Rust.
@@ -460,6 +452,7 @@ message RepoMetadataUpdatePush {
   string repo_path = 1;
   repeated string remove_entries = 2;
   repeated RepoMetadataEntryUpdate update_entries = 3;
+  StandingQueryResultsDelta standing_results_delta = 4;
 }
 
 // ── Buffer syncing ────────────────────────────────────────────────
@@ -522,21 +515,6 @@ message BufferUpdatedPush {
   uint64 new_server_version = 2;
   uint64 expected_client_version = 3;
   repeated TextEdit edits = 4;
-}
-
-// Client → server: request the daemon gather a handoff snapshot and upload it.
-// All paths must be absolute paths on the remote host's filesystem.
-message UploadHandoffSnapshot {
-  // Absolute paths the agent touched (file edits, working directories).
-  // Non-absolute or empty entries are rejected by the daemon.
-  repeated string paths = 1;
-}
-
-// Daemon → client: result of the handoff snapshot upload.
-message UploadHandoffSnapshotResponse {
-  optional string initial_snapshot_token = 1;
-  bool success = 2;
-  optional string error = 3;
 }
 
 // Client → server: close a buffer (stop watching).

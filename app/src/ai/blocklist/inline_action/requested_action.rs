@@ -41,7 +41,6 @@ use crate::ui_components::blended_colors;
 const REQUESTED_ACTION_RUN_LABEL: &str = "Run";
 
 const KEYBOARD_SHORTCUT_MARGIN_RIGHT: f32 = 8.;
-
 lazy_static! {
     pub static ref ENTER_KEYSTROKE: Keystroke = Keystroke {
         key: "enter".to_owned(),
@@ -345,7 +344,6 @@ pub(super) fn render_header_buttons(
     )
     .finish()
 }
-
 pub fn render_requested_action_body_text(
     text: Cow<str>,
     font_family: FamilyId,

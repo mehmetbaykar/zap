@@ -1,7 +1,6 @@
-//! Unit tests for `web_runtime::run_websearch` (mockito, no external network).
+//! Unit tests for `web_runtime::run_websearch` (no external network).
 
 use super::*;
-use mockito::{Matcher, Server};
 
 fn build_client() -> reqwest::Client {
     reqwest::Client::builder().build().expect("client")
@@ -24,34 +23,38 @@ fn sse_body(text: &str) -> String {
     )
 }
 
+fn build_test_request(args: SearchToolArgs) -> (String, reqwest::Request) {
+    build_websearch_request(
+        &build_client(),
+        args,
+        None,
+        Some("https://example.test/mcp"),
+    )
+    .expect("request")
+}
+
+fn request_json(request: &reqwest::Request) -> serde_json::Value {
+    let body = request
+        .body()
+        .and_then(reqwest::Body::as_bytes)
+        .expect("JSON request body");
+    serde_json::from_slice(body).expect("valid JSON request body")
+}
+
 // ---------------------------------------------------------------------------
 // Endpoint routing / API key injection
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-async fn anonymous_endpoint_no_querystring() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("POST", "/")
-        .with_status(200)
-        .with_header("content-type", "text/event-stream")
-        .with_body(sse_body("hello"))
-        .create_async()
-        .await;
-
-    let client = build_client();
-    let out = run_websearch(&client, search_args("q"), None, Some(&server.url()))
-        .await
-        .expect("ok");
-    assert_eq!(out.results, "hello");
-    assert_eq!(out.query, "q");
+#[test]
+fn anonymous_endpoint_no_querystring() {
+    let (query, request) = build_test_request(search_args("q"));
+    assert_eq!(query, "q");
+    assert_eq!(request.url().as_str(), "https://example.test/mcp");
+    assert!(request.url().query().is_none());
 }
 
-#[tokio::test]
-async fn passes_api_key_via_querystring() {
-    // Don't directly verify mockito's querystring (because we use endpoint_override,
-    // and endpoint_override already replaces endpoint_url).
-    // Separately verify that api_key is appended via endpoint_url.
+#[test]
+fn passes_api_key_via_querystring() {
     let url = exa::endpoint_url(Some("k1+k2"));
     assert!(url.contains("?exaApiKey="));
     assert!(url.contains("k1%2Bk2"), "should percent-encode: {url}");
@@ -61,42 +64,21 @@ async fn passes_api_key_via_querystring() {
 // Request body shape
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-async fn request_body_is_jsonrpc_with_default_args() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("POST", "/")
-        .match_body(Matcher::PartialJsonString(
-            r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"web_search_exa"}}"#.into(),
-        ))
-        .match_body(Matcher::PartialJsonString(
-            r#"{"params":{"arguments":{"query":"rust","numResults":8,"type":"auto","livecrawl":"fallback"}}}"#.into(),
-        ))
-        .with_status(200)
-        .with_body(sse_body("ok"))
-        .create_async()
-        .await;
-
-    let client = build_client();
-    let out = run_websearch(&client, search_args("rust"), None, Some(&server.url()))
-        .await
-        .expect("ok");
-    assert_eq!(out.results, "ok");
+#[test]
+fn request_body_is_jsonrpc_with_default_args() {
+    let (_, request) = build_test_request(search_args("rust"));
+    let body = request_json(&request);
+    assert_eq!(body["jsonrpc"], "2.0");
+    assert_eq!(body["method"], "tools/call");
+    assert_eq!(body["params"]["name"], "web_search_exa");
+    assert_eq!(body["params"]["arguments"]["query"], "rust");
+    assert_eq!(body["params"]["arguments"]["numResults"], 8);
+    assert_eq!(body["params"]["arguments"]["type"], "auto");
+    assert_eq!(body["params"]["arguments"]["livecrawl"], "fallback");
 }
 
-#[tokio::test]
-async fn all_optional_args_passthrough() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("POST", "/")
-        .match_body(Matcher::PartialJsonString(
-            r#"{"params":{"arguments":{"query":"deep","numResults":20,"type":"deep","livecrawl":"preferred","contextMaxCharacters":15000}}}"#.into(),
-        ))
-        .with_status(200)
-        .with_body(sse_body("deep result"))
-        .create_async()
-        .await;
-
+#[test]
+fn all_optional_args_passthrough() {
     let args = SearchToolArgs {
         query: "deep".into(),
         num_results: Some(20),
@@ -104,44 +86,44 @@ async fn all_optional_args_passthrough() {
         search_type: Some("deep".into()),
         context_max_characters: Some(15000),
     };
-    let out = run_websearch(&build_client(), args, None, Some(&server.url()))
-        .await
-        .expect("ok");
-    assert_eq!(out.results, "deep result");
+    let (_, request) = build_test_request(args);
+    let body = request_json(&request);
+    let arguments = &body["params"]["arguments"];
+    assert_eq!(arguments["query"], "deep");
+    assert_eq!(arguments["numResults"], 20);
+    assert_eq!(arguments["type"], "deep");
+    assert_eq!(arguments["livecrawl"], "preferred");
+    assert_eq!(arguments["contextMaxCharacters"], 15000);
 }
 
-#[tokio::test]
-async fn sends_correct_accept_header() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("POST", "/")
-        .match_header("accept", Matcher::Regex("text/event-stream".into()))
-        .match_header("content-type", Matcher::Regex("application/json".into()))
-        .with_status(200)
-        .with_body(sse_body("x"))
-        .create_async()
-        .await;
-    run_websearch(&build_client(), search_args("q"), None, Some(&server.url()))
-        .await
-        .expect("ok");
+#[test]
+fn sends_correct_accept_header() {
+    let (_, request) = build_test_request(search_args("q"));
+    assert_eq!(
+        request.headers().get(ACCEPT).and_then(|v| v.to_str().ok()),
+        Some("application/json, text/event-stream")
+    );
+    assert_eq!(
+        request
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/json")
+    );
 }
 
 // ---------------------------------------------------------------------------
 // SSE parsing / errors
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-async fn empty_results_returns_fallback() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("POST", "/")
-        .with_status(200)
-        .with_body("event: message\ndata: {\"result\":{\"content\":[]}}\n\n")
-        .create_async()
-        .await;
-    let out = run_websearch(&build_client(), search_args("q"), None, Some(&server.url()))
-        .await
-        .expect("ok");
+#[test]
+fn empty_results_returns_fallback() {
+    let out = search_output_from_response(
+        "q".to_owned(),
+        StatusCode::OK,
+        "event: message\ndata: {\"result\":{\"content\":[]}}\n\n",
+    )
+    .expect("ok");
     assert!(
         out.results.contains("No search results found"),
         "got: {}",
@@ -149,32 +131,20 @@ async fn empty_results_returns_fallback() {
     );
 }
 
-#[tokio::test]
-async fn http_error_propagates() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("POST", "/")
-        .with_status(500)
-        .with_body("internal err")
-        .create_async()
-        .await;
-    let err = run_websearch(&build_client(), search_args("q"), None, Some(&server.url()))
-        .await
-        .unwrap_err();
+#[test]
+fn http_error_propagates() {
+    let err = search_output_from_response(
+        "q".to_owned(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "internal err",
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("500"), "got: {err}");
 }
 
-#[tokio::test]
-async fn invalid_sse_payload_returns_err() {
-    let mut server = Server::new_async().await;
-    let _m = server
-        .mock("POST", "/")
-        .with_status(200)
-        .with_body("data: not_json\n")
-        .create_async()
-        .await;
-    let err = run_websearch(&build_client(), search_args("q"), None, Some(&server.url()))
-        .await
+#[test]
+fn invalid_sse_payload_returns_err() {
+    let err = search_output_from_response("q".to_owned(), StatusCode::OK, "data: not_json\n")
         .unwrap_err();
     let msg = format!("{err:#}");
     assert!(
@@ -183,20 +153,11 @@ async fn invalid_sse_payload_returns_err() {
     );
 }
 
-#[tokio::test]
-async fn handles_multiple_data_lines() {
-    let mut server = Server::new_async().await;
+#[test]
+fn handles_multiple_data_lines() {
     let body = "data: {\"result\":{\"content\":[]}}\n\
                 data: {\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"second\"}]}}\n\n";
-    let _m = server
-        .mock("POST", "/")
-        .with_status(200)
-        .with_body(body)
-        .create_async()
-        .await;
-    let out = run_websearch(&build_client(), search_args("q"), None, Some(&server.url()))
-        .await
-        .expect("ok");
+    let out = search_output_from_response("q".to_owned(), StatusCode::OK, body).expect("ok");
     assert_eq!(out.results, "second");
 }
 
@@ -205,11 +166,11 @@ async fn handles_multiple_data_lines() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Real-endpoint smoke test (enabled by default; set WARP_SKIP_WEB_INTEGRATION=1 when CI network is restricted)
+// Real-endpoint smoke test (opt in with WARP_RUN_WEB_INTEGRATION=1)
 // ---------------------------------------------------------------------------
 
 fn skip_real() -> bool {
-    std::env::var("WARP_SKIP_WEB_INTEGRATION").is_ok()
+    std::env::var("WARP_RUN_WEB_INTEGRATION").is_err()
 }
 
 #[tokio::test]

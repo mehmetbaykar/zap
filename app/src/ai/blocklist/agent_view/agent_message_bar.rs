@@ -3,7 +3,6 @@ use std::sync::Arc;
 use parking_lot::FairMutex;
 use warp_core::features::FeatureFlag;
 use warp_core::ui::appearance::Appearance;
-use warp_core::ui::theme::Fill;
 use warpui::assets::asset_cache::AssetSource;
 use warpui::elements::{Container, Element, Empty, MouseStateHandle};
 use warpui::keymap::Keystroke;
@@ -48,7 +47,6 @@ use crate::terminal::input::suggestions_mode_model::{
 use crate::terminal::input::{InputAction, SET_INPUT_MODE_AGENT_ACTION_NAME};
 use crate::terminal::model::TerminalModel;
 use crate::terminal::view::TerminalAction;
-use crate::ui_components::blended_colors;
 use crate::util::bindings::keybinding_name_to_keystroke;
 use crate::workspace::tab_settings::{TabSettings, TabSettingsChangedEvent};
 #[cfg(not(target_family = "wasm"))]

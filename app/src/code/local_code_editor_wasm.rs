@@ -15,10 +15,10 @@ use warpui::{
 pub use super::diff_viewer::DisplayMode;
 use super::editor::view::CodeEditorView;
 use super::ImmediateSaveError;
-use warp_util::local_or_remote_path::LocalOrRemotePath as BufferFileLocation;
 use crate::code::editor::EditorReviewComment;
 use crate::code_review::comments::CommentId;
 use crate::terminal::TerminalView;
+use warp_util::local_or_remote_path::LocalOrRemotePath as BufferFileLocation;
 
 #[derive(Debug)]
 pub enum LocalCodeEditorEvent {

@@ -5,15 +5,15 @@ use chrono::{DateTime, Local, TimeZone, Utc};
 use itertools::Itertools;
 use uuid::Uuid;
 use warp_cli::agent::Harness;
-use warp_core::features::FeatureFlag;
 use warpui::{App, EntityId};
 
 use crate::{
     ai::{
         agent::{
-            api::ServerConversationToken, conversation::AIConversationId, AIAgentExchange,
-            AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus, FinishedAIAgentOutput, Shared,
-            UserQueryMode,
+            api::ServerConversationToken,
+            conversation::{AIConversation, AIConversationId},
+            AIAgentExchange, AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus,
+            FinishedAIAgentOutput, Shared, UserQueryMode,
         },
         ambient_agents::AmbientAgentTaskId,
         blocklist::{controller::RequestInput, ResponseStreamId},
@@ -38,8 +38,7 @@ use warp_multi_agent_api as api;
 
 use super::{
     convert_persisted_conversation_to_ai_conversation_with_metadata, AIConversationMetadata,
-    AIQueryHistoryOutputStatus, BlocklistAIHistoryEvent, BlocklistAIHistoryModel, PersistedAIInput,
-    PersistedAIInputType,
+    AIQueryHistoryOutputStatus, BlocklistAIHistoryModel, PersistedAIInput, PersistedAIInputType,
 };
 
 fn initialize_history_model_test_app(app: &mut App) {
@@ -521,19 +520,317 @@ fn persisted_agent_conversation_from_update_event(event: ModelEvent) -> AgentCon
 }
 
 #[test]
+fn local_conversation_rename_updates_title_and_cached_metadata() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let terminal_view_id = EntityId::new();
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let conversation_id = AIConversationId::new();
+        let conversation = AIConversation::new_restored(
+            conversation_id,
+            vec![warp_multi_agent_api::Task {
+                id: "root-task".to_string(),
+                messages: vec![],
+                dependencies: None,
+                description: "Generated title".to_string(),
+                summary: String::new(),
+                server_data: String::new(),
+            }],
+            None,
+        )
+        .expect("conversation should restore");
+
+        history_model.update(&mut app, |model, ctx| {
+            model.restore_conversations(terminal_view_id, vec![conversation], ctx);
+            let metadata = AIConversationMetadata::from(
+                model
+                    .conversation(&conversation_id)
+                    .expect("conversation should exist"),
+            );
+            model
+                .all_conversations_metadata
+                .insert(conversation_id, metadata);
+            model
+                .rename_conversation_locally(conversation_id, "Manual title".to_string(), ctx)
+                .expect("rename should begin");
+        });
+
+        history_model.read(&app, |model, _| {
+            let conversation = model
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.title().as_deref(), Some("Manual title"));
+            assert_eq!(
+                conversation
+                    .get_root_task()
+                    .map(|root_task| root_task.description()),
+                Some("Manual title"),
+            );
+            assert_eq!(
+                model
+                    .get_conversation_metadata(&conversation_id)
+                    .map(|metadata| metadata.title.as_str()),
+                Some("Manual title"),
+            );
+        });
+    });
+}
+
+#[test]
+fn local_conversation_rename_does_not_require_server_token() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let terminal_view_id = EntityId::new();
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let conversation_id = AIConversationId::new();
+        let conversation = AIConversation::new_restored(
+            conversation_id,
+            vec![warp_multi_agent_api::Task {
+                id: "root-task".to_string(),
+                messages: vec![],
+                dependencies: None,
+                description: "Generated title".to_string(),
+                summary: String::new(),
+                server_data: String::new(),
+            }],
+            None,
+        )
+        .expect("conversation should restore");
+
+        let result = history_model.update(&mut app, |model, ctx| {
+            model.restore_conversations(terminal_view_id, vec![conversation], ctx);
+            let metadata = AIConversationMetadata::from(
+                model
+                    .conversation(&conversation_id)
+                    .expect("conversation should exist"),
+            );
+            model
+                .all_conversations_metadata
+                .insert(conversation_id, metadata);
+            model.rename_conversation_locally(conversation_id, "Manual title".to_string(), ctx)
+        });
+
+        assert_eq!(result, Ok(()));
+        history_model.read(&app, |model, _| {
+            let conversation = model
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.title().as_deref(), Some("Manual title"));
+            assert_eq!(
+                model
+                    .get_conversation_metadata(&conversation_id)
+                    .map(|metadata| metadata.title.as_str()),
+                Some("Manual title"),
+            );
+        });
+    });
+}
+
+#[test]
+fn local_conversation_rename_updates_optimistic_root_task() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let terminal_view_id = EntityId::new();
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+
+        let (conversation_id, result) = history_model.update(&mut app, |model, ctx| {
+            let conversation_id =
+                model.start_new_conversation(terminal_view_id, false, false, false, ctx);
+            let result =
+                model.rename_conversation_locally(conversation_id, "Manual title".to_string(), ctx);
+            (conversation_id, result)
+        });
+
+        assert_eq!(result, Ok(()));
+        history_model.read(&app, |model, _| {
+            let conversation = model
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            let root_task = conversation
+                .get_root_task()
+                .expect("conversation should have a root task");
+            assert!(root_task.source().is_none());
+            assert_eq!(root_task.description(), "Manual title");
+        });
+    });
+}
+
+#[test]
+fn local_conversation_rename_applies_replacement_title() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let terminal_view_id = EntityId::new();
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let conversation_id = AIConversationId::new();
+        let conversation = AIConversation::new_restored(
+            conversation_id,
+            vec![warp_multi_agent_api::Task {
+                id: "root-task".to_string(),
+                messages: vec![],
+                dependencies: None,
+                description: "Generated title".to_string(),
+                summary: String::new(),
+                server_data: String::new(),
+            }],
+            None,
+        )
+        .expect("conversation should restore");
+
+        history_model.update(&mut app, |model, ctx| {
+            model.restore_conversations(terminal_view_id, vec![conversation], ctx);
+            let metadata = AIConversationMetadata::from(
+                model
+                    .conversation(&conversation_id)
+                    .expect("conversation should exist"),
+            );
+            model
+                .all_conversations_metadata
+                .insert(conversation_id, metadata);
+            model
+                .rename_conversation_locally(conversation_id, "Manual title".to_string(), ctx)
+                .expect("rename should begin");
+            model
+                .rename_conversation_locally(conversation_id, "Normalized title".to_string(), ctx)
+                .expect("replacement rename should succeed");
+        });
+
+        history_model.read(&app, |model, _| {
+            let conversation = model
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.title().as_deref(), Some("Normalized title"));
+            assert_eq!(
+                conversation
+                    .get_root_task()
+                    .map(|root_task| root_task.description()),
+                Some("Normalized title"),
+            );
+            assert_eq!(
+                model
+                    .get_conversation_metadata(&conversation_id)
+                    .map(|metadata| metadata.title.as_str()),
+                Some("Normalized title"),
+            );
+        });
+    });
+}
+
+#[test]
+fn local_conversation_rename_can_restore_previous_title() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let terminal_view_id = EntityId::new();
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let conversation_id = AIConversationId::new();
+        let conversation = AIConversation::new_restored(
+            conversation_id,
+            vec![warp_multi_agent_api::Task {
+                id: "root-task".to_string(),
+                messages: vec![],
+                dependencies: None,
+                description: "Generated title".to_string(),
+                summary: String::new(),
+                server_data: String::new(),
+            }],
+            None,
+        )
+        .expect("conversation should restore");
+
+        history_model.update(&mut app, |model, ctx| {
+            model.restore_conversations(terminal_view_id, vec![conversation], ctx);
+            let metadata = AIConversationMetadata::from(
+                model
+                    .conversation(&conversation_id)
+                    .expect("conversation should exist"),
+            );
+            model
+                .all_conversations_metadata
+                .insert(conversation_id, metadata);
+            model
+                .rename_conversation_locally(conversation_id, "Manual title".to_string(), ctx)
+                .expect("rename should begin");
+            model
+                .rename_conversation_locally(conversation_id, "Generated title".to_string(), ctx)
+                .expect("restoring the previous title should succeed");
+        });
+
+        history_model.read(&app, |model, _| {
+            let conversation = model
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.title().as_deref(), Some("Generated title"));
+            assert_eq!(
+                conversation
+                    .get_root_task()
+                    .map(|root_task| root_task.description()),
+                Some("Generated title"),
+            );
+            assert_eq!(
+                model
+                    .get_conversation_metadata(&conversation_id)
+                    .map(|metadata| metadata.title.as_str()),
+                Some("Generated title"),
+            );
+        });
+    });
+}
+
+#[test]
+fn local_conversation_rename_allows_sequential_renames() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let terminal_view_id = EntityId::new();
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let conversation_id = AIConversationId::new();
+        let conversation = AIConversation::new_restored(
+            conversation_id,
+            vec![warp_multi_agent_api::Task {
+                id: "root-task".to_string(),
+                messages: vec![],
+                dependencies: None,
+                description: "Generated title".to_string(),
+                summary: String::new(),
+                server_data: String::new(),
+            }],
+            None,
+        )
+        .expect("conversation should restore");
+
+        let second_result = history_model.update(&mut app, |model, ctx| {
+            model.restore_conversations(terminal_view_id, vec![conversation], ctx);
+            model
+                .rename_conversation_locally(conversation_id, "Manual title".to_string(), ctx)
+                .expect("rename should begin");
+            model.rename_conversation_locally(conversation_id, "Second title".to_string(), ctx)
+        });
+
+        assert_eq!(second_result, Ok(()));
+        history_model.read(&app, |model, _| {
+            let conversation = model
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.title().as_deref(), Some("Second title"));
+        });
+    });
+}
+
+#[test]
 fn start_new_child_conversation_persists_harness_metadata() {
     App::test((), |mut app| async move {
         initialize_history_persistence_for_tests(&mut app);
         let terminal_view_id = EntityId::new();
         let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
 
+        // Pick a non-nil UUID for the parent run_id so the orchestration
+        // capability gate (which now reads run_id() exclusively) sees a valid
+        // agent identifier when seeding the child's parent_agent_id.
+        const PARENT_RUN_ID: &str = "00000000-0000-0000-0000-000000000001";
         let (child_a, child_b, child_ids) = history_model.update(&mut app, |history_model, ctx| {
             let parent_conversation_id =
                 history_model.start_new_conversation(terminal_view_id, false, false, false, ctx);
-            history_model.set_server_conversation_token_for_conversation(
-                parent_conversation_id,
-                "parent-agent-id".to_string(),
-            );
+            if let Some(parent) = history_model.conversation_mut(&parent_conversation_id) {
+                parent.set_run_id(PARENT_RUN_ID.to_string());
+            }
             let child_a = history_model.start_new_child_conversation(
                 terminal_view_id,
                 "Agent 1".to_string(),
@@ -581,21 +878,14 @@ fn start_new_child_conversation_persists_harness_metadata() {
                 child_b_conversation.orchestration_harness(),
                 Some(Harness::Codex)
             );
-            assert_eq!(
-                child_a_conversation.parent_agent_id(),
-                Some("parent-agent-id")
-            );
-            assert_eq!(
-                child_b_conversation.parent_agent_id(),
-                Some("parent-agent-id")
-            );
+            assert_eq!(child_a_conversation.parent_agent_id(), Some(PARENT_RUN_ID));
+            assert_eq!(child_b_conversation.parent_agent_id(), Some(PARENT_RUN_ID));
         });
     });
 }
 
 #[test]
 fn test_initialize_historical_conversations_resolves_parent_agent_id_children_via_seeded_run_ids() {
-    let _orchestration_v2 = FeatureFlag::OrchestrationV2.override_enabled(true);
     App::test((), |app| async move {
         let parent_id = AIConversationId::new();
         let child_id = AIConversationId::new();
@@ -668,6 +958,183 @@ fn test_initialize_historical_conversations_resolves_parent_agent_id_children_vi
                 model.child_conversation_ids_of(&parent_id),
                 &[child_id],
                 "parent_agent_id-only children should be indexed under their resolved parent",
+            );
+        });
+    });
+}
+
+#[test]
+fn test_initialize_historical_conversations_uses_root_task_description_title() {
+    App::test((), |app| async move {
+        let conversation_id = AIConversationId::new();
+        let now = Utc::now().naive_utc();
+        let task_id = format!("task-{conversation_id}");
+        let conversations = vec![AgentConversation {
+            conversation: AgentConversationRecord {
+                id: 0,
+                conversation_id: conversation_id.to_string(),
+                conversation_data: serde_json::to_string(&AgentConversationData {
+                    server_conversation_token: Some("renamed-title-token".to_string()),
+                    conversation_usage_metadata: None,
+                    reverted_action_ids: None,
+                    forked_from_server_conversation_token: None,
+                    artifacts_json: None,
+                    parent_agent_id: None,
+                    agent_name: None,
+                    orchestration_harness_type: None,
+                    parent_conversation_id: None,
+                    is_remote_child: false,
+                    root_task_is_optimistic: None,
+                    run_id: None,
+                    autoexecute_override: None,
+                    last_event_sequence: None,
+                    compaction_state_json: None,
+                    byop_repair_state_json: None,
+                    cli_subagent_block_snapshots_json: None,
+                    pinned: false,
+                })
+                .expect("conversation data should serialize"),
+                last_modified_at: now,
+            },
+            tasks: vec![warp_multi_agent_api::Task {
+                id: task_id.clone(),
+                messages: vec![create_user_query_message(
+                    "message-1",
+                    &task_id,
+                    "request-1",
+                    "Initial query",
+                )],
+                dependencies: None,
+                description: "Renamed root title".to_string(),
+                summary: String::new(),
+                server_data: String::new(),
+            }],
+        }];
+
+        let history_model = app
+            .add_singleton_model(|_| BlocklistAIHistoryModel::new(vec![], vec![], &conversations));
+
+        history_model.read(&app, |model, _| {
+            let metadata = model
+                .get_conversation_metadata(&conversation_id)
+                .expect("conversation metadata should be initialized");
+            assert_eq!(metadata.title, "Renamed root title");
+            assert_eq!(metadata.initial_query, "Initial query");
+        });
+    });
+}
+#[test]
+fn test_initialize_historical_conversations_eagerly_hydrates_orchestration_children() {
+    // Fix C: orchestration children should be inserted into `conversations_by_id`
+    // eagerly during `initialize_historical_conversations` so the pill bar and
+    // orchestration transcript name resolution can find them before the parent's
+    // hidden child pane materializes lazily. Non-orchestration historical rows
+    // must stay on the lazy path.
+    App::test((), |app| async move {
+        let parent_id = AIConversationId::new();
+        let child_id = AIConversationId::new();
+        let parent_run_id = Uuid::new_v4().to_string();
+        let child_run_id = Uuid::new_v4().to_string();
+        let now = Utc::now().naive_utc();
+
+        let conversations = vec![
+            persisted_agent_conversation(
+                child_id,
+                AgentConversationData {
+                    server_conversation_token: Some("child-token".to_string()),
+                    conversation_usage_metadata: None,
+                    reverted_action_ids: None,
+                    forked_from_server_conversation_token: None,
+                    artifacts_json: None,
+                    parent_agent_id: Some(parent_run_id.clone()),
+                    agent_name: Some("Agent 1".to_string()),
+                    orchestration_harness_type: None,
+                    parent_conversation_id: Some(parent_id.to_string()),
+                    is_remote_child: false,
+                    root_task_is_optimistic: None,
+                    run_id: Some(child_run_id.clone()),
+                    autoexecute_override: None,
+                    last_event_sequence: None,
+                    compaction_state_json: None,
+                    byop_repair_state_json: None,
+                    cli_subagent_block_snapshots_json: None,
+                    pinned: false,
+                },
+                now,
+                // Child needs at least one root task so `AIConversation::new_restored` succeeds.
+                Some("Child query"),
+            ),
+            persisted_agent_conversation(
+                parent_id,
+                AgentConversationData {
+                    server_conversation_token: Some("parent-token".to_string()),
+                    conversation_usage_metadata: None,
+                    reverted_action_ids: None,
+                    forked_from_server_conversation_token: None,
+                    artifacts_json: None,
+                    parent_agent_id: None,
+                    agent_name: None,
+                    orchestration_harness_type: None,
+                    parent_conversation_id: None,
+                    is_remote_child: false,
+                    root_task_is_optimistic: None,
+                    run_id: Some(parent_run_id.clone()),
+                    autoexecute_override: None,
+                    last_event_sequence: None,
+                    compaction_state_json: None,
+                    byop_repair_state_json: None,
+                    cli_subagent_block_snapshots_json: None,
+                    pinned: false,
+                },
+                now - chrono::Duration::seconds(1),
+                Some("Parent query"),
+            ),
+        ];
+
+        let history_model = app
+            .add_singleton_model(|_| BlocklistAIHistoryModel::new(vec![], vec![], &conversations));
+
+        history_model.read(&app, |model, _| {
+            // Child is hydrated into conversations_by_id eagerly so the pill
+            // bar / transcript name resolution can find it.
+            assert!(
+                model.conversation(&child_id).is_some(),
+                "Fix C: orchestration child should be eagerly hydrated into conversations_by_id",
+            );
+            // children_by_parent still gets populated as before.
+            assert_eq!(
+                model.child_conversation_ids_of(&parent_id),
+                &[child_id],
+                "orchestration children should still be indexed in children_by_parent",
+            );
+            // run_id index seeded for the child so name resolution succeeds.
+            assert_eq!(
+                model.conversation_id_for_agent_id(&child_run_id),
+                Some(child_id),
+                "child run_id should be indexed in agent_id_to_conversation_id",
+            );
+            // Parent run_id index is also seeded (matches existing behavior).
+            assert_eq!(
+                model.conversation_id_for_agent_id(&parent_run_id),
+                Some(parent_id),
+                "parent run_id should still be indexed in agent_id_to_conversation_id",
+            );
+            // Parent must NOT be in conversations_by_id yet; it remains on the
+            // existing lazy path via `restore_conversations`.
+            assert!(
+                model.conversation(&parent_id).is_none(),
+                "Fix C: parent conversation should NOT be eagerly loaded into conversations_by_id",
+            );
+            // Parent metadata is still recorded in all_conversations_metadata.
+            assert!(
+                model.get_conversation_metadata(&parent_id).is_some(),
+                "parent metadata should be recorded in all_conversations_metadata",
+            );
+            // Child metadata must NOT be recorded in all_conversations_metadata
+            // (orchestration children are managed by their parent and excluded from navigation).
+            assert!(
+                model.get_conversation_metadata(&child_id).is_none(),
+                "child metadata should NOT be recorded in all_conversations_metadata",
             );
         });
     });
@@ -1257,8 +1724,6 @@ fn test_restore_conversations_maintains_children_by_parent() {
 fn test_restore_conversations_indexes_child_by_parent_agent_id() {
     use crate::ai::agent::conversation::AIConversation;
 
-    let _orchestration_v2 = FeatureFlag::OrchestrationV2.override_enabled(true);
-
     App::test((), |mut app| async move {
         let terminal_view_id = EntityId::new();
         let history_model =
@@ -1710,7 +2175,6 @@ fn test_optimistic_root_restore_round_trip_yields_in_progress_optimistic_root() 
 
     App::test((), |mut app| async move {
         initialize_settings_for_tests(&mut app);
-        let _orchestration_v2 = FeatureFlag::OrchestrationV2.override_enabled(true);
 
         let (sender, receiver) = std::sync::mpsc::sync_channel(2);
         let mut global_resource_handles = GlobalResourceHandles::mock(&mut app);

@@ -86,7 +86,9 @@ impl AgentEventSource for ProviderAgentEventSource {
                     .stream_agent_events(run_ids, since_sequence)
                     .await?
             }
-            AgentEventFilter::AncestorRunId(ancestor_run_id) => {
+            AgentEventFilter::AncestorRunId {
+                ancestor_run_id, ..
+            } => {
                 self.client
                     .stream_agent_events_for_ancestor(ancestor_run_id, since_sequence)
                     .await?

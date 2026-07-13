@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+#[cfg(feature = "local_fs")]
+use ai::skills::SKILL_PROVIDER_DEFINITIONS;
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
 #[cfg(feature = "local_fs")]
@@ -30,7 +32,7 @@ use crate::auth::{AuthManager, AuthStateProvider};
 use crate::changelog_model::ChangelogModel;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::update_manager::UpdateManager;
-use crate::code_review::git_status_update::GitStatusUpdateModel;
+use crate::code_review::git_repo_model::GitRepoModels;
 use crate::context_chips::prompt::Prompt;
 use crate::experiments;
 use crate::network::NetworkStatus;
@@ -95,9 +97,24 @@ pub fn initialize_app_for_terminal_view(app: &mut App) {
     app.add_singleton_model(DirectoryWatcher::new);
     app.add_singleton_model(|_| DetectedRepositories::default());
     #[cfg(feature = "local_fs")]
-    app.add_singleton_model(RepoMetadataModel::new);
+    app.add_singleton_model(|ctx| {
+        let model = RepoMetadataModel::new(ctx);
+        model.register_force_included_paths(
+            SKILL_PROVIDER_DEFINITIONS
+                .iter()
+                .map(|provider| provider.skills_path.clone()),
+            ctx,
+        );
+        model.set_project_skill_provider_paths(
+            SKILL_PROVIDER_DEFINITIONS
+                .iter()
+                .map(|provider| provider.skills_path.clone()),
+            ctx,
+        );
+        model
+    });
     app.add_singleton_model(FileSearchModel::new);
-    app.add_singleton_model(|_| GitStatusUpdateModel::new());
+    app.add_singleton_model(|_| GitRepoModels::new());
     // Zap: RepoOutlines has been removed, so it is no longer registered.
     app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
     app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);

@@ -1,9 +1,11 @@
+use std::fmt::Display;
+
+use serde::Serialize;
+use serde_with::SerializeDisplay;
+
 use crate::code_review::diff_state::DiffMode;
 use crate::server::telemetry::CLIAgentType;
 use crate::view_components::find::FindDirection;
-use serde::Serialize;
-use serde_with::SerializeDisplay;
-use std::fmt::Display;
 
 /// Identifies which git button the user clicked in the code review header.
 /// Each variant maps to one of the primary action button / dropdown items.

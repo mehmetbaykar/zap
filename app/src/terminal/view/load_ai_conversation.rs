@@ -1,14 +1,10 @@
 use std::collections::HashSet;
-use std::ops::Not;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use chrono::{DateTime, Local};
-use itertools::Itertools;
-use prost::Message;
 use vec1::Vec1;
-use warp_core::channel::ChannelState;
 use warp_core::features::FeatureFlag;
 use warp_multi_agent_api as api;
 use warpui::units::IntoPixels;
@@ -63,6 +59,8 @@ pub(crate) enum RestorationDirState {
     MissingOriginalDir,
     /// The terminal needs to cd into the conversation's directory.
     NeedsCd { path: String },
+    /// Skipped auto-cd because this conversation wasn't started on this machine.
+    SkippedNonLocalConversation,
 }
 
 /// Specifies how AI conversations should be restored when creating a TerminalView.
@@ -217,7 +215,12 @@ impl TerminalView {
     fn resolve_dir_restoration_state(
         &self,
         cloud_conversation: &LoadedConversationData,
+        is_local_conversation: bool,
     ) -> RestorationDirState {
+        if !is_local_conversation {
+            return RestorationDirState::SkippedNonLocalConversation;
+        }
+
         let target_dir = match cloud_conversation {
             LoadedConversationData::Oz(conversation) => conversation.initial_working_directory(),
             LoadedConversationData::CLIAgent(cli_conversation) => {
@@ -248,12 +251,14 @@ impl TerminalView {
         cloud_conversation: LoadedConversationData,
         use_live_appearance: bool,
         entry_behavior: RestoreConversationEntryBehavior,
+        is_local_conversation: bool,
         on_restored: F,
         ctx: &mut ViewContext<Self>,
     ) where
         F: FnOnce(&mut Self, &mut ViewContext<Self>) + 'static,
     {
-        let restore_context_state = self.resolve_dir_restoration_state(&cloud_conversation);
+        let restore_context_state =
+            self.resolve_dir_restoration_state(&cloud_conversation, is_local_conversation);
 
         let restore_and_continue =
             move |me: &mut TerminalView,
@@ -288,8 +293,8 @@ impl TerminalView {
             RestorationDirState::NeedsCd { path } => {
                 // Escape the restored working directory before interpolating it into `cd`
                 // (GHSA-8659-m852-gmfx): a hostile path must not break out and inject commands.
-                let escaped = self.shell_family(ctx).shell_escape(&path).into_owned();
                 let path_for_hint = path.clone();
+                let escaped = self.shell_family(ctx).shell_escape(&path);
                 let did_execute_cd = self.input.update(ctx, |input, ctx| {
                     input.try_execute_command(&format!("cd {escaped}"), ctx)
                 });
@@ -307,7 +312,9 @@ impl TerminalView {
                     restore_and_continue(self, RestorationDirState::Unchanged, ctx);
                 }
             }
-            RestorationDirState::Unchanged | RestorationDirState::MissingOriginalDir => {
+            RestorationDirState::Unchanged
+            | RestorationDirState::MissingOriginalDir
+            | RestorationDirState::SkippedNonLocalConversation => {
                 restore_and_continue(self, restore_context_state, ctx);
             }
         }
@@ -983,7 +990,7 @@ impl TerminalView {
                 items.push(open_repo_hint.clone());
                 items.push(MessageItem::text(" change repos"));
             }
-            RestorationDirState::Unchanged => {}
+            RestorationDirState::Unchanged | RestorationDirState::SkippedNonLocalConversation => {}
         }
 
         if !items.is_empty() {
@@ -1193,94 +1200,6 @@ impl TerminalView {
                 ctx,
             );
         });
-    }
-
-    /// Loads an agent mode conversation from a debug link in the clipboard.
-    /// This is used for debugging purposes only when in dogfood channel state.
-    pub fn load_agent_mode_conversation(&mut self, ctx: &mut ViewContext<Self>) {
-        if !ChannelState::channel().is_dogfood() {
-            return;
-        }
-
-        let content = ctx.clipboard().read();
-        let Some(debug_link) = content
-            .paths
-            .and_then(|paths| paths.into_iter().exactly_one().ok())
-            .or(content
-                .plain_text
-                .is_empty()
-                .not()
-                .then_some(content.plain_text))
-        else {
-            log::error!("Clipboard contents are not a conversation debug link");
-            return;
-        };
-
-        // Parse the debug link and construct the protobuf URL
-        let proto_url = if debug_link.contains("/debug/maa/") {
-            // Split URL into base and query params
-            let mut parts = debug_link.splitn(2, '?');
-            let base_url = parts.next().unwrap_or(&debug_link);
-            let query_params = parts.next();
-
-            let clean_url = base_url.trim_end_matches('/');
-            let mut url = format!("{clean_url}/raw/final_tasks.pb");
-
-            // Preserve all query parameters if present
-            if let Some(params) = query_params {
-                url.push_str(&format!("?{params}"));
-            }
-
-            url
-        } else {
-            log::error!(
-                "Invalid debug link format. Expected format: http://host/debug/maa/conversation-id"
-            );
-            return;
-        };
-
-        log::info!("Downloading conversation data from: {proto_url}");
-
-        // Download the protobuf data
-        ctx.spawn(
-            async move {
-                let client = http_client::Client::new();
-                let response = client
-                    .get(&proto_url)
-                    .header("Accept", "application/protobuf")
-                    .send()
-                    .await?;
-
-                if !response.status().is_success() {
-                    return Err(anyhow::anyhow!("HTTP {}", response.status()));
-                }
-
-                let proto_bytes = response.bytes().await?;
-                log::debug!("Downloaded {} bytes from debug link", proto_bytes.len());
-                let task_list =
-                    api::ConversationData::decode(proto_bytes.as_ref()).map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed to decode protobuf (size: {} bytes): {}",
-                            proto_bytes.len(),
-                            e
-                        )
-                    })?;
-
-                Ok(task_list)
-            },
-            |terminal_view, task_list_result, ctx| match task_list_result {
-                Ok(task_list) => {
-                    log::info!(
-                        "Successfully downloaded and parsed conversation data with {} tasks",
-                        task_list.tasks.len()
-                    );
-                    terminal_view.load_conversation_from_tasks(task_list, ctx);
-                }
-                Err(err) => {
-                    log::warn!("Failed to download conversation data from debug link: {err}");
-                }
-            },
-        );
     }
 }
 

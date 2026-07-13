@@ -3,7 +3,6 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 use warp_multi_agent_api as api;
 
 use instant::Instant;
-use markdown_parser::FormattedTextFragment;
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
 use warp_core::{
@@ -211,7 +210,11 @@ impl BlocklistAIStatusBar {
             }
         });
         ctx.subscribe_to_model(&QueuedQueryModel::handle(ctx), |_, _, event, ctx| {
-            if matches!(event, QueuedQueryEvent::QueueNextPromptToggled { .. }) {
+            if matches!(
+                event,
+                QueuedQueryEvent::QueueNextPromptToggled { .. }
+                    | QueuedQueryEvent::DefaultModeChanged
+            ) {
                 ctx.notify();
             }
         });
@@ -343,6 +346,7 @@ impl BlocklistAIStatusBar {
         let child_agent_status_card = ctx.add_typed_action_view(|ctx| {
             ChildAgentStatusCard::new(agent_view_controller.clone(), ctx)
         });
+
         if let Some(ambient_agent_view_model) = ambient_agent_view_model.as_ref() {
             ctx.subscribe_to_model(ambient_agent_view_model, |me, _, event, ctx| match event {
                 AmbientAgentViewModelEvent::DispatchedAgent
@@ -1162,17 +1166,6 @@ impl View for BlocklistAIStatusBar {
             }
         } else {
             container = container.with_vertical_padding(8.);
-        }
-
-        // When the agent view is active, keep the child agent status card
-        // visible above the warping/status indicator so it doesn't disappear
-        // while the agent is working. The new orchestration pill bar
-        // replaces this card, so skip it when that flag is on.
-        if agent_view_controller.is_active() && !FeatureFlag::OrchestrationPillBar.is_enabled() {
-            return Flex::column()
-                .with_child(ChildView::new(&self.child_agent_status_card).finish())
-                .with_child(container.finish())
-                .finish();
         }
 
         container.finish()

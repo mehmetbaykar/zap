@@ -17,9 +17,10 @@ use super::ResponseStreamId;
 use super::{
     action_model::{BlocklistAIActionEvent, BlocklistAIActionModel},
     agent_view::{AgentViewController, AgentViewControllerEvent},
-    context_model::BlocklistAIContextModel,
+    context_model::{BlocklistAIContextModel, PendingAttachment, PendingFile},
     history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel},
     input_model::InputConfig,
+    queued_query::{QueuedQueryId, QueuedQueryModel},
     BlocklistAIInputModel, InputType,
 };
 use crate::ai::agent::api::{self, ServerConversationToken};
@@ -106,12 +107,11 @@ impl SessionContext {
             .as_ref()
             .and_then(|s| s.subshell_info().as_ref())
             .and_then(|info| info.ssh_connection_info.clone());
-        let is_legacy_ssh = session_arc
-            .as_ref()
-            .map(|s| s.is_legacy_ssh_session())
-            .unwrap_or(false);
+        let session_type = session.session_type(app);
+        let is_legacy_ssh =
+            ssh_connection_info.is_some() && matches!(&session_type, Some(SessionType::Local));
         SessionContext {
-            session_type: session.session_type(app),
+            session_type,
             shell: session.shell_launch_data(app),
             current_working_directory: session.current_working_directory().cloned(),
             ssh_connection_info,
@@ -446,6 +446,8 @@ struct InputQuery {
     /// Additional referenced attachments to include in the query
     /// (e.g. file path references from shared session file uploads).
     additional_attachments: HashMap<String, AIAgentAttachment>,
+    /// Identifies the queued row whose captured attachments must be submitted.
+    queued_query_id: Option<QueuedQueryId>,
 }
 
 impl InputQuery {
@@ -688,7 +690,16 @@ impl BlocklistAIController {
             self.cancel_active_conversation_for_follow_up(conversation_id, ctx);
 
         if let Some(slash_command_request) = SlashCommandRequest::from_query(query.as_str()) {
-            slash_command_request.send_request(self, is_queued_prompt, ctx);
+            let conversation_id_override = input_query
+                .queued_query_id
+                .is_some()
+                .then_some(conversation_id);
+            slash_command_request.send_request(
+                self,
+                input_query.queued_query_id,
+                conversation_id_override,
+                ctx,
+            );
             return;
         }
 
@@ -758,23 +769,35 @@ impl BlocklistAIController {
         }
 
         let additional_attachments = input_query.additional_attachments;
+        let queued_query_id = input_query.queued_query_id;
         let ai_input = match input_query.input_query {
             InputQueryType::UserSubmittedQueryFromInput {
                 static_query_type,
                 running_command,
                 ..
-            } => input_for_query(
-                query,
-                &task_id,
-                conversation_id,
-                static_query_type,
-                user_query_mode,
-                running_command,
-                additional_attachments,
-                self.context_model.as_ref(ctx),
-                self.active_session.as_ref(ctx),
-                ctx,
-            ),
+            } => {
+                let prompt_attachments = queued_query_id
+                    .map(|query_id| {
+                        QueuedQueryModel::as_ref(ctx)
+                            .attachments_for(conversation_id, query_id)
+                            .to_vec()
+                    })
+                    .unwrap_or_default();
+                input_for_query(
+                    query,
+                    &task_id,
+                    conversation_id,
+                    static_query_type,
+                    user_query_mode,
+                    running_command,
+                    additional_attachments,
+                    prompt_attachments,
+                    queued_query_id.is_some(),
+                    self.context_model.as_ref(ctx),
+                    self.active_session.as_ref(ctx),
+                    ctx,
+                )
+            }
             InputQueryType::AIInputType { ai_input } => ai_input,
         };
         inputs.push(ai_input);
@@ -893,6 +916,7 @@ impl BlocklistAIController {
             entrypoint_type,
             participant_id,
             /*is_queued_prompt*/ false,
+            /*queued_query_id*/ None,
             ctx,
         );
     }
@@ -907,6 +931,7 @@ impl BlocklistAIController {
         static_query_type: Option<StaticQueryType>,
         entrypoint_type: EntrypointType,
         participant_id: Option<ParticipantId>,
+        queued_query_id: QueuedQueryId,
         ctx: &mut ModelContext<Self>,
     ) {
         self.send_user_query_in_new_conversation_internal(
@@ -915,10 +940,12 @@ impl BlocklistAIController {
             entrypoint_type,
             participant_id,
             /*is_queued_prompt*/ true,
+            Some(queued_query_id),
             ctx,
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn send_user_query_in_new_conversation_internal(
         &mut self,
         query: String,
@@ -926,6 +953,7 @@ impl BlocklistAIController {
         entrypoint_type: EntrypointType,
         participant_id: Option<ParticipantId>,
         is_queued_prompt: bool,
+        queued_query_id: Option<QueuedQueryId>,
         ctx: &mut ModelContext<Self>,
     ) {
         let participant_id = participant_id.or_else(|| self.get_sharer_participant_id());
@@ -962,6 +990,7 @@ impl BlocklistAIController {
                         running_command: Some(running_command),
                     },
                     additional_attachments: HashMap::new(),
+                    queued_query_id,
                 },
                 entrypoint_type,
                 participant_id,
@@ -978,6 +1007,7 @@ impl BlocklistAIController {
                         running_command: None,
                     },
                     additional_attachments: HashMap::new(),
+                    queued_query_id,
                 },
                 entrypoint_type,
                 participant_id,
@@ -1003,6 +1033,7 @@ impl BlocklistAIController {
             HashMap::new(),
             EntrypointType::AgentInitiated,
             /*is_queued_prompt*/ false,
+            /*queued_query_id*/ None,
             ctx,
         );
     }
@@ -1023,6 +1054,7 @@ impl BlocklistAIController {
             HashMap::new(),
             EntrypointType::UserInitiated,
             /*is_queued_prompt*/ false,
+            /*queued_query_id*/ None,
             ctx,
         );
     }
@@ -1036,6 +1068,7 @@ impl BlocklistAIController {
         query: String,
         conversation_id: AIConversationId,
         participant_id: Option<ParticipantId>,
+        queued_query_id: QueuedQueryId,
         ctx: &mut ModelContext<Self>,
     ) {
         self.send_user_query_in_conversation_internal(
@@ -1046,6 +1079,7 @@ impl BlocklistAIController {
             HashMap::new(),
             EntrypointType::UserInitiated,
             /*is_queued_prompt*/ true,
+            Some(queued_query_id),
             ctx,
         );
     }
@@ -1067,6 +1101,7 @@ impl BlocklistAIController {
             additional_attachments,
             EntrypointType::UserInitiated,
             /*is_queued_prompt*/ false,
+            /*queued_query_id*/ None,
             ctx,
         );
     }
@@ -1090,6 +1125,7 @@ impl BlocklistAIController {
             HashMap::new(),
             EntrypointType::UserInitiated,
             /*is_queued_prompt*/ false,
+            /*queued_query_id*/ None,
             ctx,
         );
     }
@@ -1104,6 +1140,7 @@ impl BlocklistAIController {
         additional_attachments: HashMap<String, AIAgentAttachment>,
         entrypoint_type: EntrypointType,
         is_queued_prompt: bool,
+        queued_query_id: Option<QueuedQueryId>,
         ctx: &mut ModelContext<Self>,
     ) {
         let is_viewer = self
@@ -1211,6 +1248,7 @@ impl BlocklistAIController {
                     running_command,
                 },
                 additional_attachments,
+                queued_query_id,
             },
             entrypoint_type,
             participant_id,
@@ -1235,6 +1273,7 @@ impl BlocklistAIController {
                     running_command: None,
                 },
                 additional_attachments: HashMap::new(),
+                queued_query_id: None,
             },
             EntrypointType::ZeroStateAgentModePromptSuggestion,
             participant_id,
@@ -1271,6 +1310,7 @@ impl BlocklistAIController {
                 which_task,
                 input_query: InputQueryType::AIInputType { ai_input },
                 additional_attachments: HashMap::new(),
+                queued_query_id: None,
             },
             EntrypointType::UserInitiated,
             participant_id,
@@ -1290,7 +1330,7 @@ impl BlocklistAIController {
         if let Some(conversation_id) = slash_command.conversation_id(self, ctx) {
             self.cancel_active_conversation_for_follow_up(conversation_id, ctx);
         }
-        slash_command.send_request(self, /*is_queued_prompt*/ false, ctx);
+        slash_command.send_request(self, None, None, ctx);
     }
 
     /// Cancel any in-flight progress on the active conversation in preparation
@@ -1324,9 +1364,16 @@ impl BlocklistAIController {
     pub fn send_queued_slash_command_request(
         &mut self,
         slash_command: SlashCommandRequest,
+        queued_query_id: QueuedQueryId,
+        conversation_id: Option<AIConversationId>,
         ctx: &mut ModelContext<Self>,
     ) {
-        slash_command.send_request(self, /*is_queued_prompt*/ true, ctx);
+        let target_conversation_id =
+            conversation_id.or_else(|| slash_command.conversation_id(self, ctx));
+        if let Some(conversation_id) = target_conversation_id {
+            self.cancel_active_conversation_for_follow_up(conversation_id, ctx);
+        }
+        slash_command.send_request(self, Some(queued_query_id), target_conversation_id, ctx);
     }
 
     /// Mark a conversation to follow up after its actions complete and attempt to send immediately
@@ -1436,6 +1483,7 @@ impl BlocklistAIController {
                     },
                 },
                 additional_attachments: HashMap::new(),
+                queued_query_id: None,
             },
             EntrypointType::TriggerPassiveSuggestion {
                 trigger: trigger_type,
@@ -3953,16 +4001,27 @@ fn input_for_query(
     user_query_mode: UserQueryMode,
     running_command: Option<RunningCommand>,
     additional_attachments: HashMap<String, AIAgentAttachment>,
+    prompt_attachments: Vec<PendingAttachment>,
+    is_queued_prompt: bool,
     context_model: &BlocklistAIContextModel,
     active_session: &ActiveSession,
     app: &AppContext,
 ) -> AIAgentInput {
+    let mut image_context = Vec::new();
+    let mut file_attachments = Vec::new();
+    for attachment in prompt_attachments {
+        match attachment {
+            PendingAttachment::Image(image) => image_context.push(AIAgentContext::Image(image)),
+            PendingAttachment::File(file) => file_attachments.push(file),
+        }
+    }
+
     let context = input_context_for_request(
-        true,
+        !is_queued_prompt,
         context_model,
         active_session,
         Some(conversation_id),
-        vec![],
+        image_context,
         app,
     );
     let intended_agent = BlocklistAIHistoryModel::as_ref(app)
@@ -3979,6 +4038,7 @@ fn input_for_query(
         });
     let mut referenced_attachments = parse_context_attachments(&query, context_model, app);
     referenced_attachments.extend(additional_attachments);
+    add_pending_file_attachments(&mut referenced_attachments, file_attachments);
     AIAgentInput::UserQuery {
         query,
         context,
@@ -3987,6 +4047,31 @@ fn input_for_query(
         user_query_mode,
         running_command,
         intended_agent,
+    }
+}
+
+pub(super) fn add_pending_file_attachments(
+    referenced_attachments: &mut HashMap<String, AIAgentAttachment>,
+    file_attachments: Vec<PendingFile>,
+) {
+    for file in file_attachments {
+        let attachment = AIAgentAttachment::FilePathReference {
+            file_id: uuid::Uuid::new_v4().to_string(),
+            file_name: file.file_name.clone(),
+            file_path: file.file_path.to_string_lossy().to_string(),
+        };
+        let mut key = file.file_name.clone();
+        if referenced_attachments.contains_key(&key) {
+            let mut suffix = 1;
+            loop {
+                key = format!("{} ({suffix})", file.file_name);
+                if !referenced_attachments.contains_key(&key) {
+                    break;
+                }
+                suffix += 1;
+            }
+        }
+        referenced_attachments.insert(key, attachment);
     }
 }
 

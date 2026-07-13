@@ -1,5 +1,4 @@
 mod docker;
-pub mod parse_url_paths;
 pub mod web_intent_parser;
 
 #[cfg(target_family = "wasm")]
@@ -17,18 +16,11 @@ use warpui::platform::TerminationMode;
 use warpui::{AppContext, EntityId, SingletonEntity as _, TypedActionView, ViewHandle, WindowId};
 
 use self::docker::open_docker_container;
-use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::ambient_agents::github_auth_notifier::GitHubAuthNotifier;
-use crate::cloud_object::ObjectType;
-use crate::drive::{ZapDriveObjectArgs, ZapDriveObjectSettings};
 use crate::features::FeatureFlag;
 use crate::launch_configs::launch_config::LaunchConfig;
 use crate::linear::{LinearAction, LinearIssueWork};
-use crate::root_view::{
-    open_new_window_get_handles, open_new_with_workspace_source, NewWorkspaceSource,
-    OpenLaunchConfigArg,
-};
-use crate::server::ids::ServerId;
+use crate::root_view::{open_new_window_get_handles, OpenLaunchConfigArg};
 use crate::server::telemetry::{LaunchConfigUiLocation, TelemetryEvent};
 use crate::settings_view::{settings_widget_deeplink_target, SettingsSection};
 use crate::tab_configs::TabConfig;
@@ -83,9 +75,9 @@ pub enum UriHost {
     Action,
     /// A host prefix for all actions that involve launch configurations
     Launch,
-    /// Supports viewing AI conversations via a warp:// URI.
+    /// Legacy Warp-cloud conversation links. Recognized only so Zap can ignore them safely.
     Conversation,
-    /// Supports WD object actions
+    /// Legacy Warp Drive links. Recognized only so Zap can ignore them safely.
     Drive,
     /// Supports opening warp's settings panel via URI
     Settings,
@@ -172,103 +164,10 @@ impl UriHost {
                 handle_tab_config_uri(primary_window_id, url, ctx);
             }
             UriHost::Conversation => {
-                // We expect the uri to have the conversation ID as the last segment.
-                // e.g. warp://conversation/{conversation_id}
-                let conversation_id: Option<ServerConversationToken> = url
-                    .path_segments()
-                    .into_iter()
-                    .flatten()
-                    .last()
-                    .map(|s| ServerConversationToken::new(s.to_owned()));
-
-                if let Some(conversation_id) = conversation_id {
-                    // If there's an existing window, open the conversation in a new tab. Otherwise, open a new window.
-                    match primary_window_id.and_then(|window_id| {
-                        ctx.root_view_id(window_id)
-                            .map(|view_id| (window_id, view_id))
-                    }) {
-                        Some((primary_window_id, root_view_id)) => {
-                            ctx.dispatch_action(
-                                primary_window_id,
-                                &[root_view_id],
-                                "root_view:open_cloud_conversation_in_existing_window",
-                                &conversation_id,
-                                log::Level::Info,
-                            );
-                        }
-                        None => ctx.dispatch_global_action(
-                            "root_view:open_conversation_viewer",
-                            &conversation_id,
-                        ),
-                    }
-                } else {
-                    log::warn!("Failed to open conversation with uri={url}");
-                }
+                log::warn!("warp://conversation is decommissioned in Zap; ignoring the URI");
             }
             UriHost::Drive => {
-                // We expect the uri to have the ID of the object we are trying to open and the object_type.
-                // e.g. warp://drive/{object_type}?id={UID}
-                // For folder links, we expect an additional query parameter primary_object_id which refers to the id object
-                // that should be opened
-                // When the user is directed here via the request access flow, we expect an additional query parameter invitee_email
-                // If this parameter is present, we will open the sharing dialog with the email filled in.
-                let object_type = url
-                    .path_segments()
-                    .into_iter()
-                    .flatten()
-                    .last()
-                    .and_then(|object_type| ObjectType::from_str(object_type).ok());
-
-                let query_string: HashMap<_, _> = url.query_pairs().collect();
-                let object_server_id: Option<ServerId> =
-                    query_string.get("id").map(ServerId::from_string_lossy);
-
-                let focused_folder_id: Option<ServerId> = query_string
-                    .get("focused_folder_id")
-                    .map(ServerId::from_string_lossy);
-
-                let invitee_email: Option<String> =
-                    query_string.get("invitee_email").map(|s| s.to_string());
-
-                if let Some((object_type, server_id)) = object_type.zip(object_server_id) {
-                    let primary_window_and_view = primary_window_id.and_then(|window_id| {
-                        ctx.root_view_id(window_id)
-                            .map(|view_id| (window_id, view_id))
-                    });
-                    let args = ZapDriveObjectArgs {
-                        object_type,
-                        server_id,
-                        settings: ZapDriveObjectSettings {
-                            focused_folder_id,
-                            invitee_email,
-                        },
-                    };
-                    // If there's an existing window, open the object in that window, otherwise open a new window
-                    if let Some((primary_window_id, root_view_id)) = primary_window_and_view {
-                        // `args` may contain user-identifiable fields
-                        // (e.g. `invitee_email`), so avoid writing the full
-                        // debug representation to `warp.log` on non-dogfood
-                        // release channels.
-                        safe_info!(
-                            safe: (
-                                "Opening drive object in existing window: object_type={:?} server_id={}",
-                                args.object_type, args.server_id,
-                            ),
-                            full: ("Opening drive object in existing window: {args:?}")
-                        );
-                        ctx.dispatch_action(
-                            primary_window_id,
-                            &[root_view_id],
-                            "root_view:open_drive_object_existing_window",
-                            &args,
-                            log::Level::Info,
-                        );
-                    } else {
-                        ctx.dispatch_global_action("root_view:open_drive_object_new_window", &args)
-                    }
-                } else {
-                    log::warn!("Failed to open drive object with uri={url}");
-                }
+                log::warn!("warp://drive is decommissioned in Zap; ignoring the URI");
             }
             UriHost::Settings => {
                 // We support opening different settings pages through URI:
@@ -481,9 +380,9 @@ impl UriHost {
             Self::Auth => W::ShowPrimaryWindow(WindowActivationFallbackBehavior::NewWindow {
                 replace_existing: true,
             }),
-            Self::Drive | Self::Settings => W::default(),
+            Self::Settings => W::default(),
             // These URLs always open new windows.
-            Self::Launch | Self::Conversation | Self::Home => W::Nothing,
+            Self::Launch | Self::Conversation | Self::Drive | Self::Home => W::Nothing,
             // This will actually be handled by [`Action::window_behavior_hint`].
             Self::Action => W::Nothing,
             // TODO(vorporeal): probably want to focus the window with the MCP pane open
@@ -1460,7 +1359,6 @@ fn safe_url_log_fields(url: &Url) -> String {
         url.path(),
     )
 }
-
 fn decode_uuid_hex(hex: &str) -> Option<Vec<u8>> {
     let hex = hex.as_bytes();
     if hex.len() != 32 {

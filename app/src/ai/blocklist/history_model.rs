@@ -41,7 +41,6 @@ use crate::ai::byop_readiness::{
     RepairRecord, RepairSource, RepairState, RepairStateStatus, ToolCallKey,
 };
 use crate::ai::document::ai_document_model::AIDocumentModel;
-use crate::features::FeatureFlag;
 use crate::input_suggestions::HistoryOrder;
 use crate::persistence::model::{AgentConversation, AgentConversationData};
 use crate::persistence::ModelEvent;
@@ -58,7 +57,11 @@ pub use conversation_loader::{
     LoadedConversationData,
 };
 
-pub(super) const MAX_HISTORICAL_CONVERSATIONS: usize = 100;
+/// Mirrors [`crate::persistence::agent::MAX_PERSISTED_CONVERSATION_COUNT`].
+/// Moot at steady state because the disk-side prune already keeps the
+/// persisted set within this window; kept as defense-in-depth if rows ever
+/// arrive from another source (cross-machine import, prune bypass).
+pub(super) const MAX_HISTORICAL_CONVERSATIONS: usize = 200;
 
 /// Metadata for conversations restored from memory or local SQLite.
 #[derive(Debug, Clone)]
@@ -127,6 +130,12 @@ pub enum UpdateHistoryError {
     Conversation(#[from] UpdateConversationError),
     #[error("Failed to find conversation with ID {0:?}")]
     ConversationNotFound(AIConversationId),
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub(crate) enum BeginConversationRenameError {
+    #[error("conversation not found")]
+    ConversationNotFound,
 }
 
 /// Responsible for managing the history of user and AI exchanges.
@@ -512,6 +521,55 @@ impl BlocklistAIHistoryModel {
         };
 
         metadata.server_conversation_token = conversation.server_conversation_token().cloned();
+    }
+
+    /// Renames a conversation in the local history and persistence state.
+    pub(crate) fn rename_conversation_locally(
+        &mut self,
+        conversation_id: AIConversationId,
+        title: String,
+        ctx: &mut ModelContext<Self>,
+    ) -> Result<(), BeginConversationRenameError> {
+        if !self.conversations_by_id.contains_key(&conversation_id) {
+            return Err(BeginConversationRenameError::ConversationNotFound);
+        }
+        self.apply_conversation_title(conversation_id, title, ctx);
+        Ok(())
+    }
+
+    /// Applies a conversation title locally and notifies title observers.
+    pub(crate) fn apply_conversation_title(
+        &mut self,
+        conversation_id: AIConversationId,
+        title: String,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let terminal_view_id = self.terminal_view_id_for_conversation(&conversation_id);
+
+        let mut updated = false;
+        if let Some(conversation) = self.conversations_by_id.get_mut(&conversation_id) {
+            conversation.update_conversation_title(title.clone(), ctx);
+            updated = true;
+        } else {
+            log::warn!(
+                "apply_conversation_title called for missing conversation {conversation_id:?}"
+            );
+        }
+
+        if let Some(metadata) = self.all_conversations_metadata.get_mut(&conversation_id) {
+            metadata.title = title.clone();
+            updated = true;
+        }
+
+        if !updated {
+            return;
+        }
+
+        ctx.emit(BlocklistAIHistoryEvent::UpdatedConversationTitle {
+            terminal_view_id,
+            conversation_id,
+            title,
+        });
     }
     pub fn mark_conversation_as_remote_child(
         &mut self,
@@ -1636,7 +1694,6 @@ impl BlocklistAIHistoryModel {
                 token_usage,
                 usage_metadata,
                 was_user_initiated_request,
-                ctx,
             ) {
                 log::warn!(
                     "Failed to update request cost for conversation {conversation_id}: {e:#}"
@@ -2367,11 +2424,7 @@ fn agent_id_key(conversation: &AIConversation) -> Option<String> {
 }
 
 fn agent_id_key_from_persisted_data(conversation_data: &AgentConversationData) -> Option<&str> {
-    if FeatureFlag::OrchestrationV2.is_enabled() {
-        conversation_data.run_id.as_deref()
-    } else {
-        conversation_data.server_conversation_token.as_deref()
-    }
+    conversation_data.run_id.as_deref()
 }
 
 /// Whether an `UpdatedConversationStatus` event represents a restoration
@@ -2515,6 +2568,13 @@ pub enum BlocklistAIHistoryEvent {
         conversation_id: AIConversationId,
     },
 
+    /// Emitted when a conversation title changes.
+    UpdatedConversationTitle {
+        terminal_view_id: Option<EntityId>,
+        conversation_id: AIConversationId,
+        title: String,
+    },
+
     /// Emitted when conversation artifacts are updated (plans, PRs, etc.)
     UpdatedConversationArtifacts {
         terminal_view_id: EntityId,
@@ -2634,6 +2694,9 @@ impl BlocklistAIHistoryEvent {
             } => Some(*terminal_view_id),
             // UpdatedConversationMetadata can have None when updating historical-only conversations
             BlocklistAIHistoryEvent::UpdatedConversationMetadata {
+                terminal_view_id, ..
+            }
+            | BlocklistAIHistoryEvent::UpdatedConversationTitle {
                 terminal_view_id, ..
             } => *terminal_view_id,
             // DeletedConversation can have None when deleting historical-only conversations

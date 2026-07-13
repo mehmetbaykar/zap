@@ -285,46 +285,54 @@ pub async fn run_webfetch(client: &reqwest::Client, args: FetchArgs) -> Result<F
 
 /// Shared Response → FetchOutput conversion logic.
 ///
-/// Called by both `run_webfetch` and the test helper, to avoid duplicating the status-check,
-/// size-limit, image-encoding, and JSON-prettifying logic.
+/// Separates the network response read from the pure content conversion so the
+/// status, size, image, and formatting branches can be tested without sockets.
 async fn response_to_fetch_output(
     resp: reqwest::Response,
     url: &str,
     format: &FetchFormat,
 ) -> Result<FetchOutput> {
     let status = resp.status();
-    if !status.is_success() {
-        bail!("HTTP {} fetching {url}", status.as_u16());
-    }
-
     let content_type = resp
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    let mime = content_type
-        .split(';')
-        .next()
-        .map(|s| s.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-
-    // Content-Length pre-check
-    if let Some(len_str) = resp
+    let content_length = resp
         .headers()
         .get(CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
-    {
-        if let Ok(len) = len_str.parse::<usize>() {
-            if len > MAX_RESPONSE_SIZE {
-                bail!(
-                    "Response too large (Content-Length {len} > {MAX_RESPONSE_SIZE} bytes limit)"
-                );
-            }
-        }
-    }
+        .and_then(|len| len.parse::<usize>().ok());
+    validate_fetch_response_metadata(status, content_length, url)?;
 
     let bytes = resp.bytes().await.context("read response body")?;
+    fetch_output_from_bytes(status, content_type, &bytes, url, format)
+}
+
+fn validate_fetch_response_metadata(
+    status: StatusCode,
+    content_length: Option<usize>,
+    url: &str,
+) -> Result<()> {
+    if !status.is_success() {
+        bail!("HTTP {} fetching {url}", status.as_u16());
+    }
+    if let Some(len) = content_length {
+        if len > MAX_RESPONSE_SIZE {
+            bail!("Response too large (Content-Length {len} > {MAX_RESPONSE_SIZE} bytes limit)");
+        }
+    }
+    Ok(())
+}
+
+fn fetch_output_from_bytes(
+    status: StatusCode,
+    content_type: String,
+    bytes: &[u8],
+    url: &str,
+    format: &FetchFormat,
+) -> Result<FetchOutput> {
     if bytes.len() > MAX_RESPONSE_SIZE {
         bail!(
             "Response too large ({} bytes > {} bytes limit)",
@@ -332,10 +340,15 @@ async fn response_to_fetch_output(
             MAX_RESPONSE_SIZE
         );
     }
+    let mime = content_type
+        .split(';')
+        .next()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_default();
 
     // image → base64 attachment
     if is_image_mime(&mime) {
-        let encoded = BASE64.encode(&bytes);
+        let encoded = BASE64.encode(bytes);
         let data_url = format!("data:{mime};base64,{encoded}");
         return Ok(FetchOutput {
             url: url.to_owned(),
@@ -350,7 +363,7 @@ async fn response_to_fetch_output(
         });
     }
 
-    let body_str = String::from_utf8_lossy(&bytes).into_owned();
+    let body_str = String::from_utf8_lossy(bytes).into_owned();
     let is_html = mime == "text/html" || mime == "application/xhtml+xml";
 
     let output = match format {
@@ -631,6 +644,28 @@ pub async fn run_websearch(
     api_key: Option<&str>,
     endpoint_override: Option<&str>,
 ) -> Result<SearchOutput> {
+    let (query, request) = build_websearch_request(client, args, api_key, endpoint_override)?;
+    let url = request.url().clone();
+    let resp = client
+        .execute(request)
+        .await
+        .with_context(|| format!("Exa POST {url}"))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body_text = resp.text().await.unwrap_or_default();
+        return search_output_from_response(query, status, &body_text);
+    }
+    let body_text = resp.text().await.context("read Exa SSE body")?;
+    search_output_from_response(query, status, &body_text)
+}
+
+fn build_websearch_request(
+    client: &reqwest::Client,
+    args: SearchToolArgs,
+    api_key: Option<&str>,
+    endpoint_override: Option<&str>,
+) -> Result<(String, reqwest::Request)> {
     let query = args.query.clone();
     let exa_args = args.into_exa_args();
     let body = exa::build_request_body(exa::SEARCH_TOOL_NAME, &exa_args);
@@ -639,24 +674,27 @@ pub async fn run_websearch(
         .map(|s| s.to_owned())
         .unwrap_or_else(|| exa::endpoint_url(api_key));
 
-    let resp = client
+    let request = client
         .post(&url)
         .header(ACCEPT, "application/json, text/event-stream")
         .header(CONTENT_TYPE, "application/json")
         .timeout(Duration::from_secs(SEARCH_TIMEOUT_SECS))
         .json(&body)
-        .send()
-        .await
-        .with_context(|| format!("Exa POST {url}"))?;
+        .build()
+        .with_context(|| format!("build Exa POST {url}"))?;
+    Ok((query, request))
+}
 
-    let status = resp.status();
+fn search_output_from_response(
+    query: String,
+    status: StatusCode,
+    body_text: &str,
+) -> Result<SearchOutput> {
     if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
         bail!("Exa returned HTTP {} ({})", status.as_u16(), body_text);
     }
-    let body_text = resp.text().await.context("read Exa SSE body")?;
 
-    let parsed = exa::parse_sse_body(&body_text)?;
+    let parsed = exa::parse_sse_body(body_text)?;
     let results = parsed.unwrap_or_else(|| EMPTY_FALLBACK.to_owned());
     Ok(SearchOutput { query, results })
 }

@@ -19,6 +19,7 @@ use crate::ai::agent::conversation::{
 };
 use crate::ai::blocklist::agent_view::agent_view_bg_fill;
 use crate::ai::blocklist::agent_view::orchestration_conversation_links::parent_conversation_navigation_card;
+use crate::ai::blocklist::orchestration_topology::orchestration_aware_conversation_status;
 use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::appearance::Appearance;
 use crate::features::FeatureFlag;
@@ -372,8 +373,7 @@ impl TerminalView {
     }
 
     fn render_parent_conversation_header_card(&self, app: &AppContext) -> Option<Box<dyn Element>> {
-        if !(FeatureFlag::OrchestrationV2.is_enabled()
-            && FeatureFlag::AgentView.is_enabled()
+        if !(FeatureFlag::AgentView.is_enabled()
             && self.agent_view_controller.as_ref(app).is_fullscreen())
         {
             return None;
@@ -440,10 +440,6 @@ impl TerminalView {
                 .with_child(pinned_header)
                 .with_child(secondary_row)
                 .finish();
-        }
-
-        if !FeatureFlag::OrchestrationV2.is_enabled() {
-            return header;
         }
 
         if let Some(parent_card) = parent_conversation_header_card {
@@ -793,7 +789,10 @@ impl TerminalView {
             return None;
         }
 
-        Some(conversation.status().clone())
+        Some(orchestration_aware_conversation_status(
+            BlocklistAIHistoryModel::as_ref(ctx),
+            conversation,
+        ))
     }
 
     pub fn selected_conversation_is_empty(&self, ctx: &AppContext) -> bool {

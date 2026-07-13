@@ -280,6 +280,22 @@ impl BlocklistAIHistoryModel {
                         {
                             self.index_child_conversation(conversation_id, parent_id);
                         }
+
+                        // Eagerly hydrate orchestration children so local status cards and
+                        // transcript participant labels can resolve them before their hidden
+                        // panes are materialized. Root historical conversations remain lazy.
+                        if let Some(child_conversation) =
+                            convert_persisted_conversation_to_ai_conversation_with_metadata(
+                                (*agent_conv).clone(),
+                            )
+                        {
+                            self.conversations_by_id
+                                .insert(conversation_id, child_conversation);
+                        } else {
+                            log::warn!(
+                                "Failed to eagerly hydrate orchestration child {conversation_id}"
+                            );
+                        }
                         return None;
                     }
                 }

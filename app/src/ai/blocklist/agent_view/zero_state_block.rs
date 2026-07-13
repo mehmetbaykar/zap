@@ -201,7 +201,7 @@ impl AgentViewZeroStateBlock {
 
         Self {
             conversation_id,
-            origin,
+            origin: origin.clone(),
             agent_view_controller,
             sessions: sessions.clone(),
             terminal_model,
@@ -366,7 +366,7 @@ impl View for AgentViewZeroStateBlock {
 
         let body = render_body(
             ZeroStateBodyProps {
-                origin: self.origin,
+                origin: self.origin.clone(),
                 has_parent_terminal: self.has_parent_terminal,
                 should_show_init_callout: self.should_show_init_callout,
                 recent_conversations: &self.cached_recent_conversations,
@@ -645,7 +645,11 @@ fn render_body(props: ZeroStateBodyProps<'_>, app: &AppContext) -> Vec<Box<dyn E
                         MessageItem::text(crate::t!("terminal-zero-state-start-agent")),
                     ],
                     |ctx| {
-                        ctx.dispatch_typed_action(TerminalAction::StartNewAgentConversation);
+                        ctx.dispatch_typed_action(TerminalAction::StartNewAgentConversation {
+                            origin: AgentViewEntryOrigin::Input {
+                                was_prompt_autodetected: false,
+                            },
+                        });
                     },
                     state_handles.start_new_conversation.clone(),
                 )]),

@@ -2888,6 +2888,7 @@ impl BlockList {
         // Simulate preexec to transition to Executing state
         self.preexec(PreexecValue {
             command: command.to_string(),
+            session_id: None,
         });
 
         // Add the command output
@@ -3162,7 +3163,10 @@ impl BlockList {
 
         if block.did_execute {
             let command = self.active_block_mut().command_to_string();
-            self.preexec(PreexecValue { command });
+            self.preexec(PreexecValue {
+                command,
+                session_id: None,
+            });
         }
 
         if block.did_execute || block.is_background {
@@ -4053,7 +4057,7 @@ impl ansi::Handler for BlockList {
     }
 
     fn handle_completed_iterm_image(&mut self, image: ITermImage) {
-        delegate_to_block!(self.handle_completed_iterm_image(image))
+        delegate!(self.handle_completed_iterm_image(image))
     }
 
     fn handle_completed_kitty_action(
@@ -4061,7 +4065,7 @@ impl ansi::Handler for BlockList {
         action: KittyAction,
         metadata: &mut HashMap<u32, StoredImageMetadata>,
     ) -> Option<KittyResponse> {
-        delegate_to_block!(self.handle_completed_kitty_action(action, metadata))
+        delegate!(self.handle_completed_kitty_action(action, metadata))
     }
 
     fn set_keyboard_enhancement_flags(

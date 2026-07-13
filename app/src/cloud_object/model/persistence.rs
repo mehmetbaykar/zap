@@ -28,18 +28,11 @@ use std::sync::mpsc::SyncSender;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use crate::cloud_object::StoredObject;
-use chrono::{DateTime, Duration, Utc};
-use rand::Rng;
+use chrono::{DateTime, Utc};
 use warp_core::features::FeatureFlag;
 use warp_util::sync::Condition;
 
 use super::generic_string_model::GenericStringObjectId;
-
-// Equivalent to 24 hours
-const MIN_MINUTES_UNTIL_NEXT_FORCE_REFRESH: i64 = 1440;
-
-// Equivalent to 36 hours
-const MAX_MINUTES_UNTIL_NEXT_FORCE_REFRESH: i64 = 2160;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateSource {
@@ -107,35 +100,29 @@ pub struct ObjectStoreModel {
     objects_by_id: HashMap<ObjectUid, Box<dyn StoredObject>>,
     model_event_sender: Option<SyncSender<ModelEvent>>,
     initial_load_complete: Condition,
-
-    time_of_next_force_refresh: Option<DateTime<Utc>>,
 }
 
 impl ObjectStoreModel {
     pub fn new(
         model_event_sender: Option<SyncSender<ModelEvent>>,
         cached_objects: Vec<Box<dyn StoredObject>>,
-        time_of_next_force_refresh: Option<DateTime<Utc>>,
     ) -> Self {
         let objects_by_id = cached_objects
             .into_iter()
             .map(|object| (object.uid().to_owned(), object))
             .collect::<HashMap<ObjectUid, Box<dyn StoredObject>>>();
         let initial_load_complete = Condition::new();
-        // Zap has no cloud object initial fetch; once SQLite restore completes it can be considered
-        // readable.
+        // Zap has no cloud object initial fetch, so the local store is immediately readable.
         initial_load_complete.set();
 
         Self {
             objects_by_id,
             model_event_sender,
             initial_load_complete,
-            time_of_next_force_refresh,
         }
     }
 
-    /// Wait until the local object store is readable. In Zap this condition is satisfied immediately
-    /// after SQLite restore.
+    /// Wait until the local object store is readable. In Zap this condition is satisfied immediately.
     pub fn initial_load_complete(&self) -> impl Future<Output = ()> {
         self.initial_load_complete.wait()
     }
@@ -263,7 +250,7 @@ impl ObjectStoreModel {
         ctx: &mut ModelContext<Self>,
     ) -> (Vec<(SyncId, ObjectIdType)>, i32) {
         let mut count = 0;
-        let mut sync_ids_and_types: Vec<(SyncId, ObjectIdType)> = Vec::new();
+        let mut sync_ids_and_types = Vec::new();
         for uid in uids {
             if let Some(object) = self.objects_by_id.remove(&uid) {
                 let object_type_and_id = object.object_type_and_id();
@@ -271,7 +258,6 @@ impl ObjectStoreModel {
                     object_type_and_id.sync_id(),
                     object_type_and_id.object_id_type(),
                 ));
-
                 ctx.emit(ObjectStoreEvent::ObjectDeleted {
                     type_and_id: object.object_type_and_id(),
                     folder_id: object.metadata().folder_id,
@@ -1299,7 +1285,7 @@ impl ObjectStoreModel {
 
     #[cfg(test)]
     pub fn mock(_ctx: &mut ModelContext<Self>) -> Self {
-        Self::new(None, Vec::new(), None)
+        Self::new(None, Vec::new())
     }
 
     // If the object is a folder and a welcome object, open it if we haven't opened a welcome folder before.
@@ -1318,32 +1304,9 @@ impl ObjectStoreModel {
         }
     }
 
-    /// Whether the next local object-store refresh needs to force a full traversal of objects.
-    pub fn cloud_objects_force_refresh_pending(&self) -> bool {
-        // If there's no stated time for the next refresh, assume we should do one now. Otherwise,
-        // check if we're at or past the time of the next refresh.
-        self.time_of_next_force_refresh
-            .is_none_or(|time_of_next_refresh| Utc::now() >= time_of_next_refresh)
-    }
-
-    /// After a successful force refresh, mark the state as completed by picking a
-    /// time for the next refresh.
-    pub fn mark_cloud_objects_refresh_as_completed(&mut self) -> DateTime<Utc> {
-        // In order to offset when clients are performing the force refresh, we introduce
-        // a small amount of randomness into the calculation. This is intended to distribute
-        // server load to whatever extent possible.
-        let mut rng = rand::thread_rng();
-        let minutes_until_next_refresh = rng
-            .gen_range(MIN_MINUTES_UNTIL_NEXT_FORCE_REFRESH..MAX_MINUTES_UNTIL_NEXT_FORCE_REFRESH);
-        let next_refresh_time = Utc::now() + Duration::minutes(minutes_until_next_refresh);
-        self.time_of_next_force_refresh = Some(next_refresh_time);
-        next_refresh_time
-    }
-
     pub fn reset(&mut self) {
         self.objects_by_id = HashMap::new();
         self.initial_load_complete.set();
-        self.time_of_next_force_refresh = None;
     }
 }
 

@@ -39,7 +39,9 @@ use super::{
     ChipValue, ContextChipKind,
 };
 #[cfg(feature = "local_fs")]
-use crate::code_review::git_status_update::{GitRepoStatusEvent, GitRepoStatusModel};
+use crate::code_review::git_repo_model::{GitRepoStatusEvent, GitRepoStatusModel};
+#[cfg(feature = "local_fs")]
+use crate::code_review::github_repo_model::{GitHubRepoEvent, GitHubRepoModel};
 #[cfg(feature = "local_fs")]
 use crate::context_chips::display_chip::GitLineChanges;
 use std::collections::{HashMap, HashSet};
@@ -179,11 +181,15 @@ pub struct CurrentPrompt {
     prompt_chip_logger: PromptChipLogger,
     update_tx: async_channel::Sender<()>,
 
-    /// When set, `ShellGitBranch`, `GitBranchStatus`, and `GitDiffStats` chip
-    /// values are driven by filesystem events from `GitRepoStatusModel` instead
-    /// of the 30s periodic timer.
+    /// When set, git-backed chip values are populated from `GitRepoStatusModel`.
+    /// `ShellGitBranch` and `GitDiffStats` are driven by filesystem events.
     #[cfg(feature = "local_fs")]
     git_repo_status: Option<WeakModelHandle<GitRepoStatusModel>>,
+
+    /// When set, the `GithubPullRequest` chip value is populated from
+    /// `GitHubRepoModel` for the current repository.
+    #[cfg(feature = "local_fs")]
+    github_repo_model: Option<WeakModelHandle<GitHubRepoModel>>,
 }
 
 /// Context about the current terminal session, needed to update the prompt.
@@ -255,6 +261,8 @@ impl CurrentPrompt {
             separator: prompt.as_ref(ctx).separator(),
             #[cfg(feature = "local_fs")]
             git_repo_status: None,
+            #[cfg(feature = "local_fs")]
+            github_repo_model: None,
         }
     }
 
@@ -1032,6 +1040,44 @@ impl CurrentPrompt {
                 let state = ChipState::new(chip_kind);
                 self.states.insert(chip_kind.clone(), state);
             }
+            if self.is_updated_externally(chip_kind) {
+                // For chips updated externally (e.g. by the per-repo git status
+                // filesystem watcher), avoid running the shell-based fallback
+                // generator. Doing so can briefly overwrite the structured
+                // watcher value with one that uses different semantics (for
+                // example, the `GitDiffStats` shell fallback runs `git diff
+                // --shortstat HEAD`, which excludes untracked files, whereas
+                // the watcher counts untracked files as changes), causing the
+                // chip to flicker between the tracked-only count and the
+                // all-files count when untracked files are present.
+                //
+                // If a chip provides an `initial_value_generator` that sources
+                // from the prompt context (rather than running a shell
+                // command), use it for a fast initial value until the watcher
+                // emits a metadata-changed event.
+                if let Some(initial_gen) = chip_kind.initial_value_generator() {
+                    self.fetch_chip_value_once(
+                        chip_kind,
+                        &initial_gen,
+                        chip.on_click_generator().cloned(),
+                        true,
+                        ctx,
+                    );
+                } else {
+                    // Externally-updated chips without an `initial_value_generator`
+                    // are left blank after a state rebuild (`states.clear()` in
+                    // `handle_prompt_changed`, or `clear_cache()` on a session
+                    // change) until their backing model emits a change event.
+                    // `GithubPullRequest` only emits when cached PR info actually
+                    // changes, so after a rebuild there may be no event to restore
+                    // the already-cached value until the next periodic refresh.
+                    #[cfg(feature = "local_fs")]
+                    if matches!(chip_kind, ContextChipKind::GithubPullRequest) {
+                        self.sync_pr_chip_from_model(ctx);
+                    }
+                }
+                return;
+            }
 
             match chip.refresh_config() {
                 RefreshConfig::OnDemandOnly => {
@@ -1427,8 +1473,9 @@ impl CurrentPrompt {
     }
 
     /// Set the per-repo git status model handle. When `Some`, subscribes to
-    /// metadata-changed events so `ShellGitBranch` and `GitDiffStats` are updated
-    /// by filesystem events instead of the 30s periodic timer.
+    /// metadata events so git-backed prompt chips are updated from the
+    /// per-repo status model. PR info is handled separately by
+    /// [`Self::set_github_repo_model`].
     #[cfg(feature = "local_fs")]
     pub fn set_git_repo_status(
         &mut self,
@@ -1471,9 +1518,52 @@ impl CurrentPrompt {
                 // have completed before we subscribed). If it hasn't finished
                 // yet, the subscription above will catch the `MetadataChanged`
                 // event when it does.
-                if strong.as_ref(ctx).metadata().is_some() {
+                if strong.as_ref(ctx).metadata(ctx).is_some() {
                     self.apply_git_repo_metadata(ctx);
                 }
+            }
+        }
+    }
+
+    /// Set the per-repo GitHub-info model handle. When `Some`, subscribes to
+    /// its events so the `GithubPullRequest` chip value is updated.
+    #[cfg(feature = "local_fs")]
+    pub fn set_github_repo_model(
+        &mut self,
+        handle: Option<WeakModelHandle<GitHubRepoModel>>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        // Unsubscribe from the previous model, if any.
+        if let Some(old_weak) = self.github_repo_model.take() {
+            if let Some(old_strong) = old_weak.upgrade(ctx) {
+                ctx.unsubscribe_from_model(&old_strong);
+            }
+        }
+
+        if handle.is_none() {
+            // GitHub-info handle detached: clear any stale PR chip state.
+            if let Some(state) = self.states.get_mut(&ContextChipKind::GithubPullRequest) {
+                state.clear_abort_handlers();
+                state.clear_cache();
+            }
+            let _ = self.update_tx.try_send(());
+            return;
+        }
+
+        if let Some(weak) = handle {
+            if let Some(strong) = weak.upgrade(ctx) {
+                self.github_repo_model = Some(weak);
+                // Only PR info drives the chip value; repository name/owner
+                // changes don't affect it.
+                ctx.subscribe_to_model(&strong, |me, event, ctx| match event {
+                    GitHubRepoEvent::PrInfoChanged => {
+                        me.sync_pr_chip_from_model(ctx);
+                    }
+                    GitHubRepoEvent::RepositoryInfoChanged => {}
+                });
+
+                // Eagerly populate the PR chip if PR info has already landed.
+                self.sync_pr_chip_from_model(ctx);
             }
         }
     }
@@ -1486,7 +1576,7 @@ impl CurrentPrompt {
             .git_repo_status
             .as_ref()
             .and_then(|w| w.upgrade(ctx))
-            .and_then(|h| h.as_ref(ctx).metadata().cloned());
+            .and_then(|h| h.as_ref(ctx).metadata(ctx).cloned());
 
         let Some(metadata) = metadata else {
             return;
@@ -1528,18 +1618,41 @@ impl CurrentPrompt {
         }
     }
 
+    /// Reads PR info from the per-repo `GitHubRepoModel` and updates the
+    /// `GithubPullRequest` chip value if it differs from the current one.
+    #[cfg(feature = "local_fs")]
+    fn sync_pr_chip_from_model(&mut self, ctx: &AppContext) {
+        let new_pr_value = self
+            .github_repo_model
+            .as_ref()
+            .and_then(|w| w.upgrade(ctx))
+            .and_then(|h| {
+                h.as_ref(ctx)
+                    .pr_info(ctx)
+                    .map(|info| ChipValue::Text(info.url.clone()))
+            });
+        let current_pr = self
+            .latest_chip_value(&ContextChipKind::GithubPullRequest)
+            .cloned();
+        if current_pr != new_pr_value {
+            self.update_chip_value(&ContextChipKind::GithubPullRequest, new_pr_value);
+        }
+    }
     /// Returns `true` when the given chip's value is updated externally
     /// (e.g. by a filesystem watcher) and the periodic timer should be skipped.
     fn is_updated_externally(&self, chip_kind: &ContextChipKind) -> bool {
         #[cfg(feature = "local_fs")]
         {
-            if matches!(
-                chip_kind,
+            match chip_kind {
                 ContextChipKind::ShellGitBranch
-                    | ContextChipKind::GitBranchStatus
-                    | ContextChipKind::GitDiffStats
-            ) {
-                return self.git_repo_status.is_some();
+                | ContextChipKind::GitBranchStatus
+                | ContextChipKind::GitDiffStats => {
+                    return self.git_repo_status.is_some();
+                }
+                ContextChipKind::GithubPullRequest => {
+                    return self.github_repo_model.is_some();
+                }
+                _ => {}
             }
         }
         let _ = chip_kind;

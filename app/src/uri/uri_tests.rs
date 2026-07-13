@@ -1,5 +1,11 @@
-use self::parse_url_paths::{get_item_data_from_warp_link, WarpWebLink};
 use super::*;
+use std::cell::Cell;
+use std::rc::Rc;
+
+use warpui::App;
+
+use crate::ai::agent::api::ServerConversationToken;
+use crate::drive::ZapDriveObjectArgs;
 use crate::launch_configs::launch_config::make_mock_single_window_launch_config;
 use crate::linear::{LinearAction, LinearIssueWork};
 use crate::settings_view::settings_widget_deeplink_target;
@@ -239,69 +245,54 @@ fn test_remove_extension() {
     assert_eq!(remove_extension("🍞.yaml"), Some("🍞"));
 }
 
-// -- warp:// web link parsing -------------------------------------------------
-
 #[test]
-fn test_warp_web_link_notebook() {
-    assert_eq!(
-        get_item_data_from_warp_link(
-            &Url::parse(&format!(
-                "{}/drive/notebook/Performance-Analysis-LkDlnAe34vfYD2JXsAkssc?focused_folder_id=test_uid00000000000123&invitee_email=test@example.com",
-                ChannelState::server_root_url()
-            ))
-            .unwrap()
-        ),
-        Some(WarpWebLink::DriveObject(Box::new(ZapDriveObjectArgs {
-            object_type: ObjectType::Notebook,
-            server_id: ServerId::from_string_lossy("LkDlnAe34vfYD2JXsAkssc"),
-            settings: ZapDriveObjectSettings {
-                focused_folder_id: Some(ServerId::from(123)),
-                invitee_email: Some(String::from("test@example.com")),
+fn test_legacy_cloud_hosts_are_inert() {
+    App::test((), |mut app| async move {
+        let conversation_dispatched = Rc::new(Cell::new(false));
+        let conversation_dispatched_for_handler = conversation_dispatched.clone();
+        app.add_global_action(
+            "root_view:open_conversation_viewer",
+            move |_: &ServerConversationToken, _| {
+                conversation_dispatched_for_handler.set(true);
             },
-        })))
-    );
+        );
+
+        let drive_dispatched = Rc::new(Cell::new(false));
+        let drive_dispatched_for_handler = drive_dispatched.clone();
+        app.add_global_action(
+            "root_view:open_drive_object_new_window",
+            move |_: &ZapDriveObjectArgs, _| {
+                drive_dispatched_for_handler.set(true);
+            },
+        );
+
+        let conversation_url = Url::parse(&format!(
+            "{}://conversation/cloud-conversation-id",
+            ChannelState::url_scheme()
+        ))
+        .unwrap();
+        app.update(|ctx| UriHost::Conversation.handle(None, &conversation_url, ctx));
+
+        let drive_url = Url::parse(&format!(
+            "{}://drive/notebook?id=server-object-id&focused_folder_id=folder-id&invitee_email=alice@example.com",
+            ChannelState::url_scheme()
+        ))
+        .unwrap();
+        app.update(|ctx| UriHost::Drive.handle(None, &drive_url, ctx));
+
+        assert!(!conversation_dispatched.get());
+        assert!(!drive_dispatched.get());
+        assert!(matches!(
+            UriHost::Conversation.window_behavior_hint(),
+            WindowBehaviorHint::Nothing
+        ));
+        assert!(matches!(
+            UriHost::Drive.window_behavior_hint(),
+            WindowBehaviorHint::Nothing
+        ));
+    });
 }
 
-#[test]
-fn test_warp_web_link_session() {
-    assert_eq!(
-        get_item_data_from_warp_link(
-            &Url::parse(&format!(
-                "{}/session/317d0686-7a0b-4b67-806b-aaa3e9df501b?
-                pwd=6f727249-af9f-4025-a240-59df40a4c64b",
-                ChannelState::server_root_url()
-            ))
-            .unwrap()
-        ),
-        Some(WarpWebLink::Session)
-    );
-}
-
-#[test]
-fn test_warp_web_link_workflow() {
-    assert_eq!(
-        get_item_data_from_warp_link(
-            &Url::parse(&format!(
-                "{}/drive/workflow/Remove-all-stopped-docker-container-image-and-volumes-ZCJSkai2gpwTqpBFs5HOfZ",
-                ChannelState::server_root_url()
-            ))
-            .unwrap()
-        ),
-        Some(WarpWebLink::DriveObject(Box::new(ZapDriveObjectArgs {
-            object_type: ObjectType::Workflow,
-            server_id: ServerId::from_string_lossy("ZCJSkai2gpwTqpBFs5HOfZ"),
-            settings: ZapDriveObjectSettings::default(),
-        })))
-    );
-}
-
-#[test]
-fn test_warp_web_link_failure() {
-    assert_eq!(
-        get_item_data_from_warp_link(&Url::parse("https://google.com").unwrap()),
-        None
-    );
-}
 // -- warp://action parsing ----------------------------------------------------
 // `create_environment` / `focus_cloud_mode` / `cloud_agent_setup` /
 // `new_cloud_agent_conversation` / `auto_handoff_to_cloud` are Warp
@@ -565,156 +556,7 @@ fn test_linear_issue_work_empty_prompt() {
     assert!(args.prompt.is_none());
 }
 
-// -- handle_incoming_uri redaction -------------------------------------------
-//
-// These tests cover the fix for GH #737: the entry log inside
-// `handle_incoming_uri` used to write the full URL (including the Firebase
-// `refresh_token` query parameter) to `warp.log` at `info` level before any
-// redaction ran. They validate the redaction helper and the error messages
-// produced by `validate_custom_uri` to ensure that the fallback `warn`
-// emitted on invalid URIs never embeds the query string either.
-
-/// The redacted log representation must contain scheme/host/path for triage
-/// but must never contain the query string or any token material.
-#[test]
-fn safe_url_log_fields_redacts_refresh_token() {
-    let url = Url::parse(&format!(
-        "{}://auth/desktop_redirect?refresh_token=SENSITIVE_TOKEN&state=abc&user_uid=u",
-        ChannelState::url_scheme()
-    ))
-    .unwrap();
-
-    let logged = safe_url_log_fields(&url);
-
-    assert!(
-        logged.contains(&format!("scheme={}", ChannelState::url_scheme())),
-        "expected scheme in redacted log, got: {logged}"
-    );
-    assert!(
-        logged.contains("host=auth"),
-        "expected host in redacted log, got: {logged}"
-    );
-    assert!(
-        logged.contains("path=/desktop_redirect"),
-        "expected path in redacted log, got: {logged}"
-    );
-    assert!(
-        !logged.contains("refresh_token"),
-        "redacted log must not contain refresh_token: {logged}"
-    );
-    assert!(
-        !logged.contains("SENSITIVE_TOKEN"),
-        "redacted log must not contain the token value: {logged}"
-    );
-    assert!(
-        !logged.contains("state="),
-        "redacted log must not contain state query param: {logged}"
-    );
-    assert!(
-        !logged.contains("user_uid"),
-        "redacted log must not contain user_uid: {logged}"
-    );
-}
-
-/// The redacted log representation must drop generic OAuth query parameters
-/// (`code=`, `access_token=`, `custom_token=`, `token=`) regardless of host.
-#[test]
-fn safe_url_log_fields_redacts_generic_oauth_params() {
-    let url = Url::parse(&format!(
-        "{}://mcp/oauth_callback?code=AUTH_CODE&state=xyz&access_token=AT&custom_token=CT&token=RAW",
-        ChannelState::url_scheme()
-    ))
-    .unwrap();
-
-    let logged = safe_url_log_fields(&url);
-
-    for forbidden in [
-        "code=",
-        "AUTH_CODE",
-        "access_token",
-        "AT",
-        "custom_token",
-        "CT",
-        "token=RAW",
-        "state=",
-    ] {
-        assert!(
-            !logged.contains(forbidden),
-            "redacted log must not contain {forbidden:?}: {logged}"
-        );
-    }
-    assert!(logged.contains("host=mcp"), "expected host: {logged}");
-    assert!(
-        logged.contains("path=/oauth_callback"),
-        "expected path: {logged}"
-    );
-}
-
-/// Drive links carry user-identifiable `invitee_email` values in the query.
-/// The entry log must not surface them on non-dogfood channels.
-#[test]
-fn safe_url_log_fields_redacts_invitee_email() {
-    let url = Url::parse(&format!(
-        "{}://drive/notebook?id=abc&invitee_email=alice@example.com",
-        ChannelState::url_scheme()
-    ))
-    .unwrap();
-
-    let logged = safe_url_log_fields(&url);
-
-    assert!(
-        !logged.contains("alice@example.com"),
-        "redacted log must not contain invitee email: {logged}"
-    );
-    assert!(
-        !logged.contains("invitee_email"),
-        "redacted log must not contain invitee_email key: {logged}"
-    );
-    assert!(logged.contains("host=drive"), "expected host: {logged}");
-}
-
-/// URL fragments are not currently used as secret carriers by Warp today, but
-/// the entry log's contract is "scheme + host + path only", so fragments must
-/// be dropped as well.
-#[test]
-fn safe_url_log_fields_drops_fragment() {
-    let url = Url::parse(&format!(
-        "{}://auth/desktop_redirect#sensitive_fragment",
-        ChannelState::url_scheme()
-    ))
-    .unwrap();
-
-    let logged = safe_url_log_fields(&url);
-
-    assert!(
-        !logged.contains("sensitive_fragment"),
-        "redacted log must not contain url fragment: {logged}"
-    );
-    assert!(
-        !logged.contains('#'),
-        "redacted log must not contain any fragment separator: {logged}"
-    );
-}
-
-/// `file://` URLs route through the same entry log. `file://` URLs on macOS
-/// have no host; the helper must not panic and must report `host=-` so the
-/// format string stays well-formed.
-#[test]
-fn safe_url_log_fields_handles_file_urls_without_host() {
-    let url = Url::parse("file:///tmp/foo.md").unwrap();
-
-    let logged = safe_url_log_fields(&url);
-
-    assert!(logged.contains("scheme=file"), "expected scheme: {logged}");
-    assert!(
-        logged.contains("host=-"),
-        "expected host placeholder: {logged}"
-    );
-    assert!(
-        logged.contains("path=/tmp/foo.md"),
-        "expected path: {logged}"
-    );
-}
+// -- handle_incoming_uri validation errors -----------------------------------
 
 /// `validate_custom_uri` returns `anyhow::Error`s whose messages feed the
 /// non-dogfood `log::warn!("Custom URI is invalid: {e:?}")` fallback in

@@ -171,6 +171,10 @@ pub enum ParseServerIdError {
 
 #[allow(clippy::result_unit_err)]
 pub fn parse_sqlite_id_to_uid(hashed_sqlite_id: HashedSqliteId) -> Result<ObjectUid, ()> {
+    if ClientId::from_hash(&hashed_sqlite_id).is_some() {
+        return Ok(hashed_sqlite_id);
+    }
+
     let Some(uid) = hashed_sqlite_id.split('-').next_back() else {
         return Err(());
     };

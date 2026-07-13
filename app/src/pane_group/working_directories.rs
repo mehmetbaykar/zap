@@ -12,16 +12,15 @@ use indexmap::IndexSet;
 use remote_server::manager::RemoteServerManager;
 #[cfg(feature = "local_fs")]
 use repo_metadata::repositories::DetectedRepositories;
+use warp_core::SessionId;
+#[cfg(feature = "local_fs")]
+use warp_util::remote_path::RemotePath;
 #[cfg(feature = "local_fs")]
 use warpui::{AppContext, SingletonEntity as _};
 use warpui::{Entity, EntityId, ModelContext, ModelHandle, ViewHandle};
 
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 
-#[cfg(feature = "local_fs")]
-use crate::code::buffer_location::BufferLocation;
-#[cfg(feature = "local_fs")]
-use crate::code::buffer_location::RemotePath;
 #[cfg(feature = "local_fs")]
 use crate::code::file_tree::FileTreeView;
 use crate::code_review::code_review_view::CodeReviewView;
@@ -31,23 +30,23 @@ use crate::code_review::comments::{
 use crate::code_review::diff_state::{DiffMode, DiffStateModel};
 use crate::workspace::view::global_search::view::GlobalSearchView;
 
-/// Type-safe wrapper around the map of `BufferLocation` → `DiffStateModel`.
+/// Type-safe wrapper around the map of `LocalOrRemotePath` → `DiffStateModel`.
 ///
 /// Enforces that local keys are always paired with local-backend models and
 /// remote keys with remote-backend models via dedicated insertion methods.
 #[cfg(feature = "local_fs")]
 #[derive(Default)]
 struct DiffStateModelMap {
-    models: HashMap<BufferLocation, ModelHandle<DiffStateModel>>,
+    models: HashMap<LocalOrRemotePath, ModelHandle<DiffStateModel>>,
 }
 
 #[cfg(feature = "local_fs")]
 impl DiffStateModelMap {
-    fn get(&self, key: &BufferLocation) -> Option<&ModelHandle<DiffStateModel>> {
+    fn get(&self, key: &LocalOrRemotePath) -> Option<&ModelHandle<DiffStateModel>> {
         self.models.get(key)
     }
 
-    /// Insert a model that was created from a `BufferLocation::Local` key.
+    /// Insert a model that was created from a `LocalOrRemotePath::Local` key.
     fn insert_local(
         &mut self,
         path: PathBuf,
@@ -58,10 +57,10 @@ impl DiffStateModelMap {
             matches!(model.as_ref(ctx), DiffStateModel::Local(_)),
             "insert_local called with a remote-backend DiffStateModel",
         );
-        self.models.insert(BufferLocation::Local(path), model);
+        self.models.insert(LocalOrRemotePath::Local(path), model);
     }
 
-    /// Insert a model that was created from a `BufferLocation::Remote` key.
+    /// Insert a model that was created from a `LocalOrRemotePath::Remote` key.
     fn insert_remote(
         &mut self,
         remote_id: RemotePath,
@@ -72,10 +71,11 @@ impl DiffStateModelMap {
             matches!(model.as_ref(ctx), DiffStateModel::Remote(_)),
             "insert_remote called with a local-backend DiffStateModel",
         );
-        self.models.insert(BufferLocation::Remote(remote_id), model);
+        self.models
+            .insert(LocalOrRemotePath::Remote(remote_id), model);
     }
 
-    fn remove(&mut self, key: &BufferLocation) -> Option<ModelHandle<DiffStateModel>> {
+    fn remove(&mut self, key: &LocalOrRemotePath) -> Option<ModelHandle<DiffStateModel>> {
         self.models.remove(key)
     }
 }
@@ -383,7 +383,8 @@ impl WorkingDirectoriesModel {
     /// for that repo rather than producing a model that cannot subscribe.
     pub fn get_or_create_diff_state_model(
         &mut self,
-        key: BufferLocation,
+        key: LocalOrRemotePath,
+        preferred_session: Option<SessionId>,
         ctx: &mut ModelContext<Self>,
     ) -> Option<ModelHandle<DiffStateModel>> {
         if let Some(model) = self.diff_state_models.get(&key) {
@@ -391,32 +392,26 @@ impl WorkingDirectoriesModel {
         }
 
         let diff_state_model = match &key {
-            BufferLocation::Local(path) => {
+            LocalOrRemotePath::Local(path) => {
                 let path = path.clone();
                 ctx.add_model(|ctx| DiffStateModel::new_local(path, ctx))
             }
-            BufferLocation::Remote(remote_path) => {
+            LocalOrRemotePath::Remote(remote_path) => {
                 let mgr_handle = RemoteServerManager::handle(ctx);
                 mgr_handle
                     .as_ref(ctx)
                     .client_for_host(&remote_path.host_id)?;
-                // `DiffStateModel::new_remote` expects the canonical
-                // `warp_util::remote_path::RemotePath`, distinct from this
-                // module's local `RemotePath` wrapper used as the map key.
-                let remote_path = warp_util::remote_path::RemotePath::new(
-                    remote_path.host_id.clone(),
-                    remote_path.path.clone(),
-                );
-                ctx.add_model(|ctx| DiffStateModel::new_remote(remote_path, ctx))
+                let remote_path = remote_path.clone();
+                ctx.add_model(|ctx| DiffStateModel::new_remote(remote_path, preferred_session, ctx))
             }
         };
 
         match key {
-            BufferLocation::Local(path) => {
+            LocalOrRemotePath::Local(path) => {
                 self.diff_state_models
                     .insert_local(path, diff_state_model.clone(), ctx);
             }
-            BufferLocation::Remote(remote_id) => {
+            LocalOrRemotePath::Remote(remote_id) => {
                 self.diff_state_models
                     .insert_remote(remote_id, diff_state_model.clone(), ctx);
             }
@@ -434,18 +429,7 @@ impl WorkingDirectoriesModel {
         ctx: &mut ModelContext<Self>,
     ) {
         for repo_key in orphaned_repos {
-            // `diff_state_models` is keyed by this module's own `BufferLocation`
-            // (decoupled from `warp_util`, see `buffer_location.rs`), distinct from
-            // the canonical `LocalOrRemotePath` the pane-group repository-root
-            // tracking below yields; convert at this boundary.
-            let buffer_location = match &repo_key {
-                LocalOrRemotePath::Local(path) => BufferLocation::Local(path.clone()),
-                LocalOrRemotePath::Remote(remote) => BufferLocation::Remote(RemotePath::new(
-                    remote.host_id.clone(),
-                    remote.path.clone(),
-                )),
-            };
-            if let Some(model) = self.diff_state_models.remove(&buffer_location) {
+            if let Some(model) = self.diff_state_models.remove(&repo_key) {
                 model.update(ctx, |model, ctx| {
                     model.stop_active_watcher(ctx);
                 });
@@ -1043,6 +1027,7 @@ impl WorkingDirectoriesModel {
     pub fn get_or_create_diff_state_model(
         &mut self,
         _key: LocalOrRemotePath,
+        _preferred_session: Option<SessionId>,
         _ctx: &mut ModelContext<Self>,
     ) -> Option<ModelHandle<DiffStateModel>> {
         None

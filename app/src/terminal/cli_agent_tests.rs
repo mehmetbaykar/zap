@@ -14,7 +14,6 @@ use super::{
     build_selection_substring_prompt, CLIAgent, UBER_TEAM_UID,
 };
 use crate::ai::agent::{AgentReviewCommentBatch, DiffSetHunk};
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 use crate::code::editor::line::EditorLineLocation;
 use crate::code_review::comments::{
     AttachedReviewComment, AttachedReviewCommentTarget, CommentOrigin, LineDiffContent,
@@ -23,6 +22,7 @@ use crate::server::ids::ServerId;
 use crate::workspaces::team::Team;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::workspaces::workspace::Workspace;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 /// Helper to build an alias map from pairs.
 fn aliases(pairs: &[(&str, &str)]) -> HashMap<SmolStr, String> {

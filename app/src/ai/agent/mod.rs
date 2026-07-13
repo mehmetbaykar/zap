@@ -101,6 +101,12 @@ pub enum CancellationReason {
     /// The long-running command completed while the agent was still streaming.
     /// This should be treated as a successful completion, not a cancellation.
     OptimisticCLISubagentCompletion,
+
+    /// The user manually took control of a long-running command away from the agent.
+    /// The agent conversation is still in progress — it will resume after the command
+    /// finishes or once the user hands control back. The stream is cancelled only to
+    /// stop the CLI subagent monitoring loop, not to end the conversation.
+    CLISubagentUserTakeover,
 }
 
 impl Display for CancellationReason {
@@ -114,6 +120,9 @@ impl Display for CancellationReason {
             CancellationReason::Deleted => write!(f, "deleted"),
             CancellationReason::OptimisticCLISubagentCompletion => {
                 write!(f, "LRC command completed")
+            }
+            CancellationReason::CLISubagentUserTakeover => {
+                write!(f, "CLI subagent user takeover")
             }
         }
     }
@@ -141,6 +150,19 @@ impl CancellationReason {
 
     pub fn is_lrc_command_completed(&self) -> bool {
         matches!(self, CancellationReason::OptimisticCLISubagentCompletion)
+    }
+
+    /// Returns true when the stream was cancelled because the user took manual
+    /// control of the long-running command. The conversation remains in progress
+    /// and the ambient agent task should not be reported as cancelled.
+    pub fn is_cli_subagent_user_takeover(&self) -> bool {
+        matches!(self, CancellationReason::CLISubagentUserTakeover)
+    }
+
+    /// Returns true when the stream cancellation should NOT transition the
+    /// conversation status away from InProgress.
+    pub fn should_preserve_in_progress_status(&self) -> bool {
+        self.is_follow_up_for_same_conversation() || self.is_cli_subagent_user_takeover()
     }
 }
 
@@ -644,6 +666,23 @@ pub enum RenderableAIError {
 }
 
 impl RenderableAIError {
+    const TRANSIENT_NETWORK_ERROR_MESSAGE: &'static str =
+        "Warp lost connection while receiving the agent response. This is usually temporary.";
+    pub fn transient_network_error(will_attempt_resume: bool, waiting_for_network: bool) -> Self {
+        Self::Other {
+            error_message: Self::TRANSIENT_NETWORK_ERROR_MESSAGE.to_string(),
+            will_attempt_resume,
+            waiting_for_network,
+            is_user_error: false,
+        }
+    }
+
+    fn is_transient_network_transport_error(error: &reqwest::Error) -> bool {
+        // If reqwest has an HTTP status, the server responded. Preserve the existing generic
+        // rendering for those failures rather than calling them lost connections.
+        error.status().is_none()
+    }
+
     pub fn is_invalid_api_key(&self) -> bool {
         matches!(self, Self::InvalidApiKey { .. })
     }

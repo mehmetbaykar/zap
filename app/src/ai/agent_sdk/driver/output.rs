@@ -252,6 +252,10 @@ pub mod text {
                 AIAgentActionResultType::UseComputer(result) => writeln!(w, "{result}"),
                 AIAgentActionResultType::TransferShellCommandControlToUser { .. } => Ok(()),
                 AIAgentActionResultType::RequestComputerUse(result) => writeln!(w, "{result}"),
+                AIAgentActionResultType::StartAgent(_)
+                | AIAgentActionResultType::SendMessageToAgent(_)
+                | AIAgentActionResultType::RunAgents(_)
+                | AIAgentActionResultType::WaitForEvents(_) => Ok(()),
                 AIAgentActionResultType::AskUserQuestion(_) => Ok(()),
             },
         }
@@ -339,6 +343,10 @@ pub mod text {
                     | AIAgentActionType::EditDocuments(_)
                     | AIAgentActionType::CreateDocuments(_)
                     | AIAgentActionType::ReadShellCommandOutput { .. }
+                    | AIAgentActionType::StartAgent { .. }
+                    | AIAgentActionType::SendMessageToAgent { .. }
+                    | AIAgentActionType::RunAgents(_)
+                    | AIAgentActionType::WaitForEvents(_)
                     | AIAgentActionType::TransferShellCommandControlToUser { .. } => (),
                     AIAgentActionType::UseComputer(request) => {
                         writeln!(w, "Using computer: {}", request.action_summary)?;
@@ -952,6 +960,10 @@ pub mod json {
                     | AIAgentActionType::ReadShellCommandOutput { .. }
                     | AIAgentActionType::UseComputer(_)
                     | AIAgentActionType::ReadSkill(_)
+                    | AIAgentActionType::StartAgent { .. }
+                    | AIAgentActionType::SendMessageToAgent { .. }
+                    | AIAgentActionType::RunAgents(_)
+                    | AIAgentActionType::WaitForEvents(_)
                     | AIAgentActionType::TransferShellCommandControlToUser { .. }
                     | AIAgentActionType::RequestComputerUse(_) => None,
                     AIAgentActionType::AskUserQuestion { .. } => None,
@@ -1170,8 +1182,8 @@ fn format_agent_text<W: Write>(text: &AIAgentText, w: &mut W) -> io::Result<()> 
                 }
 
                 match source {
-                    Some(CodeSource::ProjectRules { path }) => {
-                        writeln!(w, " rules_path={}", path.display())?;
+                    Some(CodeSource::ProjectRules { location }) => {
+                        writeln!(w, " rules_path={}", location.display_path())?;
                     }
                     Some(CodeSource::Link {
                         path,

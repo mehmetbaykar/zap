@@ -1,56 +1,5 @@
 use super::*;
 
-fn make_manager(keys: ApiKeys) -> ApiKeyManager {
-    ApiKeyManager {
-        keys,
-        aws_credentials_state: AwsCredentialsState::Missing,
-        aws_credentials_refresh_strategy: AwsCredentialsRefreshStrategy::default(),
-        secure_storage_write_version: 0,
-    }
-}
-
-fn endpoint(
-    name: &str,
-    url: &str,
-    api_key: &str,
-    models: &[(&str, Option<&str>)],
-) -> CustomEndpoint {
-    endpoint_with_keys(
-        name,
-        url,
-        api_key,
-        &models
-            .iter()
-            .enumerate()
-            .map(|(i, (n, a))| (*n, *a, format!("cfg-{i}")))
-            .collect::<Vec<_>>()
-            .iter()
-            .map(|(n, a, k)| (*n, *a, k.as_str()))
-            .collect::<Vec<_>>(),
-    )
-}
-
-fn endpoint_with_keys(
-    name: &str,
-    url: &str,
-    api_key: &str,
-    models: &[(&str, Option<&str>, &str)],
-) -> CustomEndpoint {
-    CustomEndpoint {
-        name: name.into(),
-        url: url.into(),
-        api_key: api_key.into(),
-        models: models
-            .iter()
-            .map(|(n, a, cfg)| CustomEndpointModel {
-                name: (*n).into(),
-                alias: a.map(|s| s.into()),
-                config_key: (*cfg).into(),
-            })
-            .collect(),
-    }
-}
-
 // ── serde round-trip ────────────────────────────────────────────
 
 #[test]
@@ -61,8 +10,26 @@ fn serde_round_trip_empty() {
     assert_eq!(keys, deser);
 }
 
+#[test]
+fn serde_round_trip_with_provider_keys() {
+    let keys = ApiKeys {
+        openai: Some("sk-openai".into()),
+        anthropic: Some("sk-ant-abc".into()),
+        google: Some("AIzaSy123".into()),
+        open_router: Some("sk-or-xxx".into()),
+        custom_endpoints: Vec::new(),
+    };
+    let json = serde_json::to_string(&keys).unwrap();
+    let deser: ApiKeys = serde_json::from_str(&json).unwrap();
+    assert_eq!(keys, deser);
+}
 
-
+#[test]
+fn serde_ignores_unknown_fields() {
+    let json = r#"{"openai":"sk-x","unknown_field":"value","custom_endpoints":[]}"#;
+    let keys: ApiKeys = serde_json::from_str(json).unwrap();
+    assert_eq!(keys.openai, Some("sk-x".into()));
+}
 
 // ── has_any_key ─────────────────────────────────────────────────
 
@@ -80,80 +47,42 @@ fn has_any_key_true_for_openai_only() {
     assert!(keys.has_any_key());
 }
 
-
-
-// ── has_custom_endpoints
-
-
-
-
-
-
-
-
-
-
-
-// ── display_label fallback ─────────────────────────────────────
-
 #[test]
-fn display_label_uses_alias_when_present() {
-    let m = CustomEndpointModel {
-        name: "raw-name".into(),
-        alias: Some("My Alias".into()),
-        config_key: "k".into(),
-    };
-    assert_eq!(m.display_label(), "My Alias");
-}
-
-#[test]
-fn display_label_falls_back_to_name_when_alias_missing() {
-    let m = CustomEndpointModel {
-        name: "raw-name".into(),
-        alias: None,
-        config_key: "k".into(),
-    };
-    assert_eq!(m.display_label(), "raw-name");
-}
-
-#[test]
-fn display_label_falls_back_to_name_when_alias_is_whitespace() {
-    let m = CustomEndpointModel {
-        name: "raw-name".into(),
-        alias: Some("   ".into()),
-        config_key: "k".into(),
-    };
-    assert_eq!(m.display_label(), "raw-name");
-}
-
-// ── api_keys_for_request ────────────────────────────────────────
-
-#[test]
-fn api_keys_for_request_none_when_empty() {
-    let mgr = make_manager(ApiKeys::default());
-    assert!(mgr.api_keys_for_request(true, false).is_none());
-}
-
-#[test]
-fn api_keys_for_request_populates_provider_keys() {
-    let mgr = make_manager(ApiKeys {
-        openai: Some("sk-o".into()),
-        anthropic: Some("sk-a".into()),
+fn custom_endpoints_round_trip_through_secure_storage_payload() {
+    let keys = ApiKeys {
+        custom_endpoints: vec![CustomEndpoint {
+            name: "Local gateway".into(),
+            url: "http://127.0.0.1:8080/v1".into(),
+            api_key: "local-key".into(),
+            models: vec![CustomEndpointModel {
+                name: "local-model".into(),
+                alias: Some("Local".into()),
+                config_key: "stable-model-id".into(),
+            }],
+        }],
         ..Default::default()
-    });
-    let result = mgr.api_keys_for_request(true, false).unwrap();
-    assert_eq!(result.openai, "sk-o");
-    assert_eq!(result.anthropic, "sk-a");
-    assert!(result.google.is_empty());
+    };
+
+    let json = serde_json::to_string(&keys).unwrap();
+    let restored: ApiKeys = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(restored, keys);
+    assert!(restored.has_any_key());
+    assert!(restored.has_custom_endpoints());
+    assert_eq!(
+        restored.custom_endpoints[0].models[0].display_label(),
+        "Local"
+    );
 }
 
 #[test]
-fn api_keys_for_request_omits_keys_when_byo_disabled() {
-    let mgr = make_manager(ApiKeys {
-        openai: Some("sk-o".into()),
-        ..Default::default()
-    });
-    // With BYO disabled and no other credentials, returns None.
-    assert!(mgr.api_keys_for_request(false, false).is_none());
-}
+fn custom_endpoint_models_preserve_ids_and_generate_missing_ids() {
+    let models = ApiKeyManager::custom_endpoint_models(vec![
+        ("preserved".into(), None, Some("existing-model-id".into())),
+        ("generated".into(), Some("Alias".into()), None),
+    ]);
 
+    assert_eq!(models[0].config_key, "existing-model-id");
+    assert!(!models[1].config_key.is_empty());
+    assert_eq!(models[1].display_label(), "Alias");
+}

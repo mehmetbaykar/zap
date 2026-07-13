@@ -6,10 +6,10 @@ Authoritative strategy and process: see `SPEC.md` (2026-07-10).
 
 ## Phase 1 — Catch-up merges (now)
 
-- Restore the true git merge relationship with warpdotdev/warp: ~7 catch-up merge slices from merge-base `c325d146a` to upstream tip, each buildable and gate-tested.
+- Restore the true git merge relationship with warpdotdev/warp: six fixed catch-up merge slices from merge-base `c325d146a` through pinned upstream tip `5e9dc1c24`, each buildable and gate-tested.
 - All previously-skipped non-cloud features land via the merges (tab-groups, queued prompts, custom model routers, codebase auto-indexing, project rules, agent_sdk growth, `crates/mcp` structure).
 - Cloud/subscription code stripped per the policy table; shims (`report_error!` → `log::error!`, auth gates → local constants) keep future upstream code compiling untouched.
-- `warp_tui` included as a non-default workspace member.
+- `warp_tui` enters in slice 5 as a non-default workspace member, with explicit `cargo check -p warp_tui` gates from that slice onward.
 
 ## Phase 2 — Steady state
 

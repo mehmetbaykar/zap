@@ -62,7 +62,7 @@ pub fn main() -> Result<()> {
                 return Ok(());
             }
             #[cfg(not(target_family = "wasm"))]
-            WorkerCommand::RemoteServerProxy(_) | WorkerCommand::RemoteServerDaemon(_) => {
+            WorkerCommand::RemoteServerProxy | WorkerCommand::RemoteServerDaemon => {
                 return warp::run();
             }
             // This is a catch-all to handle the plugin host, which the integration test crate doesn't have a feature flag for.

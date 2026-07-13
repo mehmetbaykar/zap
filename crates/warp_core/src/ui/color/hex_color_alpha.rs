@@ -2,7 +2,7 @@
 //! Also accepts RRGGBB (6-digit hex), using alpha 255 (opaque).
 
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use warpui::color::ColorU;
+use warpui_core::color::ColorU;
 
 use super::OPAQUE;
 

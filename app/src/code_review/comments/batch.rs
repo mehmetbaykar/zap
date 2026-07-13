@@ -7,9 +7,9 @@ use warpui::{Entity, ModelContext};
 use super::{
     AttachedReviewComment, AttachedReviewCommentTarget, CommentId, PendingImportedReviewComment,
 };
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 use crate::code::editor::EditorReviewComment;
 use crate::code_review::diff_state::DiffMode;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReviewCommentBatchEvent {

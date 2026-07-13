@@ -12,14 +12,18 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use warpui::r#async::{executor, FutureExt as _};
 
-use remote_server::auth::RemoteServerAuthContext;
 use remote_server::client::RemoteServerClient;
 use remote_server::manager::RemoteServerExitStatus;
 use remote_server::setup::{
     parse_uname_output, remote_server_daemon_dir, PreinstallCheckResult, RemotePlatform,
 };
 use remote_server::ssh::{ssh_args, SshCommandError};
-use remote_server::transport::{Connection, Error, InstallOutcome, InstallSource, RemoteTransport};
+use remote_server::transport::{
+    Connection, ControlPath, Error, InstallOutcome, InstallSource, RemoteTransport,
+};
+
+#[path = "ssh_transport/installation.rs"]
+pub(crate) mod installation;
 
 /// SSH transport: connects via a ControlMaster socket.
 ///
@@ -30,22 +34,27 @@ use remote_server::transport::{Connection, Error, InstallOutcome, InstallSource,
 #[derive(Clone)]
 pub struct SshTransport {
     socket_path: PathBuf,
-    auth_context: Arc<RemoteServerAuthContext>,
+    /// Whether Warp owns the ControlMaster behind `socket_path`. `false`
+    /// when the SSH wrapper attached to a master the user already had
+    /// running, in which case Warp must not run `ssh -O exit` against it
+    /// on teardown.
+    warp_owns_control_master: bool,
 }
 
 impl fmt::Debug for SshTransport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SshTransport")
             .field("socket_path", &self.socket_path)
+            .field("warp_owns_control_master", &self.warp_owns_control_master)
             .finish_non_exhaustive()
     }
 }
 
 impl SshTransport {
-    pub fn new(socket_path: PathBuf, auth_context: Arc<RemoteServerAuthContext>) -> Self {
+    pub fn new(socket_path: PathBuf, warp_owns_control_master: bool) -> Self {
         Self {
             socket_path,
-            auth_context,
+            warp_owns_control_master,
         }
     }
 
@@ -53,10 +62,14 @@ impl SshTransport {
         &self.socket_path
     }
 
+    pub fn warp_owns_control_master(&self) -> bool {
+        self.warp_owns_control_master
+    }
+
     pub fn remote_daemon_socket_path(&self) -> String {
         format!(
             "{}/{}",
-            remote_server_daemon_dir(&self.auth_context.remote_server_identity_key()),
+            remote_server_daemon_dir(),
             remote_server::setup::daemon_socket_name(),
         )
     }
@@ -64,16 +77,14 @@ impl SshTransport {
     pub fn remote_daemon_pid_path(&self) -> String {
         format!(
             "{}/{}",
-            remote_server_daemon_dir(&self.auth_context.remote_server_identity_key()),
+            remote_server_daemon_dir(),
             remote_server::setup::daemon_pid_name(),
         )
     }
 
     fn remote_proxy_command(&self) -> String {
         let binary = remote_server::setup::remote_server_binary();
-        let identity_key = self.auth_context.remote_server_identity_key();
-        let quoted_identity_key = shell_words::quote(&identity_key);
-        format!("{binary} remote-server-proxy --identity-key {quoted_identity_key}")
+        format!("{binary} remote-server-proxy")
     }
 }
 
@@ -626,6 +637,7 @@ impl RemoteTransport for SshTransport {
         executor: Arc<executor::Background>,
     ) -> Pin<Box<dyn Future<Output = Result<Connection>> + Send>> {
         let socket_path = self.socket_path.clone();
+        let warp_owns_control_master = self.warp_owns_control_master;
         let remote_proxy_command = self.remote_proxy_command();
         Box::pin(async move {
             let mut args = ssh_args(&socket_path);
@@ -657,14 +669,22 @@ impl RemoteTransport for SshTransport {
                 .take()
                 .ok_or_else(|| anyhow::anyhow!("Failed to capture child stderr"))?;
 
-            let (client, event_rx, failure_rx, stderr_tail) =
+            let (client, event_rx, host_response_rx, stderr_tail) =
                 RemoteServerClient::from_child_streams(stdin, stdout, stderr, &executor);
             Ok(Connection {
                 client,
                 event_rx,
-                failure_rx,
+                host_response_rx,
                 child,
-                control_path: Some(socket_path),
+                // Tag the socket with master ownership. Teardown only runs
+                // `ssh -O exit` against Warp-managed masters; a user-owned
+                // (external) master must be left running when the Warp
+                // session exits.
+                control_path: if warp_owns_control_master {
+                    ControlPath::WarpManaged(socket_path)
+                } else {
+                    ControlPath::UserOwned(socket_path)
+                },
                 stderr_tail,
             })
         })
@@ -675,7 +695,7 @@ impl RemoteTransport for SshTransport {
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         let socket_path = self.socket_path.clone();
         Box::pin(async move {
-            let cmd = format!("rm -f {}", remote_server::setup::remote_server_binary());
+            let cmd = remote_server::setup::remote_server_removal_command();
             log::info!("Removing stale remote server binary: {cmd}");
             let output = remote_server::ssh::run_ssh_command(
                 &socket_path,

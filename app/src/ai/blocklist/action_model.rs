@@ -27,8 +27,9 @@ pub use execute::{
     read_local_file_context, EditAcceptAndContinueClickedEvent, EditAcceptClickedEvent,
     EditResolvedEvent, EditStats, NewConversationDecision, PromptSuggestionExecutor,
     PromptSuggestionExecutorEvent, ReadFileContextResult, RequestFileEditsExecutor,
-    RequestFileEditsFormatKind, RequestFileEditsTelemetryEvent, ShellCommandExecutor,
-    ShellCommandExecutorEvent,
+    RequestFileEditsFormatKind, RequestFileEditsTelemetryEvent, RunAgentsExecutor,
+    ShellCommandExecutor, ShellCommandExecutorEvent, StartAgentExecutor, StartAgentExecutorEvent,
+    StartAgentRequest,
 };
 use futures::future::{join_all, BoxFuture};
 use itertools::Itertools;
@@ -364,6 +365,14 @@ impl BlocklistAIActionModel {
         app: &AppContext,
     ) -> ModelHandle<PromptSuggestionExecutor> {
         self.executor.as_ref(app).suggest_prompt_executor().clone()
+    }
+
+    pub fn start_agent_executor(&self, app: &AppContext) -> ModelHandle<StartAgentExecutor> {
+        self.executor.as_ref(app).start_agent_executor().clone()
+    }
+
+    pub fn run_agents_executor(&self, app: &AppContext) -> ModelHandle<RunAgentsExecutor> {
+        self.executor.as_ref(app).run_agents_executor().clone()
     }
 
     pub fn ask_user_question_executor(
@@ -1318,7 +1327,7 @@ impl BlocklistAIActionModel {
             .get(&conversation_id)
             .is_none_or(|actions| actions.is_empty())
         {
-            if !cancellation_reason.is_some_and(|r| r.is_follow_up_for_same_conversation()) {
+            if !cancellation_reason.is_some_and(|r| r.should_preserve_in_progress_status()) {
                 BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
                     let status = if self
                         .finished_action_results

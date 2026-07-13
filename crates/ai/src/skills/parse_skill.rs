@@ -10,7 +10,7 @@ use thiserror::Error;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 use super::parser::parse_markdown_content;
-use super::skill_provider::{get_provider_for_path, SkillProvider, SkillScope};
+use super::skill_provider::{get_provider_for_path, get_scope_for_path, SkillProvider, SkillScope};
 
 const MAX_SKILL_DESCRIPTION_CHARS: usize = 512;
 
@@ -113,7 +113,7 @@ impl Display for ParsedSkill {
 pub fn parse_skill(path: &Path) -> Result<ParsedSkill> {
     let provider_path = LocalOrRemotePath::Local(path.to_path_buf());
     let provider = get_provider_for_path(&provider_path).unwrap_or(SkillProvider::Agents);
-    parse_local_skill_internal(path, provider, SkillScope::Project)
+    parse_local_skill_internal(path, provider, get_scope_for_path(path))
 }
 
 /// Parse a bundled skill markdown file.

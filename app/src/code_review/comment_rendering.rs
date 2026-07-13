@@ -23,7 +23,6 @@ use warpui::units::Pixels;
 use warpui::{AppContext, Element, EventContext, SingletonEntity, View, ViewContext, ViewHandle};
 
 use crate::appearance::Appearance;
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 use crate::code::editor::comment_editor::create_readonly_comment_markdown_editor;
 use crate::code::editor::view::{CodeEditorRenderOptions, CodeEditorView};
 use crate::code_review::comments::{
@@ -32,6 +31,7 @@ use crate::code_review::comments::{
 use crate::editor::InteractionState;
 use crate::notebooks::editor::view::RichTextEditorView;
 use crate::util::time_format::human_readable_approx_duration;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 /// Configuration for making the comment header clickable.
 pub(crate) struct HeaderClickHandler {

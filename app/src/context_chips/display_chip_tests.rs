@@ -1,7 +1,5 @@
-use super::{
-    format_create_git_branch_command, format_git_branch_command, truncate_from_beginning,
-    CreateGitBranch, GitBranch, GitLineChanges,
-};
+use super::{truncate_from_beginning, CreateGitBranch, GitBranch, GitLineChanges};
+use crate::context_chips::display_chip::PromptChipShellCommand;
 use crate::context_chips::display_menu::GenericMenuItem;
 use crate::context_chips::git_branch_on_click::GitBranchOnClickValue;
 use crate::context_chips::{github_pr_display_text_from_url, ContextChipKind};
@@ -51,8 +49,10 @@ fn test_format_git_branch_command_checks_out_normal_branch() {
     let value = GitBranchOnClickValue::new("feature/alice's-work".to_string()).encode();
 
     assert_eq!(
-        format_git_branch_command(&value),
-        "git checkout 'feature/alice'\"'\"'s-work'"
+        GitBranch(value).prompt_chip_command(),
+        PromptChipShellCommand::GitCheckout {
+            branch_name: "feature/alice\'s-work".to_string()
+        }
     );
 }
 
@@ -66,8 +66,10 @@ fn test_format_git_branch_command_changes_to_linked_worktree_path() {
     .encode();
 
     assert_eq!(
-        format_git_branch_command(&value),
-        "cd '/tmp/repo feature-a'"
+        GitBranch(value).prompt_chip_command(),
+        PromptChipShellCommand::ChangeDirectory {
+            dir_name: "/tmp/repo feature-a".to_string()
+        }
     );
 }
 
@@ -81,8 +83,10 @@ fn test_format_git_branch_command_reports_missing_linked_worktree_path() {
     .encode();
 
     assert_eq!(
-        format_git_branch_command(&value),
-        "echo 'Branch '\"'\"'feature-a'\"'\"' is already checked out in another worktree, but Warp couldn'\"'\"'t find its path.'"
+        GitBranch(value).prompt_chip_command(),
+        PromptChipShellCommand::Echo {
+            message: "The branch is already checked out in another worktree, but Warp couldn't find its path."
+        }
     );
 }
 
@@ -106,22 +110,6 @@ fn test_git_branch_menu_icon_uses_worktree_icon_for_linked_worktree() {
 }
 
 #[test]
-fn test_format_create_git_branch_command_quotes_branch_and_appends_double_dash() {
-    assert_eq!(
-        format_create_git_branch_command("feature/xyz"),
-        "git checkout -b 'feature/xyz' --"
-    );
-}
-
-#[test]
-fn test_format_create_git_branch_command_escapes_single_quotes() {
-    assert_eq!(
-        format_create_git_branch_command("alice's-branch"),
-        "git checkout -b 'alice'\"'\"'s-branch' --"
-    );
-}
-
-#[test]
 fn test_create_git_branch_menu_name_quotes_query() {
     let item = CreateGitBranch::new("feature/xyz".to_string());
     assert_eq!(item.name(), "Create new branch \"feature/xyz\"");
@@ -132,6 +120,12 @@ fn test_create_git_branch_action_data_returns_branch_name() {
     let item = CreateGitBranch::new("feature/xyz".to_string());
     assert_eq!(item.action_data(), "feature/xyz");
     assert_eq!(item.branch_name(), "feature/xyz");
+    assert_eq!(
+        item.prompt_chip_command(),
+        PromptChipShellCommand::GitCreateAndCheckoutBranch {
+            branch_name: "feature/xyz".to_string()
+        }
+    );
 }
 
 #[test]
@@ -390,26 +384,4 @@ fn test_truncate_from_beginning_preserves_char_boundaries() {
             result.chars().count() <= max_len || result.chars().count() == text.chars().count()
         );
     }
-}
-
-#[test]
-fn test_chip_commands_neutralize_shell_injection() {
-    use super::{format_change_directory_command, format_git_branch_command};
-
-    // A hostile git branch name or directory name must stay a single quoted
-    // argument instead of breaking out into an injected command (GHSA-hgvx-4xvm-39pw).
-    assert_eq!(
-        format_git_branch_command("x'; touch /tmp/pwned; echo '"),
-        r#"git checkout 'x'"'"'; touch /tmp/pwned; echo '"'"''"#
-    );
-    assert_eq!(
-        format_change_directory_command("a'; rm -rf ~; echo '"),
-        r#"cd 'a'"'"'; rm -rf ~; echo '"'"''"#
-    );
-    // Plain inputs round-trip unchanged inside the quotes.
-    assert_eq!(
-        format_git_branch_command("feature/foo"),
-        "git checkout 'feature/foo'"
-    );
-    assert_eq!(format_change_directory_command(".."), "cd '..'");
 }

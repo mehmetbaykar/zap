@@ -309,7 +309,3 @@ impl PersistedSubject {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "cloud_object_tests.rs"]
-mod tests;

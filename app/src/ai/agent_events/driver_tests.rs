@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use futures::StreamExt;
+use warp_core::errors::AnyhowErrorExt as _;
 
 use super::*;
 use crate::ai::agent_events::AgentRunEvent;
@@ -363,6 +364,49 @@ fn make_http_status_error(status: u16) -> anyhow::Error {
         body: "not found".to_string(),
     })
     .context("SSE stream error")
+}
+
+#[test]
+fn actionable_stream_status_reports_only_at_threshold_crossing() {
+    let err = make_http_status_error(400);
+    assert_eq!(
+        [
+            agent_event_failure_should_log_error(&err, 4, 5),
+            agent_event_failure_should_log_error(&err, 5, 5),
+            agent_event_failure_should_log_error(&err, 6, 5),
+        ],
+        [false, true, false]
+    );
+}
+
+#[test]
+fn zero_threshold_disables_stream_error_escalation() {
+    let err = make_http_status_error(400);
+    assert!(!agent_event_failure_should_log_error(&err, 1, 0));
+}
+
+#[test]
+fn non_actionable_stream_statuses_do_not_report_at_threshold() {
+    for status in [408, 429] {
+        let err = make_http_status_error(status);
+        assert!(
+            !agent_event_failure_should_log_error(&err, 5, 5),
+            "status {status}"
+        );
+    }
+}
+
+#[test]
+fn server_error_status_reports_at_threshold_crossing() {
+    let err = make_http_status_error(500);
+    assert!(agent_event_failure_should_log_error(&err, 5, 5));
+}
+
+#[test]
+fn http_status_error_actionability_follows_status_classification() {
+    assert!(make_http_status_error(400).is_actionable());
+    assert!(make_http_status_error(500).is_actionable());
+    assert!(!make_http_status_error(429).is_actionable());
 }
 
 #[tokio::test]

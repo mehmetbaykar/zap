@@ -8,15 +8,15 @@ use crate::{
     auth::TEST_USER_UID,
     cloud_object::{
         model::{
-            actions::{ObjectAction, ObjectActionHistory, ObjectActionType, ObjectActions},
+            actions::{ObjectActionHistory, ObjectActionType, ObjectActions},
             generic_string_model::{
                 GenericStringModel, GenericStringObjectId, Serializer, StringModel,
             },
             persistence::{ObjectStoreEvent, ObjectStoreModel, UpdateSource},
             view::{Editor, EditorState, ObjectStoreViewModel},
         },
-        GenericStoredObject, GenericStringObjectFormat, JsonObjectType, ObjectIdType, ObjectType,
-        Owner, Revision, Space, StoredObject, StoredObjectEventEntrypoint, StoredObjectLocation,
+        GenericStoredObject, GenericStringObjectFormat, JsonObjectType, ObjectType, Owner,
+        Revision, Space, StoredObject, StoredObjectEventEntrypoint, StoredObjectLocation,
         StoredObjectModel,
     },
     drive::{
@@ -126,10 +126,8 @@ where
 
 /// The UpdateManager is responsible for delegating work
 /// when there is an update to an object (e.g. via a user interaction or
-/// a message from the server). Specifically, it will
-/// - write to SQLite
-/// - interact with the ObjectStoreModel to update the in-memory state used by the object views
-/// - interact with the SyncQueue by enqueueing an event
+/// another local component). It updates both the SQLite backing store and the in-memory state used
+/// by object views.
 pub struct UpdateManager {
     model_event_sender: Option<SyncSender<ModelEvent>>,
     spawned_futures: Vec<FutureId>,
@@ -157,8 +155,7 @@ impl UpdateManager {
     }
 
     fn save_to_db(&self, events: impl IntoIterator<Item = ModelEvent>) {
-        let model_event_sender = self.model_event_sender.clone();
-        if let Some(model_event_sender) = &model_event_sender {
+        if let Some(model_event_sender) = &self.model_event_sender {
             for event in events {
                 if let Err(e) = model_event_sender.send(event) {
                     log::error!("Error saving to database: {e:?}");
@@ -181,7 +178,7 @@ impl UpdateManager {
             .map(|object| object.object_type_and_id())
             .collect_vec();
 
-        // First, delete in-memory from ObjectStoreModel and object actions.
+        // Delete in-memory from ObjectStoreModel and object actions.
         object_store_model.update(ctx, |object_store_model, ctx| {
             for object in objects_to_remove.iter() {
                 object_store_model.delete_object(object.sync_id(), ctx);
@@ -193,7 +190,6 @@ impl UpdateManager {
             }
         });
 
-        // Then, delete from SQLite.
         let object_ids_and_types = objects_to_remove
             .into_iter()
             .map(|object| (object.sync_id(), object.object_id_type()))
@@ -208,9 +204,7 @@ impl UpdateManager {
         object_type_and_id: &ObjectTypeAndId,
         ctx: &mut ModelContext<Self>,
     ) {
-        // Zap (Wave 4): resync originally meant "re-enqueue into SyncQueue to push local changes to
-        // the server". After localization it is just a one-way sqlite write, so the call site only
-        // needs a lightweight check.
+        // Zap: there is no remote sync source. Keep this compatibility entry point as a no-op.
         let _ = (object_type_and_id, ctx);
     }
 
@@ -223,28 +217,12 @@ impl UpdateManager {
     }
 
     fn save_in_memory_object_to_sqlite(
-        &mut self,
+        &self,
         object_store_model: &ObjectStoreModel,
         uid: &ObjectUid,
     ) {
-        if let Some(cloud_object) = object_store_model.get_by_uid(uid) {
-            self.save_to_db([cloud_object.upsert_event()]);
-        }
-    }
-
-    fn save_in_memory_object_metadata_to_sqlite(
-        &mut self,
-        object_store_model: &ObjectStoreModel,
-        uid: &ObjectUid,
-        hashed_sqlite_id: &str,
-    ) {
-        if let Some(cloud_object) = object_store_model.get_by_uid(uid) {
-            let metadata = cloud_object.metadata().clone();
-            let event = ModelEvent::UpdateObjectMetadata {
-                id: hashed_sqlite_id.to_string(),
-                metadata,
-            };
-            self.save_to_db([event]);
+        if let Some(object) = object_store_model.get_by_uid(uid) {
+            self.save_to_db([object.upsert_event()]);
         }
     }
 
@@ -272,7 +250,6 @@ impl UpdateManager {
     pub fn replace_object_with_conflict(&mut self, uid: &ObjectUid, ctx: &mut ModelContext<Self>) {
         let object_store_model_handle = ObjectStoreModel::handle(ctx);
 
-        // Update the in-memory model first, and check for conflicts.
         let had_conflicts =
             object_store_model_handle.update(
                 ctx,
@@ -289,7 +266,6 @@ impl UpdateManager {
                 },
             );
 
-        // Update SQLite, but only if the in-memory model was updated.
         if had_conflicts {
             self.save_in_memory_object_to_sqlite(object_store_model_handle.as_ref(ctx), uid);
         }
@@ -414,8 +390,7 @@ impl UpdateManager {
     }
 
     /// Attempts to move the object identified by `object_id`
-    /// to the folder identified by `folder_id`, then persists the local metadata
-    /// changes in sqlite.
+    /// to the folder identified by `folder_id`.
     #[allow(clippy::too_many_arguments)]
     fn move_object_to_folder(
         &mut self,
@@ -604,8 +579,7 @@ impl UpdateManager {
             return;
         }
 
-        // Apply a pending, optimistic update and then try to sync the move with the server.
-        // We only update the in-memory data but don't persist anything in sqlite until the server confirms the move.
+        // Apply the move directly to the local in-memory object.
         // Todo: this logic shouldn't need to match based on Space versus Folder. Once we have moving across spaces in MoveObject,
         // we should simplify this to a unified call to move_object that sends the new space AND the new folder.
         let mut not_supported = false;
@@ -1028,11 +1002,11 @@ impl UpdateManager {
 
     /// Create a new local stored object with the given model.
     ///
-    /// Zap (localization): same as `update_object` -- the original implementation enqueued into
-    /// `SyncQueue` and waited for the server create ack; after localization it only keeps creating
-    /// the in-memory object + writing sqlite. The object exists permanently under its client_id and
-    /// is no longer promoted to a server_id. The `entrypoint` / `initiated_by` parameters are kept
-    /// to keep the interface stable.
+    /// Zap (localization): the original implementation enqueued into `SyncQueue` and waited for the
+    /// server create acknowledgement. The local implementation writes SQLite and updates the
+    /// in-memory store immediately. The object remains under its client_id and is no longer promoted
+    /// to a server_id. The `entrypoint` / `initiated_by` parameters are kept to keep the interface
+    /// stable.
     #[allow(clippy::too_many_arguments)]
     pub fn create_object<K, M>(
         &mut self,
@@ -1081,20 +1055,17 @@ impl UpdateManager {
             }
         });
 
-        // Update sqlite.
-        let object_store_model = ObjectStoreModel::as_ref(ctx);
-        if let Some(object) = object_store_model.get_object_of_type::<K, M>(&object_id) {
+        if let Some(object) = ObjectStoreModel::as_ref(ctx).get_object_of_type::<K, M>(&object_id) {
             self.save_to_db([object.upsert_event()]);
         }
     }
 
     /// Update a local stored object with a new model.
     ///
-    /// Zap (localization): no cloud = no server ack. The original implementation: update memory ->
-    /// mark `InFlight` -> write sqlite -> enqueue into `SyncQueue` (decrement `InFlight` once the
-    /// server responds). After localization the two cloud legs are cut, keeping only: update memory
-    /// + write sqlite. The object's sync_status stays permanently at the initial `NoLocalChanges`
-    /// (the local write itself is the "complete" semantics). The `revision_ts` parameter is kept to
+    /// Zap (localization): no cloud = no server acknowledgement. The local implementation updates
+    /// the in-memory object and writes the same update to SQLite without enqueuing into `SyncQueue`.
+    /// The object's sync_status stays permanently at the initial `NoLocalChanges`.
+    /// The `revision_ts` parameter is kept to
     /// keep the interface signature stable and is ignored on the local branch (to be cleaned up
     /// during the Phase 2d-4b rename).
     pub fn update_object<K, M>(
@@ -1123,11 +1094,9 @@ impl UpdateManager {
             ctx.notify();
         });
 
-        // Update sqlite.
-        let object_store_model = ObjectStoreModel::as_ref(ctx);
-        if let Some(object) = object_store_model.get_object_of_type::<K, M>(&object_id) {
+        if let Some(object) = ObjectStoreModel::as_ref(ctx).get_object_of_type::<K, M>(&object_id) {
             self.save_to_db([object.upsert_event()]);
-        };
+        }
     }
 
     // Takes a generic SyncId and records the action.
@@ -1152,13 +1121,7 @@ impl UpdateManager {
                 ctx,
             )
         });
-
-        // Update sqlite.
         self.save_to_db([ModelEvent::InsertObjectAction { object_action }]);
-
-        // Zap (Wave 4): the original tail enqueued into SyncQueue to report RecordObjectAction;
-        // after SyncQueue was fully deleted, the local sqlite record itself is "complete".
-        let _ = (id_and_type, action_type, data, action_timestamp);
     }
 
     fn maybe_overwrite_object_action_history(
@@ -1184,25 +1147,7 @@ impl UpdateManager {
         });
     }
 
-    /// Overwrites the actions in SQLite for a specified set of objects with the actions that
-    /// are currently in the ObjectActions singleton model.
-    fn sync_actions_for_objects_to_sqlite(
-        &mut self,
-        object_uids: Vec<&ObjectUid>,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        // Retrieve the objects from the ObjectActions model
-        let actions = ObjectActions::handle(ctx).read(ctx, |object_actions_model, _ctx| {
-            object_actions_model.get_actions_for_objects(object_uids)
-        });
-
-        // Overwrite the actions for those objects in sqlite
-        let actions_to_sync: Vec<ObjectAction> = actions.values().flatten().cloned().collect();
-        self.save_to_db([ModelEvent::SyncObjectActions { actions_to_sync }]);
-    }
-
-    /// Sets the notebooks current editor in memory. SQLite is not updated until we receive
-    /// server confirmation.
+    /// Sets the notebook's current editor in memory.
     fn set_notebook_current_editor(
         &self,
         notebook_id: &SyncId,
@@ -1293,19 +1238,15 @@ impl UpdateManager {
     }
 
     pub fn trash_object(&mut self, id: ObjectTypeAndId, ctx: &mut ModelContext<Self>) {
-        // Zap (decentralized branch): local objects (no server_id) take the pure-local trash path --
-        // mark trashed_ts + write sqlite. **Does not emit ObjectOperationComplete**, because several
+        // Zap (decentralized branch): local objects (no server_id) take the pure-local trash path.
+        // **Does not emit ObjectOperationComplete**, because several
         // of its consumers (notebooks/env_vars/cloud_object/view) all `.expect` a server_id; the
         // Drive UI has already been notified via the ObjectStoreEvent::ObjectTrashed that
         // mark_object_trashed_and_return_timestamps emits internally.
-        let Some(server_id) = id.server_id() else {
+        if id.server_id().is_none() {
             let hashed_id = id.uid();
             self.mark_object_trashed_and_return_timestamps(&hashed_id, ctx);
-            // Zap: a local object never has a server ack to clear has_pending_metadata_change.
-            // It must be cleared manually before writing sqlite, otherwise the
-            // `if !has_pending_metadata_change` branch in upsert_stored_object skips writing the
-            // trashed_ts field, causing the trashed_ts loaded from sqlite after a restart to be
-            // NULL, so the object reappears in PERSONAL.
+            // A local object never has a server acknowledgement, so clear the pending bit directly.
             ObjectStoreModel::handle(ctx).update(ctx, |object_store_model, _| {
                 if let Some(object) = object_store_model.get_mut_by_uid(&hashed_id) {
                     object
@@ -1313,11 +1254,11 @@ impl UpdateManager {
                         .pending_changes_statuses
                         .has_pending_metadata_change = false;
                 }
-                self.save_in_memory_object_to_sqlite(object_store_model, &hashed_id);
             });
+            self.save_in_memory_object_to_sqlite(ObjectStoreModel::as_ref(ctx), &hashed_id);
             ctx.notify();
             return;
-        };
+        }
 
         let hashed_id = id.uid();
         // If there's a pending online-only operation for this object, don't trash it.
@@ -1343,14 +1284,8 @@ impl UpdateManager {
                     .pending_changes_statuses
                     .has_pending_metadata_change = false;
             }
-
-            let hashed_sqlite_id = server_id.sqlite_type_and_uid_hash(id.object_id_type());
-            self.save_in_memory_object_metadata_to_sqlite(
-                object_store_model,
-                &hashed_id,
-                &hashed_sqlite_id,
-            );
         });
+        self.save_in_memory_object_to_sqlite(ObjectStoreModel::as_ref(ctx), &hashed_id);
 
         ctx.emit(UpdateManagerEvent::ObjectOperationComplete {
             result: ObjectOperationResult {
@@ -1365,13 +1300,11 @@ impl UpdateManager {
     }
 
     pub fn untrash_object(&mut self, id: ObjectTypeAndId, ctx: &mut ModelContext<Self>) {
-        // Zap: local object untrash -- clear trashed_ts + emit ObjectUntrashed + write sqlite.
+        // Zap: local object untrash -- clear trashed_ts + emit ObjectUntrashed.
         // Does not emit ObjectOperationComplete (same as the trash_object comment).
-        let Some(server_id) = id.server_id() else {
+        if id.server_id().is_none() {
             let hashed_id = id.uid();
-            // Zap: local object untrash -- clear trashed_ts and also clear
-            // has_pending_metadata_change (the local branch has no server ack), otherwise
-            // upsert_stored_object skips writing trashed_ts and sqlite keeps the old value.
+            // Clear trashed_ts and the pending metadata bit directly because there is no server ack.
             ObjectStoreModel::handle(ctx).update(ctx, |object_store_model, ctx| {
                 if let Some(object) = object_store_model.get_mut_by_uid(&hashed_id) {
                     object.metadata_mut().trashed_ts = None;
@@ -1385,12 +1318,10 @@ impl UpdateManager {
                     });
                 }
             });
-            ObjectStoreModel::handle(ctx).update(ctx, |object_store_model, _| {
-                self.save_in_memory_object_to_sqlite(object_store_model, &hashed_id);
-            });
+            self.save_in_memory_object_to_sqlite(ObjectStoreModel::as_ref(ctx), &hashed_id);
             ctx.notify();
             return;
-        };
+        }
 
         let hashed_id = id.uid();
         // If there's a pending online-only operation for this object, don't untrash it.
@@ -1426,10 +1357,8 @@ impl UpdateManager {
                     source: UpdateSource::Local,
                 });
             }
-            self.save_in_memory_object_to_sqlite(object_store_model, &hashed_id);
         });
-
-        let _ = server_id;
+        self.save_in_memory_object_to_sqlite(ObjectStoreModel::as_ref(ctx), &hashed_id);
 
         ctx.emit(UpdateManagerEvent::ObjectOperationComplete {
             result: ObjectOperationResult {
@@ -1453,9 +1382,10 @@ impl UpdateManager {
         initiated_by: InitiatedBy,
         ctx: &mut ModelContext<Self>,
     ) {
-        // If the object isn't known to the server yet, we can't delete it.
-        let Some(server_id) = id.server_id() else {
-            return;
+        let sync_id = id.sync_id();
+        let (client_id, server_id) = match sync_id {
+            SyncId::ClientId(client_id) => (Some(client_id), None),
+            SyncId::ServerId(server_id) => (None, Some(server_id)),
         };
 
         let uid = id.uid();
@@ -1478,14 +1408,13 @@ impl UpdateManager {
         }
 
         // Zap: the cloud delete RPC has been deleted; this collapses to a direct local removal.
-        let num_deleted_objects =
-            self.on_object_delete_success(vec![SyncId::ServerId(server_id)], ctx);
+        let num_deleted_objects = self.on_object_delete_success(vec![sync_id], ctx);
         ctx.emit(UpdateManagerEvent::ObjectOperationComplete {
             result: ObjectOperationResult {
                 success_type: OperationSuccessType::Success,
                 operation: ObjectOperation::Delete { initiated_by },
-                client_id: None,
-                server_id: Some(ServerId::from_string_lossy(&uid)),
+                client_id,
+                server_id,
                 num_objects: Some(num_deleted_objects),
             },
         });
@@ -1498,7 +1427,7 @@ impl UpdateManager {
         // `Failed to get access token`, retry 3 times, then fail, leaving the Trash UI unchanged.
         // Local branch: directly iterate ObjectStoreModel to find objects with a matching owner +
         // is_trashed, collect their SyncIds, then reuse `on_object_delete_success` (which already
-        // does the in-memory + sqlite double-delete + actions cleanup).
+        // performs the in-memory delete and actions cleanup).
         let owner = match UserWorkspaces::as_ref(ctx).space_to_owner(space, ctx) {
             Some(owner) => owner,
             None => {
@@ -1549,14 +1478,10 @@ impl UpdateManager {
         let object_store_model_handle = ObjectStoreModel::handle(ctx);
         let all_object_uids: Vec<ObjectUid> = deleted_ids.iter().map(|&id| id.uid()).collect();
 
-        // This variable counts the number of objects deleted client-side in each Empty Trash action,
-        // because the server returns everything in the db, including objects that have already been marked for deletion
-        let mut num_deleted_objects = 0;
-        let mut sync_ids_and_types: Vec<(SyncId, ObjectIdType)> = Vec::new();
-        object_store_model_handle.update(ctx, |object_store_model, ctx| {
-            (sync_ids_and_types, num_deleted_objects) =
-                object_store_model.delete_objects_by_id(all_object_uids.clone(), ctx);
-        });
+        let (sync_ids_and_types, num_deleted_objects) =
+            object_store_model_handle.update(ctx, |object_store_model, ctx| {
+                object_store_model.delete_objects_by_id(all_object_uids.clone(), ctx)
+            });
 
         // Deleted the actions associated with these objects too.
         ObjectActions::handle(ctx).update(ctx, |object_actions, ctx| {
@@ -1565,15 +1490,11 @@ impl UpdateManager {
             }
         });
 
-        // Return early if empty
-        if num_deleted_objects == 0 {
-            return num_deleted_objects;
+        if num_deleted_objects > 0 {
+            self.save_to_db([ModelEvent::DeleteObjects {
+                ids: sync_ids_and_types,
+            }]);
         }
-
-        // Delete objects from sqlite. This will also delete their actions.
-        self.save_to_db([ModelEvent::DeleteObjects {
-            ids: sync_ids_and_types,
-        }]);
 
         num_deleted_objects
     }

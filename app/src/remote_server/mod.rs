@@ -3,8 +3,6 @@
 pub use remote_server::*;
 
 #[cfg(not(target_family = "wasm"))]
-pub mod auth_context;
-#[cfg(not(target_family = "wasm"))]
 pub mod codebase_index_model;
 #[cfg(not(target_family = "wasm"))]
 mod codebase_index_status;
@@ -22,23 +20,23 @@ pub mod unix;
 
 /// Run the `remote-server-proxy` subcommand.
 #[cfg(unix)]
-pub fn run_proxy(identity_key: String) -> anyhow::Result<()> {
-    unix::proxy::run(&identity_key)
+pub fn run_proxy() -> anyhow::Result<()> {
+    unix::proxy::run()
 }
 
 #[cfg(not(unix))]
-pub fn run_proxy(_identity_key: String) -> anyhow::Result<()> {
+pub fn run_proxy() -> anyhow::Result<()> {
     anyhow::bail!("remote-server-proxy is not supported on this platform")
 }
 
 /// Run the `remote-server-daemon` subcommand.
 #[cfg(unix)]
-pub fn run_daemon(identity_key: String) -> anyhow::Result<()> {
-    unix::run_daemon(identity_key)
+pub fn run_daemon() -> anyhow::Result<()> {
+    unix::run_daemon()
 }
 
 #[cfg(not(unix))]
-pub fn run_daemon(_identity_key: String) -> anyhow::Result<()> {
+pub fn run_daemon() -> anyhow::Result<()> {
     anyhow::bail!("remote-server-daemon is not supported on this platform")
 }
 
@@ -91,20 +89,3 @@ pub(super) fn run_daemon_app(
     })?;
     Ok(())
 }
-
-// Zap Wave 6-1: the `wire_auth_token_rotation` function was physically removed —
-// it originally subscribed to server API token rotation events and forwarded
-// them to `RemoteServerManager::rotate_auth_token`. After Wave 3-1 removed the
-// auth subsystem, that event had 0 emit points, so Wave 6-1 removed the event +
-// this subscription function + the call site in `lib.rs` together. The
-// `RemoteServerManager::rotate_auth_token` function body is kept for now.
-//
-// Zap: upstream's `current_codebase_index_limits` / `wire_auth_token_rotation`
-// codebase-index-limit wiring (gated on `AIRequestUsageModel` / subscription
-// usage quotas) was not ported — this fork has no billing/usage-quota system,
-// and the embedding-backed codebase index it would gate
-// (`ai::index::full_source_code_embedding`) was already stripped, see
-// `codebase_index_status.rs`. Likewise `handoff_snapshot` (local-to-cloud
-// SSH-session handoff via GCS upload through `server::server_api::ai`) is not
-// wired in here: it depends entirely on the cloud AI proxy this fork replaces
-// with BYOP providers, and has no local-only variant to keep.

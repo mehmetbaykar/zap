@@ -44,4 +44,3 @@ impl OrchestrationConfigStatus {
         matches!(self, Self::Disapproved)
     }
 }
-

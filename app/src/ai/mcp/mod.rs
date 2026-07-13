@@ -1,3 +1,6 @@
+pub mod manager;
+pub mod templatable_manager;
+
 #[cfg(not(target_family = "wasm"))]
 use crate::server::datetime_ext::DateTimeExt;
 #[cfg(not(target_family = "wasm"))]
@@ -28,14 +31,11 @@ use diesel::{QueryDsl, RunQueryDsl, SqliteConnection};
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
-use warp_core::ui::appearance::Appearance;
-use warp_core::ui::Icon;
-
-pub mod manager;
-pub mod templatable_manager;
 #[cfg(not(target_family = "wasm"))]
 pub use templatable_manager::McpIntegration;
 pub use templatable_manager::TemplatableMCPServerManager;
+use warp_core::ui::appearance::Appearance;
+use warp_core::ui::Icon;
 
 cfg_if::cfg_if! {
     if #[cfg(not(feature = "local_fs"))] {

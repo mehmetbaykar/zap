@@ -1,5 +1,7 @@
+use std::fs;
 use std::sync::Arc;
 
+use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Local};
 use vec1::vec1;
 use warp_core::command::ExitCode;
@@ -15,6 +17,7 @@ use crate::terminal::model::ansi::{CompletionMetadata, Handler, Processor};
 use crate::terminal::model::block::BlockId;
 use crate::terminal::model::bootstrap::BootstrapStage;
 use crate::terminal::model::grid::Dimensions as _;
+use crate::terminal::model::image_map::StoredImageMetadata;
 use crate::terminal::model::index::Side;
 use crate::terminal::model::selection::ExpandedSelectionRange;
 use crate::terminal::model::test_utils::block_size;
@@ -58,6 +61,7 @@ fn command_finished_and_precmd(terminal: &mut TerminalModel) {
     };
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: completion_metadata.clone(),
+        session_id: None,
     });
     terminal.precmd_with_completion_metadata(PrecmdValue {
         completion_metadata,
@@ -75,6 +79,7 @@ fn normal_command_finished_and_precmd(
     );
     terminal.preexec(PreexecValue {
         command: "completed".to_owned(),
+        session_id: None,
     });
     let completion_metadata = CompletionMetadata {
         exit_code: ExitCode::from(0),
@@ -82,6 +87,7 @@ fn normal_command_finished_and_precmd(
     };
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: completion_metadata.clone(),
+        session_id: None,
     });
     terminal.precmd_with_completion_metadata(PrecmdValue {
         completion_metadata,
@@ -155,6 +161,103 @@ fn generic_shared_session_viewer_model_starts_view_pending() {
     assert!(model.shared_session_status().is_viewer());
 }
 
+fn iterm_file_osc(name: &str, inline: bool, payload: &[u8]) -> String {
+    let inline = if inline { "1" } else { "0" };
+    format!(
+        "\x1b]1337;File=name={};inline={}:{}\x07",
+        base64::Engine::encode(&BASE64, name),
+        inline,
+        base64::Engine::encode(&BASE64, payload)
+    )
+}
+
+fn multipart_iterm_file_osc(name: &str, inline: bool, payload: &[u8]) -> Vec<String> {
+    let inline = if inline { "1" } else { "0" };
+    let encoded_payload = base64::Engine::encode(&BASE64, payload);
+    let midpoint = encoded_payload.len() / 2;
+    vec![
+        format!(
+            "\x1b]1337;MultipartFile=name={};inline={}\x07",
+            base64::Engine::encode(&BASE64, name),
+            inline,
+        ),
+        format!("\x1b]1337;FilePart={}\x07", &encoded_payload[..midpoint]),
+        format!("\x1b]1337;FilePart={}\x07", &encoded_payload[midpoint..]),
+        "\x1b]1337;FileEnd\x07".to_owned(),
+    ]
+}
+
+fn hex_encoded_json_dcs(payload: &str) -> Vec<u8> {
+    let mut bytes = b"\x1bP$d".to_vec();
+    bytes.extend(hex::encode(payload).bytes());
+    bytes.push(0x9c);
+    bytes
+}
+
+#[test]
+fn ignores_non_inline_iterm_file_payload_without_overwriting_cwd_file() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let target_path = temp_dir.path().join(".zshenv");
+    let original_bytes = b"ORIGINAL=1\n";
+    let attacker_bytes = b"touch /tmp/warp-pwned\n";
+    fs::write(&target_path, original_bytes).unwrap();
+
+    let mut terminal = TerminalModel::mock(None, None);
+    terminal.prompt_only_precmd(PromptMetadata {
+        pwd: Some(temp_dir.path().to_string_lossy().to_string()),
+        ..Default::default()
+    });
+
+    let osc = iterm_file_osc(".zshenv", false, attacker_bytes);
+    terminal.process_bytes(osc.as_str());
+
+    assert_eq!(fs::read(&target_path).unwrap(), original_bytes);
+    assert!(terminal.image_id_to_metadata.is_empty());
+}
+
+#[test]
+fn ignores_multipart_non_inline_iterm_file_payload_without_overwriting_cwd_file() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let target_path = temp_dir.path().join(".zshenv");
+    let original_bytes = b"ORIGINAL=1\n";
+    let attacker_bytes = b"touch /tmp/warp-pwned\n";
+    fs::write(&target_path, original_bytes).unwrap();
+
+    let mut terminal = TerminalModel::mock(None, None);
+    terminal.prompt_only_precmd(PromptMetadata {
+        pwd: Some(temp_dir.path().to_string_lossy().to_string()),
+        ..Default::default()
+    });
+
+    for osc in multipart_iterm_file_osc(".zshenv", false, attacker_bytes) {
+        terminal.process_bytes(osc.as_str());
+    }
+
+    assert_eq!(fs::read(&target_path).unwrap(), original_bytes);
+    assert!(terminal.image_id_to_metadata.is_empty());
+}
+
+#[test]
+fn handles_inline_iterm_image_payload() {
+    let mut terminal = TerminalModel::mock(None, None);
+    let svg_bytes =
+        br#"<svg width="1" height="1" viewBox="0 0 1 1" xmlns="http://www.w3.org/2000/svg"></svg>"#;
+
+    let osc = iterm_file_osc("pixel.svg", true, svg_bytes);
+    terminal.process_bytes(osc.as_str());
+
+    assert_eq!(terminal.image_id_to_metadata.len(), 1);
+    let StoredImageMetadata::ITerm(metadata) =
+        terminal.image_id_to_metadata.values().next().unwrap()
+    else {
+        panic!("Expected iTerm image metadata");
+    };
+    assert_eq!(metadata.name, "pixel.svg");
+    assert!(metadata.inline);
+    assert_eq!(metadata.image_size.x(), 1.0);
+    assert_eq!(metadata.image_size.y(), 1.0);
+}
+
 // Ensures that an ssh session successfully bootstraps even if the block list is empty.
 #[test]
 fn ssh_bootstraps_if_blocklist_empty() {
@@ -163,6 +266,7 @@ fn ssh_bootstraps_if_blocklist_empty() {
     command_finished_and_precmd(&mut terminal);
 
     let bootstrapped_value = BootstrappedValue {
+        session_id: None,
         histfile: None,
         shell: String::from("bash"),
         home_dir: None,
@@ -192,6 +296,7 @@ fn ssh_bootstraps_if_blocklist_empty() {
             exit_code: ExitCode::from(0),
             next_block_id: BlockId::new(),
         },
+        session_id: None,
     });
     terminal
         .block_list_mut()
@@ -789,6 +894,7 @@ fn test_exit_alt_screen_on_command_finished() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "accepted".to_owned(),
+        session_id: None,
     });
 
     terminal.enter_alt_screen(true);
@@ -798,6 +904,7 @@ fn test_exit_alt_screen_on_command_finished() {
             exit_code: ExitCode::from(0),
             next_block_id: BlockId::new(),
         },
+        session_id: None,
     });
 
     assert!(!terminal.alt_screen_active);
@@ -810,6 +917,7 @@ fn accepted_precmd_and_preexec_target_the_block_list_while_the_alt_screen_is_act
     terminal.enter_alt_screen(true);
     terminal.preexec(PreexecValue {
         command: "accepted".to_owned(),
+        session_id: None,
     });
     assert_eq!(
         terminal.block_list().active_block().state(),
@@ -823,6 +931,7 @@ fn accepted_precmd_and_preexec_target_the_block_list_while_the_alt_screen_is_act
             exit_code: ExitCode::from(0),
             next_block_id: next_block_id.clone(),
         },
+        session_id: None,
     });
     terminal.enter_alt_screen(true);
     terminal.precmd_with_completion_metadata(PrecmdValue {
@@ -852,6 +961,7 @@ fn test_unset_bracketed_paste_mode_on_command_finished() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "accepted".to_owned(),
+        session_id: None,
     });
 
     terminal.set_mode(Mode::BracketedPaste);
@@ -861,6 +971,7 @@ fn test_unset_bracketed_paste_mode_on_command_finished() {
             exit_code: ExitCode::from(0),
             next_block_id: BlockId::new(),
         },
+        session_id: None,
     });
 
     assert!(!terminal.is_term_mode_set(TermMode::BRACKETED_PASTE));
@@ -887,9 +998,11 @@ fn normal_lifecycle_pipeline_emits_completion_and_prompt_side_effects_once() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "false".to_owned(),
+        session_id: None,
     });
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: completion_metadata.clone(),
+        session_id: None,
     });
     terminal.precmd_with_completion_metadata(PrecmdValue {
         completion_metadata,
@@ -990,6 +1103,7 @@ fn repeated_and_executing_command_starts_are_safely_gated() {
 
     terminal.preexec(PreexecValue {
         command: "running".to_owned(),
+        session_id: None,
     });
     assert_eq!(
         terminal.start_command_execution(),
@@ -1008,6 +1122,7 @@ fn duplicate_and_colliding_completion_evidence_is_ignored() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "first".to_owned(),
+        session_id: None,
     });
     let first_block_id = terminal.active_block_id().clone();
     terminal.command_finished(CommandFinishedValue {
@@ -1015,6 +1130,7 @@ fn duplicate_and_colliding_completion_evidence_is_ignored() {
             exit_code: ExitCode::from(9),
             next_block_id: first_block_id.clone(),
         },
+        session_id: None,
     });
     assert_eq!(terminal.active_block_id(), &first_block_id);
     assert_eq!(
@@ -1028,6 +1144,7 @@ fn duplicate_and_colliding_completion_evidence_is_ignored() {
             exit_code: ExitCode::from(0),
             next_block_id: second_block_id.clone(),
         },
+        session_id: None,
     });
     terminal.precmd_with_completion_metadata(PrecmdValue {
         completion_metadata: CompletionMetadata {
@@ -1039,12 +1156,14 @@ fn duplicate_and_colliding_completion_evidence_is_ignored() {
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "second".to_owned(),
+        session_id: None,
     });
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: CompletionMetadata {
             exit_code: ExitCode::from(7),
             next_block_id: first_block_id,
         },
+        session_id: None,
     });
     assert_eq!(terminal.active_block_id(), &second_block_id);
     assert_eq!(
@@ -1067,12 +1186,14 @@ fn terminal_exit_absorbs_later_lifecycle_inputs() {
     );
     terminal.preexec(PreexecValue {
         command: "ignored".to_owned(),
+        session_id: None,
     });
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: CompletionMetadata {
             exit_code: ExitCode::from(1),
             next_block_id: BlockId::new(),
         },
+        session_id: None,
     });
     terminal.precmd_with_completion_metadata(PrecmdValue {
         completion_metadata: CompletionMetadata {
@@ -1246,6 +1367,58 @@ fn test_rect_selection_in_alt_screen() {
 }
 
 #[test]
+fn viewer_processes_dcs_hook_with_unregistered_session_id() {
+    let mut terminal = TerminalModel::mock(None, None);
+    terminal.set_shared_session_status(SharedSessionStatus::reader());
+
+    let bytes = hex_encoded_json_dcs(
+        r#"{
+                "hook": "Precmd",
+                "value": {
+                    "pwd": "/viewer",
+                    "session_id": 999
+                }
+            }"#,
+    );
+    terminal.process_bytes(bytes.as_slice());
+
+    assert_eq!(
+        terminal
+            .block_list()
+            .active_block()
+            .pwd()
+            .map(String::as_str),
+        Some("/viewer")
+    );
+}
+
+#[test]
+fn sharer_rejects_dcs_hook_with_unregistered_session_id() {
+    let mut terminal = TerminalModel::mock(None, None);
+    terminal.set_shared_session_status(SharedSessionStatus::ActiveSharer);
+
+    let bytes = hex_encoded_json_dcs(
+        r#"{
+                "hook": "Precmd",
+                "value": {
+                    "pwd": "/sharer",
+                    "session_id": 999
+                }
+            }"#,
+    );
+    terminal.process_bytes(bytes.as_slice());
+
+    assert_eq!(
+        terminal
+            .block_list()
+            .active_block()
+            .pwd()
+            .map(String::as_str),
+        None
+    );
+}
+
+#[test]
 fn test_synchronized_output_sharing_session() {
     let mut terminal: TerminalModel = TerminalModel::mock(None, None);
 
@@ -1348,12 +1521,14 @@ fn precmd_with_completion_metadata_records_completion_mismatch_without_overwriti
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "false".to_owned(),
+        session_id: None,
     });
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: CompletionMetadata {
             exit_code: ExitCode::from(7),
             next_block_id: next_block_id.clone(),
         },
+        session_id: None,
     });
     while event_rx.try_recv().is_ok() {}
 
@@ -1492,6 +1667,7 @@ fn precmd_with_completion_metadata_recovery_cleans_up_alt_screen_and_bracketed_p
     terminal.start_command_execution();
     terminal.preexec(PreexecValue {
         command: "vim".to_owned(),
+        session_id: None,
     });
     let completed_block_id = terminal.active_block_id().clone();
     terminal.set_mode(Mode::BracketedPaste);
@@ -1618,6 +1794,7 @@ fn recovery_advances_finished_active_block_without_republishing_completion() {
     };
     terminal.command_finished(CommandFinishedValue {
         completion_metadata: completion_metadata.clone(),
+        session_id: None,
     });
     terminal.precmd_with_completion_metadata(PrecmdValue {
         completion_metadata,

@@ -72,12 +72,6 @@ pub fn sections(ctx: &mut ViewContext<ResourceCenterMainView>) -> Vec<Section> {
                 url: "",
                 button_label: crate::t!("resource-center-view-documentation"),
             },
-            ContentItem {
-                title: crate::t!("resource-center-how-warp-uses-warp-title"),
-                description: crate::t!("resource-center-how-warp-uses-warp-description"),
-                url: "https://www.warp.dev/blog/how-warp-uses-warp",
-                button_label: crate::t!("resource-center-read-article"),
-            },
         ],
     };
     sections.push(Section::Content(advanced_setup));

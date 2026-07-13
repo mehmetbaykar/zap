@@ -57,8 +57,10 @@ pub enum SkillProvider {
     VariantNames,
 )]
 pub enum SkillScope {
-    /// Skills from a project directory (e.g., `./repo/.agents/skills`).
+    /// Skills from the user's home directory (e.g., `~/.agents/skills`).
     #[default]
+    Home,
+    /// Skills from a project directory (e.g., `./repo/.agents/skills`).
     Project,
     /// Bundled skills distributed with Zap.
     Bundled,
@@ -229,6 +231,19 @@ fn match_provider_skills_root(
     None
 }
 
+/// Returns whether a local skill belongs to a home-level or project-level provider directory.
+pub fn get_scope_for_path(path: &Path) -> SkillScope {
+    for definition in SKILL_PROVIDER_DEFINITIONS.iter() {
+        if home_skills_path(definition.provider)
+            .into_iter()
+            .any(|home_skills_path| path.starts_with(home_skills_path))
+        {
+            return SkillScope::Home;
+        }
+    }
+    SkillScope::Project
+}
+
 #[cfg(test)]
 mod tests {
     use warp_util::host_id::HostId;
@@ -237,8 +252,8 @@ mod tests {
     use warp_util::standardized_path::StandardizedPath;
 
     use super::{
-        get_provider_for_path, home_skills_path, provider_parent_directory_for_skills_root,
-        SkillProvider,
+        get_provider_for_path, get_scope_for_path, home_skills_path,
+        provider_parent_directory_for_skills_root, SkillProvider, SkillScope,
     };
 
     #[test]
@@ -261,6 +276,7 @@ mod tests {
             get_provider_for_path(&LocalOrRemotePath::Local(path.clone())),
             Some(SkillProvider::Zap)
         );
+        assert_eq!(get_scope_for_path(&path), SkillScope::Home);
     }
 
     #[test]

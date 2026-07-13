@@ -416,6 +416,9 @@ pub struct EditorWrapper<V: EditorView> {
     gutter_element_hover_target: GutterHoverTarget,
     expand_diff_indicator_width_on_hover: bool,
     comment_save_position_id: String,
+    find_references_save_position_id: String,
+    /// The line where find references card is anchored (if active).
+    find_references_anchor: Option<EditorLineLocation>,
 }
 
 impl<V: EditorView> EditorWrapper<V> {
@@ -512,6 +515,7 @@ impl<V: EditorView> EditorWrapper<V> {
         expand_diff_indicator_width_on_hover: bool,
         gutter_element_hover_target: GutterHoverTarget,
         comment_save_position_id: String,
+        find_references_save_position_id: String,
     ) -> Self {
         Self {
             editor,
@@ -535,6 +539,8 @@ impl<V: EditorView> EditorWrapper<V> {
             comment_box: None,
             saved_comments,
             comment_save_position_id,
+            find_references_save_position_id,
+            find_references_anchor: None,
         }
     }
 
@@ -545,6 +551,11 @@ impl<V: EditorView> EditorWrapper<V> {
             line_highlight_element: highlight_element(appearance),
             line,
         });
+    }
+
+    /// Set the find references anchor line for position caching
+    pub fn set_find_references_anchor(&mut self, anchor: Option<EditorLineLocation>) {
+        self.find_references_anchor = anchor;
     }
 
     /// True iff the diff hunks are expanded in the underlying editor model.
@@ -1399,6 +1410,8 @@ impl<V: EditorView> Element for EditorWrapper<V> {
         // Track the offset and height of the gutter element under which we should render the
         // inline comment box.
         let mut inline_comment_gutter_element: Option<(f32, f32)> = None;
+        // Track the offset and height of the gutter element for find references anchor.
+        let mut find_references_gutter_element: Option<(f32, f32)> = None;
 
         if let Some(gutter_elements) = &mut self.gutter_elements {
             // Start clipping layer for gutter elements to prevent overflow
@@ -1480,6 +1493,16 @@ impl<V: EditorView> Element for EditorWrapper<V> {
                     {
                         inline_comment_gutter_element = Some((gutter_y, element.height));
                     }
+
+                    // If this is the gutter element for find references anchor,
+                    // save its position for caching.
+                    if self
+                        .find_references_anchor
+                        .as_ref()
+                        .is_some_and(|anchor| element.line.is_same_line(anchor))
+                    {
+                        find_references_gutter_element = Some((gutter_y, element.height));
+                    }
                 }
             }
             // Flush last group.
@@ -1531,7 +1554,19 @@ impl<V: EditorView> Element for EditorWrapper<V> {
         }
 
         // Cache find references anchor position if we have one.
-        // After LSP was removed, there is no longer any need to cache the find-references gutter position.
+        if self.find_references_anchor.is_some() {
+            if let Some((offset, height)) = find_references_gutter_element {
+                let gutter_origin = origin + vec2f(0., offset);
+
+                // Cache the gutter position for the find references anchor.
+                // This will be used to determine if the card should be shown.
+                let rect = RectF::new(gutter_origin, vec2f(1., height));
+                ctx.position_cache.cache_position_for_one_frame(
+                    self.find_references_save_position_id.clone(),
+                    rect,
+                );
+            }
+        }
 
         self.child_max_z_index = Some(ctx.scene.max_active_z_index());
     }

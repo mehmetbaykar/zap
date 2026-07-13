@@ -39,7 +39,7 @@ use std::path::{Component, Path};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use ai::agent::action::SuggestPromptRequest;
+use ai::agent::action::{RequestComputerUseRequest, SuggestPromptRequest};
 use ai::skills::SkillReference;
 use indexmap::IndexMap;
 use itertools::Itertools;
@@ -120,12 +120,11 @@ use super::imported_comments::render_imported_comments;
 use super::todos::render_todos;
 use super::CONTENT_HORIZONTAL_PADDING;
 use super::{
-    add_highlights_to_rich_text, render_autonomy_checkbox_setting_speedbump_footer,
+    add_highlights_to_rich_text, orchestration, render_autonomy_checkbox_setting_speedbump_footer,
     render_citation_chips, todos::render_completed_todo_items, WithContentItemSpacing,
     CONTENT_ITEM_VERTICAL_MARGIN,
 };
 use crate::terminal::model::session::active_session::ActiveSession;
-use crate::workspace::WorkspaceAction;
 use warpui::{
     keymap::Keystroke,
     platform::{Cursor, OperatingSystem},
@@ -787,6 +786,61 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                             ));
                         }
                         AIAgentOutputMessageType::Action(AIAgentAction {
+                            action: AIAgentActionType::RequestComputerUse(request),
+                            id,
+                            ..
+                        }) => {
+                            should_render_footer = false;
+                            output_items
+                                .add_child(render_request_computer_use(props, id, request, app));
+                        }
+                        AIAgentOutputMessageType::Action(AIAgentAction {
+                            action:
+                                AIAgentActionType::StartAgent {
+                                    version: _,
+                                    name,
+                                    prompt,
+                                    execution_mode,
+                                    lifecycle_subscription: _,
+                                },
+                            id,
+                            ..
+                        }) => {
+                            should_render_footer = false;
+                            should_render_suggestions = false;
+                            output_items.add_child(orchestration::render_start_agent(
+                                props,
+                                id,
+                                name,
+                                prompt,
+                                execution_mode,
+                                &output_message.id,
+                                app,
+                            ));
+                        }
+                        AIAgentOutputMessageType::Action(AIAgentAction {
+                            action:
+                                AIAgentActionType::SendMessageToAgent {
+                                    addresses,
+                                    subject,
+                                    message,
+                                },
+                            id,
+                            ..
+                        }) => {
+                            should_render_footer = false;
+                            should_render_suggestions = false;
+                            output_items.add_child(orchestration::render_send_message(
+                                props,
+                                id,
+                                addresses,
+                                subject,
+                                message,
+                                &output_message.id,
+                                app,
+                            ));
+                        }
+                        AIAgentOutputMessageType::Action(AIAgentAction {
                             action: AIAgentActionType::InsertCodeReviewComments { repo_path, .. },
                             id,
                             ..
@@ -859,6 +913,13 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                                     output_message.id
                                 );
                             }
+                        }
+                        AIAgentOutputMessageType::MessagesReceivedFromAgents { messages } => {
+                            output_items.add_child(
+                                orchestration::render_messages_received_from_agents(
+                                    messages, props, app,
+                                ),
+                            );
                         }
                         AIAgentOutputMessageType::DebugOutput { text } => {
                             if ChannelState::enable_debug_features() {
@@ -1173,7 +1234,7 @@ fn should_render_stopped_output(props: Props, app: &AppContext) -> bool {
 
     let status = props.model.status(app);
     let cancellation_reason = status.cancellation_reason().cloned();
-    if cancellation_reason.is_some_and(|reason| reason.is_follow_up_for_same_conversation()) {
+    if cancellation_reason.is_some_and(|reason| reason.should_preserve_in_progress_status()) {
         return false;
     }
 
@@ -1412,17 +1473,25 @@ fn render_read_skill(
     // Renders the 'open skill' button for known, non-bundled skills.
     if let Some(skill) = skill {
         if !skill.is_bundled() {
-            if let Some(path) = skill.path.to_local_path() {
-                let source = CodeSource::Skill {
-                    reference: skill_reference.clone(),
-                    path: path.to_path_buf(),
-                    origin: SkillOpenOrigin::ReadSkill,
+            if let Some(button_handle) = props.state_handles.skill_button_handles.get(id).cloned() {
+                let source = match &skill.path {
+                    LocalOrRemotePath::Local(path) => CodeSource::Skill {
+                        reference: skill_reference.clone(),
+                        path: path.clone(),
+                        origin: SkillOpenOrigin::ReadSkill,
+                    },
+                    LocalOrRemotePath::Remote(path) => CodeSource::RemoteFileTree {
+                        remote_path: crate::code::buffer_location::RemotePath::new(
+                            path.host_id.clone(),
+                            path.path.clone(),
+                        ),
+                    },
                 };
 
                 let skill_icon_override = icon_override_for_skill_name(&skill.name);
                 let open_button = render_skill_button(
                     "Open skill",
-                    props.state_handles.open_skill_button_handle.clone(),
+                    button_handle,
                     appearance,
                     skill.provider,
                     skill_icon_override,
@@ -1516,31 +1585,38 @@ fn render_read_files(
 
     // Renders the 'open skill' button if all files belong to the same skill directory.
     if let Some(skill) = parsed_skill {
-        let Some(path) = skill.path.to_local_path() else {
-            return renderable_action.render(app).finish();
-        };
-        let reference = SkillManager::handle(app)
-            .as_ref(app)
-            .reference_for_skill_path(&skill.path);
-        let source = CodeSource::Skill {
-            reference,
-            path: path.to_path_buf(),
-            origin: SkillOpenOrigin::ReadFiles,
-        };
-        let skill_icon_override = icon_override_for_skill_name(&skill.name);
-        let open_button = render_skill_button(
-            &format!("/{}", skill.name),
-            props.state_handles.read_from_skill_button_handle.clone(),
-            appearance,
-            skill.provider,
-            skill_icon_override,
-            move |ctx| {
-                ctx.dispatch_typed_action(AIBlockAction::OpenCodeInWarp {
-                    source: source.clone(),
-                });
-            },
-        );
-        renderable_action = renderable_action.with_action_button(open_button);
+        if let Some(button_handle) = props.state_handles.skill_button_handles.get(id).cloned() {
+            let reference = SkillManager::handle(app)
+                .as_ref(app)
+                .reference_for_skill_path(&skill.path);
+            let source = match &skill.path {
+                LocalOrRemotePath::Local(path) => CodeSource::Skill {
+                    reference,
+                    path: path.clone(),
+                    origin: SkillOpenOrigin::ReadFiles,
+                },
+                LocalOrRemotePath::Remote(path) => CodeSource::RemoteFileTree {
+                    remote_path: crate::code::buffer_location::RemotePath::new(
+                        path.host_id.clone(),
+                        path.path.clone(),
+                    ),
+                },
+            };
+            let skill_icon_override = icon_override_for_skill_name(&skill.name);
+            let open_button = render_skill_button(
+                &format!("/{}", skill.name),
+                button_handle,
+                appearance,
+                skill.provider,
+                skill_icon_override,
+                move |ctx| {
+                    ctx.dispatch_typed_action(AIBlockAction::OpenCodeInWarp {
+                        source: source.clone(),
+                    });
+                },
+            );
+            renderable_action = renderable_action.with_action_button(open_button);
+        }
     }
 
     renderable_action.render(app).finish()
@@ -2390,6 +2466,52 @@ fn render_read_mcp_resource(
         if (props.model.status(app).is_streaming()
             && !props.model.is_first_action_in_output(action_id, app))
             || status.as_ref().is_some_and(|s| s.is_queued())
+        {
+            renderable_action = renderable_action.with_font_color(blended_colors::text_disabled(
+                appearance.theme(),
+                appearance.theme().surface_2(),
+            ));
+        }
+        renderable_action = renderable_action
+            .with_icon(action_icon(action_id, props.action_model, props.model, app).finish());
+    }
+
+    renderable_action.render(app).finish()
+}
+
+fn render_request_computer_use(
+    props: Props,
+    action_id: &AIAgentActionId,
+    request: &RequestComputerUseRequest,
+    app: &AppContext,
+) -> Box<dyn Element> {
+    let appearance = Appearance::as_ref(app);
+    let status = props.action_model.as_ref(app).get_action_status(action_id);
+
+    let mut renderable_action = RenderableAction::new(&request.task_summary, app);
+
+    if status.as_ref().is_some_and(AIActionStatus::is_blocked) {
+        let buttons = props
+            .action_buttons
+            .get(action_id)
+            .expect("Button states must exist for each requested action.");
+
+        renderable_action = renderable_action
+            .with_header(blocked_action_header(
+                action_id.clone(),
+                "OK if I use computer control for this task?",
+                buttons.run_button.clone(),
+                buttons.cancel_button.clone(),
+                props.action_model,
+                props.model,
+                app,
+            ))
+            .with_highlighted_border()
+            .with_background_color(appearance.theme().background().into_solid());
+    } else {
+        if (props.model.status(app).is_streaming()
+            && !props.model.is_first_action_in_output(action_id, app))
+            || status.as_ref().is_some_and(AIActionStatus::is_queued)
         {
             renderable_action = renderable_action.with_font_color(blended_colors::text_disabled(
                 appearance.theme(),

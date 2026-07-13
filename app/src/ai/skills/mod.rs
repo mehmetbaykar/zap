@@ -1,9 +1,17 @@
 use std::path::{Path, PathBuf};
 
 use warp_util::local_or_remote_path::LocalOrRemotePath;
+
 mod telemetry;
 pub use telemetry::{SkillOpenOrigin, SkillTelemetryEvent};
-
+#[cfg(all(not(target_family = "wasm"), feature = "local_fs"))]
+mod remote;
+#[cfg(all(not(target_family = "wasm"), feature = "local_fs"))]
+pub(crate) use remote::{bundled_skills_snapshot_protos, wire_remote_bundled_skills};
+#[cfg(feature = "local_fs")]
+mod bundled;
+#[cfg(all(not(target_family = "wasm"), feature = "local_fs"))]
+pub(crate) use bundled::BundledSkill;
 cfg_if::cfg_if! {
     if #[cfg(not(feature = "local_fs"))] {
         mod dummy_skill_manager;
@@ -17,8 +25,6 @@ pub use ai::skills::SkillReference;
 
 #[cfg(not(target_family = "wasm"))]
 mod global_skills;
-#[cfg(not(target_family = "wasm"))]
-pub use global_skills::filter_skills_by_spec;
 
 mod listed_skill;
 pub use listed_skill::SkillDescriptor;
@@ -60,12 +66,10 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
         mod skill_manager;
         pub use skill_manager::{
-            extract_skill_parent_directory, read_skills_from_directories,
-            SkillInventoryDuplicate, SkillInventoryItem, SkillManager, SkillManagerEvent,
+            extract_skill_parent_directory, SkillInventoryDuplicate, SkillInventoryItem,
+            SkillManager, SkillManagerEvent,
         };
         #[allow(unused_imports)]
         pub use skill_manager::SkillWatcher;
-        #[cfg(test)]
-        pub use skill_manager::BundledSkillActivation;
     }
 }

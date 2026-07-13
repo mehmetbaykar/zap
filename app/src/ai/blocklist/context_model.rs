@@ -9,9 +9,9 @@ use std::sync::Arc;
 use ai::project_context::model::ProjectContextModel;
 use parking_lot::FairMutex;
 use warp_core::features::FeatureFlag;
-use warpui::{
-    AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity, WeakModelHandle,
-};
+#[cfg(feature = "local_fs")]
+use warpui::WeakModelHandle;
+use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
 
 use super::agent_view::{AgentViewController, AgentViewEntryOrigin, EnterAgentViewError};
 use super::block::DirectoryContext;
@@ -27,13 +27,15 @@ use crate::ai::agent::{
 use crate::ai::block_context::BlockContext;
 use crate::ai::document::ai_document_model::AIDocumentId;
 use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
-use crate::code_review::git_status_update::GitRepoStatusModel;
+#[cfg(feature = "local_fs")]
+use crate::code_review::github_repo_model::GitHubRepoModel;
 use crate::terminal::event::{BlockCompletedEvent, BlockType};
 use crate::terminal::model::block::{BlockId, BlockMetadata};
 use crate::terminal::model::session::Sessions;
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
 use crate::terminal::TerminalModel;
-use crate::workspaces::user_workspaces::UserWorkspaces;
+#[cfg(any(feature = "local_fs", test))]
+use crate::util::git::{PrInfo, RepositoryInfo};
 
 /// A non-image file picked via the "attach file" button, stored until query submission.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -345,7 +347,8 @@ impl PendingQueryState {
 pub struct BlocklistAIContextModel {
     terminal_model: Arc<FairMutex<TerminalModel>>,
     directory_context: DirectoryContext,
-    git_repo_status: Option<WeakModelHandle<GitRepoStatusModel>>,
+    #[cfg(feature = "local_fs")]
+    github_repo_model: Option<WeakModelHandle<GitHubRepoModel>>,
 
     /// `BlockId`s corresponding to blocks to be included as context with the next AI query.
     pending_context_block_ids: HashSet<BlockId>,
@@ -527,7 +530,8 @@ impl BlocklistAIContextModel {
         Self {
             terminal_model,
             directory_context: Default::default(),
-            git_repo_status: None,
+            #[cfg(feature = "local_fs")]
+            github_repo_model: None,
             pending_context_block_ids: HashSet::new(),
             pending_context_selected_text: None,
             pending_attachments: Default::default(),
@@ -556,7 +560,8 @@ impl BlocklistAIContextModel {
         Self {
             terminal_model,
             directory_context: Default::default(),
-            git_repo_status: None,
+            #[cfg(feature = "local_fs")]
+            github_repo_model: None,
             pending_context_block_ids: HashSet::new(),
             pending_context_selected_text: None,
             pending_attachments: Default::default(),
@@ -644,6 +649,7 @@ impl BlocklistAIContextModel {
     /// If `is_user_query` is true, includes blocks, selected text, and images as context.
     /// If false, excludes these user-specific contexts but includes everything else.
     pub fn pending_context(&self, app: &AppContext, is_user_query: bool) -> Vec<AIAgentContext> {
+        // `pwd` is the shell-reported path used for directory context and local indexing.
         let pwd = self.current_pwd();
         // Zap: this used to query RepoOutlines to check whether the repo under the current pwd was
         // already indexed, so "use codebase semantic search" could be offered as context. Outline is
@@ -693,14 +699,14 @@ impl BlocklistAIContextModel {
         // Always include project rules if available
         if let Some(rules) = project_rules {
             context.push(AIAgentContext::ProjectRules {
-                root_path: rules.root_path.to_string_lossy().into(),
+                root_path: rules.root_path.display_path(),
                 active_rules: rules
                     .active_rules
                     .into_iter()
                     .map(|rule| {
                         let line_count = rule.content.lines().count();
                         FileContext {
-                            file_name: rule.path.to_string_lossy().into(),
+                            file_name: rule.path.display_path(),
                             content: AnyFileContent::StringContent(rule.content.clone()),
                             line_range: None,
                             last_modified: None,
@@ -1324,10 +1330,53 @@ impl BlocklistAIContextModel {
         }
     }
 
-    pub fn set_git_repo_status(&mut self, handle: Option<WeakModelHandle<GitRepoStatusModel>>) {
-        self.git_repo_status = handle;
+    #[cfg(feature = "local_fs")]
+    pub fn set_github_repo_model(&mut self, handle: Option<WeakModelHandle<GitHubRepoModel>>) {
+        self.github_repo_model = handle;
     }
 
+    /// Builds an `AIAgentContext::Repository` from cached git remote metadata, if available.
+    #[cfg(feature = "local_fs")]
+    fn repository_context(&self, app: &AppContext) -> Option<AIAgentContext> {
+        let handle = self.github_repo_model.as_ref()?.upgrade(app)?;
+        let repository_info = handle.as_ref(app).repository_info(app)?;
+        Some(Self::repository_context_from_repository_info(
+            repository_info,
+        ))
+    }
+    #[cfg(not(feature = "local_fs"))]
+    fn repository_context(&self, _app: &AppContext) -> Option<AIAgentContext> {
+        None
+    }
+
+    #[cfg(any(feature = "local_fs", test))]
+    fn repository_context_from_repository_info(repository_info: &RepositoryInfo) -> AIAgentContext {
+        AIAgentContext::Repository {
+            name: repository_info.name.clone(),
+            owner: repository_info.owner.clone(),
+        }
+    }
+
+    #[cfg(feature = "local_fs")]
+    fn pull_request_context(&self, app: &AppContext) -> Option<AIAgentContext> {
+        let handle = self.github_repo_model.as_ref()?.upgrade(app)?;
+        let pr_info = handle.as_ref(app).pr_info(app)?;
+        Self::pull_request_context_from_pr_info(pr_info)
+    }
+    #[cfg(not(feature = "local_fs"))]
+    fn pull_request_context(&self, _app: &AppContext) -> Option<AIAgentContext> {
+        None
+    }
+
+    #[cfg(any(feature = "local_fs", test))]
+    fn pull_request_context_from_pr_info(pr_info: &PrInfo) -> Option<AIAgentContext> {
+        Some(AIAgentContext::PullRequest {
+            number: i32::try_from(pr_info.number).ok()?,
+            state: pr_info.state.clone(),
+            draft: pr_info.draft,
+            base_branch: pr_info.base_branch.clone(),
+        })
+    }
     /// Clears all pending attachments.
     pub fn clear_pending_attachments(&mut self, ctx: &mut ModelContext<Self>) {
         if !self.pending_attachments.is_empty() {
@@ -1338,6 +1387,23 @@ impl BlocklistAIContextModel {
             });
         }
         self.pending_attachments.clear();
+    }
+
+    /// Drains all pending attachments, returning them, and emits the same update event as
+    /// [`Self::clear_pending_attachments`] so the input's attachment chips disappear. Used to
+    /// move staged attachments onto a queued prompt row at enqueue time.
+    pub fn take_pending_attachments(
+        &mut self,
+        ctx: &mut ModelContext<Self>,
+    ) -> Vec<PendingAttachment> {
+        if !self.pending_attachments.is_empty() {
+            ctx.emit(BlocklistAIContextEvent::UpdatedPendingContext {
+                previous_block_ids: self.pending_context_block_ids.clone(),
+                requires_block_resync: false,
+                requires_text_resync: false,
+            });
+        }
+        std::mem::take(&mut self.pending_attachments)
     }
 }
 

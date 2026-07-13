@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use warpui::elements::HeadingFontSizeMultipliers;
-use warpui::fonts::{FamilyId, Weight};
-use warpui::{current_render_window, Entity, ModelContext, SingletonEntity, WindowId};
+use warpui_core::elements::HeadingFontSizeMultipliers;
+use warpui_core::fonts::{FamilyId, Weight};
+use warpui_core::{current_render_window, Entity, ModelContext, SingletonEntity, WindowId};
 
 use super::builder::UiBuilder;
 use super::theme::WarpTheme;
@@ -137,7 +137,7 @@ impl Appearance {
 
     #[cfg(feature = "test-util")]
     pub fn mock() -> Self {
-        use warpui::color::ColorU;
+        use warpui_core::color::ColorU;
 
         use crate::ui::theme::{mock_terminal_colors, Details, Fill};
 

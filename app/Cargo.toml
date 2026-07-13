@@ -13,12 +13,17 @@ license.workspace = true
 name = "warp"
 path = "src/lib.rs"
 
-# Zap keeps only two bins: zap-oss for packaging, and the build-time tool generate_settings_schema.
-# The original warp multi-channel-release dev/stable/preview/local bins have been removed.
+# Zap keeps zap-oss for packaging, warp for local development, and the build-time tool
+# generate_settings_schema. The other multi-channel release bins remain removed.
 
 [[bin]]
 name = "zap-oss"
 path = "src/bin/zap_oss.rs"
+test = false
+
+[[bin]]
+name = "warp"
+path = "src/bin/local.rs"
 test = false
 
 [[bin]]
@@ -102,6 +107,7 @@ jaq-all.workspace = true
 jemalloc_pprof = { version = "0.8.1", optional = true, features = [
     "symbolize",
 ] }
+lsp-types = "0.97.0"
 indexmap = { version = "2.0.2", features = ["serde"] }
 input_classifier.workspace = true
 instant.workspace = true
@@ -116,9 +122,11 @@ libc.workspace = true
 line-ending.workspace = true
 log.workspace = true
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
+lsp.workspace = true
 warp_logging.workspace = true
 lz4_flex = "0.11"
 markdown_parser.workspace = true
+mcp.workspace = true
 memchr.workspace = true
 memo-map.workspace = true
 mermaid_to_svg.workspace = true
@@ -213,6 +221,7 @@ warp_ssh_manager.workspace = true
 zap_sftp = { path = "../crates/zap_sftp" }
 warp_util.workspace = true
 warpui = { workspace = true, features = ["schema_gen", "settings_value"] }
+warpui_core.workspace = true
 voice_input = { workspace = true, optional = true }
 warpui_extras = { workspace = true, features = ["default", "user_preferences-toml"] }
 syntax_tree.workspace = true
@@ -235,11 +244,12 @@ warp_multi_agent_api.workspace = true
 remote_server.workspace = true
 repo_metadata.workspace = true
 vim.workspace = true
-rmcp = { workspace = true, features = ["client"] }
+rmcp.workspace = true
 warp_isolation_platform.workspace = true
 warp_ripgrep.workspace = true
 warp_managed_secrets.workspace = true
 zap_sync = { path = "../crates/zap_sync" }
+local_control.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block.workspace = true
@@ -296,12 +306,6 @@ aws-credential-types = "1"
 aws-sdk-sts = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-types = "1"
 
-mcp.workspace = true
-rmcp = { workspace = true, features = [
-    "auth",
-    "transport-streamable-http-client-reqwest",
-    "transport-child-process",
-] }
 notify-debouncer-full.workspace = true
 rquickjs = { workspace = true, optional = true }
 rustls.workspace = true
@@ -394,7 +398,6 @@ command = { workspace = true, features = ["test-util"] }
 ctor = "0.1.18"
 http_client = { workspace = true, features = ["test-util"] }
 mockall.workspace = true
-mockito.workspace = true
 serial_test = "0.8.0"
 sum_tree = { workspace = true, features = ["test-util"] }
 virtual-fs.workspace = true
@@ -403,6 +406,7 @@ warp_core = { workspace = true, features = ["test-util"] }
 warp_editor = { workspace = true, features = ["test-util"] }
 warp_terminal = { workspace = true, features = ["test-util"] }
 warpui = { workspace = true, features = ["test-util"] }
+warpui_core = { workspace = true, features = ["test-util"] }
 warpui_extras = { workspace = true, features = ["test-util"] }
 warp_files = { workspace = true, features = ["test-util"] }
 repo_metadata = { workspace = true, features = ["test-util"] }
@@ -505,7 +509,6 @@ default = [
     "allow_opening_file_links_using_editor_env",
     "read_image_files",
     "selection_as_context",
-    "changed_lines_only_apply_diff_result",
     "undo_closed_panes",
     "revert_diff_hunk",
     "code_review_save_changes",
@@ -518,8 +521,6 @@ default = [
     "mcp_oauth",
     "expand_edit_to_pane",
     "fallback_model_load_output_messaging",
-    "api_key_authentication",
-    "api_key_management",
     "summarization_cancellation_confirmation",
     "ui_zoom",
     "discard_per_file_and_all_changes",
@@ -544,7 +545,6 @@ default = [
     "bundled_skills",
     "agent_mode_computer_use",
     "oz_platform_skills",
-    "sync_ambient_plans",
     "conversation_artifacts",
     "agent_view",
     "agent_view_block_context",
@@ -553,7 +553,6 @@ default = [
     "inline_history_menu",
     "inline_model_selector",
     "open_warp_launch_modal",
-    "orchestration_launch_modal",
     "new_tab_styling",
     "richtext_multiselect",
     "inline_profile_selector",
@@ -592,12 +591,10 @@ default = [
     "tab_configs",
     "agent_harness",
     "hoa_onboarding_flow",
-    "hoa_remote_control",
     "codex_notifications",
     "trim_trailing_blank_lines",
     "open_warp_new_settings_modes",
     "settings_file",
-    "ssh_tmux_wrapper",
     "onekey_prompt",
     "directory_tab_colors",
     "git_credential_refresh",
@@ -605,12 +602,9 @@ default = [
     "orchestration_v2",
     "orchestration_pill_bar",
     "pending_user_query_indicator",
-    "cloud_mode_input_v2",
-    "cloud_mode_setup_v2",
-    "handoff_cloud_cloud",
-    "remote_codebase_indexing",
+    "queue_slash_command",
+    "queued_prompts_v2",
     "solo_user_byok",
-    "custom_inference_endpoints",
     "remote_code_review",
     "git_operations_in_code_review",
 ]
@@ -625,7 +619,6 @@ embedded_code_review_comments = []
 interactive_conversation_management_view = []
 default_waterfall_mode = []
 suggested_agent_mode_workflows = []
-ssh_tmux_wrapper = []
 ssh_enable_host_denylist_in_settings = []
 extern_plist = []
 fast_dev = ["skip_login"]
@@ -640,6 +633,7 @@ grep_tool = []
 gui = ["voice_input"]
 nld_classifier_v1 = ["input_classifier/nld_classifier_v1"]
 nld_classifier_v2 = ["input_classifier/nld_classifier_v2"]
+nld_classifier_v3 = ["input_classifier/nld_classifier_v3"]
 nld_heuristic_v1 = ["input_classifier/nld_heuristic_v1"]
 nld_heuristic_v2 = ["input_classifier/nld_heuristic_v2"]
 msys2_shells = []
@@ -690,6 +684,7 @@ local_claude_codex_child_harnesses = []
 # environments.
 local_fs = [
     "ai/local_fs",
+    "lsp/local_fs",
     "persistence/local_fs",
     "repo_metadata/local_fs",
     "warp_core/local_fs",
@@ -718,10 +713,8 @@ plugin_host = ["dep:rquickjs", "dep:warp_js", "warp_cli/plugin_host"]
 pprof_cpu_profiling = ["dep:pprof"]
 predict_am_queries = []
 quake_mode = []
-record_app_active_events = []
 recording_mode = []
 full_source_code_embedding = []
-remote_codebase_indexing = ["full_source_code_embedding"]
 
 # This feature should only be enabled when building a release bundle with
 # the bundle script, and can be used to conditionally enable functionality
@@ -764,8 +757,6 @@ blocklist_markdown_images = []
 minimalist_ui = []
 remove_alt_screen_padding = []
 less_horizontal_terminal_padding = []
-shared_session_long_running_commands = []
-loginless_conversion = []
 external_agent_mode_context = []
 avatar_in_tab_bar = []
 ssh_drag_and_drop = []
@@ -786,7 +777,6 @@ agent_management_popup = []
 simulate_github_unauthed = []
 reload_stale_conversation_files = []
 nld_onnx_model = ["input_classifier/onnx_candle"]
-shared_block_title_generation = []
 retry_truncated_code_responses = []
 ai_context_menu = []
 at_menu_outside_of_ai_mode = []
@@ -811,8 +801,6 @@ pr_comments_v2 = []
 pr_comments_skill = []
 conversation_artifacts = []
 conversations_as_context = []
-conversation_api = []
-sync_ambient_plans = []
 projects = []
 vim_code_editor = []
 allow_opening_file_links_using_editor_env = []
@@ -825,8 +813,6 @@ remote_code_review = []
 file_tree = []
 server_file_browser = []
 code_launch_modal = []
-api_key_authentication = []
-api_key_management = []
 diff_set_as_context = []
 discard_per_file_and_all_changes = []
 ui_zoom = []
@@ -850,29 +836,29 @@ v4a_file_diffs = []
 agent_tips = []
 agent_toolbar_editor = ["agent_view"]
 agent_view_prompt_chip = ["agent_view"]
-ambient_agents_rtc = []
 classic_completions = []
 force_classic_completions = []
 agent_view_conversation_list_view = ["agent_view"]
 inline_history_menu = ["agent_view"]
 inline_repo_menu = ["agent_view"]
 summarization_via_message_replacement = []
+lsp_as_a_tool = []
 inline_model_selector = ["agent_view"]
 inline_profile_selector = ["agent_view"]
+restore_prompt_on_inline_model_selector_search = []
 oz_platform_skills = []
 open_warp_launch_modal = []
-orchestration_launch_modal = []
+orchestration_v2 = []
+orchestration_pill_bar = []
+orchestration_viewer_pill_bar = []
 new_tab_styling = []
 file_based_mcp = []
 skill_arguments = []
 active_conversation_requires_interaction = []
 incremental_auto_reload = []
-orchestration_v2 = []
-orchestration_pill_bar = []
-orchestration_viewer_pill_bar = []
-run_agents_tool = []
 pending_user_query_indicator = []
 queue_slash_command = []
+queued_prompts_v2 = ["queue_slash_command"]
 inline_menu_headers = []
 directory_tab_colors = []
 open_warp_new_settings_modes = []
@@ -881,24 +867,21 @@ vertical_tabs = []
 vertical_tabs_summary_mode = []
 tab_configs = []
 grouped_tabs = []
+pinned_tabs = []
+warp_control_cli = []
 agent_harness = []
-oz_handoff = []
-handoff_local_cloud = []
 hoa_notifications = []
 open_code_notifications = []
 transfer_control_tool = []
-custom_inference_endpoints = []
 solo_user_byok = []
+gpt_configurable_context_window = []
 configurable_toolbar = []
 warpify_footer = []
 hoa_onboarding_flow = []
 git_operations_in_code_review = []
-hoa_remote_control = []
 codex_notifications = []
-cloud_mode_setup_v2 = []
-cloud_mode_input_v2 = []
+codex_plugin = []
 configurable_context_window = []
-handoff_cloud_cloud = ["cloud_mode_setup_v2"]
 git_credential_refresh = []
 
 [package.metadata.bundle.bin.zap-oss]

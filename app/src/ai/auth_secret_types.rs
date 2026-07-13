@@ -15,7 +15,6 @@ pub struct AuthSecretTypeInfo {
     pub display_name: &'static str,
     pub secret_type: ManagedSecretType,
     pub fields: &'static [AuthSecretTypeField],
-    pub learn_more_url: &'static str,
 }
 
 pub fn auth_secret_types_for_harness(harness: Harness) -> &'static [AuthSecretTypeInfo] {
@@ -25,21 +24,6 @@ pub fn auth_secret_types_for_harness(harness: Harness) -> &'static [AuthSecretTy
         _ => &[],
     }
 }
-
-pub fn learn_more_url_for_harness(harness: Harness) -> &'static str {
-    match harness {
-        Harness::Claude => CLAUDE_LEARN_MORE_URL,
-        Harness::Codex => CODEX_LEARN_MORE_URL,
-        _ => DEFAULT_LEARN_MORE_URL,
-    }
-}
-
-const DEFAULT_LEARN_MORE_URL: &str =
-    "https://docs.warp.dev/agent-platform/cloud-agents/harnesses/authentication/";
-const CODEX_LEARN_MORE_URL: &str =
-    "https://docs.warp.dev/agent-platform/cloud-agents/harnesses/authentication/#connecting-codex-credentials";
-const CLAUDE_LEARN_MORE_URL: &str =
-    "https://docs.warp.dev/agent-platform/cloud-agents/harnesses/authentication/#connecting-claude-code-credentials";
 
 pub fn build_managed_secret_value(
     info: &AuthSecretTypeInfo,
@@ -100,7 +84,6 @@ pub fn build_managed_secret_value(
 static CODEX_AUTH_SECRET_TYPES: [AuthSecretTypeInfo; 1] = [AuthSecretTypeInfo {
     display_name: "OpenAI API Key",
     secret_type: ManagedSecretType::OpenaiApiKey,
-    learn_more_url: CODEX_LEARN_MORE_URL,
     fields: &[
         AuthSecretTypeField {
             label: "OPENAI_API_KEY",
@@ -121,7 +104,6 @@ static CLAUDE_AUTH_SECRET_TYPES: [AuthSecretTypeInfo; 3] = [
     AuthSecretTypeInfo {
         display_name: "Anthropic API Key",
         secret_type: ManagedSecretType::AnthropicApiKey,
-        learn_more_url: CLAUDE_LEARN_MORE_URL,
         fields: &[AuthSecretTypeField {
             label: "ANTHROPIC_API_KEY",
             placeholder: Some("sk-ant-..."),
@@ -132,7 +114,6 @@ static CLAUDE_AUTH_SECRET_TYPES: [AuthSecretTypeInfo; 3] = [
     AuthSecretTypeInfo {
         display_name: "Bedrock API Key",
         secret_type: ManagedSecretType::AnthropicBedrockApiKey,
-        learn_more_url: CLAUDE_LEARN_MORE_URL,
         fields: &[
             AuthSecretTypeField {
                 label: "AWS_BEARER_TOKEN_BEDROCK",
@@ -151,7 +132,6 @@ static CLAUDE_AUTH_SECRET_TYPES: [AuthSecretTypeInfo; 3] = [
     AuthSecretTypeInfo {
         display_name: "Bedrock Access Key",
         secret_type: ManagedSecretType::AnthropicBedrockAccessKey,
-        learn_more_url: CLAUDE_LEARN_MORE_URL,
         fields: &[
             AuthSecretTypeField {
                 label: "AWS_ACCESS_KEY_ID",

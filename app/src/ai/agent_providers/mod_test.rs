@@ -63,7 +63,7 @@ fn smoke_build_byop_models_by_feature_exposes_configured_models() {
 
         app.read(|ctx| {
             let choices: Vec<_> = LLMPreferences::as_ref(ctx)
-                .get_base_llm_choices_for_agent_mode(ctx)
+                .get_base_llm_choices_for_agent_mode()
                 .collect();
             assert_eq!(choices.len(), 1, "expected one BYOP model in picker");
             assert!(
@@ -139,6 +139,45 @@ fn smoke_lookup_byop_resolves_provider_and_model_without_api_key() {
             assert_eq!(provider.id, provider_id);
             assert_eq!(model_id, "llama3.2");
             assert!(api_key.is_empty(), "Ollama path allows empty API key");
+        });
+    });
+}
+
+#[test]
+fn smoke_lookup_byop_resolves_custom_endpoint_config_key_locally() {
+    App::test((), |mut app| async move {
+        init_byop_test_app(&mut app);
+
+        let config_key = "custom-model-config-key";
+        app.update(|ctx| {
+            ai::api_keys::ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
+                manager.add_custom_endpoint(
+                    "Local gateway".to_owned(),
+                    "http://127.0.0.1:8080/v1".to_owned(),
+                    "local-secret".to_owned(),
+                    vec![(
+                        "upstream-model".to_owned(),
+                        Some("Friendly model".to_owned()),
+                        Some(config_key.to_owned()),
+                    )],
+                    ctx,
+                );
+            });
+        });
+
+        app.read(|ctx| {
+            let (provider, api_key, model_id) =
+                lookup_byop(ctx, &LLMId::from(config_key)).expect("custom endpoint should route");
+
+            assert_eq!(provider.id, format!("custom-endpoint:{config_key}"));
+            assert_eq!(provider.name, "Local gateway");
+            assert_eq!(provider.api_type, AgentProviderApiType::OpenAi);
+            assert_eq!(provider.base_url, "http://127.0.0.1:8080/v1");
+            assert_eq!(provider.models.len(), 1);
+            assert_eq!(provider.models[0].name, "Friendly model");
+            assert_eq!(provider.models[0].id, "upstream-model");
+            assert_eq!(api_key, "local-secret");
+            assert_eq!(model_id, "upstream-model");
         });
     });
 }

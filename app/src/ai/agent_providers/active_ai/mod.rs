@@ -170,7 +170,10 @@ pub mod prompt_suggestions {
                 }
             }
         };
-        let system = render("prompt_suggestions_system.j2", context! { language => language });
+        let system = render(
+            "prompt_suggestions_system.j2",
+            context! { language => language },
+        );
         let user = render(
             "prompt_suggestions_user.j2",
             context! {

@@ -171,43 +171,26 @@ impl CliAgentPluginManager for ClaudeCodePluginManager {
 
     async fn install_platform_plugin(&self) -> Result<(), PluginInstallError> {
         let mut log = String::new();
-        if self
-            .run_logged(&["plugin", "install", PLATFORM_PLUGIN_KEY], &mut log)
-            .await
-            .is_err()
-        {
-            self.run_logged(
-                &["plugin", "marketplace", "add", PLATFORM_MARKETPLACE_REPO],
-                &mut log,
-            )
+        self.run_logged(
+            &["plugin", "marketplace", "add", PLATFORM_MARKETPLACE_REPO],
+            &mut log,
+        )
+        .await?;
+        self.run_logged(&["plugin", "install", PLATFORM_PLUGIN_KEY], &mut log)
             .await?;
-            self.run_logged(&["plugin", "install", PLATFORM_PLUGIN_KEY], &mut log)
-                .await?;
-        }
-        let still_outdated = claude_home_dir()
-            .ok()
-            .and_then(|dir| installed_platform_plugin_version(&dir))
-            .map(|version| compare_versions(&version, MINIMUM_PLATFORM_PLUGIN_VERSION).is_lt())
-            .unwrap_or(true);
-        if still_outdated {
-            log.push_str("Post-install version check: platform plugin is still outdated\n");
-            return Err(PluginInstallError {
-                message: "Platform plugin installation did not take effect".to_owned(),
-                log,
-            });
-        }
         Ok(())
     }
 
     async fn update_platform_plugin(&self) -> Result<(), PluginInstallError> {
         let mut log = String::new();
         self.run_logged(
-            &["plugin", "marketplace", "update", MARKETPLACE_NAME],
+            &["plugin", "marketplace", "add", PLATFORM_MARKETPLACE_REPO],
             &mut log,
         )
         .await?;
         self.run_logged(&["plugin", "install", PLATFORM_PLUGIN_KEY], &mut log)
             .await?;
+
         let still_outdated = claude_home_dir()
             .ok()
             .and_then(|dir| installed_platform_plugin_version(&dir))

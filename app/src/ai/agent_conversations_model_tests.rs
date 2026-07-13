@@ -30,6 +30,7 @@ use crate::ai::blocklist::history_model::{
 use crate::ai::conversation_navigation::ConversationNavigationData;
 use crate::auth::AuthStateProvider;
 use crate::test_util::ai_agent_tasks::{create_api_task, create_message};
+use crate::test_util::settings::initialize_history_persistence_for_tests;
 use crate::workspace::WorkspaceAction;
 
 /// Creates a test task with specified creator UID and updated_at time
@@ -186,6 +187,90 @@ fn test_same_bucket_re_emission_emits_status_set_with_equal_filters() {
                 new_filter: StatusFilter::Working,
             }),
         );
+    });
+}
+
+#[test]
+fn test_title_update_refreshes_shadowing_task_title() {
+    App::test((), |mut app| async move {
+        let _interactive_management_guard =
+            FeatureFlag::InteractiveConversationManagementView.override_enabled(true);
+        initialize_history_persistence_for_tests(&mut app);
+        app.add_singleton_model(|_| AuthStateProvider::new_for_test());
+        let history_model =
+            app.add_singleton_model(|_| BlocklistAIHistoryModel::new(vec![], vec![], &[]));
+        let agent_model = app.add_singleton_model(|_| create_test_model());
+        let captured = subscribe_to_conversation_updated(&mut app, &agent_model);
+
+        let terminal_view_id = EntityId::new();
+        let conversation_id = AIConversationId::new();
+        let server_token = "rename-token";
+        let task_id = make_uuid(3900);
+
+        let conversation = create_restored_conversation(
+            conversation_id,
+            "root-task",
+            AgentConversationData {
+                server_conversation_token: Some(server_token.to_string()),
+                conversation_usage_metadata: None,
+                reverted_action_ids: None,
+                forked_from_server_conversation_token: None,
+                artifacts_json: None,
+                parent_agent_id: None,
+                agent_name: None,
+                orchestration_harness_type: None,
+                parent_conversation_id: None,
+                is_remote_child: false,
+                root_task_is_optimistic: None,
+                run_id: None,
+                autoexecute_override: None,
+                last_event_sequence: None,
+                compaction_state_json: None,
+                byop_repair_state_json: None,
+                cli_subagent_block_snapshots_json: None,
+                pinned: false,
+            },
+        );
+
+        history_model.update(&mut app, |model, ctx| {
+            model.restore_conversations(terminal_view_id, vec![conversation], ctx);
+            model.apply_conversation_title(
+                conversation_id,
+                "Renamed conversation".to_string(),
+                ctx,
+            );
+        });
+
+        agent_model.update(&mut app, |model, _| {
+            let mut task = create_test_task(&task_id, "user-a", Utc::now());
+            task.title = "Old task title".to_string();
+            task.conversation_id = Some(server_token.to_string());
+            model.tasks.insert(task.task_id, task);
+        });
+
+        agent_model.update(&mut app, |model, ctx| {
+            model.handle_history_event(
+                &BlocklistAIHistoryEvent::UpdatedConversationTitle {
+                    terminal_view_id: Some(terminal_view_id),
+                    conversation_id,
+                    title: "Renamed conversation".to_string(),
+                },
+                ctx,
+            );
+        });
+
+        assert_eq!(*captured.lock(), Some(ConversationUpdateKind::TitleChanged));
+        agent_model.read(&app, |model, ctx| {
+            let task_id: AmbientAgentTaskId = task_id.parse().unwrap();
+            assert_eq!(
+                model.get_task_data(&task_id).map(|task| task.title),
+                Some("Renamed conversation".to_string()),
+            );
+            let entry = model
+                .get_entry_by_id(&AgentConversationEntryId::AmbientRun(task_id), ctx)
+                .expect("task-backed entry should exist");
+            assert_eq!(entry.display.title, "Renamed conversation");
+        });
     });
 }
 
@@ -494,7 +579,6 @@ fn test_display_status_terminal_task_state_overrides_matching_conversation() {
 #[test]
 fn test_status_filter_uses_display_status_for_task_backed_conversations() {
     App::test((), |mut app| async move {
-        let _orchestration_v2_guard = FeatureFlag::OrchestrationV2.override_enabled(true);
         add_entry_projection_test_models(&mut app);
         let history_model = BlocklistAIHistoryModel::handle(&app);
 
@@ -643,7 +727,6 @@ fn test_get_entries_includes_local_only_entry() {
 #[test]
 fn test_get_entries_merges_task_and_local_conversation_by_run_id() {
     App::test((), |mut app| async move {
-        let _orchestration_v2_guard = FeatureFlag::OrchestrationV2.override_enabled(true);
         add_entry_projection_test_models(&mut app);
 
         let now = Utc::now();
@@ -834,9 +917,45 @@ fn test_resolve_open_action_opens_active_ambient_session() {
 }
 
 #[test]
+fn test_hosted_session_link_does_not_make_task_active_or_openable() {
+    App::test((), |mut app| async move {
+        add_entry_projection_test_models(&mut app);
+
+        let mut task = create_test_task(&make_uuid(8206), "user-a", Utc::now());
+        task.state = AmbientAgentTaskState::InProgress;
+        task.session_link = Some("https://example.com/session".to_string());
+        task.is_sandbox_running = true;
+        let task_id = task.task_id;
+
+        assert!(!task.has_active_execution());
+
+        app.add_singleton_model(|_| {
+            let mut model = create_test_model();
+            model.tasks.insert(task_id, task);
+            model
+        });
+
+        app.update(|ctx| {
+            let entry = AgentConversationsModel::as_ref(ctx)
+                .get_entry_by_id(&AgentConversationEntryId::AmbientRun(task_id), ctx)
+                .expect("task entry should exist");
+            assert!(!entry.capabilities.can_open);
+
+            let action = AgentConversationsModel::resolve_open_action(
+                AgentConversationNavigationSubject::Entry(AgentConversationEntryId::AmbientRun(
+                    task_id,
+                )),
+                None,
+                ctx,
+            );
+            assert!(action.is_none());
+        });
+    });
+}
+
+#[test]
 fn test_resolve_open_action_falls_back_to_local_conversation_for_invalid_session() {
     App::test((), |mut app| async move {
-        let _orchestration_v2_guard = FeatureFlag::OrchestrationV2.override_enabled(true);
         add_entry_projection_test_models(&mut app);
 
         let now = Utc::now();
@@ -909,7 +1028,7 @@ fn test_resolve_open_action_falls_back_to_local_conversation_for_invalid_session
 }
 
 #[test]
-fn test_resolve_open_action_handles_server_token_subject_without_entry() {
+fn test_resolve_open_action_rejects_server_token_without_local_entry() {
     App::test((), |mut app| async move {
         add_entry_projection_test_models(&mut app);
         app.add_singleton_model(|_| create_test_model());
@@ -922,19 +1041,13 @@ fn test_resolve_open_action_handles_server_token_subject_without_entry() {
                 ctx,
             );
 
-            assert!(matches!(
-                action,
-                Some(WorkspaceAction::OpenConversationTranscriptViewer {
-                    conversation_id,
-                    ambient_agent_task_id: None,
-                }) if conversation_id == server_token
-            ));
+            assert!(action.is_none());
         });
     });
 }
 
 #[test]
-fn test_resolve_open_action_opens_completed_cloud_task_by_server_token() {
+fn test_resolve_open_action_rejects_completed_server_only_task() {
     App::test((), |mut app| async move {
         add_entry_projection_test_models(&mut app);
 
@@ -961,19 +1074,13 @@ fn test_resolve_open_action_opens_completed_cloud_task_by_server_token() {
                 ctx,
             );
 
-            assert!(matches!(
-                action,
-                Some(WorkspaceAction::OpenConversationTranscriptViewer {
-                    conversation_id,
-                    ambient_agent_task_id: Some(resolved_task_id),
-                }) if conversation_id.as_str() == token && resolved_task_id == task_id
-            ));
+            assert!(action.is_none());
         });
     });
 }
 
 #[test]
-fn test_resolve_copy_link_prefers_active_session_link() {
+fn test_resolve_copy_link_does_not_expose_hosted_session_link() {
     App::test((), |mut app| async move {
         add_entry_projection_test_models(&mut app);
 
@@ -1001,13 +1108,13 @@ fn test_resolve_copy_link_prefers_active_session_link() {
                 ctx,
             );
 
-            assert_eq!(link.as_deref(), Some(session_link));
+            assert_eq!(link, None);
         });
     });
 }
 
 #[test]
-fn test_resolve_copy_link_uses_cloud_conversation_link_for_inactive_task() {
+fn test_resolve_copy_link_does_not_create_hosted_conversation_link() {
     App::test((), |mut app| async move {
         add_entry_projection_test_models(&mut app);
 
@@ -1030,15 +1137,12 @@ fn test_resolve_copy_link_uses_cloud_conversation_link_for_inactive_task() {
                 ctx,
             );
 
-            assert_eq!(
-                link,
-                Some(ServerConversationToken::new(token.to_string()).conversation_link())
-            );
+            assert_eq!(link, None);
 
             let entry = AgentConversationsModel::as_ref(ctx)
                 .get_entry_by_id(&AgentConversationEntryId::AmbientRun(task_id), ctx)
                 .expect("task entry should exist");
-            assert!(entry.capabilities.can_copy_link);
+            assert!(!entry.capabilities.can_copy_link);
         });
     });
 }
@@ -1080,7 +1184,7 @@ fn test_resolve_copy_link_returns_none_for_local_only_unsynced_conversation() {
 }
 
 #[test]
-fn test_server_token_assignment_updates_copy_link_resolution() {
+fn test_server_token_assignment_does_not_enable_copy_link() {
     App::test((), |mut app| async move {
         let _interactive_management_guard =
             FeatureFlag::InteractiveConversationManagementView.override_enabled(true);
@@ -1171,18 +1275,14 @@ fn test_server_token_assignment_updates_copy_link_resolution() {
                 )),
                 ctx,
             );
-            assert_eq!(
-                link,
-                Some(ServerConversationToken::new(token.to_string()).conversation_link())
-            );
+            assert_eq!(link, None);
         });
     });
 }
 
 #[test]
-fn test_resolve_copy_link_uses_attached_synced_conversation_for_task_without_token() {
+fn test_resolve_copy_link_stays_disabled_for_attached_server_token() {
     App::test((), |mut app| async move {
-        let _orchestration_v2_guard = FeatureFlag::OrchestrationV2.override_enabled(true);
         add_entry_projection_test_models(&mut app);
 
         let conversation_id = AIConversationId::new();
@@ -1239,15 +1339,12 @@ fn test_resolve_copy_link_uses_attached_synced_conversation_for_task_without_tok
                 ctx,
             );
 
-            assert_eq!(
-                link,
-                Some(ServerConversationToken::new(token.to_string()).conversation_link())
-            );
+            assert_eq!(link, None);
 
             let entry = AgentConversationsModel::as_ref(ctx)
                 .get_entry_by_id(&AgentConversationEntryId::AmbientRun(task_id), ctx)
                 .expect("task entry should exist");
-            assert!(entry.capabilities.can_copy_link);
+            assert!(!entry.capabilities.can_copy_link);
             assert_eq!(entry.identity.local_conversation_id, Some(conversation_id));
         });
     });
@@ -1423,7 +1520,6 @@ fn test_task_status_maps_blocked_state_to_blocked() {
 #[test]
 fn test_get_entries_prefers_task_when_task_id_matches_conversation_run_id() {
     App::test((), |mut app| async move {
-        let _orchestration_v2_guard = FeatureFlag::OrchestrationV2.override_enabled(true);
         add_entry_projection_test_models(&mut app);
         let history_model = BlocklistAIHistoryModel::handle(&app);
 

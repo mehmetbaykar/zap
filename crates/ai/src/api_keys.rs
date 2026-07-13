@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warp_multi_agent_api as api;
-use warpui::{Entity, ModelContext, SingletonEntity};
+use warpui_core::{Entity, ModelContext, SingletonEntity};
 use warpui_extras::secure_storage::{self, AppContextExt};
 
 pub use crate::aws_credentials::{AwsCredentials, AwsCredentialsState};
@@ -42,15 +41,12 @@ pub struct CustomEndpoint {
 pub struct CustomEndpointModel {
     pub name: String,
     pub alias: Option<String>,
-    /// Stable identifier used as `ModelConfig.{base,coding,cli_agent,computer_use_agent}` and
-    /// as the `CustomModelProviders.providers[*].models[*].config_key` on the request wire.
-    /// Generated as a UUIDv4 at model creation.
+    /// Stable local identifier for this endpoint model.
     pub config_key: String,
 }
 
 impl CustomEndpointModel {
-    /// Picker label: prefer the user-provided alias; fall back to the raw model name
-    /// so a row is never blank.
+    /// Picker label: prefer the user-provided alias; fall back to the raw model name.
     pub fn display_label(&self) -> &str {
         match self.alias.as_deref() {
             Some(alias) if !alias.trim().is_empty() => alias,
@@ -71,7 +67,6 @@ impl ApiKeys {
                 .any(|endpoint| !endpoint.api_key.trim().is_empty())
     }
 
-    /// Returns `true` when the user has at least one custom endpoint configured.
     pub fn has_custom_endpoints(&self) -> bool {
         !self.custom_endpoints.is_empty()
     }
@@ -152,16 +147,7 @@ impl ApiKeyManager {
             name,
             url,
             api_key,
-            models: models
-                .into_iter()
-                .map(|(name, alias, config_key)| CustomEndpointModel {
-                    name,
-                    alias,
-                    config_key: config_key
-                        .filter(|k| !k.is_empty())
-                        .unwrap_or_else(|| Uuid::new_v4().to_string()),
-                })
-                .collect(),
+            models: Self::custom_endpoint_models(models),
         });
         ctx.emit(ApiKeyManagerEvent::KeysUpdated);
         self.write_keys_to_secure_storage(ctx);
@@ -176,23 +162,14 @@ impl ApiKeyManager {
         models: Vec<(String, Option<String>, Option<String>)>,
         ctx: &mut ModelContext<Self>,
     ) {
-        if index >= self.keys.custom_endpoints.len() {
+        let Some(endpoint) = self.keys.custom_endpoints.get_mut(index) else {
             return;
-        }
-        self.keys.custom_endpoints[index] = CustomEndpoint {
+        };
+        *endpoint = CustomEndpoint {
             name,
             url,
             api_key,
-            models: models
-                .into_iter()
-                .map(|(name, alias, config_key)| CustomEndpointModel {
-                    name,
-                    alias,
-                    config_key: config_key
-                        .filter(|k| !k.is_empty())
-                        .unwrap_or_else(|| Uuid::new_v4().to_string()),
-                })
-                .collect(),
+            models: Self::custom_endpoint_models(models),
         };
         ctx.emit(ApiKeyManagerEvent::KeysUpdated);
         self.write_keys_to_secure_storage(ctx);
@@ -207,13 +184,19 @@ impl ApiKeyManager {
         self.write_keys_to_secure_storage(ctx);
     }
 
-    pub fn clear_custom_endpoints(&mut self, ctx: &mut ModelContext<Self>) {
-        if self.keys.custom_endpoints.is_empty() {
-            return;
-        }
-        self.keys.custom_endpoints.clear();
-        ctx.emit(ApiKeyManagerEvent::KeysUpdated);
-        self.write_keys_to_secure_storage(ctx);
+    fn custom_endpoint_models(
+        models: Vec<(String, Option<String>, Option<String>)>,
+    ) -> Vec<CustomEndpointModel> {
+        models
+            .into_iter()
+            .map(|(name, alias, config_key)| CustomEndpointModel {
+                name,
+                alias,
+                config_key: config_key
+                    .filter(|key| !key.is_empty())
+                    .unwrap_or_else(|| Uuid::new_v4().to_string()),
+            })
+            .collect()
     }
 
     pub fn set_aws_credentials_state(
@@ -238,70 +221,6 @@ impl ApiKeyManager {
         strategy: AwsCredentialsRefreshStrategy,
     ) {
         self.aws_credentials_refresh_strategy = strategy;
-    }
-
-    /// Builds the `CustomModelProviders` registry that ships with every agent request.
-    ///
-    /// Emits one [`CustomModelProvider`] per configured [`CustomEndpoint`], each populated with
-    /// all of its [`CustomEndpointModel`]s. The per-model `config_key` is what the server uses
-    /// to map a `ModelConfig.{base,coding,cli_agent,computer_use_agent}` selection back to a
-    /// user-provided endpoint, so it MUST be the same UUID we store locally.
-    ///
-    pub fn api_keys_for_request(
-        &self,
-        include_byo_keys: bool,
-        include_aws_bedrock_credentials: bool,
-    ) -> Option<api::request::settings::ApiKeys> {
-        let anthropic = include_byo_keys
-            .then(|| self.keys.anthropic.clone())
-            .flatten()
-            .unwrap_or_default();
-        let openai = include_byo_keys
-            .then(|| self.keys.openai.clone())
-            .flatten()
-            .unwrap_or_default();
-        let google = include_byo_keys
-            .then(|| self.keys.google.clone())
-            .flatten()
-            .unwrap_or_default();
-        let open_router = include_byo_keys
-            .then(|| self.keys.open_router.clone())
-            .flatten()
-            .unwrap_or_default();
-
-        // Also include credentials when running with OIDC-managed Bedrock inference, regardless
-        // of the per-user setting flag (which only applies to the local credential chain path).
-        let include_aws = include_aws_bedrock_credentials
-            || matches!(
-                self.aws_credentials_refresh_strategy,
-                AwsCredentialsRefreshStrategy::OidcManaged { .. }
-            );
-        let aws_credentials = include_aws
-            .then(|| match self.aws_credentials_state {
-                AwsCredentialsState::Loaded {
-                    ref credentials, ..
-                } => Some(credentials.clone().into()),
-                _ => None,
-            })
-            .flatten();
-
-        if anthropic.is_empty()
-            && openai.is_empty()
-            && google.is_empty()
-            && open_router.is_empty()
-            && aws_credentials.is_none()
-        {
-            None
-        } else {
-            Some(api::request::settings::ApiKeys {
-                anthropic,
-                openai,
-                google,
-                open_router,
-                allow_use_of_warp_credits: false,
-                aws_credentials,
-            })
-        }
     }
 
     fn load_keys_from_secure_storage(ctx: &mut ModelContext<Self>) -> ApiKeys {

@@ -52,7 +52,7 @@ use crate::ai::llms::{
     AvailableLLMs, DisableReason, LLMContextWindow, LLMInfo, LLMProvider, LLMUsageMetadata,
     ModelsByFeature,
 };
-use crate::settings::{AISettings, AgentProvider};
+use crate::settings::{AISettings, AgentProvider, AgentProviderApiType, AgentProviderModel};
 
 /// Synthesizes the LLMInfo list for all valid (provider, model) pairs of the given provider.
 ///
@@ -169,14 +169,38 @@ pub fn build_byop_models_by_feature(app: &AppContext) -> ModelsByFeature {
 /// Given a BYOP `LLMId`, looks up `(provider, api_key, model_id)` from `AISettings` and secrets.
 /// Returns `None` if any piece of information is missing (the controller caller should map this to an `InvalidApiKey` error).
 pub fn lookup_byop(app: &AppContext, id: &ai::LLMId) -> Option<(AgentProvider, String, String)> {
-    let (provider_id, model_id) = llm_id::decode(id)?;
-    let providers = AISettings::as_ref(app).agent_providers.value().clone();
-    let provider = providers.into_iter().find(|p| p.id == provider_id)?;
-    // API key optional: when there's no key, returns an empty string, which downstream build_client passes to genai as
-    // `AuthData::from_single("")` —— without `Authorization`, to support local no-auth services like ollama.
-    let api_key = AgentProviderSecrets::as_ref(app)
-        .get(&provider_id)
-        .map(str::to_owned)
-        .unwrap_or_default();
-    Some((provider, api_key, model_id))
+    if let Some((provider_id, model_id)) = llm_id::decode(id) {
+        let providers = AISettings::as_ref(app).agent_providers.value().clone();
+        let provider = providers.into_iter().find(|p| p.id == provider_id)?;
+        // API key optional: when there's no key, returns an empty string, which downstream build_client passes to genai as
+        // `AuthData::from_single("")` —— without `Authorization`, to support local no-auth services like ollama.
+        let api_key = AgentProviderSecrets::as_ref(app)
+            .get(&provider_id)
+            .map(str::to_owned)
+            .unwrap_or_default();
+        return Some((provider, api_key, model_id));
+    }
+
+    let config_key = id.as_str();
+    let keys = ai::api_keys::ApiKeyManager::as_ref(app).keys();
+    keys.custom_endpoints.iter().find_map(|endpoint| {
+        let model = endpoint
+            .models
+            .iter()
+            .find(|model| model.config_key == config_key)?;
+
+        let mut provider_model = AgentProviderModel::from_id(model.name.clone());
+        provider_model.name = model.display_label().to_owned();
+        let provider = AgentProvider {
+            id: format!("custom-endpoint:{config_key}"),
+            name: endpoint.name.clone(),
+            kind: Default::default(),
+            api_type: AgentProviderApiType::OpenAi,
+            base_url: endpoint.url.clone(),
+            models: vec![provider_model],
+            extra_headers: Vec::new(),
+        };
+
+        Some((provider, endpoint.api_key.clone(), model.name.clone()))
+    })
 }

@@ -8,23 +8,28 @@
 //! from the old `(repo_path, mode)` subscription and re-subscribing with the
 //! new mode.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use instant::Instant;
 use remote_server::manager::{RemoteServerManager, RemoteServerManagerEvent};
-use warp_core::{send_telemetry_from_ctx, HostId};
+use warp_core::{send_telemetry_from_ctx, HostId, SessionId};
 use warp_util::remote_path::RemotePath;
 use warp_util::standardized_path::StandardizedPath;
 use warpui::{ModelContext, SingletonEntity};
 
 use super::{
-    DiffMetadata, DiffMode, DiffState, DiffStateModelEvent, DiffStats, FileDiffAndContent,
-    GitDiffData, GitDiffWithBaseContent,
+    CommitChainMode, DiffLineType, DiffMetadata, DiffMode, DiffState, DiffStateError,
+    DiffStateModelEvent, DiffStats, FileDiffAndContent, GitDiffData, GitDiffWithBaseContent,
+    GitFileStatus,
+};
+use crate::ai::agent_providers::oneshot::{
+    byop_oneshot_completion, resolve_active_ai_oneshot, OneshotOptions,
 };
 use crate::code_review::telemetry_event::CodeReviewTelemetryEvent;
 use crate::remote_server::diff_state_proto::{try_decode_file_delta, try_decode_snapshot};
 use crate::remote_server::proto;
-use crate::util::git::{BranchEntry, Commit};
+use crate::util::git::{BranchEntry, Commit, FileChangeEntry, PrInfo};
 
 // ── Internal state ────────────────────────────────────────────────
 
@@ -38,6 +43,60 @@ enum InternalRemoteDiffState {
     /// The remote connection was lost. Preserves stale data until the model
     /// can re-establish the server-side subscription.
     Disconnected,
+}
+
+/// Reconstructs the textual patch needed by the local BYOP commit-message
+/// prompt from the diff hunks already cached on the client. This does not read
+/// the remote filesystem or call a Warp API.
+fn cached_diff_for_commit_message(diffs: &GitDiffData) -> String {
+    let mut output = String::new();
+
+    for file in &diffs.files {
+        let (old_path, new_path) = match &file.status {
+            GitFileStatus::New | GitFileStatus::Untracked => {
+                ("/dev/null".to_string(), format!("b/{}", file.file_path))
+            }
+            GitFileStatus::Deleted => (format!("a/{}", file.file_path), "/dev/null".to_string()),
+            GitFileStatus::Renamed { old_path } | GitFileStatus::Copied { old_path } => {
+                (format!("a/{old_path}"), format!("b/{}", file.file_path))
+            }
+            GitFileStatus::Modified | GitFileStatus::Conflicted => (
+                format!("a/{}", file.file_path),
+                format!("b/{}", file.file_path),
+            ),
+        };
+
+        let _ = writeln!(output, "diff --git {old_path} {new_path}");
+        let _ = writeln!(output, "--- {old_path}");
+        let _ = writeln!(output, "+++ {new_path}");
+
+        if file.is_binary {
+            let _ = writeln!(output, "Binary file changed");
+            continue;
+        }
+
+        for hunk in file.hunks.iter() {
+            let _ = writeln!(
+                output,
+                "@@ -{},{} +{},{} @@",
+                hunk.old_start_line, hunk.old_line_count, hunk.new_start_line, hunk.new_line_count
+            );
+            for line in &hunk.lines {
+                let prefix = match line.line_type {
+                    DiffLineType::Context => ' ',
+                    DiffLineType::Add => '+',
+                    DiffLineType::Delete => '-',
+                    DiffLineType::HunkHeader => continue,
+                };
+                let _ = writeln!(output, "{prefix}{}", line.text);
+                if line.no_trailing_newline {
+                    let _ = writeln!(output, "\\ No newline at end of file");
+                }
+            }
+        }
+    }
+
+    output
 }
 
 // ── Model ────────────────────────────────────────────────────────────────────
@@ -59,14 +118,25 @@ impl RemoteDiffStateModel {
     /// Creates a new remote diff state model.
     ///
     /// Identity is `(host_id, repo_path, mode)`. The model is session-agnostic:
-    /// the manager picks a connected session for the host at every outbound
+    /// the manager resolves a connected session for the host on every outbound
     /// RPC, and host-level connect/disconnect events drive subscription
     /// lifecycle.
+    ///
+    /// `preferred_session` is the session that opened this review (the
+    /// triggering callsite). It is used only for the *initial* `GetDiffState`
+    /// dispatch and is deliberately not stored: a shared, long-lived model
+    /// must not pin a session, and later re-triggers supply their own session
+    /// (or `None`) rather than reusing a stale one.
     ///
     /// A session for this host is required at construction time. The model starts in `Loading` and
     /// issues the initial `GetDiffState` request. Runtime disconnects transition the model through
     /// `mark_disconnected`; subsequent reconnects re-subscribe via the `HostConnected` event handler.
-    pub fn new(remote_path: RemotePath, mode: DiffMode, ctx: &mut ModelContext<Self>) -> Self {
+    pub fn new(
+        remote_path: RemotePath,
+        mode: DiffMode,
+        preferred_session: Option<SessionId>,
+        ctx: &mut ModelContext<Self>,
+    ) -> Self {
         // Subscribe to RemoteServerManager push events and filter by remote_path and diff_mode
         let mgr_handle = RemoteServerManager::handle(ctx);
         ctx.subscribe_to_model(&mgr_handle, Self::handle_manager_event);
@@ -75,7 +145,13 @@ impl RemoteDiffStateModel {
         let repo_path = remote_path.path.clone();
         let mode_clone = mode.clone();
         mgr_handle.update(ctx, |mgr, ctx| {
-            mgr.get_diff_state(host_id, repo_path, proto::DiffMode::from(&mode_clone), ctx);
+            mgr.get_diff_state(
+                host_id,
+                repo_path,
+                proto::DiffMode::from(&mode_clone),
+                preferred_session,
+                ctx,
+            );
         });
 
         Self {
@@ -158,6 +234,41 @@ impl RemoteDiffStateModel {
                 };
                 ctx.emit(DiffStateModelEvent::BranchesReceived(branches));
             }
+            RemoteServerManagerEvent::CommitChainResponse {
+                host_id,
+                repo_path,
+                result,
+            } if host_id == &self.remote_path.host_id && repo_path == &self.remote_path.path => {
+                self.handle_git_commit_chain_response(result, ctx);
+            }
+            RemoteServerManagerEvent::GitPushResponse {
+                host_id,
+                repo_path,
+                result,
+            } if host_id == &self.remote_path.host_id && repo_path == &self.remote_path.path => {
+                self.handle_git_push_response(result, ctx);
+            }
+            RemoteServerManagerEvent::CreatePrResponse {
+                host_id,
+                repo_path,
+                result,
+            } if host_id == &self.remote_path.host_id && repo_path == &self.remote_path.path => {
+                self.handle_create_pr_response(result, ctx);
+            }
+            RemoteServerManagerEvent::GetPrInfoResponse {
+                host_id,
+                repo_path,
+                result,
+            } if host_id == &self.remote_path.host_id && repo_path == &self.remote_path.path => {
+                self.handle_get_pr_info_response(result, ctx);
+            }
+            RemoteServerManagerEvent::GetCommittedBranchFilesResponse {
+                host_id,
+                repo_path,
+                result,
+            } if host_id == &self.remote_path.host_id && repo_path == &self.remote_path.path => {
+                self.handle_get_committed_branch_files_response(result, ctx);
+            }
             RemoteServerManagerEvent::HostDisconnected { host_id }
                 if host_id == &self.remote_path.host_id =>
             {
@@ -167,7 +278,10 @@ impl RemoteDiffStateModel {
                 if host_id == &self.remote_path.host_id
                     && matches!(self.state, InternalRemoteDiffState::Disconnected) =>
             {
-                self.resubscribe(false, ctx);
+                // Reconnect is event-driven with no viewing-session in scope
+                // (and the prior session may be gone), so re-subscribe over
+                // any connected session for the host.
+                self.resubscribe(false, None, ctx);
             }
             _ => {}
         }
@@ -185,9 +299,17 @@ impl RemoteDiffStateModel {
     }
 
     /// Re-sends `GetDiffState` for this model's `(host_id, repo, mode)` and
-    /// transitions to `Loading` while waiting for a fresh snapshot. The
-    /// manager chooses a connected session for the host at dispatch time.
-    fn resubscribe(&mut self, track_load_duration: bool, ctx: &mut ModelContext<Self>) {
+    /// transitions to `Loading` while waiting for a fresh snapshot.
+    ///
+    /// `preferred_session` is supplied by the triggering callsite (the
+    /// session-scoped view) so the request rides the connection that needs the
+    /// result; `None` (e.g. reconnect) falls back to any connected session.
+    fn resubscribe(
+        &mut self,
+        track_load_duration: bool,
+        preferred_session: Option<SessionId>,
+        ctx: &mut ModelContext<Self>,
+    ) {
         // Always overwrite to avoid carrying a stale `Instant` from a prior
         // tracked load that was interrupted by a session blip.
         self.tracked_diff_load_start_time = track_load_duration.then(Instant::now);
@@ -195,7 +317,13 @@ impl RemoteDiffStateModel {
         let repo_path = self.remote_path.path.clone();
         let mode = self.mode.clone();
         RemoteServerManager::handle(ctx).update(ctx, |mgr, ctx| {
-            mgr.get_diff_state(host_id, repo_path, proto::DiffMode::from(&mode), ctx);
+            mgr.get_diff_state(
+                host_id,
+                repo_path,
+                proto::DiffMode::from(&mode),
+                preferred_session,
+                ctx,
+            );
         });
         self.state = InternalRemoteDiffState::Loading;
         ctx.emit(DiffStateModelEvent::NewDiffsComputed {
@@ -277,6 +405,7 @@ impl RemoteDiffStateModel {
     pub(crate) fn fetch_fresh_snapshot(
         &mut self,
         track_load_duration: bool,
+        preferred_session: Option<SessionId>,
         ctx: &mut ModelContext<Self>,
     ) {
         if track_load_duration {
@@ -285,8 +414,17 @@ impl RemoteDiffStateModel {
         let host_id = self.remote_path.host_id.clone();
         let repo_path = self.remote_path.path.clone();
         let mode = self.mode.clone();
+        // `preferred_session` is supplied per-call by the triggering view (the
+        // session showing the review); `None` falls back to any connected
+        // session for the host. Never cached on this shared model.
         RemoteServerManager::handle(ctx).update(ctx, |mgr, ctx| {
-            mgr.get_diff_state(host_id, repo_path, proto::DiffMode::from(&mode), ctx);
+            mgr.get_diff_state(
+                host_id,
+                repo_path,
+                proto::DiffMode::from(&mode),
+                preferred_session,
+                ctx,
+            );
         });
     }
 
@@ -322,13 +460,12 @@ impl RemoteDiffStateModel {
                 });
             }
             DiffState::Error(msg) => {
-                let load_duration = self
-                    .tracked_diff_load_start_time
-                    .take()
-                    .map(|start| start.elapsed());
+                self.tracked_diff_load_start_time = None;
+                let err = DiffStateError::from_message(&msg);
+                warp_core::report_error!(&err);
                 send_telemetry_from_ctx!(
                     CodeReviewTelemetryEvent::LoadDiffFailed {
-                        error: "Server reported diff error".to_string(),
+                        error: err.to_string(),
                     },
                     ctx
                 );
@@ -340,19 +477,16 @@ impl RemoteDiffStateModel {
             }
             DiffState::Loaded => {
                 let Some(base_content) = diffs else {
-                    let error =
-                        "Server reported loaded state but no diff data was available".to_string();
-                    let load_duration = self
-                        .tracked_diff_load_start_time
-                        .take()
-                        .map(|start| start.elapsed());
+                    self.tracked_diff_load_start_time = None;
+                    let err = DiffStateError::empty_diff_data();
+                    warp_core::report_error!(&err);
                     send_telemetry_from_ctx!(
                         CodeReviewTelemetryEvent::LoadDiffFailed {
-                            error: "Empty diff data".to_string(),
+                            error: err.to_string(),
                         },
                         ctx
                     );
-                    self.state = InternalRemoteDiffState::Error(error);
+                    self.state = InternalRemoteDiffState::Error(err.to_string());
                     ctx.emit(DiffStateModelEvent::NewDiffsComputed {
                         diffs: None,
                         load_duration: None,
@@ -380,6 +514,19 @@ impl RemoteDiffStateModel {
             .map(|m| m.current_branch_name.as_str());
         let branch_changed =
             previous_branch.is_some_and(|prev| prev != metadata.current_branch_name.as_str());
+
+        // PR info is owned by the separate GetPrInfo / CreatePr channel
+        // (`apply_pr_info`), not the diff-state sync: the daemon's
+        // `load_metadata_for_repo` always sends `pr_info: None`. A wholesale
+        // replace would therefore wipe the fetched value and revert the
+        // header's PR button on the next server push. Preserve the cached value
+        // when the sync doesn't carry one and the branch is unchanged — PR info
+        // is branch-specific, so a branch change clears it (the view re-fetches
+        // on `CurrentBranchChanged`).
+        let mut metadata = metadata.clone();
+        if !branch_changed && metadata.pr_info.is_none() {
+            metadata.pr_info = self.metadata.as_ref().and_then(|m| m.pr_info.clone());
+        }
         self.metadata = Some(metadata.clone());
 
         // Only emit CurrentBranchChanged when there was a previous branch to
@@ -388,9 +535,7 @@ impl RemoteDiffStateModel {
         if branch_changed {
             ctx.emit(DiffStateModelEvent::CurrentBranchChanged);
         }
-        ctx.emit(DiffStateModelEvent::MetadataRefreshed(Box::new(
-            metadata.clone(),
-        )));
+        ctx.emit(DiffStateModelEvent::MetadataRefreshed(Box::new(metadata)));
     }
 
     fn apply_file_delta(
@@ -463,6 +608,14 @@ impl RemoteDiffStateModel {
             .map(|m| m.against_head.aggregate_stats)
     }
 
+    /// Per-file entries for uncommitted-vs-HEAD changes, from synced metadata.
+    pub fn uncommitted_file_entries(&self) -> &[FileChangeEntry] {
+        self.metadata
+            .as_ref()
+            .map(|m| m.against_head.files.as_slice())
+            .unwrap_or(&[])
+    }
+
     pub fn get_main_branch_name(&self) -> Option<String> {
         self.metadata
             .as_ref()
@@ -503,10 +656,6 @@ impl RemoteDiffStateModel {
         }
     }
 
-    pub fn is_git_operation_blocked(&self, _ctx: &warpui::AppContext) -> bool {
-        false
-    }
-
     pub fn has_head(&self) -> bool {
         self.metadata.as_ref().is_some_and(|m| m.has_head_commit)
     }
@@ -515,12 +664,285 @@ impl RemoteDiffStateModel {
         self.remote_path.clone()
     }
 
+    // ── Git operation event handlers ─────────────────────────────────
+
+    /// Converts a proto `GitOpDelta` to domain types and applies it through
+    /// the shared `apply_git_op_delta` (the single delta-application path), so
+    /// the proto-driven and domain-driven callers stay in sync.
+    fn apply_delta_from_proto(
+        &mut self,
+        delta: &remote_server::proto::GitOpDelta,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let commits = delta.unpushed_commits.iter().map(Commit::from).collect();
+        self.apply_git_op_delta(commits, delta.upstream_ref.clone(), ctx);
+    }
+
+    fn handle_git_commit_chain_response(
+        &mut self,
+        result: &Result<remote_server::manager::CommitChainSuccess, String>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let domain_result = match result {
+            Ok(success) => {
+                // Apply the delta and any created-PR info in a single metadata
+                // mutation so the header re-renders from one
+                // `MetadataRefreshed` rather than two.
+                let commits = success
+                    .delta
+                    .unpushed_commits
+                    .iter()
+                    .map(Commit::from)
+                    .collect();
+                let pr_info = success.pr_info.as_ref().map(PrInfo::from);
+                let metadata = self.metadata.get_or_insert_with(DiffMetadata::default);
+                metadata.unpushed_commits = commits;
+                metadata.upstream_ref = success.delta.upstream_ref.clone();
+                if let Some(ref pr) = pr_info {
+                    metadata.pr_info = Some(pr.clone());
+                }
+                ctx.emit(DiffStateModelEvent::MetadataRefreshed(Box::new(
+                    metadata.clone(),
+                )));
+                Ok(pr_info)
+            }
+            Err(msg) => Err(msg.clone()),
+        };
+        ctx.emit(DiffStateModelEvent::GitOpCompleted(
+            super::GitOpResult::CommitChainCompleted(domain_result),
+        ));
+    }
+
+    fn handle_git_push_response(
+        &mut self,
+        result: &Result<remote_server::proto::GitOpDelta, String>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let domain_result = match result {
+            Ok(delta) => {
+                self.apply_delta_from_proto(delta, ctx);
+                Ok(())
+            }
+            Err(msg) => Err(msg.clone()),
+        };
+        ctx.emit(DiffStateModelEvent::GitOpCompleted(
+            super::GitOpResult::PushCompleted(domain_result),
+        ));
+    }
+
+    fn handle_create_pr_response(
+        &mut self,
+        result: &Result<remote_server::proto::PrInfo, String>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let domain_result = match result {
+            Ok(proto_pr) => {
+                let pr_info = PrInfo::from(proto_pr);
+                // Reuse the shared PR-info applier (sets metadata.pr_info and
+                // emits MetadataRefreshed).
+                self.apply_pr_info(Some(pr_info.clone()), ctx);
+                Ok(pr_info)
+            }
+            Err(msg) => Err(msg.clone()),
+        };
+        ctx.emit(DiffStateModelEvent::GitOpCompleted(
+            super::GitOpResult::PrCreated(domain_result),
+        ));
+    }
+
+    /// Handles a `GetPrInfoResponse`: applies the fetched PR info (or clears
+    /// it when there is no open PR) so the header reflects real PR state.
+    /// Errors are logged and leave the cached value untouched.
+    fn handle_get_pr_info_response(
+        &mut self,
+        result: &Result<Option<remote_server::proto::PrInfo>, String>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        match result {
+            Ok(proto_pr) => {
+                let pr_info = proto_pr.as_ref().map(PrInfo::from);
+                self.apply_pr_info(pr_info, ctx);
+            }
+            Err(msg) => {
+                log::warn!("RemoteDiffStateModel: GetPrInfo failed: {msg}");
+            }
+        }
+    }
+
+    /// Handles a `GetCommittedBranchFilesResponse`: converts the proto entries
+    /// to domain types and emits `BranchCommittedFilesReceived` for the Create
+    /// PR dialog's Changes box. On error, logs and emits an empty list so the
+    /// dialog renders an empty box rather than showing stale data.
+    fn handle_get_committed_branch_files_response(
+        &self,
+        result: &Result<Vec<remote_server::proto::FileChangeEntry>, String>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let files = match result {
+            Ok(files) => files.iter().map(FileChangeEntry::from).collect(),
+            Err(msg) => {
+                log::warn!("RemoteDiffStateModel: GetCommittedBranchFiles failed: {msg}");
+                Vec::new()
+            }
+        };
+        ctx.emit(DiffStateModelEvent::BranchCommittedFilesReceived(files));
+    }
+
+    // ── Remote git operations (async; results arrive via manager events) ──
+    //
+    // Each dispatches via `RemoteServerManager` and returns immediately; the
+    // response lands as a manager event in `handle_manager_event`, which
+    // converts it into the corresponding `DiffStateModelEvent`.
+
+    /// Runs a commit chain via the remote server manager. The result
+    /// arrives as a `CommitChainResponse` manager event, handled above.
+    #[allow(clippy::too_many_arguments)]
+    pub fn git_commit_chain(
+        &self,
+        mode: CommitChainMode,
+        message: String,
+        include_unstaged: bool,
+        branch: String,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let host_id = self.remote_path.host_id.clone();
+        let repo_path = self.remote_path.path.clone();
+        RemoteServerManager::handle(ctx).update(ctx, |mgr, ctx| {
+            mgr.git_commit_chain(
+                host_id,
+                repo_path,
+                proto::GitCommitChainMode::from(&mode),
+                message,
+                include_unstaged,
+                branch,
+                ctx,
+            );
+        });
+    }
+
+    /// Generates a commit message through the fork's local BYOP client using
+    /// the already-cached remote diff. The cache can faithfully represent the
+    /// commit scope only for the HEAD view with unstaged changes included.
+    pub fn generate_commit_message(
+        &self,
+        include_unstaged: bool,
+        branch_name: String,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        if !include_unstaged {
+            ctx.emit(DiffStateModelEvent::CommitMessageGenerated(Err(
+                "remote diff state does not distinguish staged from unstaged changes".to_string(),
+            )));
+            return;
+        }
+        if self.mode != DiffMode::Head {
+            ctx.emit(DiffStateModelEvent::CommitMessageGenerated(Err(
+                "remote commit-message generation requires a diff against HEAD".to_string(),
+            )));
+            return;
+        }
+        let InternalRemoteDiffState::Loaded(diffs) = &self.state else {
+            ctx.emit(DiffStateModelEvent::CommitMessageGenerated(Err(
+                "remote diff is not loaded".to_string(),
+            )));
+            return;
+        };
+        let diff = cached_diff_for_commit_message(diffs);
+        if diff.trim().is_empty() {
+            ctx.emit(DiffStateModelEvent::CommitMessageGenerated(Err(
+                "no changes to generate a commit message from".to_string(),
+            )));
+            return;
+        }
+        let Some(byop_config) = resolve_active_ai_oneshot(ctx, None) else {
+            ctx.emit(DiffStateModelEvent::CommitMessageGenerated(Err(
+                "no BYOP model configured for commit-message generation".to_string(),
+            )));
+            return;
+        };
+
+        ctx.spawn(
+            async move {
+                let user = format!("Branch: {branch_name}\n\nDiff:\n{diff}");
+                let generated = byop_oneshot_completion(
+                    &byop_config,
+                    "Write one concise Git commit subject for the supplied diff. Return only the subject, with no quotes, prefix, explanation, or Markdown.",
+                    &user,
+                    &OneshotOptions {
+                        max_chars: Some(40_000),
+                        temperature: Some(0.2),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+                let trimmed = generated
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or_default()
+                    .trim()
+                    .trim_matches(['`', '"']);
+                if trimmed.is_empty() {
+                    anyhow::bail!("AI returned an empty commit message");
+                }
+                Ok::<_, anyhow::Error>(trimmed.to_string())
+            },
+            |_me, result, ctx| {
+                ctx.emit(DiffStateModelEvent::CommitMessageGenerated(
+                    result.map_err(|error| error.to_string()),
+                ));
+            },
+        );
+    }
+
+    /// Fetches PR info for the current branch via the remote `GetPrInfo`
+    /// command. The result arrives as a `GetPrInfoResponse` manager event,
+    /// handled in `handle_manager_event`, which applies it to metadata.
+    pub fn fetch_pr_info(&self, ctx: &mut ModelContext<Self>) {
+        let host_id = self.remote_path.host_id.clone();
+        let repo_path = self.remote_path.path.clone();
+        RemoteServerManager::handle(ctx).update(ctx, |mgr, ctx| {
+            mgr.git_get_pr_info(host_id, repo_path, ctx);
+        });
+    }
+
+    /// Fetches the committed branch files (`merge_base(HEAD, main)..HEAD`) for
+    /// the current branch via the remote `GitGetCommittedBranchFiles` RPC. The
+    /// result arrives as a `GetCommittedBranchFilesResponse` manager event,
+    /// handled in `handle_manager_event`, which emits
+    /// `BranchCommittedFilesReceived` for the Create PR dialog.
+    pub fn fetch_committed_branch_files(&self, ctx: &mut ModelContext<Self>) {
+        let host_id = self.remote_path.host_id.clone();
+        let repo_path = self.remote_path.path.clone();
+        RemoteServerManager::handle(ctx).update(ctx, |mgr, ctx| {
+            mgr.git_get_committed_branch_files(host_id, repo_path, ctx);
+        });
+    }
+
+    /// Pushes the branch via the remote server manager.
+    pub fn git_push(&self, branch: String, ctx: &mut ModelContext<Self>) {
+        let host_id = self.remote_path.host_id.clone();
+        let repo_path = self.remote_path.path.clone();
+        RemoteServerManager::handle(ctx).update(ctx, |mgr, ctx| {
+            mgr.git_push_branch(host_id, repo_path, branch, ctx);
+        });
+    }
+
+    /// Creates a PR via the remote server manager using `gh pr create --fill`.
+    pub fn create_pr(&self, branch: String, ctx: &mut ModelContext<Self>) {
+        let host_id = self.remote_path.host_id.clone();
+        let repo_path = self.remote_path.path.clone();
+        RemoteServerManager::handle(ctx).update(ctx, |mgr, ctx| {
+            mgr.git_create_pr(host_id, repo_path, branch, ctx);
+        });
+    }
+
     // ── Write API ────────────────────────────────────────────────────
 
     pub fn set_diff_mode(
         &mut self,
         mode: DiffMode,
         track_load_duration: bool,
+        preferred_session: Option<SessionId>,
         ctx: &mut ModelContext<Self>,
     ) {
         if self.mode == mode {
@@ -528,11 +950,12 @@ impl RemoteDiffStateModel {
         }
 
         // Unsubscribe from the old mode before switching, then re-send
-        // GetDiffState for the new mode. The manager resolves a connected
-        // session for the host at dispatch time.
+        // GetDiffState for the new mode over `preferred_session` (the
+        // triggering view's session) when provided, else any connected
+        // session for the host.
         self.unsubscribe(ctx);
         self.mode = mode;
-        self.resubscribe(track_load_duration, ctx);
+        self.resubscribe(track_load_duration, preferred_session, ctx);
     }
 
     /// Fetches branches for the remote repository via the `GetBranches` RPC.
@@ -570,6 +993,41 @@ impl RemoteDiffStateModel {
                 ctx,
             );
         });
+    }
+
+    /// Applies a post-git-operation delta (refreshed unpushed commits +
+    /// upstream ref returned by the daemon) to the cached metadata and emits
+    /// `MetadataRefreshed`, so the code review header updates immediately
+    /// rather than waiting for the next server-pushed snapshot.
+    pub fn apply_git_op_delta(
+        &mut self,
+        unpushed_commits: Vec<Commit>,
+        upstream_ref: Option<String>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let metadata = self.metadata.get_or_insert_with(DiffMetadata::default);
+        metadata.unpushed_commits = unpushed_commits;
+        metadata.upstream_ref = upstream_ref;
+        ctx.emit(DiffStateModelEvent::MetadataRefreshed(Box::new(
+            metadata.clone(),
+        )));
+    }
+
+    /// Applies PR info fetched via the remote `GetPrInfo` / `CreatePr` command
+    /// to the cached metadata and emits `MetadataRefreshed`. This is the
+    /// remote source of PR info (the local `GitRepoStatusModel` has no remote
+    /// equivalent yet).
+    pub fn apply_pr_info(&mut self, pr_info: Option<PrInfo>, ctx: &mut ModelContext<Self>) {
+        let metadata = self.metadata.get_or_insert_with(DiffMetadata::default);
+        metadata.pr_info = pr_info;
+        ctx.emit(DiffStateModelEvent::MetadataRefreshed(Box::new(
+            metadata.clone(),
+        )));
+    }
+
+    /// Returns the cached PR info for the current branch, if any.
+    pub fn pr_info(&self) -> Option<&PrInfo> {
+        self.metadata.as_ref().and_then(|m| m.pr_info.as_ref())
     }
 }
 

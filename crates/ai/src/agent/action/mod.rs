@@ -1,5 +1,9 @@
 mod convert;
 
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
+
 use std::fmt::Display;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -16,8 +20,9 @@ use crate::agent::action_result::{
     EditDocumentsResult, FileGlobResult, FileGlobV2Result, GrepResult, InsertReviewCommentsResult,
     ReadDocumentsResult, ReadFilesResult, ReadMCPResourceResult, ReadShellCommandOutputResult,
     ReadSkillResult, RequestCommandOutputResult, RequestComputerUseResult, RequestFileEditsResult,
+    RunAgentsResult, SendMessageToAgentResult, StartAgentResult, StartAgentVersion,
     SuggestNewConversationResult, SuggestPromptResult, TransferShellCommandControlToUserResult,
-    UseComputerResult, WriteToLongRunningShellCommandResult,
+    UseComputerResult, WaitForEventsResult, WriteToLongRunningShellCommandResult,
 };
 use crate::agent::{AIAgentCitation, FileLocations};
 use crate::diff_validation::ParsedDiff;
@@ -130,6 +135,20 @@ pub enum AIAgentActionType {
     // AI requested to read a skill.
     ReadSkill(ReadSkillRequest),
 
+    StartAgent {
+        version: StartAgentVersion,
+        name: String,
+        prompt: String,
+        execution_mode: StartAgentExecutionMode,
+        lifecycle_subscription: Option<Vec<String>>,
+    },
+
+    SendMessageToAgent {
+        addresses: Vec<String>,
+        subject: String,
+        message: String,
+    },
+
     /// Transfer control of a running shell command to the user.
     TransferShellCommandControlToUser {
         /// The reason provided by the agent for transferring control.
@@ -139,6 +158,80 @@ pub enum AIAgentActionType {
     AskUserQuestion {
         questions: Vec<AskUserQuestionItem>,
     },
+
+    /// AI requested a batch of local child-agent runs that share model and
+    /// harness configuration.
+    RunAgents(RunAgentsRequest),
+
+    /// Pause until a local event arrives or the idle watchdog expires.
+    WaitForEvents(WaitForEventsRequest),
+}
+
+/// Run-wide and per-agent configuration for a local orchestration batch.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RunAgentsRequest {
+    pub summary: String,
+    pub base_prompt: String,
+    pub skills: Vec<SkillReference>,
+    pub model_id: String,
+    pub harness_type: String,
+    pub execution_mode: RunAgentsExecutionMode,
+    pub agent_run_configs: Vec<RunAgentsAgentRunConfig>,
+    pub plan_id: String,
+    /// Optional local managed-secret name used to authenticate the selected harness.
+    pub harness_auth_secret_name: Option<String>,
+}
+
+/// Execution mode for an orchestration batch.
+///
+/// Zap supports only local child-agent execution. Remote/cloud execution is
+/// intentionally not represented by this type.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum RunAgentsExecutionMode {
+    Local,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RunAgentsAgentRunConfig {
+    pub name: String,
+    pub prompt: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct WaitForEventsRequest {
+    /// Identifier of the unresolved tool call, used to match a local resume signal.
+    pub tool_call_id: String,
+    /// Zero means unset; the executor should substitute its default timeout.
+    pub idle_timeout_seconds: i32,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum StartAgentExecutionMode {
+    Local {
+        /// `None` selects the legacy embedded local child-agent flow.
+        /// `Some(...)` selects a third-party CLI harness to launch locally.
+        harness_type: Option<String>,
+        /// `None` inherits the parent agent's preferred LLM.
+        /// `Some(_)` overrides the child's preferred LLM.
+        model_id: Option<String>,
+    },
+}
+
+impl StartAgentExecutionMode {
+    pub fn local_with_defaults() -> Self {
+        Self::Local {
+            harness_type: None,
+            model_id: None,
+        }
+    }
+
+    pub fn local_harness(harness_type: String) -> Self {
+        Self::Local {
+            harness_type: Some(harness_type),
+            model_id: None,
+        }
+    }
 }
 
 impl AIAgentActionType {
@@ -216,6 +309,14 @@ impl AIAgentActionType {
                 AIAgentActionResultType::RequestComputerUse(RequestComputerUseResult::Cancelled)
             }
             Self::ReadSkill(_) => AIAgentActionResultType::ReadSkill(ReadSkillResult::Cancelled),
+            Self::StartAgent { version, .. } => {
+                AIAgentActionResultType::StartAgent(StartAgentResult::Cancelled {
+                    version: *version,
+                })
+            }
+            Self::SendMessageToAgent { .. } => {
+                AIAgentActionResultType::SendMessageToAgent(SendMessageToAgentResult::Cancelled)
+            }
             Self::TransferShellCommandControlToUser { .. } => {
                 AIAgentActionResultType::TransferShellCommandControlToUser(
                     TransferShellCommandControlToUserResult::Cancelled,
@@ -223,6 +324,10 @@ impl AIAgentActionType {
             }
             Self::AskUserQuestion { .. } => {
                 AIAgentActionResultType::AskUserQuestion(AskUserQuestionResult::Cancelled)
+            }
+            Self::RunAgents(_) => AIAgentActionResultType::RunAgents(RunAgentsResult::Cancelled),
+            Self::WaitForEvents(_) => {
+                AIAgentActionResultType::WaitForEvents(WaitForEventsResult::Cancelled)
             }
         }
     }
@@ -252,8 +357,12 @@ impl AIAgentActionType {
             Self::InsertCodeReviewComments { .. } => "Inserting review comments",
             Self::RequestComputerUse(_) => "Requesting computer use",
             Self::ReadSkill(_) => "Reading skill",
+            Self::StartAgent { .. } => "Starting agent",
+            Self::SendMessageToAgent { .. } => "Sending message",
             Self::TransferShellCommandControlToUser { .. } => "Transferring control",
             Self::AskUserQuestion { .. } => "Asking question",
+            Self::RunAgents(_) => "Orchestrating agents",
+            Self::WaitForEvents(_) => "Waiting for events",
         }
     }
 
@@ -287,12 +396,18 @@ impl AIAgentActionType {
             }
             Self::RequestComputerUse(_) => "Request computer use".to_string(),
             Self::ReadSkill(_) => "Read skill".to_string(),
+            Self::StartAgent { name, .. } => format!("Start agent: {name}"),
+            Self::SendMessageToAgent { subject, .. } => format!("Send message: {subject}"),
             Self::TransferShellCommandControlToUser { .. } => {
                 "Transfer shell command control to user".to_string()
             }
             Self::AskUserQuestion { questions } => {
                 format!("Ask user {} question(s)", questions.len())
             }
+            Self::RunAgents(req) => {
+                format!("Orchestrate {} agent(s)", req.agent_run_configs.len())
+            }
+            Self::WaitForEvents(_) => "Wait for events".to_string(),
         }
     }
 }
@@ -435,11 +550,38 @@ impl Display for AIAgentActionType {
             AIAgentActionType::ReadSkill(req) => {
                 write!(f, "ReadSkill: {}", req.skill)
             }
+            AIAgentActionType::StartAgent { name, .. } => {
+                write!(f, "StartAgent: {name}")
+            }
+            AIAgentActionType::SendMessageToAgent {
+                addresses, subject, ..
+            } => {
+                write!(
+                    f,
+                    "SendMessageToAgent: to=[{}] subject={subject}",
+                    addresses.join(", ")
+                )
+            }
             AIAgentActionType::TransferShellCommandControlToUser { reason } => {
                 write!(f, "TransferShellCommandControlToUser: {reason}")
             }
             AIAgentActionType::AskUserQuestion { questions } => {
                 write!(f, "AskUserQuestion: {} question(s)", questions.len())
+            }
+            AIAgentActionType::RunAgents(req) => {
+                let names = req
+                    .agent_run_configs
+                    .iter()
+                    .map(|config| config.name.as_str())
+                    .join(", ");
+                write!(f, "Orchestrate: summary='{}' agents=[{names}]", req.summary)
+            }
+            AIAgentActionType::WaitForEvents(req) => {
+                write!(
+                    f,
+                    "WaitForEvents: tool_call_id={} idle_timeout_seconds={}",
+                    req.tool_call_id, req.idle_timeout_seconds
+                )
             }
         }
     }

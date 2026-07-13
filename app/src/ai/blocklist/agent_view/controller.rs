@@ -100,7 +100,7 @@ impl PendingConfirmation {
 ///
 /// Depending on the entrypoint, an `AgentView` block representing the entry may be inserted into
 /// the terminal blocklist.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentViewEntryOrigin {
     /// Entered agent view from user input (e.g. /agent or cmd-enter keypress).
     Input {
@@ -146,7 +146,7 @@ pub enum AgentViewEntryOrigin {
     },
     SlashInit,
     /// Entered agent view by executing a slash command that requires agent mode.
-    Keybinding,
+    Keybinding(Keystroke),
     /// Entered agent view by attaching context from the code review panel.
     CodeReviewContext,
     /// Entered agent view from codex integration modal.
@@ -714,7 +714,7 @@ impl AgentViewController {
                 .active_block()
                 .is_active_and_long_running()
                 && !terminal_model.is_conversation_transcript_viewer()
-                && !matches!(origin, AgentViewEntryOrigin::ExternalAmbientAgent)
+                && !matches!(&origin, AgentViewEntryOrigin::ExternalAmbientAgent)
         };
 
         if is_long_running {
@@ -784,7 +784,7 @@ impl AgentViewController {
                 history_model.start_new_conversation(
                     self.terminal_view_id,
                     false,
-                    matches!(origin, AgentViewEntryOrigin::AmbientAgent),
+                    matches!(&origin, AgentViewEntryOrigin::AmbientAgent),
                     false,
                     ctx,
                 )
@@ -797,7 +797,7 @@ impl AgentViewController {
 
         self.agent_view_state = AgentViewState::Active {
             conversation_id,
-            origin,
+            origin: origin.clone(),
             display_mode,
             original_conversation_length: exchange_count,
         };

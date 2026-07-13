@@ -2,7 +2,6 @@
 pub mod entry;
 
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use clap::ValueEnum;
@@ -10,25 +9,15 @@ pub use entry::{
     AgentConversationEntry, AgentConversationEntryId, AgentConversationNavigationSubject,
     AgentConversationProvenance,
 };
-use futures::stream::AbortHandle;
-use instant::Instant;
 use itertools::Itertools;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use warp_cli::agent::Harness;
-use warp_core::execution_mode::AppExecutionMode;
 use warp_core::features::FeatureFlag;
-use warp_core::report_error;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::WarpTheme;
 use warpui::color::ColorU;
-use warpui::r#async::Timer;
-use warpui::windowing::{StateEvent, WindowManager};
-use warpui::{
-    duration_with_jitter, AppContext, Entity, EntityId, ModelContext, RequestState,
-    SingletonEntity, WindowId,
-};
+use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, WindowId};
 
-use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::ambient_agents::{
     AgentSource, AmbientAgentTask, AmbientAgentTaskId, AmbientAgentTaskState,
@@ -780,6 +769,8 @@ pub enum ConversationUpdateKind {
     },
     /// Conversation metadata or capabilities changed.
     MetadataChanged,
+    /// Conversation title changed.
+    TitleChanged,
 }
 
 impl Entity for AgentConversationsModel {
@@ -994,32 +985,16 @@ impl AgentConversationsModel {
             AgentConversationNavigationSubject::Entry(id) => model
                 .get_entry_by_id(&id, app)
                 .and_then(|entry| model.resolve_entry_open_action(&entry, restore_layout, app)),
-            AgentConversationNavigationSubject::ServerToken(server_token) => model
-                .entry_for_server_token(&server_token, app)
-                .and_then(|entry| model.resolve_entry_open_action(&entry, restore_layout, app))
-                .or_else(|| {
-                    Some(WorkspaceAction::OpenConversationTranscriptViewer {
-                        ambient_agent_task_id: model.task_id_for_server_token(&server_token),
-                        conversation_id: server_token,
-                    })
-                }),
+            AgentConversationNavigationSubject::ServerToken(_) => None,
         }
     }
 
+    /// Zap has no Warp-hosted session or conversation links.
     pub fn resolve_copy_link(
-        subject: AgentConversationNavigationSubject,
-        app: &AppContext,
+        _subject: AgentConversationNavigationSubject,
+        _app: &AppContext,
     ) -> Option<String> {
-        let model = Self::as_ref(app);
-        match subject {
-            AgentConversationNavigationSubject::Entry(id) => model
-                .get_entry_by_id(&id, app)
-                .and_then(|entry| model.resolve_entry_copy_link(&entry)),
-            AgentConversationNavigationSubject::ServerToken(server_token) => model
-                .entry_for_server_token(&server_token, app)
-                .and_then(|entry| model.resolve_entry_copy_link(&entry))
-                .or_else(|| Some(server_token.conversation_link())),
-        }
+        None
     }
 
     fn resolve_entry_open_action(
@@ -1081,88 +1056,16 @@ impl AgentConversationsModel {
                 .conversations
                 .get(&conversation_id)
                 .map(|metadata| &metadata.nav_data);
-            if !entry.backing.has_cloud_data
-                || entry.backing.has_local_persisted_data
-                || entry.backing.has_loaded_conversation
-                || nav_data.is_some()
-            {
-                return Some(WorkspaceAction::RestoreOrNavigateToConversation {
-                    conversation_id,
-                    window_id: nav_data.and_then(|nav_data| nav_data.window_id),
-                    pane_view_locator: None,
-                    terminal_view_id: nav_data.and_then(|nav_data| nav_data.terminal_view_id),
-                    restore_layout,
-                });
-            }
+            return Some(WorkspaceAction::RestoreOrNavigateToConversation {
+                conversation_id,
+                window_id: nav_data.and_then(|nav_data| nav_data.window_id),
+                pane_view_locator: None,
+                terminal_view_id: nav_data.and_then(|nav_data| nav_data.terminal_view_id),
+                restore_layout,
+            });
         }
 
-        entry
-            .identity
-            .server_conversation_token
-            .as_ref()
-            .map(|token| WorkspaceAction::OpenConversationTranscriptViewer {
-                conversation_id: token.clone(),
-                ambient_agent_task_id: entry.identity.ambient_agent_task_id,
-            })
-    }
-
-    fn resolve_entry_copy_link(&self, entry: &AgentConversationEntry) -> Option<String> {
-        if let Some(task_id) = entry.identity.ambient_agent_task_id {
-            if let Some(session_link) = self.tasks.get(&task_id).and_then(|task| {
-                task.has_active_execution()
-                    .then(|| {
-                        task.active_run_execution()
-                            .session_link
-                            .map(ToString::to_string)
-                    })
-                    .flatten()
-            }) {
-                return Some(session_link);
-            }
-        }
-
-        entry
-            .identity
-            .server_conversation_token
-            .as_ref()
-            .map(ServerConversationToken::conversation_link)
-    }
-
-    fn entry_for_server_token(
-        &self,
-        server_token: &ServerConversationToken,
-        app: &AppContext,
-    ) -> Option<AgentConversationEntry> {
-        let history_model = BlocklistAIHistoryModel::as_ref(app);
-        if let Some(task) = self.tasks.values().find(|task| {
-            task.conversation_id()
-                .is_some_and(|conversation_id| conversation_id == server_token.as_str())
-        }) {
-            return Some(entry::entry_for_task(task, history_model, app));
-        }
-
-        let conversation_id = history_model.find_conversation_id_by_server_token(server_token)?;
-        if let Some(task) = self.tasks.values().find(|task| {
-            entry::conversation_id_shadowed_by_task(task, history_model) == Some(conversation_id)
-        }) {
-            return Some(entry::entry_for_task(task, history_model, app));
-        }
-
-        self.get_entry_by_id(
-            &AgentConversationEntryId::Conversation(conversation_id),
-            app,
-        )
-    }
-
-    fn task_id_for_server_token(
-        &self,
-        server_token: &ServerConversationToken,
-    ) -> Option<AmbientAgentTaskId> {
-        self.tasks.values().find_map(|task| {
-            task.conversation_id()
-                .is_some_and(|conversation_id| conversation_id == server_token.as_str())
-                .then_some(task.task_id)
-        })
+        None
     }
 
     fn handle_history_event(
@@ -1229,6 +1132,24 @@ impl AgentConversationsModel {
                     conversation_id: *conversation_id,
                 });
             }
+            BlocklistAIHistoryEvent::UpdatedConversationTitle {
+                conversation_id,
+                title,
+                ..
+            } => {
+                let history_model = BlocklistAIHistoryModel::as_ref(ctx);
+                for task in self.tasks.values_mut() {
+                    if entry::conversation_id_shadowed_by_task(task, history_model)
+                        == Some(*conversation_id)
+                    {
+                        task.title = title.clone();
+                    }
+                }
+
+                ctx.emit(AgentConversationsModelEvent::ConversationUpdated {
+                    kind: ConversationUpdateKind::TitleChanged,
+                });
+            }
 
             // Task/exchange-level changes that don't affect conversation navigation.
             BlocklistAIHistoryEvent::CreatedSubtask { .. }
@@ -1236,7 +1157,6 @@ impl AgentConversationsModel {
             | BlocklistAIHistoryEvent::ReassignedExchange { .. }
             | BlocklistAIHistoryEvent::UpdatedTodoList { .. }
             | BlocklistAIHistoryEvent::UpdatedAutoexecuteOverride { .. }
-            | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. }
             // UpdatedStreamingExchange covers streaming and other exchange-level updates but
             // doesn't change any ConversationNavigationData fields (title comes from
             // UpdateTaskDescription, last_updated uses exchange.start_time which is set at append time).
@@ -1244,7 +1164,8 @@ impl AgentConversationsModel {
             | BlocklistAIHistoryEvent::ConversationOwnershipTransferred { .. }
             | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. }
             | BlocklistAIHistoryEvent::ConversationUsageMetadataUpdated { .. }
-            | BlocklistAIHistoryEvent::LocalSharedSessionEstablished { .. } => {}
+            | BlocklistAIHistoryEvent::LocalSharedSessionEstablished { .. }
+            | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. } => {}
 
             // A server/agent id was assigned to the conversation (e.g. via
             // StreamInit). Copy-link resolution depends on it, so notify

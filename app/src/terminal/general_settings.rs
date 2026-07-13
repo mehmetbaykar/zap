@@ -34,6 +34,33 @@ define_settings_group!(GeneralSettings, settings: [
         toml_path: "general.restore_session",
         description: "Whether to restore the previous session when Zap starts up.",
     },
+    add_app_as_login_item: LoginItem {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::OR(
+            Box::new(SupportedPlatforms::MAC),
+            Box::new(SupportedPlatforms::WINDOWS),
+        ),
+        sync_to_cloud: SyncToCloud::Never,
+        private: false,
+        toml_path: "general.login_item",
+        description: "Whether to launch Zap automatically when you log in.",
+    },
+    // Records whether the app has been added as a login item.
+    // If it has, we don't try to add it again unless the user explicitly
+    // retoggles the setting. This is to allow a user to remove the login item
+    // directly from their OS's startup UI and not have it re-added when they
+    // next start Zap.
+    app_added_as_login_item: AppAddedAsLoginItem {
+        type: bool,
+        default: false,
+        supported_platforms: SupportedPlatforms::OR(
+            Box::new(SupportedPlatforms::MAC),
+            Box::new(SupportedPlatforms::WINDOWS),
+        ),
+        sync_to_cloud: SyncToCloud::Never,
+        private: true,
+    },
     persist_conversations: PersistConversations {
         type: bool,
         default: true,

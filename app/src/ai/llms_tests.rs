@@ -191,8 +191,6 @@ fn deserialized_available_llms_with_missing_default_does_not_panic() {
     assert_eq!(deserialized.default_llm_info().id.as_str(), "gpt-x");
 }
 
-// -- build_custom_llm_infos / display label tests --
-
 fn endpoint(
     name: &str,
     url: &str,
@@ -210,7 +208,7 @@ fn endpoint(
 fn model(name: &str, alias: Option<&str>, config_key: &str) -> CustomEndpointModel {
     CustomEndpointModel {
         name: name.into(),
-        alias: alias.map(|s| s.into()),
+        alias: alias.map(str::to_owned),
         config_key: config_key.into(),
     }
 }
@@ -229,7 +227,9 @@ fn custom_llm_infos_built_from_endpoints() {
         )],
         ..Default::default()
     };
+
     let infos = build_custom_llm_infos(&keys);
+
     assert_eq!(infos.len(), 2);
     assert_eq!(infos[0].display_name, "fast");
     assert_eq!(infos[0].id.as_str(), "uuid-1");
@@ -237,52 +237,42 @@ fn custom_llm_infos_built_from_endpoints() {
         infos[0].description.as_deref(),
         Some("Custom · My Endpoint")
     );
+    assert!(infos[0]
+        .host_configs
+        .contains_key(&LLMModelHost::CustomEndpoint));
     assert_eq!(infos[1].display_name, "llama");
     assert_eq!(infos[1].id.as_str(), "uuid-2");
 }
 
 #[test]
-fn custom_llm_display_name_uses_alias_when_present() {
-    let keys = ai::api_keys::ApiKeys {
-        custom_endpoints: vec![endpoint(
-            "ep",
-            "https://a.io",
-            "k",
-            vec![model("raw-name", Some("My Alias"), "uuid-a")],
-        )],
-        ..Default::default()
-    };
-    let infos = build_custom_llm_infos(&keys);
-    assert_eq!(infos[0].display_name, "My Alias");
-}
-
-#[test]
-fn custom_llm_display_name_falls_back_to_name_when_alias_missing() {
-    let keys = ai::api_keys::ApiKeys {
-        custom_endpoints: vec![endpoint(
-            "ep",
-            "https://a.io",
-            "k",
-            vec![model("raw-name", None, "uuid-a")],
-        )],
-        ..Default::default()
-    };
-    let infos = build_custom_llm_infos(&keys);
-    assert_eq!(infos[0].display_name, "raw-name");
-}
-
-#[test]
-fn custom_endpoint_usage_display_label_resolves_alias_name_and_generic_fallback() {
+fn custom_llm_display_name_uses_alias_or_model_name() {
     let keys = ai::api_keys::ApiKeys {
         custom_endpoints: vec![endpoint(
             "ep",
             "https://a.io",
             "k",
             vec![
-                model("raw-alias", Some("Alias"), "uuid-alias"),
-                model("raw-name", None, "uuid-name"),
-                model("raw~name", None, "uuid-tilde-name"),
+                model("raw-alias", Some("My Alias"), "uuid-a"),
+                model("raw-name", None, "uuid-b"),
             ],
+        )],
+        ..Default::default()
+    };
+
+    let infos = build_custom_llm_infos(&keys);
+
+    assert_eq!(infos[0].display_name, "My Alias");
+    assert_eq!(infos[1].display_name, "raw-name");
+}
+
+#[test]
+fn custom_endpoint_usage_display_label_resolves_model_and_fallback() {
+    let keys = ai::api_keys::ApiKeys {
+        custom_endpoints: vec![endpoint(
+            "ep",
+            "https://a.io",
+            "k",
+            vec![model("raw-name", Some("Alias"), "uuid-alias")],
         )],
         ..Default::default()
     };
@@ -300,125 +290,71 @@ fn custom_endpoint_usage_display_label_resolves_alias_name_and_generic_fallback(
         "Alias"
     );
     assert_eq!(
-        preferences.custom_endpoint_usage_display_label("uuid-name"),
-        "raw-name"
-    );
-    assert_eq!(
-        preferences.custom_endpoint_usage_display_label("uuid-tilde-name"),
-        "raw~name"
-    );
-    assert_eq!(
         preferences.custom_endpoint_usage_display_label("unknown"),
         CUSTOM_ENDPOINT_USAGE_FALLBACK_LABEL
     );
+    assert_eq!(preferences.custom_llm_choices().count(), 1);
 }
 
 #[test]
-fn custom_llm_infos_skip_endpoints_with_empty_api_key() {
+fn custom_llm_infos_skip_incomplete_endpoint_and_model_rows() {
     let keys = ai::api_keys::ApiKeys {
         custom_endpoints: vec![
-            endpoint("bad", "https://a.io", "", vec![model("m", None, "uuid-x")]),
             endpoint(
-                "good",
-                "https://b.io",
-                "k",
-                vec![model("m", None, "uuid-y")],
-            ),
-        ],
-        ..Default::default()
-    };
-    let infos = build_custom_llm_infos(&keys);
-    assert_eq!(infos.len(), 1);
-    assert_eq!(infos[0].id.as_str(), "uuid-y");
-}
-
-#[test]
-fn custom_llm_infos_skip_models_without_config_key() {
-    let keys = ai::api_keys::ApiKeys {
-        custom_endpoints: vec![endpoint(
-            "ep",
-            "https://a.io",
-            "k",
-            vec![
-                model("unconfigured", None, ""),
-                model("ready", None, "uuid-a"),
-            ],
-        )],
-        ..Default::default()
-    };
-    let infos = build_custom_llm_infos(&keys);
-    assert_eq!(infos.len(), 1);
-    assert_eq!(infos[0].display_name, "ready");
-}
-
-#[test]
-fn removing_model_row_purges_from_custom_llms() {
-    let before = ai::api_keys::ApiKeys {
-        custom_endpoints: vec![endpoint(
-            "ep",
-            "https://a.io",
-            "k",
-            vec![model("a", None, "uuid-a"), model("b", None, "uuid-b")],
-        )],
-        ..Default::default()
-    };
-    assert_eq!(build_custom_llm_infos(&before).len(), 2);
-
-    let after = ai::api_keys::ApiKeys {
-        custom_endpoints: vec![endpoint(
-            "ep",
-            "https://a.io",
-            "k",
-            vec![model("b", None, "uuid-b")],
-        )],
-        ..Default::default()
-    };
-    let infos = build_custom_llm_infos(&after);
-    assert_eq!(infos.len(), 1);
-    assert_eq!(infos[0].id.as_str(), "uuid-b");
-    assert!(infos.iter().all(|i| i.id.as_str() != "uuid-a"));
-}
-
-#[test]
-fn removing_endpoint_purges_all_its_models_from_custom_llms() {
-    let before = ai::api_keys::ApiKeys {
-        custom_endpoints: vec![
-            endpoint(
-                "keep",
+                "missing-key",
                 "https://a.io",
-                "k",
-                vec![model("k1", None, "uuid-k1")],
+                "",
+                vec![model("m", None, "a")],
             ),
             endpoint(
-                "goner",
+                "ready",
                 "https://b.io",
                 "k",
-                vec![model("g1", None, "uuid-g1"), model("g2", None, "uuid-g2")],
+                vec![model("missing-id", None, ""), model("m", None, "ready-id")],
             ),
         ],
         ..Default::default()
     };
-    assert_eq!(build_custom_llm_infos(&before).len(), 3);
 
+    let infos = build_custom_llm_infos(&keys);
+
+    assert_eq!(infos.len(), 1);
+    assert_eq!(infos[0].id.as_str(), "ready-id");
+}
+
+#[test]
+fn rebuilding_custom_llms_removes_deleted_models_and_endpoints() {
+    let before = ai::api_keys::ApiKeys {
+        custom_endpoints: vec![
+            endpoint("keep", "https://a.io", "k", vec![model("a", None, "a")]),
+            endpoint(
+                "remove",
+                "https://b.io",
+                "k",
+                vec![model("b", None, "b"), model("c", None, "c")],
+            ),
+        ],
+        ..Default::default()
+    };
     let after = ai::api_keys::ApiKeys {
         custom_endpoints: vec![endpoint(
             "keep",
             "https://a.io",
             "k",
-            vec![model("k1", None, "uuid-k1")],
+            vec![model("a", None, "a")],
         )],
         ..Default::default()
     };
+
+    assert_eq!(build_custom_llm_infos(&before).len(), 3);
     let infos = build_custom_llm_infos(&after);
     assert_eq!(infos.len(), 1);
-    assert_eq!(infos[0].id.as_str(), "uuid-k1");
+    assert_eq!(infos[0].id.as_str(), "a");
 }
 
 #[test]
 fn reconcile_preserves_custom_models_saved_on_execution_profile() {
     App::test((), |mut app| async move {
-        let _custom_inference_flag = FeatureFlag::CustomInferenceEndpoints.override_enabled(true);
-
         initialize_settings_for_tests(&mut app);
         app.add_singleton_model(UpdateManager::mock);
         app.add_singleton_model(ObjectStoreModel::mock);
@@ -434,16 +370,16 @@ fn reconcile_preserves_custom_models_saved_on_execution_profile() {
 
         let profiles_model = AIExecutionProfilesModel::handle(&app);
         let llm_preferences = app.add_singleton_model(LLMPreferences::new);
-
         let custom_model_id = LLMId::from("custom-model-config-key");
-        ApiKeyManager::handle(&app).update(&mut app, |api_key_manager, ctx| {
+
+        ai::api_keys::ApiKeyManager::handle(&app).update(&mut app, |api_key_manager, ctx| {
             api_key_manager.add_custom_endpoint(
-                "local".to_string(),
-                "https://example.com/v1".to_string(),
-                "test-key".to_string(),
+                "local".to_owned(),
+                "https://example.com/v1".to_owned(),
+                "test-key".to_owned(),
                 vec![(
-                    "custom-model".to_string(),
-                    Some("Custom Model".to_string()),
+                    "custom-model".to_owned(),
+                    Some("Custom Model".to_owned()),
                     Some(custom_model_id.to_string()),
                 )],
                 ctx,

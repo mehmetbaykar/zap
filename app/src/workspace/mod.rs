@@ -119,6 +119,7 @@ pub fn init(app: &mut AppContext) {
     notebooks::init(app);
     code::init(app);
     sync_inputs::init(app);
+    lsp::init(app);
 
     app.register_fixed_bindings([FixedBinding::empty(
         "Dump debug info",
@@ -379,7 +380,7 @@ pub fn init(app: &mut AppContext) {
             )
             .with_context_predicate(id!("Workspace"))
             .with_group(bindings::BindingGroup::Settings.as_str())
-            .with_key_binding("ctrl-shift->"),
+            .with_key_binding("alt-shift->"),
             EditableBinding::new(
                 "workspace:decrease_font_size",
                 crate::t!("keybinding-desc-workspace-decrease-font-size"),
@@ -387,7 +388,7 @@ pub fn init(app: &mut AppContext) {
             )
             .with_context_predicate(id!("Workspace"))
             .with_group(bindings::BindingGroup::Settings.as_str())
-            .with_key_binding("ctrl-shift-<"),
+            .with_key_binding("alt-shift-<"),
             EditableBinding::new(
                 "workspace:reset_font_size",
                 crate::t!("keybinding-desc-workspace-reset-font-size"),
@@ -708,6 +709,15 @@ pub fn init(app: &mut AppContext) {
         .with_context_predicate(id!("Workspace") & id!(flags::SHOW_GLOBAL_SEARCH))
         .with_enabled(|| FeatureFlag::GlobalSearch.is_enabled())
         .with_custom_action(CustomAction::ToggleGlobalSearch),
+        EditableBinding::new(
+            "file_tree:toggle_hidden_files",
+            BindingDescription::new("Toggle hidden files in Project Explorer"),
+            WorkspaceAction::ToggleHiddenFiles,
+        )
+        .with_group(bindings::BindingGroup::Navigation.as_str())
+        .with_context_predicate(id!("Workspace") & id!(flags::SHOW_PROJECT_EXPLORER))
+        .with_mac_key_binding("cmd-shift->")
+        .with_linux_or_windows_key_binding("ctrl-shift->"),
         EditableBinding::new(
             LEFT_PANEL_WARP_DRIVE_BINDING_NAME,
             BindingDescription::new(crate::t!("keybinding-desc-workspace-left-panel-warp-drive")),
@@ -1228,18 +1238,6 @@ pub fn init(app: &mut AppContext) {
         WorkspaceAction::ImportToPersonalDrive,
     )
     .with_context_predicate(id!("Workspace") & id!(flags::ENABLE_WARP_DRIVE))]);
-
-    // Register a debug-only action for writing the user's access token to the system clipboard
-    // to aid debugging and development.
-    #[cfg(not(feature = "skip_login"))]
-    if ChannelState::enable_debug_features() {
-        app.register_editable_bindings([EditableBinding::new(
-            "workspace:copy_access_token_to_clipboard",
-            crate::t!("keybinding-desc-workspace-copy-access-token"),
-            WorkspaceAction::CopyAccessTokenToClipboard,
-        )
-        .with_context_predicate(id!("Workspace"))]);
-    }
 
     app.register_editable_bindings([
         EditableBinding::new(

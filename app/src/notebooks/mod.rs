@@ -122,7 +122,7 @@ impl StoredObjectModel for NotebookObjectModel {
     }
 }
 
-/// This is the notebook_id in the database associated with this notebook.
+/// Stable ID for an object-backed notebook.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct NotebookId(ServerId);
 crate::server_id_traits! { NotebookId, "Notebook" }

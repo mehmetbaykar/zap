@@ -141,29 +141,19 @@ impl ModelSelectorDataSource {
         Self { terminal_view_id }
     }
 
-    fn order_model_choices<'a>(
-        llm_preferences: &LLMPreferences,
-        choices: Vec<&'a LLMInfo>,
-    ) -> Vec<&'a LLMInfo> {
+    fn order_model_choices(choices: Vec<&LLMInfo>) -> Vec<&LLMInfo> {
         let mut auto_choices = Vec::new();
-        let mut custom_choices = Vec::new();
         let mut other_choices = Vec::new();
 
         for llm in choices {
             if is_auto(llm) {
                 auto_choices.push(llm);
-            } else if llm_preferences.custom_llm_info_for_id(&llm.id).is_some() {
-                custom_choices.push(llm);
             } else {
                 other_choices.push(llm);
             }
         }
 
-        auto_choices
-            .into_iter()
-            .chain(custom_choices)
-            .chain(other_choices)
-            .collect()
+        auto_choices.into_iter().chain(other_choices).collect()
     }
 }
 
@@ -191,13 +181,13 @@ impl SyncDataSource for ModelSelectorDataSource {
         };
 
         let choices = if is_full_terminal {
-            llm_preferences.get_cli_agent_llm_choices(app).collect_vec()
+            llm_preferences.get_cli_agent_llm_choices().collect_vec()
         } else {
             llm_preferences
-                .get_base_llm_choices_for_agent_mode(app)
+                .get_base_llm_choices_for_agent_mode()
                 .collect_vec()
         };
-        let choices = Self::order_model_choices(llm_preferences, choices);
+        let choices = Self::order_model_choices(choices);
 
         let query_text = query.text.trim().to_lowercase();
 
@@ -244,7 +234,7 @@ struct ModelSearchItem {
     credential_icon: Option<Icon>,
     display_text: String,
     is_selected: bool,
-    is_custom_endpoint: bool,
+    is_byop_model: bool,
     disable_reason: Option<DisableReason>,
     is_auto: bool,
     is_using_bedrock: bool,
@@ -267,13 +257,10 @@ impl ModelSearchItem {
         } else {
             llm.disable_reason.clone()
         };
-        let is_custom_endpoint = LLMPreferences::as_ref(app)
-            .custom_llm_info_for_id(&llm.id)
-            .is_some();
+        let is_byop_model = byop_llm_id::is_byop(&llm.id);
         let is_auto = is_auto(llm);
         let is_using_bedrock = should_show_bedrock_icon_for_model(llm, app);
-        let is_using_api_key =
-            is_custom_endpoint || is_using_api_key_for_provider(&llm.provider, app);
+        let is_using_api_key = is_byop_model || is_using_api_key_for_provider(&llm.provider, app);
         let leading_icon = if is_using_bedrock {
             Icon::Aws
         } else {
@@ -292,7 +279,7 @@ impl ModelSearchItem {
             credential_icon,
             display_text: llm.display_name.clone(),
             is_selected: &llm.id == active_llm_id,
-            is_custom_endpoint,
+            is_byop_model,
             disable_reason,
             is_auto,
             is_using_bedrock,
@@ -544,7 +531,7 @@ impl SearchItem for ModelSearchItem {
         }
 
         let is_using_api_key =
-            self.is_custom_endpoint || is_using_api_key_for_provider(&self.provider, app);
+            self.is_byop_model || is_using_api_key_for_provider(&self.provider, app);
         let cost_row = if self.is_using_bedrock || is_using_api_key {
             let search_query = if self.is_using_bedrock {
                 "bedrock"

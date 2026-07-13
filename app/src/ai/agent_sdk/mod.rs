@@ -11,7 +11,6 @@ use crate::ai::agent_sdk::driver::{AgentDriverOptions, AgentRunPrompt, Task};
 use crate::ai::agent_sdk::mcp_config::build_mcp_servers_from_specs;
 #[cfg(not(target_family = "wasm"))]
 use crate::ai::llms::LLMId;
-use crate::auth::OwnerType;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::workflows::workflow::Workflow;
 use anyhow::Context;
@@ -37,9 +36,7 @@ use crate::ai::skills::{
     clone_repo_for_skill, resolve_skill_spec, ResolveSkillError, ResolvedSkill,
 };
 
-pub(crate) use driver::harness::{
-    task_env_vars, validate_cli_installed, ClaudeHarness, ThirdPartyHarness,
-};
+pub(crate) use driver::harness::{task_env_vars, validate_cli_installed};
 pub use driver::AgentDriver;
 use warp_cli::agent::{Harness, Prompt, RunAgentArgs};
 
@@ -56,20 +53,6 @@ mod provider;
 #[cfg(test)]
 mod test_support;
 mod text_layout;
-
-/// Prints a non-blocking warning to stderr when the CLI is invoked with a team-scoped API key.
-fn maybe_warn_team_api_key(ctx: &AppContext) {
-    let auth_state = AuthStateProvider::handle(ctx).as_ref(ctx).get();
-    let owner_type = auth_state.api_key_owner_type();
-    if !matches!(owner_type, Some(OwnerType::Team)) {
-        return;
-    }
-
-    eprintln!(
-        "\x1b[33mWarning: Personal credits apply to personal runs only but this run uses \
-         a team API key. If you want to use personal credits, consider using a personal API key instead.\x1b[0m"
-    );
-}
 
 /// Run a Zap CLI command.
 pub fn run(
@@ -482,8 +465,6 @@ impl AgentDriverRunner {
         output_format: OutputFormat,
         task: driver::Task,
     ) {
-        maybe_warn_team_api_key(ctx);
-
         // Initializing the driver will fail if not logged in. Since we check that above, panic here - it's difficult to
         // fallibly instantiate a UI framework model.
         let driver = ctx.add_singleton_model(|ctx| {

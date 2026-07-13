@@ -25,8 +25,8 @@ use crate::view_components::action_button::{ActionButton, ActionButtonTheme, But
 const MODAL_WIDTH: f32 = 420.;
 const HERO_HEIGHT: f32 = 92.;
 const HERO_IMAGE_PATH: &str = "async/png/onboarding/zap_launch_banner.png";
-const REPO_URL: &str = "https://github.com/warpdotdev/warp";
-const CONTRIBUTING_URL: &str = "https://github.com/warpdotdev/warp/blob/master/CONTRIBUTING.md";
+const REPO_URL: &str = "https://github.com/mehmetbaykar/zap";
+const CONTRIBUTING_URL: &str = "https://github.com/mehmetbaykar/zap/blob/main/CONTRIBUTING.md";
 
 struct InlineLink {
     text: String,

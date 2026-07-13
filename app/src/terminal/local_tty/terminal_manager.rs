@@ -3,7 +3,6 @@ use crate::auth::AuthState;
 use crate::auth::AuthStateProvider;
 use crate::terminal::model::terminal_model::ExitReason;
 use crate::terminal::shell::ShellName;
-use crate::terminal::warpify::settings::WarpifySettings;
 use crate::terminal::TerminalManager as _;
 use anyhow::Context as _;
 use async_broadcast::InactiveReceiver;
@@ -19,6 +18,7 @@ use parking_lot::{FairMutex, Mutex};
 use pathfinder_geometry::vector::Vector2F;
 
 use settings::Setting as _;
+use warp_core::SessionId;
 use warpui::r#async::executor::Background;
 use warpui::{AppContext, ModelContext, ModelHandle, SingletonEntity, ViewHandle, WindowId};
 
@@ -27,7 +27,9 @@ use crate::terminal::view::ConversationRestorationInNewPaneType;
 
 use crate::banner::BannerState;
 use crate::context_chips::current_prompt::CurrentPrompt;
+use crate::context_chips::prompt::Prompt;
 use crate::context_chips::prompt_type::PromptType;
+use crate::context_chips::ContextChipKind;
 use crate::features::FeatureFlag;
 use crate::pane_group::TerminalViewResources;
 use crate::persistence::ModelEvent;
@@ -41,7 +43,7 @@ use crate::terminal::model::session::Sessions;
 
 use crate::terminal::model_events::ModelEventDispatcher;
 use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
-use crate::terminal::session_settings::SessionSettings;
+use crate::terminal::session_settings::{SessionSettings, ToolbarChipSelection};
 use crate::terminal::shared_session::SharedSessionStatus;
 #[cfg(unix)]
 use crate::terminal::view::Event as TerminalViewEvent;
@@ -500,11 +502,23 @@ impl TerminalManager {
             .lock()
             .set_pending_shell_launch_data(shell_launch_data.clone());
 
+        // Register the session ID that was generated during shell starter construction.
+        // For bash, fish, and PowerShell, the session ID is already baked into the command
+        // args. For zsh and MSYS2, enqueue_init_script injects this same ID.
+        let generated_session_id = match &shell_starter {
+            ShellStarter::Direct(starter) | ShellStarter::MSYS2(starter) => starter.session_id(),
+            ShellStarter::DockerSandbox(starter) => starter.session_id(),
+            ShellStarter::Wsl(starter) => starter.session_id(),
+        };
+        self.model()
+            .lock()
+            .register_session_id(generated_session_id);
+
         // Enqueue the init shell script (for shells that need it), then create
         // the PTY and start its corresponding event loop.
         let model = self.model();
         let pty = match self
-            .enqueue_init_script(&shell_starter)
+            .enqueue_init_script(&shell_starter, generated_session_id)
             .context("Failed to write shell init script to the pty")
             .and_then(|_| {
                 Self::create_pty(
@@ -603,14 +617,21 @@ impl TerminalManager {
         }
     }
 
-    fn enqueue_init_script(&self, shell_starter: &ShellStarter) -> Result<(), SendError<Message>> {
+    fn enqueue_init_script(
+        &self,
+        shell_starter: &ShellStarter,
+        session_id: SessionId,
+    ) -> Result<(), SendError<Message>> {
         let shell_type = shell_starter.shell_type();
         if shell_type == crate::terminal::shell::ShellType::Zsh
             // For more on why this is necessary on Git Bash, see https://linear.app/warpdotdev/issue/CORE-3202.
             || shell_starter.is_msys2()
         {
-            let init_shell_script =
-                crate::terminal::bootstrap::init_shell_script_for_shell(shell_type, &crate::ASSETS);
+            let init_shell_script = crate::terminal::bootstrap::init_shell_script_for_shell(
+                shell_type,
+                &crate::ASSETS,
+                session_id,
+            );
             let tx = self.event_loop_tx.lock();
             tx.send(Message::Input(init_shell_script.into_bytes().into()))?;
             tx.send(Message::Input(shell_type.execute_command_bytes().into()))
@@ -633,15 +654,35 @@ impl TerminalManager {
         let is_honor_ps1_enabled = *SessionSettings::as_ref(ctx).honor_ps1;
         let is_crash_reporting_enabled = PrivacySettings::as_ref(ctx).is_crash_reporting_enabled;
 
-        // The TMUX SSH wrapper supercedes the original ControlMaster wrapper.
-        let enable_ssh_wrapper = if FeatureFlag::SSHTmuxWrapper.is_enabled() {
-            *WarpifySettings::as_ref(ctx)
-                .enable_ssh_warpification
-                .value()
-                && !*WarpifySettings::as_ref(ctx).use_ssh_tmux_wrapper.value()
-        } else {
-            *SshSettings::as_ref(ctx).enable_legacy_ssh_wrapper.value()
+        // Determine whether the Node.js Version chip is enabled anywhere it could be
+        // shown (the Warp prompt, the agent footer, or the CLI agent footer). When it
+        // is not, the shell bootstrap skips the expensive per-prompt `node --version`
+        // detection. The chip value is fed by the same precmd payload regardless of
+        // where it is displayed, so we must check all three locations.
+        let node_version_chip_enabled = {
+            let in_prompt = !is_honor_ps1_enabled
+                && Prompt::as_ref(ctx)
+                    .chip_kinds()
+                    .contains(&ContextChipKind::NodeVersion);
+            let settings = SessionSettings::as_ref(ctx);
+            in_prompt
+                || settings
+                    .agent_footer_chip_selection
+                    .all_chips()
+                    .contains(&ContextChipKind::NodeVersion)
+                || settings
+                    .cli_agent_footer_chip_selection
+                    .all_chips()
+                    .contains(&ContextChipKind::NodeVersion)
         };
+
+        let enable_ssh_wrapper = *SshSettings::as_ref(ctx).enable_ssh_wrapper.value();
+
+        // Only meaningful when the legacy ControlMaster wrapper is active.
+        let reuse_ssh_control_master = enable_ssh_wrapper
+            && *SshSettings::as_ref(ctx)
+                .reuse_existing_control_master
+                .value();
 
         let size: crate::terminal::SizeInfo = model.lock().block_list().size().to_owned();
         let options = PtyOptions {
@@ -651,8 +692,10 @@ impl TerminalManager {
             start_dir: startup_directory,
             env_vars,
             enable_ssh_wrapper,
+            reuse_ssh_control_master,
             shell_debug_mode: is_shell_debug_mode_enabled,
             honor_ps1: is_honor_ps1_enabled,
+            node_version_chip_enabled,
             close_fds: true,
         };
 

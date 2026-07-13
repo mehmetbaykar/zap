@@ -1,21 +1,21 @@
 // Zap (localization, Phase 2d-1): this file originally played the role of "offline banner / sync-status predicates";
 // after the cloud leg (SyncQueue / NetworkStatus online gating) was fully decommissioned this code all became meaningless,
 // so it was removed entirely and the imports trimmed. The Pane container view itself is kept, responsible for switching between the Rules / RuleEditor pages.
+use std::path::PathBuf;
+
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::{pane::view, BackingView, PaneConfiguration, PaneEvent};
 use crate::server::ids::SyncId;
-use std::path::PathBuf;
 use warp_core::ui::appearance::Appearance;
-use warpui::{
-    elements::{
-        Align, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container, Flex,
-        MainAxisSize, ParentElement, ScrollbarWidth,
-    },
-    AppContext, Element, Entity, FocusContext, ModelHandle, TypedActionView, View, ViewContext,
+use warp_util::local_or_remote_path::LocalOrRemotePath;
+use warpui::elements::{
+    Align, ChildView, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container, Flex,
+    MainAxisSize, ParentElement, ScrollbarWidth,
 };
-
-use warpui::elements::ChildView;
-use warpui::{SingletonEntity, ViewHandle};
+use warpui::{
+    AppContext, Element, Entity, FocusContext, ModelHandle, SingletonEntity, TypedActionView, View,
+    ViewContext, ViewHandle,
+};
 
 pub mod rule;
 pub mod rule_editor;
@@ -45,7 +45,7 @@ impl std::fmt::Display for AIFactPage {
 pub enum AIFactViewEvent {
     Pane(PaneEvent),
     OpenSettings,
-    OpenFile(PathBuf),
+    OpenFile(LocalOrRemotePath),
     InitializeProject(PathBuf),
 }
 

@@ -2,11 +2,9 @@
 //! `OrchestrationConfigBlockView` to edit the run-wide harness / model /
 //! fields of an `OrchestrationConfig`.
 //!
-//! The generic parameter `A` is the parent view's typed action — this
-//! lets `OrchestrationConfigBlockView` (and, historically, the
-//! now-removed cloud `RunAgentsCardView`) impl
-//! [`OrchestrationControlAction`] to provide the mapping from
-//! field-change events to their own action enum.
+//! The generic parameter `A` is the parent view's typed action, letting
+//! `OrchestrationConfigBlockView` implement [`OrchestrationControlAction`]
+//! to map field-change events to its own action enum.
 //!
 //! Cloud-only data sources and controls are intentionally absent from
 //! this fork. Orchestration here selects only a local harness and model.
@@ -56,8 +54,7 @@ use crate::LLMPreferences;
 
 // Zap: `WARP_WORKER_HOST` used to come from the removed cloud
 // `connected_self_hosted_workers` module; inlined as a literal since it is only ever
-// used as a sentinel meaning "run locally" (see the `RunAgentsExecutionMode::Local`/
-// `OrchestrationExecutionMode::Local` mappings below).
+// used as a sentinel meaning "run locally" for `OrchestrationExecutionMode::Local`.
 pub const ORCHESTRATION_WARP_WORKER_HOST: &str = "warp";
 pub const ORCHESTRATION_ENV_NONE_LABEL: &str = "Empty environment";
 pub const ORCHESTRATION_PICKER_HEIGHT: f32 = 36.;
@@ -74,9 +71,8 @@ pub const AUTH_SECRET_COLUMN_LABEL: &str = "API key";
 const AUTH_SECRET_CREATE_NEW_LABEL: &str = "New API key…";
 // ── Action trait ────────────────────────────────────────────────────
 
-/// Trait that both `RunAgentsCardViewAction` and
-/// `OrchestrationConfigBlockAction` implement so the shared picker
-/// creation and render helpers can produce the correct action variant.
+/// Trait implemented by the plan-card action so shared picker creation and
+/// render helpers can produce the correct action variant.
 pub trait OrchestrationControlAction: DropdownItemAction + Clone {
     fn execution_mode_toggled(is_remote: bool) -> Self;
     fn model_changed(model_id: String) -> Self;
@@ -360,12 +356,11 @@ pub fn new_standard_filterable_picker_dropdown<A: OrchestrationControlAction, V:
 /// Returns Warp base-model choices for orchestration.
 fn get_base_model_choices<'a>(
     llm_prefs: &'a LLMPreferences,
-    app: &'a AppContext,
     is_local: bool,
 ) -> impl Iterator<Item = &'a LLMInfo> {
     llm_prefs
-        .get_base_llm_choices_for_agent_mode(app)
-        .filter(move |llm| is_local || llm_prefs.custom_llm_info_for_id(&llm.id).is_none())
+        .get_base_llm_choices_for_agent_mode()
+        .filter(move |llm| is_local || !crate::ai::agent_providers::llm_id::is_byop(&llm.id))
 }
 /// Populates the model picker based on the active harness.
 ///
@@ -387,21 +382,13 @@ pub fn populate_model_picker_for_harness<A: OrchestrationControlAction, V: View>
         let harness = Harness::parse_orchestration_harness(&harness_type);
         match harness {
             Some(Harness::Oz) | None => {
-                // Oz / unset: Warp LLM catalog. Custom models excluded for
-                // cloud runs (not supported by remote workers).
-                // Order: auto models first, then custom models, then other models.
+                // Oz / unset: direct-provider models are excluded for remote runs.
+                // Order auto models before the remaining models.
                 let llm_prefs = LLMPreferences::as_ref(ctx_dropdown);
                 let (auto_models, rest): (Vec<_>, Vec<_>) =
-                    get_base_model_choices(llm_prefs, ctx_dropdown, is_local)
+                    get_base_model_choices(llm_prefs, is_local)
                         .partition(|llm| llm.id.as_str().starts_with("auto"));
-                let (custom_models, other_models): (Vec<_>, Vec<_>) = rest
-                    .into_iter()
-                    .partition(|llm| llm_prefs.custom_llm_info_for_id(&llm.id).is_some());
-                let ordered_choices: Vec<_> = auto_models
-                    .into_iter()
-                    .chain(custom_models)
-                    .chain(other_models)
-                    .collect();
+                let ordered_choices: Vec<_> = auto_models.into_iter().chain(rest).collect();
                 let selected_display_name = ordered_choices
                     .iter()
                     .find(|llm| llm.id.to_string() == initial_model_id)
@@ -457,8 +444,7 @@ pub fn is_model_in_filtered_choices<V: View>(
     match harness {
         Some(Harness::Oz) | None => {
             let llm_prefs = LLMPreferences::as_ref(ctx);
-            get_base_model_choices(llm_prefs, ctx, is_local)
-                .any(|llm| llm.id.to_string() == model_id)
+            get_base_model_choices(llm_prefs, is_local).any(|llm| llm.id.to_string() == model_id)
         }
         // Non-Oz harnesses only ever offer the "Default model" (empty id)
         // entry — see `populate_model_picker_for_harness`.
@@ -479,7 +465,7 @@ pub fn first_filtered_model_id<V: View>(
         Some(Harness::Oz) | None => {
             let llm_prefs = LLMPreferences::as_ref(ctx);
             llm_prefs
-                .get_base_llm_choices_for_agent_mode(ctx)
+                .get_base_llm_choices_for_agent_mode()
                 .next()
                 .map(|llm| llm.id.to_string())
         }
@@ -884,7 +870,7 @@ pub fn sync_picker_selections<A: OrchestrationControlAction, V: View>(
                 Some(Harness::Oz) | None => {
                     let llm_prefs = LLMPreferences::as_ref(ctx_dropdown);
                     llm_prefs
-                        .get_base_llm_choices_for_agent_mode(ctx_dropdown)
+                        .get_base_llm_choices_for_agent_mode()
                         .find(|llm| llm.id.to_string() == target_model_id)
                         .map(|llm| llm.menu_display_name())
                 }

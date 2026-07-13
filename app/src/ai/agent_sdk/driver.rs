@@ -1373,6 +1373,7 @@ impl AgentDriver {
                 | BlocklistAIHistoryEvent::CreatedSubtask { .. }
                 | BlocklistAIHistoryEvent::UpgradedTask { .. }
                 | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. }
+                | BlocklistAIHistoryEvent::UpdatedConversationTitle { .. }
                 | BlocklistAIHistoryEvent::ClearedActiveConversation { .. }
                 | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
                 | BlocklistAIHistoryEvent::ConversationAgentIdAssigned { .. }

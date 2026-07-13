@@ -113,10 +113,13 @@ if ("$CHANNEL" -eq 'local') {
     $WARP_BIN = 'zap-oss'
     $BINARY_NAME = 'zap-oss.exe'
     $APP_NAME = 'Zap'
-    # The OSS channel uses local crash reporting and does not enable the default release feature set.
+    # The OSS channel does not enable the default release feature set.
     # autoupdate goes through GitHub Release (zerx-lab/warp), only downloading to Downloads, without invoking Inno Setup.
     $FEATURES = 'release_bundle,gui,nld_improvements,autoupdate'
 }
+
+# All channels ship the v3 classifier and v2 heuristic.
+$FEATURES = "$FEATURES,nld_classifier_v3,nld_heuristic_v2"
 
 $BINARY_PATH = "$CARGO_TARGET_OUTPUT_DIR\$BINARY_NAME"
 # AUMID (Windows AppUserModel ID) — must exactly match what the process side generates via `ChannelState::app_id()`,

@@ -1,8 +1,8 @@
-use std::sync::mpsc;
-
 use warp_core::ui::appearance::Appearance;
 use warpui::platform::WindowStyle;
-use warpui::{AddSingletonModel, App, EntityId, ModelHandle, ViewContext, ViewHandle};
+use warpui::{
+    AddSingletonModel, App, EntityId, ModelHandle, SingletonEntity, ViewContext, ViewHandle,
+};
 
 use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::auth::AuthManager;
@@ -16,7 +16,6 @@ use crate::network::NetworkStatus;
 use crate::notebooks::editor::keys::NotebookKeybindings;
 use crate::notebooks::notebook::NotebookView;
 use crate::pane_group::NotebookPane;
-use crate::persistence::ModelEvent;
 use crate::search::files::model::FileSearchModel;
 use crate::settings::PrivacySettings;
 use crate::settings_view::keybindings::KeybindingChangedNotifier;
@@ -31,7 +30,6 @@ use super::NotebookManager;
 
 struct TestState {
     manager: ModelHandle<NotebookManager>,
-    model_events: mpsc::Receiver<ModelEvent>,
 }
 
 impl TestState {
@@ -52,15 +50,6 @@ impl TestState {
         });
 
         notebook
-    }
-
-    /// All model events not yet received.
-    fn model_events(&self) -> Vec<ModelEvent> {
-        let mut events = Vec::new();
-        while let Ok(event) = self.model_events.try_recv() {
-            events.push(event);
-        }
-        events
     }
 }
 
@@ -90,16 +79,12 @@ fn initialize_app(app: &mut App) -> TestState {
     #[cfg(feature = "voice_input")]
     app.add_singleton_model(voice_input::VoiceInput::new);
 
-    let (sender, receiver) = mpsc::sync_channel(10);
-    app.add_singleton_model(|ctx| UpdateManager::new(Some(sender), ctx));
+    app.add_singleton_model(|ctx| UpdateManager::new(None, ctx));
     // Zap (Wave 4): SyncQueue fully removed; the original `sync_queue.start_dequeueing(ctx)` no longer applies.
 
     app.add_singleton_model(ObjectStoreViewModel::mock);
     let manager = app.add_singleton_model(NotebookManager::mock);
-    TestState {
-        manager,
-        model_events: receiver,
-    }
+    TestState { manager }
 }
 
 #[test]
@@ -122,24 +107,23 @@ fn test_save_on_close() {
             });
         });
 
-        // There will be an initial model event to save the notebook.
-        let events = state.model_events();
-        assert_eq!(events.len(), 1, "Expected 1 event, got {events:?}");
+        let notebook_id = notebook.update(&mut app, |notebook, ctx| {
+            notebook
+                .notebook_id(ctx)
+                .expect("notebook should have an id")
+        });
 
         // Closing the notebook manager should trigger a save.
         state
             .manager
             .update(&mut app, |manager, ctx| manager.close_notebooks(ctx));
 
-        // There should now be a pending model event to save the notebook.
-        let events = state.model_events();
-        assert_eq!(events.len(), 1);
-        match &events[0] {
-            ModelEvent::UpsertNotebook { notebook } => {
-                assert_eq!(notebook.model().title, "Test Notebook");
-                assert_eq!(notebook.model().data, "Hello");
-            }
-            other => panic!("Expected an UpsertNotebook event, got {other:?}"),
-        }
+        app.read(|ctx| {
+            let notebook = ObjectStoreModel::as_ref(ctx)
+                .get_notebook(&notebook_id)
+                .expect("notebook should remain in the local object store");
+            assert_eq!(notebook.model().title, "Test Notebook");
+            assert_eq!(notebook.model().data, "Hello");
+        });
     });
 }

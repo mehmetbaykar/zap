@@ -6,6 +6,7 @@ use crate::{
     code::editor::comment_editor::DEFAULT_COMMENT_MAX_WIDTH,
     coding_panel_enablement_state::CodingPanelEnablementState,
 };
+
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -56,6 +57,10 @@ use crate::{
 };
 
 #[cfg(feature = "local_fs")]
+use crate::code_review::git_repo_model::{GitRepoModels, GitRepoStatusEvent, GitRepoStatusModel};
+#[cfg(feature = "local_fs")]
+use crate::code_review::github_repo_model::{GitHubRepoEvent, GitHubRepoModel};
+#[cfg(feature = "local_fs")]
 use crate::code_review::telemetry_event::DiffSetContextScope;
 
 use crate::{
@@ -93,7 +98,7 @@ use crate::terminal::cli_agent::{
 };
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::EditorSettings;
-use crate::util::git::BranchEntry;
+use crate::util::git::{BranchEntry, PrInfo};
 #[cfg(feature = "local_fs")]
 use crate::util::openable_file_type::resolve_file_target_with_editor_choice;
 #[cfg(feature = "local_fs")]
@@ -112,8 +117,9 @@ use rand::{distributions::Alphanumeric, Rng};
 use warp_core::{
     channel::{Channel, ChannelState},
     features::FeatureFlag,
-    safe_error, safe_info,
+    safe_error,
     ui::theme::color::internal_colors,
+    SessionId,
 };
 use warpui::{
     clipboard::ClipboardContent,
@@ -151,8 +157,11 @@ use warpui::{
     ModelHandle, WeakViewHandle,
 };
 
-use crate::code::footer::CodeFooterView;
+use crate::code::footer::{CodeFooterView, CodeFooterViewEvent};
+#[cfg(not(target_family = "wasm"))]
+use crate::code::ShowFindReferencesCard;
 use crate::settings::AISettings;
+use crate::settings_view::SettingsSection;
 use crate::ui_components::{
     blended_colors::{neutral_2, neutral_3},
     buttons::icon_button_with_color,
@@ -637,6 +646,28 @@ struct RelocateCommentsResult {
     fallback_count: usize,
 }
 
+/// Resolves which terminal code review actions should target.
+///
+/// Injected by the hosting view (`RightPanelView`) so target selection is
+/// late-bound: actions land in the conversation the user is currently focused
+/// on rather than a terminal handle captured when the view was constructed.
+pub trait ReviewActionTargetProvider {
+    /// The terminal that should receive attach-as-context payloads. Uses the
+    /// same selection as review comment submission (focused > repo-preferred >
+    /// any available), falling back to the focused terminal inside `repo_path`
+    /// when none are available so per-action handling for busy terminals still
+    /// targets the focused conversation.
+    fn attach_terminal(
+        &self,
+        repo_path: &LocalOrRemotePath,
+        app: &AppContext,
+    ) -> Option<ViewHandle<TerminalView>>;
+
+    /// The focused (or active) terminal of the hosting pane group, regardless
+    /// of repo. Used for environment checks and terminal-targeted actions.
+    fn focused_terminal(&self, app: &AppContext) -> Option<ViewHandle<TerminalView>>;
+}
+
 /// State shared among the entire code review view.
 pub struct CodeReviewView {
     active_repo: Option<RepositoryState>,
@@ -690,7 +721,7 @@ pub struct CodeReviewView {
     diff_state_model: ModelHandle<DiffStateModel>,
     diff_selector: ViewHandle<DiffSelector>,
     header: CodeReviewHeader,
-    terminal_view: Option<WeakViewHandle<TerminalView>>,
+    action_target_provider: Option<Box<dyn ReviewActionTargetProvider>>,
     position_id_prefix: String,
     /// Whether the view is currently open (subscribed to diff state model).
     is_open: bool,
@@ -698,6 +729,12 @@ pub struct CodeReviewView {
     code_review_footer: Option<ViewHandle<CodeFooterView>>,
     /// Active git-operation dialog overlay (commit / push / publish), if open.
     git_dialog: Option<ViewHandle<GitDialog>>,
+    /// Per-repo git status model for the current repository, if any.
+    #[cfg(feature = "local_fs")]
+    git_repo_status: Option<ModelHandle<GitRepoStatusModel>>,
+    /// Per-repo GitHub-info model for the current repository, if any.
+    #[cfg(feature = "local_fs")]
+    github_repo_model: Option<ModelHandle<GitHubRepoModel>>,
 }
 
 impl CodeReviewView {
@@ -720,6 +757,15 @@ impl CodeReviewView {
         &self.diff_state_model
     }
 
+    /// The session this review is being shown in, when available. Supplied
+    /// per-call as the preferred dispatch session for remote `GetDiffState`
+    /// RPCs so the request rides the connection that's actually showing the
+    /// review; `None` falls back to any connected session for the host.
+    fn preferred_review_session(&self, ctx: &ViewContext<Self>) -> Option<SessionId> {
+        self.focused_terminal(ctx)
+            .and_then(|tv| tv.as_ref(ctx).active_block_session_id())
+    }
+
     /// Called when the code review view is opened/attached to a pane group.
     /// Subscribes to the diff state model and enables metadata refresh.
     pub fn on_open(&mut self, ctx: &mut ViewContext<Self>) {
@@ -729,14 +775,68 @@ impl CodeReviewView {
         self.is_open = true;
 
         ctx.subscribe_to_model(&self.diff_state_model, Self::handle_diff_state_model_event);
+        #[cfg(feature = "local_fs")]
+        {
+            self.subscribe_to_git_repo_status_model(ctx);
+            self.subscribe_to_github_repo_model(ctx);
+        }
+        // Remote repos kick off a separate `GetPrInfo` fetch via the remote server manager.
+        // TODO: source the info from the `GitRepoStatusModel` as done for local repos.
+        if FeatureFlag::GitOperationsInCodeReview.is_enabled()
+            && self.repo_path().is_some_and(LocalOrRemotePath::is_remote)
+        {
+            self.diff_state_model.update(ctx, |model, ctx| {
+                model.fetch_pr_info(ctx);
+            });
+        }
         if self.repo_path().is_some() {
             self.fetch_branches_and_setup_dropdown(ctx);
         }
         ctx.notify();
 
+        // Create global LSP footer for the code review panel
+        // TODO: add support for remote repositories
+        if let Some(repo_path) = self
+            .repo_path()
+            .and_then(LocalOrRemotePath::to_local_path)
+            .map(Path::to_path_buf)
+        {
+            let footer =
+                ctx.add_typed_action_view(|ctx| CodeFooterView::new_for_workspace(repo_path, ctx));
+            ctx.subscribe_to_view(&footer, Self::handle_footer_event);
+            self.code_review_footer = Some(footer);
+
+            // Subscribe to PersistedWorkspace events to refresh the footer
+            // UI after LSP installation succeeds or fails.
+            #[cfg(feature = "local_fs")]
+            {
+                use crate::ai::persisted_workspace::{PersistedWorkspace, PersistedWorkspaceEvent};
+
+                // PersistedWorkspace handles spawning the server after install;
+                // we only subscribe to refresh the footer UI.
+                ctx.subscribe_to_model(&PersistedWorkspace::handle(ctx), |me, _, event, ctx| {
+                    match event {
+                        PersistedWorkspaceEvent::InstallationSucceeded
+                        | PersistedWorkspaceEvent::InstallationFailed => {
+                            if let Some(footer) = &me.code_review_footer {
+                                footer.update(ctx, |_, ctx| ctx.notify());
+                            }
+                        }
+                        _ => {}
+                    }
+                });
+            }
+        }
+
+        // Always reload diffs on open. For local, this re-reads the
+        // filesystem. For remote, this re-emits the model's current state
+        // (and will make an RPC once that path is wired). We pass
+        // should_fetch_base: false because re-opening the panel doesn't
+        // need to fetch the base branch from origin.
+        let preferred_session = self.preferred_review_session(ctx);
         self.diff_state_model.update(ctx, |model, ctx| {
             model.set_code_review_metadata_refresh_enabled(true, ctx);
-            model.load_diffs_for_current_repo(false, true, ctx);
+            model.load_diffs_for_current_repo(false, true, preferred_session, ctx);
         });
     }
 
@@ -753,12 +853,184 @@ impl CodeReviewView {
         }
 
         ctx.unsubscribe_to_model(&self.diff_state_model);
+        #[cfg(feature = "local_fs")]
+        {
+            self.unsubscribe_from_git_repo_status_model(ctx);
+            self.unsubscribe_from_github_repo_model(ctx);
+        }
 
         self.code_review_footer = None;
 
         self.diff_state_model.update(ctx, |model, ctx| {
             model.set_code_review_metadata_refresh_enabled(false, ctx);
         });
+    }
+
+    fn handle_footer_event(
+        &mut self,
+        _footer: ViewHandle<CodeFooterView>,
+        event: &CodeFooterViewEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        match event {
+            CodeFooterViewEvent::RunTabConfigSkill { .. } => {}
+            CodeFooterViewEvent::RestartAllServers { servers } => {
+                for server in servers {
+                    server.update(ctx, |server, ctx| {
+                        server.restart(ctx);
+                    });
+                }
+            }
+            CodeFooterViewEvent::StopAllServers { servers } => {
+                for server in servers {
+                    server.update(ctx, |server, ctx| {
+                        let _ = server.stop(true, ctx);
+                    });
+                }
+            }
+            CodeFooterViewEvent::StartAllServers { servers } => {
+                for server in servers {
+                    server.update(ctx, |server, ctx| {
+                        let _ = server.manual_start(ctx);
+                    });
+                }
+            }
+            CodeFooterViewEvent::ManageServers => {
+                ctx.dispatch_typed_action(&WorkspaceAction::ShowSettingsPage(
+                    SettingsSection::EditorAndCodeReview,
+                ));
+            }
+            CodeFooterViewEvent::RestartServer { server } => {
+                server.update(ctx, |server, ctx| {
+                    server.restart(ctx);
+                });
+            }
+            CodeFooterViewEvent::StopServer { server } => {
+                server.update(ctx, |server, ctx| {
+                    let _ = server.stop(true, ctx);
+                });
+            }
+            CodeFooterViewEvent::StartServer { server } => {
+                server.update(ctx, |server, ctx| {
+                    let _ = server.manual_start(ctx);
+                });
+            }
+            CodeFooterViewEvent::OpenLogs { path } => {
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    let lsp_manager = lsp::LspManagerModel::handle(ctx);
+                    if let Some(server) = lsp_manager.as_ref(ctx).server_for_path(path, ctx) {
+                        let repo_root = server.as_ref(ctx).initial_workspace().to_path_buf();
+                        let server_type = server.as_ref(ctx).server_type();
+                        let log_path =
+                            crate::code::lsp_logs::log_file_path(server_type, &repo_root);
+                        self.open_file_in_tab(LocalOrRemotePath::Local(log_path), None, ctx);
+                    }
+                }
+                let _ = path;
+            }
+            CodeFooterViewEvent::EnableLSP { path, server_type } => {
+                Self::handle_enable_lsp(path, *server_type, ctx);
+            }
+            CodeFooterViewEvent::InstallAndEnableLSP { path, server_type } => {
+                Self::handle_install_and_enable_lsp(path, *server_type, ctx);
+            }
+        }
+    }
+
+    #[cfg(feature = "local_fs")]
+    fn handle_enable_lsp(
+        path: &Path,
+        server_type: Option<lsp::supported_servers::LSPServerType>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        use crate::ai::persisted_workspace::{LspTask, PersistedWorkspace};
+
+        let server_type =
+            server_type.or_else(|| lsp::LanguageId::from_path(path).map(|id| id.server_type()));
+        let Some(server_type) = server_type else {
+            return;
+        };
+
+        let repo_root = PersistedWorkspace::as_ref(ctx)
+            .root_for_workspace(path)
+            .map(Path::to_path_buf)
+            .or_else(|| {
+                repo_metadata::repositories::DetectedRepositories::as_ref(ctx)
+                    .get_root_for_path(&LocalOrRemotePath::Local(path.to_path_buf()))
+                    .and_then(|root| root.to_local_path().map(Path::to_path_buf))
+            })
+            .or_else(|| path.parent().map(Path::to_path_buf));
+        let Some(repo_root) = repo_root else {
+            return;
+        };
+
+        PersistedWorkspace::handle(ctx).update(ctx, |workspace, _| {
+            workspace.enable_lsp_server_for_path(&repo_root, server_type);
+        });
+        PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
+            workspace.execute_lsp_task(
+                LspTask::Spawn {
+                    file_path: path.to_path_buf(),
+                },
+                ctx,
+            );
+        });
+    }
+
+    #[cfg(feature = "local_fs")]
+    fn handle_install_and_enable_lsp(
+        path: &Path,
+        server_type: Option<lsp::supported_servers::LSPServerType>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        use crate::ai::persisted_workspace::{LspTask, PersistedWorkspace};
+
+        let server_type =
+            server_type.or_else(|| lsp::LanguageId::from_path(path).map(|id| id.server_type()));
+        let Some(server_type) = server_type else {
+            return;
+        };
+
+        let repo_root = PersistedWorkspace::as_ref(ctx)
+            .root_for_workspace(path)
+            .map(Path::to_path_buf)
+            .or_else(|| {
+                repo_metadata::repositories::DetectedRepositories::as_ref(ctx)
+                    .get_root_for_path(&LocalOrRemotePath::Local(path.to_path_buf()))
+                    .and_then(|root| root.to_local_path().map(Path::to_path_buf))
+            })
+            .or_else(|| path.parent().map(Path::to_path_buf));
+        let Some(repo_root) = repo_root else {
+            return;
+        };
+
+        PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
+            workspace.execute_lsp_task(
+                LspTask::Install {
+                    file_path: path.to_path_buf(),
+                    repo_root,
+                    server_type,
+                },
+                ctx,
+            );
+        });
+    }
+
+    #[cfg(not(feature = "local_fs"))]
+    fn handle_enable_lsp(
+        _path: &Path,
+        _server_type: Option<lsp::supported_servers::LSPServerType>,
+        _ctx: &mut ViewContext<Self>,
+    ) {
+    }
+
+    #[cfg(not(feature = "local_fs"))]
+    fn handle_install_and_enable_lsp(
+        _path: &Path,
+        _server_type: Option<lsp::supported_servers::LSPServerType>,
+        _ctx: &mut ViewContext<Self>,
+    ) {
     }
 
     fn set_active_repo_comment_model(
@@ -908,7 +1180,7 @@ impl CodeReviewView {
         repo_path: Option<LocalOrRemotePath>,
         diff_state_model: ModelHandle<DiffStateModel>,
         comment_batch_model: Option<ModelHandle<ReviewCommentBatch>>,
-        terminal_view: Option<WeakViewHandle<TerminalView>>,
+        action_target_provider: Option<Box<dyn ReviewActionTargetProvider>>,
         ctx: &mut ViewContext<Self>,
     ) -> Self {
         // TODO(asweet): Migrate subscription and event handling of diff_state_model to RepositoryState
@@ -1116,7 +1388,7 @@ impl CodeReviewView {
             position_id_prefix: random_str,
             viewported_list_state: list_state,
             scroll_state: ScrollStateHandle::default(),
-            terminal_view,
+            action_target_provider,
             window_id: ctx.window_id(),
             undo_action_button,
             last_revert: None,
@@ -1140,6 +1412,10 @@ impl CodeReviewView {
             is_open: false,
             code_review_footer: None,
             git_dialog: None,
+            #[cfg(feature = "local_fs")]
+            git_repo_status: None,
+            #[cfg(feature = "local_fs")]
+            github_repo_model: None,
         };
         view.set_active_repo_comment_model(comment_batch_model, ctx);
         if has_repo {
@@ -1148,10 +1424,6 @@ impl CodeReviewView {
         }
 
         view
-    }
-
-    pub fn set_terminal_view(&mut self, terminal_view: WeakViewHandle<TerminalView>) {
-        self.terminal_view = Some(terminal_view);
     }
 
     pub fn set_review_destination(
@@ -1375,8 +1647,9 @@ impl CodeReviewView {
             ctx
         );
 
+        let preferred_session = self.preferred_review_session(ctx);
         self.diff_state_model.update(ctx, |model, ctx| {
-            model.set_diff_mode(mode, false, true, ctx);
+            model.set_diff_mode(mode, false, true, preferred_session, ctx);
         });
         self.update_diff_selector_selection(ctx);
         self.invalidate_all(None, ctx);
@@ -2081,6 +2354,17 @@ impl CodeReviewView {
             DiffStateModelEvent::CurrentBranchChanged => {
                 self.fetch_branches_and_setup_dropdown(ctx);
                 self.update_diff_selector_selection(ctx);
+                // PR info is branch-specific. Local repos re-fetch automatically
+                // via `GitRepoStatusModel` (it keys off branch changes); remote
+                // repos must re-issue `GetPrInfo` here, since the diff-state
+                // sync doesn't carry PR info.
+                if FeatureFlag::GitOperationsInCodeReview.is_enabled()
+                    && self.repo_path().is_some_and(LocalOrRemotePath::is_remote)
+                {
+                    self.diff_state_model.update(ctx, |model, ctx| {
+                        model.fetch_pr_info(ctx);
+                    });
+                }
             }
             DiffStateModelEvent::NewDiffsComputed { diffs, .. } => {
                 self.invalidate_all(diffs.as_ref().map(|d| d.as_ref()), ctx);
@@ -2126,6 +2410,11 @@ impl CodeReviewView {
                     repo.available_branches = branches.clone();
                 }
                 self.update_diff_selector_selection(ctx);
+            }
+            DiffStateModelEvent::GitOpCompleted(_)
+            | DiffStateModelEvent::CommitMessageGenerated(_)
+            | DiffStateModelEvent::BranchCommittedFilesReceived(_) => {
+                // Handled by GitDialog's own subscription.
             }
         }
     }
@@ -2540,9 +2829,19 @@ impl CodeReviewView {
         )
     }
 
-    /// Get the terminal view for the current repo. Returns None if no repo or no terminal.
-    pub fn terminal_view(&self, app: &AppContext) -> Option<ViewHandle<TerminalView>> {
-        self.terminal_view.as_ref().and_then(|tv| tv.upgrade(app))
+    /// The terminal that attach-as-context actions should target, resolved at
+    /// action time for the current repo. Returns None if no repo, no provider,
+    /// or no suitable terminal.
+    fn attach_target_terminal(&self, app: &AppContext) -> Option<ViewHandle<TerminalView>> {
+        let repo_path = self.repo_path()?;
+        self.action_target_provider
+            .as_ref()?
+            .attach_terminal(repo_path, app)
+    }
+
+    /// The focused terminal of the hosting pane group, if any.
+    fn focused_terminal(&self, app: &AppContext) -> Option<ViewHandle<TerminalView>> {
+        self.action_target_provider.as_ref()?.focused_terminal(app)
     }
 
     fn diff_state(&self, app: &AppContext) -> DiffState {
@@ -2565,7 +2864,7 @@ impl CodeReviewView {
 
     #[cfg(not(target_family = "wasm"))]
     fn session_env(&self, app: &AppContext) -> Option<GitSessionState> {
-        let terminal_view = self.terminal_view.as_ref()?.upgrade(app)?;
+        let terminal_view = self.focused_terminal(app)?;
         terminal_view.read(app, |terminal, ctx| {
             let session = terminal
                 .active_block_session_id()
@@ -2721,6 +3020,12 @@ impl CodeReviewView {
                                         .code_review_list_position_id
                                         .clone(),
                                     window_id: ctx.window_id(),
+                                })
+                                .with_show_find_references_provider(ShowFindReferencesCard {
+                                    editor_window_id: ctx.window_id(),
+                                    parent_scrollable_position_id: Some(
+                                        self.code_review_list_position_id.clone(),
+                                    ),
                                 }),
                                 ctx,
                             )
@@ -2745,7 +3050,7 @@ impl CodeReviewView {
                 )
                 .with_selection_as_context(Box::new(move |_, app| {
                     self_handle.upgrade(app).and_then(|code_review_view| {
-                        code_review_view.as_ref(app).terminal_view(app)
+                        code_review_view.as_ref(app).attach_target_terminal(app)
                     })
                 }));
 
@@ -2838,7 +3143,7 @@ impl CodeReviewView {
                     local_code_view =
                         local_code_view.with_selection_as_context(Box::new(move |_, app| {
                             self_handle.upgrade(app).and_then(|code_review_view| {
-                                code_review_view.as_ref(app).terminal_view(app)
+                                code_review_view.as_ref(app).attach_target_terminal(app)
                             })
                         }));
                 }
@@ -2989,6 +3294,31 @@ impl CodeReviewView {
                         .invalidate_height_for_index(index);
                     ctx.notify();
                 }
+            }
+            #[cfg(not(target_family = "wasm"))]
+            LocalCodeEditorEvent::GotoDefinition {
+                path,
+                line,
+                column,
+                source_server_id,
+            } => {
+                let lsp_manager = lsp::LspManagerModel::handle(ctx);
+                lsp_manager.update(ctx, |manager, _| {
+                    manager.maybe_register_external_file(path, *source_server_id);
+                });
+
+                self.open_file_in_tab(
+                    LocalOrRemotePath::Local(path.clone()),
+                    Some(LineAndColumnArg {
+                        line_num: *line + 1,
+                        column_num: Some(*column),
+                    }),
+                    ctx,
+                );
+            }
+            #[cfg(not(target_family = "wasm"))]
+            LocalCodeEditorEvent::OpenLspLogs { log_path } => {
+                self.open_file_in_tab(LocalOrRemotePath::Local(log_path.clone()), None, ctx);
             }
             _ => (),
         }
@@ -3881,13 +4211,13 @@ impl CodeReviewView {
                 .finish(),
             );
 
-        if let Some(repo_path) = self.repo_path().and_then(LocalOrRemotePath::to_local_path) {
+        if let Some(repo_path) = self.repo_path() {
             // Check for initialized project-scoped rules.
             if let Some(rules) =
                 ProjectContextModel::as_ref(app).find_applicable_project_rules(repo_path)
             {
                 if let Some(first_rule) = rules.active_rules.first() {
-                    if let Some(file_name) = first_rule.path.file_name().and_then(|n| n.to_str()) {
+                    if let Some(file_name) = first_rule.path.file_name() {
                         zero_state_column.add_child(
                             Container::new(
                                 Text::new(
@@ -4940,10 +5270,10 @@ impl CodeReviewView {
         let theme = appearance.theme();
 
         let diff_size = file.file_diff.size;
-        if diff_size == DiffSize::Unrenderable {
+        if let DiffSize::Unrenderable(reason) = diff_size {
             return Self::styled_file_content_container(
                 Text::new(
-                    "Diff is too large to render",
+                    reason.to_string(),
                     appearance.monospace_font_family(),
                     appearance.monospace_font_size(),
                 )
@@ -5447,7 +5777,7 @@ impl CodeReviewView {
         selected_text: String,
         ctx: &mut ViewContext<Self>,
     ) {
-        if let Some(terminal_view) = self.terminal_view.as_ref().and_then(|tv| tv.upgrade(ctx)) {
+        if let Some(terminal_view) = self.attach_target_terminal(ctx) {
             // If a CLI agent is active, send appropriate content to the PTY.
             let prompt = if start_line == end_line {
                 // Single-line: send the literal text with file/line context.
@@ -5535,11 +5865,7 @@ impl CodeReviewView {
     /// Insert diff set as context in the terminal input (either all files or a specific file)
     #[cfg(feature = "local_fs")]
     fn insert_diff_as_context(&mut self, scope: DiffSetScope, ctx: &mut ViewContext<Self>) {
-        if let Some(terminal_view) = self
-            .terminal_view
-            .as_ref()
-            .and_then(|view| view.upgrade(ctx))
-        {
+        if let Some(terminal_view) = self.attach_target_terminal(ctx) {
             let active_cli_agent = terminal_view.read(ctx, |tv, ctx| tv.active_cli_agent(ctx));
 
             let diff_set_scope = match &scope {
@@ -5730,8 +6056,9 @@ impl CodeReviewView {
     }
 
     pub(crate) fn set_diff_base(&mut self, diff_mode: DiffMode, ctx: &mut ViewContext<Self>) {
+        let preferred_session = self.preferred_review_session(ctx);
         self.diff_state_model.update(ctx, |diff_state_model, ctx| {
-            diff_state_model.set_diff_mode_and_fetch_base(diff_mode, ctx);
+            diff_state_model.set_diff_mode_and_fetch_base(diff_mode, preferred_session, ctx);
         });
         self.update_diff_selector_selection(ctx);
         self.invalidate_all(None, ctx);
@@ -5748,7 +6075,7 @@ impl CodeReviewView {
             return;
         };
         // Try to get the terminal view and insert the context
-        if let Some(terminal_view) = self.terminal_view.as_ref().and_then(|tv| tv.upgrade(ctx)) {
+        if let Some(terminal_view) = self.attach_target_terminal(ctx) {
             let is_long_running =
                 terminal_view.read(ctx, |terminal_view, _| terminal_view.is_long_running());
             let active_cli_agent = terminal_view.read(ctx, |tv, ctx| tv.active_cli_agent(ctx));
@@ -6047,16 +6374,6 @@ impl CodeReviewView {
         }
     }
 
-    /// Refreshes metadata after a git operation (commit, push, etc.).
-    /// Diff reloading is left to the file watcher (for commits) or skipped
-    /// entirely (for push/create-PR where the working directory is unchanged).
-    fn refresh_after_git_operation(&mut self, ctx: &mut ViewContext<Self>) {
-        self.diff_state_model.update(ctx, |model, ctx| {
-            model.refresh_metadata_after_git_operation(ctx);
-        });
-        ctx.notify();
-    }
-
     /// Returns whether the working tree has uncommitted changes.
     ///
     /// This reads the `against_head` metadata directly rather than the loaded
@@ -6071,6 +6388,125 @@ impl CodeReviewView {
             .is_some_and(|stats| !stats.has_no_changes())
     }
 
+    /// Returns PR info for the current branch.
+    ///
+    /// Routed by repo location: local repos read from the per-repo
+    /// `GitHubRepoModel`, while remote repos read from the diff model.
+    fn pr_info(&self, ctx: &AppContext) -> Option<PrInfo> {
+        if self.repo_path().is_some_and(LocalOrRemotePath::is_remote) {
+            return self.diff_state_model.as_ref(ctx).pr_info(ctx);
+        }
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "local_fs")] {
+                let github_repo_model = self.github_repo_model.as_ref()?;
+                github_repo_model.as_ref(ctx).pr_info(ctx).cloned()
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Whether a `gh pr view` lookup is currently in flight.
+    fn is_pr_info_refreshing(&self, ctx: &AppContext) -> bool {
+        #[cfg(feature = "local_fs")]
+        {
+            self.github_repo_model
+                .as_ref()
+                .map(|h| h.as_ref(ctx).is_refreshing_pr_info(ctx))
+                .unwrap_or(false)
+        }
+
+        #[cfg(not(feature = "local_fs"))]
+        {
+            let _ = ctx;
+            false
+        }
+    }
+
+    #[cfg(feature = "local_fs")]
+    fn refresh_pr_info(&self, ctx: &mut ViewContext<Self>) {
+        let Some(handle) = self.github_repo_model.as_ref() else {
+            return;
+        };
+        handle.update(ctx, |model, ctx| {
+            model.refresh_pr_info(ctx);
+        });
+    }
+
+    #[cfg(not(feature = "local_fs"))]
+    fn refresh_pr_info(&self, _ctx: &mut ViewContext<Self>) {}
+
+    /// Subscribes to the per-repo git status model.
+    #[cfg(feature = "local_fs")]
+    fn subscribe_to_git_repo_status_model(&mut self, ctx: &mut ViewContext<Self>) {
+        let Some(repo_path) = self
+            .repo_path()
+            .and_then(LocalOrRemotePath::to_local_path)
+            .map(Path::to_path_buf)
+        else {
+            return;
+        };
+        let result =
+            GitRepoModels::handle(ctx).update(ctx, |model, ctx| model.subscribe(&repo_path, ctx));
+        let handle = match result {
+            Ok(handle) => handle,
+            Err(err) => {
+                log::warn!("CodeReviewView git status subscribe failed: {err}");
+                return;
+            }
+        };
+        ctx.subscribe_to_model(&handle, |me, _, event, ctx| match event {
+            GitRepoStatusEvent::MetadataChanged => {
+                me.update_git_operations_ui(ctx);
+            }
+        });
+        self.git_repo_status = Some(handle);
+    }
+
+    /// Subscribes to the per-repo GitHub-info model.
+    #[cfg(feature = "local_fs")]
+    fn subscribe_to_github_repo_model(&mut self, ctx: &mut ViewContext<Self>) {
+        let Some(repo_path) = self
+            .repo_path()
+            .and_then(LocalOrRemotePath::to_local_path)
+            .map(Path::to_path_buf)
+        else {
+            return;
+        };
+
+        let result = GitRepoModels::handle(ctx).update(ctx, |model, ctx| {
+            model.subscribe_github_repo(&repo_path, ctx)
+        });
+        let handle = match result {
+            Ok(handle) => handle,
+            Err(err) => {
+                log::warn!("CodeReviewView github repo subscribe failed: {err}");
+                return;
+            }
+        };
+        ctx.subscribe_to_model(&handle, |me, _, event, ctx| match event {
+            GitHubRepoEvent::PrInfoChanged => {
+                me.update_git_operations_ui(ctx);
+            }
+            // Repository name/owner doesn't affect the git-ops UI.
+            GitHubRepoEvent::RepositoryInfoChanged => {}
+        });
+        self.github_repo_model = Some(handle);
+    }
+
+    #[cfg(feature = "local_fs")]
+    fn unsubscribe_from_git_repo_status_model(&mut self, ctx: &mut ViewContext<Self>) {
+        if let Some(handle) = self.git_repo_status.take() {
+            ctx.unsubscribe_to_model(&handle);
+        }
+    }
+
+    #[cfg(feature = "local_fs")]
+    fn unsubscribe_from_github_repo_model(&mut self, ctx: &mut ViewContext<Self>) {
+        if let Some(handle) = self.github_repo_model.take() {
+            ctx.unsubscribe_to_model(&handle);
+        }
+    }
     /// Opens a `GitDialog` overlay for the given `kind`. Centralizes the
     /// common guards (single-dialog invariant, git-ops blocked check, repo
     /// + branch lookup), the per-kind dialog construction, and the event
@@ -6088,13 +6524,10 @@ impl CodeReviewView {
         {
             return;
         }
-        let Some(repo_path) = self
-            .repo_path()
-            .and_then(LocalOrRemotePath::to_local_path)
-            .map(Path::to_path_buf)
-        else {
+        let Some(repo_path) = self.repo_path().cloned() else {
             return;
         };
+        let diff_state_model = self.diff_state_model.clone();
         let branch_name = self
             .diff_state_model
             .read(ctx, |model, ctx| model.get_current_branch_name(ctx))
@@ -6111,6 +6544,7 @@ impl CodeReviewView {
                 ctx.add_typed_action_view(|ctx| {
                     GitDialog::new_for_commit(
                         repo_path,
+                        diff_state_model,
                         branch_name,
                         allow_create_pr,
                         has_upstream,
@@ -6123,7 +6557,14 @@ impl CodeReviewView {
                     .diff_state_model
                     .read(ctx, |model, ctx| model.unpushed_commits(ctx).to_vec());
                 ctx.add_typed_action_view(|ctx| {
-                    GitDialog::new_for_push(repo_path, branch_name, publish, commits, ctx)
+                    GitDialog::new_for_push(
+                        repo_path,
+                        diff_state_model,
+                        branch_name,
+                        publish,
+                        commits,
+                        ctx,
+                    )
                 })
             }
             GitDialogKind::CreatePr => {
@@ -6131,7 +6572,13 @@ impl CodeReviewView {
                     .diff_state_model
                     .read(ctx, |model, ctx| model.get_main_branch_name(ctx));
                 ctx.add_typed_action_view(|ctx| {
-                    GitDialog::new_for_pr(repo_path, branch_name, base_branch_name, ctx)
+                    GitDialog::new_for_pr(
+                        repo_path,
+                        diff_state_model,
+                        branch_name,
+                        base_branch_name,
+                        ctx,
+                    )
                 })
             }
         };
@@ -6140,7 +6587,7 @@ impl CodeReviewView {
             match event {
                 GitDialogEvent::Completed => {
                     me.git_dialog = None;
-                    me.refresh_after_git_operation(ctx);
+                    me.refresh_pr_info(ctx);
                 }
                 GitDialogEvent::Cancelled => {
                     me.git_dialog = None;
@@ -6857,8 +7304,9 @@ impl TypedActionView for CodeReviewView {
                 self.save_files(unsaved_files.as_slice(), ctx);
             }
             CodeReviewAction::RefreshGitState => {
+                let preferred_session = self.preferred_review_session(ctx);
                 self.diff_state_model.update(ctx, |model, ctx| {
-                    model.load_diffs_for_current_repo(false, true, ctx);
+                    model.load_diffs_for_current_repo(false, true, preferred_session, ctx);
                     model.refresh_metadata_after_git_operation(ctx);
                 });
             }
@@ -7030,13 +7478,12 @@ impl TypedActionView for CodeReviewView {
                 ctx.focus_self();
             }
             CodeReviewAction::OpenRepository => {
-                if let Some(terminal_view) = self.terminal_view(ctx) {
+                if let Some(terminal_view) = self.focused_terminal(ctx) {
                     terminal_view.update(ctx, |terminal, ctx| {
                         terminal.handle_action(&TerminalAction::PickRepoToOpen, ctx);
                     });
                 }
             }
-
             CodeReviewAction::OpenCommitDialog => {
                 send_telemetry_from_ctx!(
                     CodeReviewTelemetryEvent::GitButtonTriggered {

@@ -7,12 +7,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use ai::agent::convert::ConvertToAPITypeError;
-use ai::api_keys::ApiKeyManager;
 pub use convert_from::{
     user_inputs_from_messages, ConversionParams, ConvertAPIMessageToClientOutputMessage,
     MaybeAIAgentOutputMessage, MessageToAIAgentOutputMessageError,
 };
 use futures_lite::Stream;
+use mcp::TemplatableMCPServerInfo;
 use serde::Serialize;
 use warp_core::channel::ChannelState;
 use warp_core::execution_mode::AppExecutionMode;
@@ -26,16 +26,15 @@ use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::api_error::AIApiError;
 use crate::ai::blocklist::{BlocklistAIPermissions, RequestInput, SessionContext};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
+use crate::ai::execution_profiles::AIExecutionProfileAppExt;
 use crate::ai::facts::{AIFact, AIFactObjectModel};
 use crate::ai::llms::LLMId;
-use crate::ai::mcp::templatable_manager::TemplatableMCPServerInfo;
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::StoredObject;
 use crate::settings::AISettings;
 use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
-use crate::workspaces::user_workspaces::UserWorkspaces;
 
 /// Unique, server-generated conversation-scoped token to be roundtripped to the API when sending
 /// requests that follow-up within a given conversation.
@@ -54,14 +53,6 @@ impl ServerConversationToken {
     pub fn debug_link(&self) -> String {
         format!(
             "{}://debug/maa/{}",
-            ChannelState::url_scheme(),
-            self.as_str()
-        )
-    }
-
-    pub fn conversation_link(&self) -> String {
-        format!(
-            "{}://conversation/{}",
             ChannelState::url_scheme(),
             self.as_str()
         )
@@ -103,8 +94,6 @@ pub struct RequestParams {
     pub planning_enabled: bool,
     should_redact_secrets: bool,
 
-    /// User-provided API keys for AI providers (BYO API Key).
-    pub api_keys: Option<warp_multi_agent_api::request::settings::ApiKeys>,
     pub allow_use_of_warp_credits: bool,
     pub autonomy_level: warp_multi_agent_api::AutonomyLevel,
     pub isolation_level: warp_multi_agent_api::IsolationLevel,
@@ -218,7 +207,6 @@ impl RequestParams {
             mcp_context: None,
             planning_enabled: true,
             should_redact_secrets: false,
-            api_keys: None,
             allow_use_of_warp_credits: false,
             autonomy_level: warp_multi_agent_api::AutonomyLevel::Supervised,
             isolation_level: warp_multi_agent_api::IsolationLevel::None,
@@ -328,13 +316,6 @@ impl RequestParams {
 
         let should_redact_secrets = get_secret_obfuscation_mode(app).should_redact_secret();
 
-        let user_workspaces = UserWorkspaces::as_ref(app);
-        let api_key_manager = ApiKeyManager::as_ref(app);
-        let is_byo_enabled = user_workspaces.is_byo_api_key_enabled();
-        let api_keys = api_key_manager.api_keys_for_request(
-            is_byo_enabled,
-            user_workspaces.is_aws_bedrock_credentials_enabled(app),
-        );
         let allow_use_of_warp_credits = false;
 
         let app_execution_mode = AppExecutionMode::as_ref(app);
@@ -386,19 +367,10 @@ impl RequestParams {
         // server-side, drop the override; otherwise clamp it to the model's
         // current `[min, max]` range. This closes the window between an
         // in-flight model metadata refresh and the next request.
-        let context_window_limit = {
-            let profile_data = AIExecutionProfilesModel::as_ref(app)
-                .active_profile(terminal_view_id, app)
-                .data()
-                .clone();
-            profile_data
-                .configurable_context_window(app)
-                .and_then(|cw| {
-                    profile_data
-                        .context_window_limit
-                        .map(|v| v.clamp(cw.min, cw.max))
-                })
-        };
+        let context_window_limit = AIExecutionProfilesModel::as_ref(app)
+            .active_profile(terminal_view_id, app)
+            .data()
+            .context_window_limit_for_request(app);
 
         Self {
             input: request_input.all_inputs().cloned().collect(),
@@ -420,7 +392,6 @@ impl RequestParams {
             mcp_context,
             planning_enabled: true,
             should_redact_secrets,
-            api_keys,
             allow_use_of_warp_credits,
             autonomy_level,
             isolation_level,

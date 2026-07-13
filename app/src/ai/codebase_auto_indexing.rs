@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::hash::Hash;
 
 use warp_core::features::FeatureFlag;
-use warpui::SingletonEntity;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum CodebaseAutoIndexingSurface {
@@ -14,14 +13,16 @@ impl CodebaseAutoIndexingSurface {
     fn required_feature_enabled(self) -> bool {
         match self {
             Self::Local => true,
-            Self::Remote => FeatureFlag::RemoteCodebaseIndexing.is_enabled(),
+            // Remote indexing requires Warp's hosted embedding/search backend, which Zap does
+            // not carry. Keep the status surface but never issue remote index requests.
+            Self::Remote => false,
         }
     }
 }
 
 pub(crate) fn should_auto_index_codebase(surface: CodebaseAutoIndexingSurface) -> bool {
-    // Zap does not carry Warp's hosted embedding/search backend. Keep the remote
-    // daemon's status model, but do not start an index that cannot be queried.
+    // Zap does not carry Warp's hosted embedding/search backend. Keep the local and remote
+    // status/gating shell, but do not start an index that cannot be queried.
     codebase_auto_indexing_enabled(surface, false, false)
 }
 
@@ -60,72 +61,5 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn local_auto_indexing_requires_full_source_code_embedding_codebase_context_and_auto_indexing()
-    {
-        {
-            let _flag = FeatureFlag::FullSourceCodeEmbedding.override_enabled(false);
-            assert!(!codebase_auto_indexing_enabled(
-                CodebaseAutoIndexingSurface::Local,
-                true,
-                true,
-            ));
-        }
-        {
-            let _flag = FeatureFlag::FullSourceCodeEmbedding.override_enabled(true);
-            assert!(codebase_auto_indexing_enabled(
-                CodebaseAutoIndexingSurface::Local,
-                true,
-                true,
-            ));
-            assert!(!codebase_auto_indexing_enabled(
-                CodebaseAutoIndexingSurface::Local,
-                false,
-                true,
-            ));
-            assert!(!codebase_auto_indexing_enabled(
-                CodebaseAutoIndexingSurface::Local,
-                true,
-                false,
-            ));
-            assert!(!codebase_auto_indexing_enabled(
-                CodebaseAutoIndexingSurface::Local,
-                false,
-                false,
-            ));
-        }
-    }
-
-    #[test]
-    fn remote_auto_indexing_requires_remote_feature() {
-        {
-            let _remote_flag = FeatureFlag::RemoteCodebaseIndexing.override_enabled(false);
-            let _flag = FeatureFlag::FullSourceCodeEmbedding.override_enabled(true);
-            assert!(!codebase_auto_indexing_enabled(
-                CodebaseAutoIndexingSurface::Remote,
-                true,
-                true,
-            ));
-        }
-        {
-            let _remote_flag = FeatureFlag::RemoteCodebaseIndexing.override_enabled(true);
-            let _flag = FeatureFlag::FullSourceCodeEmbedding.override_enabled(true);
-            assert!(codebase_auto_indexing_enabled(
-                CodebaseAutoIndexingSurface::Remote,
-                true,
-                true,
-            ));
-        }
-    }
-
-    #[test]
-    fn candidate_roots_are_deduped_before_filtering() {
-        let roots = vec!["/repo", "/repo", "/other"];
-        let candidates = auto_index_candidate_roots(roots, |root| *root != "/other");
-
-        assert_eq!(candidates, vec!["/repo"]);
-    }
-}
+#[path = "codebase_auto_indexing_tests.rs"]
+mod tests;

@@ -20,28 +20,28 @@ use std::time::Duration;
 use super::super::setup;
 
 /// Path to the daemon's Unix domain socket, versioned on release channels.
-pub(super) fn socket_path(identity_key: &str) -> PathBuf {
-    let dir = setup::remote_server_daemon_dir(identity_key);
+pub(super) fn socket_path() -> PathBuf {
+    let dir = setup::remote_server_daemon_dir();
     let expanded = shellexpand::tilde(&dir).into_owned();
     PathBuf::from(expanded).join(setup::daemon_socket_name())
 }
 
 /// Path to the daemon's PID file (also used as the flock target),
 /// versioned on release channels.
-pub(super) fn pid_path(identity_key: &str) -> PathBuf {
-    let dir = setup::remote_server_daemon_dir(identity_key);
+pub(super) fn pid_path() -> PathBuf {
+    let dir = setup::remote_server_daemon_dir();
     let expanded = shellexpand::tilde(&dir).into_owned();
     PathBuf::from(expanded).join(setup::daemon_pid_name())
 }
 
-/// Daemon directory for the given identity key (expanded, no tilde).
-fn daemon_dir(identity_key: &str) -> PathBuf {
-    let dir = setup::remote_server_daemon_dir(identity_key);
+/// Daemon directory expanded without a tilde.
+fn daemon_dir() -> PathBuf {
+    let dir = setup::remote_server_daemon_dir();
     let expanded = shellexpand::tilde(&dir).into_owned();
     PathBuf::from(expanded)
 }
 
-/// Scans the identity-key daemon directory and removes socket/PID files
+/// Scans the daemon directory and removes socket/PID files
 /// from previous daemon versions.
 ///
 /// Old daemons are **not** killed — they may still be serving active
@@ -51,8 +51,8 @@ fn daemon_dir(identity_key: &str) -> PathBuf {
 /// it down naturally after the last client disconnects.
 ///
 /// Errors are logged but do not prevent the proxy from proceeding.
-fn cleanup_old_versions(identity_key: &str) {
-    let dir = daemon_dir(identity_key);
+fn cleanup_old_versions() {
+    let dir = daemon_dir();
     let current_socket = setup::daemon_socket_name();
     let current_pid = setup::daemon_pid_name();
 
@@ -102,17 +102,17 @@ const SUN_PATH_MAX: usize = 103;
 ///
 /// Ensures the daemon is running, then bridges stdin/stdout to the daemon's
 /// Unix socket for the lifetime of this SSH session.
-pub fn run(identity_key: &str) -> anyhow::Result<()> {
-    let socket_path = socket_path(identity_key);
-    let pid_path = pid_path(identity_key);
+pub fn run() -> anyhow::Result<()> {
+    let socket_path = socket_path();
+    let pid_path = pid_path();
 
     // Guard against socket paths that exceed the sun_path limit.
     // Without this check, UnixListener::bind fails silently in the
     // daemon and the proxy times out after 10s with no actionable
-    // error.  With hashed identity + version names the path should
-    // always fit, so hitting this guard indicates a new path component
-    // was added without budgeting for sun_path.  The error surfaces in
-    // client telemetry (RemoteServerInitialization) and daemon logs.
+    // error. The per-user daemon directory and versioned names should always
+    // fit, so hitting this guard indicates a new path component was added
+    // without budgeting for sun_path. The error surfaces in client
+    // diagnostics and daemon logs.
     let path_len = socket_path.as_os_str().len();
     if path_len > SUN_PATH_MAX {
         anyhow::bail!(
@@ -129,7 +129,7 @@ pub fn run(identity_key: &str) -> anyhow::Result<()> {
 
     // Clean up socket/PID files from previous daemon versions so stale
     // daemons left over after autoupdate don't linger.
-    cleanup_old_versions(identity_key);
+    cleanup_old_versions();
 
     // ---- Acquire exclusive flock on the PID file --------------------------------
     //
@@ -170,8 +170,6 @@ pub fn run(identity_key: &str) -> anyhow::Result<()> {
         let exe = std::env::current_exe()?;
         let mut cmd = command::blocking::Command::new(&exe);
         cmd.arg("remote-server-daemon")
-            .arg("--identity-key")
-            .arg(identity_key)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());

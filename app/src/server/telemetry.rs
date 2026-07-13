@@ -55,13 +55,11 @@ use crate::tab::TabTelemetryAction;
 use crate::terminal::block_list_viewport::InputMode;
 use crate::terminal::cli_agent_sessions::{CLIAgentInputEntrypoint, CLIAgentRichInputCloseReason};
 use crate::terminal::input::TelemetryInputSuggestionsMode;
-use crate::terminal::model::ansi::WarpificationUnavailableReason;
 use crate::terminal::model::block::BlockId;
 use crate::terminal::model::session::SessionId;
-use crate::terminal::model::terminal_model::{BlockSelectionCardinality, TmuxInstallationState};
+use crate::terminal::model::terminal_model::BlockSelectionCardinality;
 use crate::terminal::settings::AltScreenPaddingMode;
 use crate::terminal::shell::ShellType;
-use crate::terminal::ssh::ssh_detection::SshInteractiveSessionDetected;
 use crate::terminal::view::block_onboarding::onboarding_agentic_suggestions_block::OnboardingChipType;
 use crate::terminal::view::inline_banner::{
     ZeroStatePromptSuggestionTriggeredFrom, ZeroStatePromptSuggestionType,
@@ -342,8 +340,6 @@ impl From<rmcp::RmcpError> for MCPServerTelemetryError {
                 // The enum is marked as non-exhaustive, so we need a catch-all.
                 _ => Self::InternalError(err.to_string()),
             },
-            // The enum is marked as non-exhaustive, so we need a catch-all.
-            _ => Self::InternalError(err.to_string()),
         }
     }
 }
@@ -1090,7 +1086,7 @@ impl From<AgentViewEntryOrigin> for TelemetryAgentViewEntryOrigin {
             AgentViewEntryOrigin::OnboardingCallout => Self::OnboardingCallout,
             AgentViewEntryOrigin::ConversationListView => Self::ConversationListView,
             AgentViewEntryOrigin::Onboarding => Self::Onboarding,
-            AgentViewEntryOrigin::Keybinding => Self::Keybinding,
+            AgentViewEntryOrigin::Keybinding(_) => Self::Keybinding,
             AgentViewEntryOrigin::SlashInit => Self::SlashInit,
             AgentViewEntryOrigin::ProjectEntry => Self::ProjectEntry,
             AgentViewEntryOrigin::ClearBuffer => Self::ClearBuffer,
@@ -1126,6 +1122,8 @@ pub enum TelemetryQueuedQueryOrigin {
     InitialCloudMode,
     QueueSlashCommand,
     AutoQueueToggle,
+    CompactAndSlashCommand,
+    ForkAndCompactSlashCommand,
 }
 
 impl From<QueuedQueryOrigin> for TelemetryQueuedQueryOrigin {
@@ -1134,6 +1132,8 @@ impl From<QueuedQueryOrigin> for TelemetryQueuedQueryOrigin {
             QueuedQueryOrigin::InitialCloudMode => Self::InitialCloudMode,
             QueuedQueryOrigin::QueueSlashCommand => Self::QueueSlashCommand,
             QueuedQueryOrigin::AutoQueueToggle => Self::AutoQueueToggle,
+            QueuedQueryOrigin::CompactAndSlashCommand => Self::CompactAndSlashCommand,
+            QueuedQueryOrigin::ForkAndCompactSlashCommand => Self::ForkAndCompactSlashCommand,
         }
     }
 }
@@ -1155,21 +1155,6 @@ pub enum CLISubagentControlState {
     AgentTaggedIn,
     AgentTaggedOut,
 }
-#[derive(Clone, Copy, Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteCodebaseIndexStatusTelemetrySource {
-    Snapshot,
-    PushUpdate,
-    MutationResponse,
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteCodebaseAutoIndexTrigger {
-    NavigatedToGitRepo,
-    CodebaseContextEnablementChanged,
-}
-
 #[derive(Clone)]
 pub enum TelemetryEvent {
     AutosuggestionInserted {
@@ -1602,8 +1587,6 @@ pub enum TelemetryEvent {
     SshRemoteServerChoiceDoNotAskAgainToggled {
         checked: bool,
     },
-    /// An ssh interactive session was detected.
-    SshInteractiveSessionDetected(SshInteractiveSessionDetected),
     SshTmuxWarpifyBannerDisplayed,
     /// A SSH Warpify Block was accepted
     SshTmuxWarpifyBlockAccepted,
@@ -1615,16 +1598,6 @@ pub enum TelemetryEvent {
     AgentToolbarDismissed,
     WarpifyFooterAcceptedWarpify {
         is_ssh: bool,
-    },
-    /// How long until the warpify process succeeded
-    SshTmuxWarpificationSuccess {
-        tmux_installation: Option<TmuxInstallationState>,
-        duration_ms: u64,
-    },
-    /// An SSH Error block was displayed to the user.
-    SshTmuxWarpificationErrorBlock {
-        error: WarpificationUnavailableReason,
-        tmux_installation: Option<TmuxInstallationState>,
     },
     /// A SSH Install Tmux Block was displayed.
     SshInstallTmuxBlockDisplayed,
@@ -2602,18 +2575,6 @@ pub enum TelemetryEvent {
         remote_os: Option<String>,
         remote_arch: Option<String>,
     },
-    /// Emitted when a client request to the remote server fails.
-    RemoteServerClientRequestError {
-        operation: remote_server::manager::RemoteServerOperation,
-        error_type: remote_server::manager::RemoteServerErrorKind,
-        remote_os: Option<String>,
-        remote_arch: Option<String>,
-    },
-    /// Emitted when a server message cannot be decoded (no parseable request_id).
-    RemoteServerMessageDecodingError {
-        remote_os: Option<String>,
-        remote_arch: Option<String>,
-    },
     /// Emitted when the full remote server setup flow completes successfully.
     RemoteServerSetupDuration {
         duration_ms: u64,
@@ -2660,26 +2621,6 @@ pub enum TelemetryEvent {
         remote_arch: Option<String>,
         exit_code: Option<i32>,
         signal_killed: Option<bool>,
-    },
-    /// Emitted when the remote codebase index status changes.
-    RemoteCodebaseIndexStatusChanged {
-        state: remote_server::codebase_index_proto::RemoteCodebaseIndexState,
-        previous_state: Option<remote_server::codebase_index_proto::RemoteCodebaseIndexState>,
-        has_root_hash: bool,
-        has_failure_message: bool,
-        progress_completed: Option<u64>,
-        progress_total: Option<u64>,
-        mutation_kind: Option<remote_server::manager::RemoteCodebaseIndexUpdateOperation>,
-        source: RemoteCodebaseIndexStatusTelemetrySource,
-        remote_os: Option<String>,
-        remote_arch: Option<String>,
-    },
-    /// Emitted when auto-indexing requests one or more remote codebases.
-    RemoteCodebaseAutoIndexRequested {
-        trigger: RemoteCodebaseAutoIndexTrigger,
-        requested_count: usize,
-        remote_os: Option<String>,
-        remote_arch: Option<String>,
     },
     /// Emitted when the user commits a non-empty edit to a queued prompt row.
     QueuedPromptEdited {
@@ -3184,23 +3125,6 @@ impl TelemetryEvent {
             TelemetryEvent::SshRemoteServerChoiceDoNotAskAgainToggled { checked } => {
                 Some(json!({"checked": checked}))
             }
-            TelemetryEvent::SshInteractiveSessionDetected(ssh_interactive_session_detected) => {
-                Some(json!({"ssh_interactive_session": ssh_interactive_session_detected}))
-            }
-            TelemetryEvent::SshTmuxWarpificationSuccess {
-                duration_ms,
-                tmux_installation,
-            } => Some(json!({
-                "duration_ms": duration_ms,
-                "tmux_installation": *tmux_installation,
-            })),
-            TelemetryEvent::SshTmuxWarpificationErrorBlock {
-                error,
-                tmux_installation,
-            } => Some(json!({
-                "error": error,
-                "tmux_installation": *tmux_installation,
-            })),
             TelemetryEvent::WebObjectOpenedOnDesktop { object_metadata } => Some(json!({
                 "object": object_metadata,
             })),
@@ -3848,7 +3772,7 @@ impl TelemetryEvent {
                 remote_arch,
             } => Some(json!({
                 "error": error,
-                "install_source": install_source,
+                "install_source": format!("{install_source:?}"),
                 "remote_os": remote_os,
                 "remote_arch": remote_arch,
             })),
@@ -3861,7 +3785,7 @@ impl TelemetryEvent {
                 signal_killed,
                 proxy_stderr,
             } => Some(json!({
-                "phase": phase,
+                "phase": format!("{phase:?}"),
                 "error": error,
                 "remote_os": remote_os,
                 "remote_arch": remote_arch,
@@ -3897,58 +3821,6 @@ impl TelemetryEvent {
                 "remote_arch": remote_arch,
                 "exit_code": exit_code,
                 "signal_killed": signal_killed,
-            })),
-            TelemetryEvent::RemoteServerClientRequestError {
-                operation,
-                error_type,
-                remote_os,
-                remote_arch,
-            } => Some(json!({
-                "operation": operation,
-                "error_type": error_type,
-                "remote_os": remote_os,
-                "remote_arch": remote_arch,
-            })),
-            TelemetryEvent::RemoteServerMessageDecodingError {
-                remote_os,
-                remote_arch,
-            } => Some(json!({
-                "remote_os": remote_os,
-                "remote_arch": remote_arch,
-            })),
-            TelemetryEvent::RemoteCodebaseIndexStatusChanged {
-                state,
-                previous_state,
-                has_root_hash,
-                has_failure_message,
-                progress_completed,
-                progress_total,
-                mutation_kind,
-                source,
-                remote_os,
-                remote_arch,
-            } => Some(json!({
-                "state": state,
-                "previous_state": previous_state,
-                "has_root_hash": has_root_hash,
-                "has_failure_message": has_failure_message,
-                "progress_completed": progress_completed,
-                "progress_total": progress_total,
-                "mutation_kind": mutation_kind,
-                "source": source,
-                "remote_os": remote_os,
-                "remote_arch": remote_arch,
-            })),
-            TelemetryEvent::RemoteCodebaseAutoIndexRequested {
-                trigger,
-                requested_count,
-                remote_os,
-                remote_arch,
-            } => Some(json!({
-                "trigger": trigger,
-                "requested_count": requested_count,
-                "remote_os": remote_os,
-                "remote_arch": remote_arch,
             })),
             TelemetryEvent::RemoteServerDaemonStartup { timing_data } => {
                 Some(json!({ "timing_data": timing_data }))
@@ -3991,7 +3863,12 @@ impl TelemetryEvent {
                 Some(json!({
                     "remote_os": remote_os,
                     "remote_arch": remote_arch,
-                    "reason": unsupported_reason.as_telemetry_reason(),
+                    "reason": match unsupported_reason {
+                        remote_server::setup::UnsupportedReason::GlibcTooOld { .. } => "glibc_too_old",
+                        remote_server::setup::UnsupportedReason::NonGlibc { .. } => "non_glibc",
+                        remote_server::setup::UnsupportedReason::UnsupportedOs { .. } => "unsupported_os",
+                        remote_server::setup::UnsupportedReason::UnsupportedArch { .. } => "unsupported_arch",
+                    },
                     "detected_libc": detected_libc,
                     "unsupported_os": unsupported_os,
                     "unsupported_arch": unsupported_arch,
@@ -4540,15 +4417,12 @@ impl TelemetryEvent {
             | TelemetryEvent::AddDenylistedSshTmuxWrapperHost
             | TelemetryEvent::RemoveDenylistedSshTmuxWrapperHost
             | TelemetryEvent::ToggleSshTmuxWrapper { .. }
-            | TelemetryEvent::SshInteractiveSessionDetected(_)
             | TelemetryEvent::SshTmuxWarpifyBannerDisplayed
             | TelemetryEvent::SshTmuxWarpifyBlockAccepted
             | TelemetryEvent::SshTmuxWarpifyBlockDismissed
             | TelemetryEvent::WarpifyFooterShown { .. }
             | TelemetryEvent::AgentToolbarDismissed
             | TelemetryEvent::WarpifyFooterAcceptedWarpify { .. }
-            | TelemetryEvent::SshTmuxWarpificationSuccess { .. }
-            | TelemetryEvent::SshTmuxWarpificationErrorBlock { .. }
             | TelemetryEvent::SshInstallTmuxBlockDisplayed
             | TelemetryEvent::SshInstallTmuxBlockAccepted
             | TelemetryEvent::SshInstallTmuxBlockDismissed
@@ -4743,14 +4617,10 @@ impl TelemetryEvent {
             | TelemetryEvent::RemoteServerInitialization { .. }
             | TelemetryEvent::RemoteServerDaemonStartup { .. }
             | TelemetryEvent::RemoteServerDisconnection { .. }
-            | TelemetryEvent::RemoteServerClientRequestError { .. }
-            | TelemetryEvent::RemoteServerMessageDecodingError { .. }
             | TelemetryEvent::RemoteServerSetupDuration { .. }
             | TelemetryEvent::RemoteServerHostUnsupported { .. }
             | TelemetryEvent::RemoteServerReconnection { .. }
-            | TelemetryEvent::RemoteServerReconnectExhausted { .. }
-            | TelemetryEvent::RemoteCodebaseIndexStatusChanged { .. }
-            | TelemetryEvent::RemoteCodebaseAutoIndexRequested { .. } => false,
+            | TelemetryEvent::RemoteServerReconnectExhausted { .. } => false,
             #[cfg(feature = "local_fs")]
             TelemetryEvent::CodePaneOpened { .. }
             | TelemetryEvent::CodePanelsFileOpened { .. }

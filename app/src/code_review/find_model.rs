@@ -156,12 +156,7 @@ impl CodeReviewFindModel {
             return;
         }
 
-        send_telemetry_from_ctx!(
-            CodeReviewTelemetryEvent::FindNavigated {
-                direction,
-            },
-            ctx
-        );
+        send_telemetry_from_ctx!(CodeReviewTelemetryEvent::FindNavigated { direction }, ctx);
 
         let next_index = if let Some(selected) = &self.selected_match {
             match direction {

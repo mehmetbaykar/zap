@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Installs the Zap CLI binary on the remote host, used for remote-server-proxy.
+# Installs the Zap remote-server binary and bundled resources on the remote host.
 #
 # setup.rs replaces these placeholders at runtime:
-#   {download_base_url}     - e.g. https://github.com/mehmetbaykar/zap/releases/latest/download
-#   {install_dir}           - e.g. ~/.zap/remote-server
-#   {binary_name}           - e.g. zap-oss
-#   {version_suffix}        - e.g. -v0.2026..., empty when there is no release tag
-#   {staging_tarball_path}  - SCP fallback pre-uploaded tarball path, empty on the regular download path
+#   {download_base_url}          — e.g. https://github.com/mehmetbaykar/zap/releases/latest/download
+#   {install_dir}                — e.g. ~/.zap/remote-server
+#   {binary_name}                — e.g. zap-oss
+#   {version_suffix}             — e.g. -v0.2026..., empty when there is no release tag
+#   {bundled_resources_dir_name} — global resources directory name (e.g. bundled_resources)
+#   {no_http_client_exit_code}   — exit code when neither curl nor wget is available
+#   {staging_tarball_path}       — SCP fallback pre-uploaded tarball path, empty normally
 set -e
 
 arch=$(uname -m)
@@ -69,7 +71,7 @@ else
     wget -q -O "$tmpdir/zap.tar.gz" "$url"
   else
     echo "error: neither curl nor wget is available" >&2
-    exit 3
+    exit {no_http_client_exit_code}
   fi
 fi
 
@@ -81,4 +83,17 @@ if [ ! -f "$bin" ]; then
 fi
 if [ -z "$bin" ]; then echo "no binary found in tarball" >&2; exit 1; fi
 chmod +x "$bin"
+
+# Install the resources tree at the global, version-independent location
+# the daemon reads. `$tmpdir` lives inside `$install_dir`, so the `mv` is a
+# same-filesystem rename. Installed before the binary so an interrupted
+# install never leaves a new binary without its resources — the binary miss
+# re-triggers this script. A tarball without resources is not an error: the
+# daemon simply has no bundled skills.
+resources="$(dirname "$bin")/resources"
+if [ -d "$resources" ]; then
+  rm -rf "$install_dir/{bundled_resources_dir_name}"
+  mv "$resources" "$install_dir/{bundled_resources_dir_name}"
+fi
+
 mv "$bin" "$install_dir/{binary_name}{version_suffix}"

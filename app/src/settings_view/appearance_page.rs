@@ -93,10 +93,11 @@ use crate::window_settings::{
 };
 use crate::workspace::header_toolbar_editor::HeaderToolbarInlineEditor;
 use crate::workspace::tab_settings::{
-    DirectoryTabColor, PreserveActiveTabColor, ShowCodeReviewButton, ShowIndicatorsButton,
-    ShowTitleBarSearchBar, ShowVerticalTabPanelInRestoredWindows, TabCloseButtonPosition,
-    TabSettings, TabSettingsChangedEvent, UseLatestUserPromptAsConversationTitleInTabNames,
-    UseVerticalTabs, WorkspaceDecorationVisibility,
+    canonical_directory_key, DirectoryTabColor, HideTitleBarSearchBarInVerticalTabs,
+    PreserveActiveTabColor, ShowCodeReviewButton, ShowIndicatorsButton, ShowTitleBarSearchBar,
+    ShowVerticalTabPanelInRestoredWindows, TabCloseButtonPosition, TabSettings,
+    TabSettingsChangedEvent, UseLatestUserPromptAsConversationTitleInTabNames, UseVerticalTabs,
+    WorkspaceDecorationVisibility,
 };
 use crate::workspace::WorkspaceAction;
 use crate::{report_error, report_if_error, send_telemetry_from_ctx, themes};
@@ -539,6 +540,7 @@ pub enum AppearancePageAction {
     ToggleVerticalTabs,
     ToggleShowVerticalTabPanelInRestoredWindows,
     ToggleShowTitleBarSearchBar,
+    ToggleHideTitleBarSearchBarInVerticalTabs,
     ToggleUseLatestUserPromptAsConversationTitleInTabNames,
     ToggleLigatureRendering,
     ToggleBlurTexture,
@@ -702,6 +704,9 @@ impl TypedActionView for AppearanceSettingsPageView {
                 self.toggle_show_vertical_tab_panel_in_restored_windows(ctx)
             }
             ToggleShowTitleBarSearchBar => self.toggle_show_title_bar_search_bar(ctx),
+            ToggleHideTitleBarSearchBarInVerticalTabs => {
+                self.toggle_hide_title_bar_search_bar_in_vertical_tabs(ctx)
+            }
             ToggleUseLatestUserPromptAsConversationTitleInTabNames => {
                 self.toggle_use_latest_user_prompt_as_conversation_title_in_tab_names(ctx)
             }
@@ -1657,6 +1662,9 @@ impl AppearanceSettingsPageView {
                 ShowVerticalTabPanelInRestoredWindowsWidget::default(),
             ));
             tab_settings_widgets.push(Box::new(ShowTitleBarSearchBarWidget::default()));
+            tab_settings_widgets.push(Box::new(
+                HideTitleBarSearchBarInVerticalTabsWidget::default(),
+            ));
             tab_settings_widgets.push(Box::new(
                 UseLatestUserPromptAsConversationTitleInTabNamesWidget::default(),
             ));
@@ -2963,6 +2971,14 @@ impl AppearanceSettingsPageView {
         TabSettings::handle(ctx).update(ctx, |settings, ctx| {
             report_if_error!(settings
                 .show_title_bar_search_bar
+                .toggle_and_save_value(ctx));
+        });
+    }
+
+    fn toggle_hide_title_bar_search_bar_in_vertical_tabs(&mut self, ctx: &mut ViewContext<Self>) {
+        TabSettings::handle(ctx).update(ctx, |settings, ctx| {
+            report_if_error!(settings
+                .hide_title_bar_search_bar_in_vertical_tabs
                 .toggle_and_save_value(ctx));
         });
     }
@@ -5662,6 +5678,56 @@ impl SettingsWidget for ShowTitleBarSearchBarWidget {
 }
 
 #[derive(Default)]
+struct HideTitleBarSearchBarInVerticalTabsWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for HideTitleBarSearchBarInVerticalTabsWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "hide title bar search bar vertical tabs chrome minimal"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let tab_settings = TabSettings::as_ref(app);
+
+        render_body_item::<AppearancePageAction>(
+            "Hide search bar in vertical tab layout".into(),
+            None,
+            LocalOnlyIconState::for_setting(
+                HideTitleBarSearchBarInVerticalTabs::storage_key(),
+                HideTitleBarSearchBarInVerticalTabs::sync_to_cloud(),
+                &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                app,
+            ),
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*tab_settings.hide_title_bar_search_bar_in_vertical_tabs)
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(
+                        AppearancePageAction::ToggleHideTitleBarSearchBarInVerticalTabs,
+                    );
+                })
+                .finish(),
+            Some(
+                "When using the vertical tab layout, hide the search bar in the title bar. Search stays available via the command palette and keyboard shortcuts."
+                    .to_string(),
+            ),
+        )
+    }
+}
+
+#[derive(Default)]
 struct UseLatestUserPromptAsConversationTitleInTabNamesWidget {
     switch_state: SwitchStateHandle,
 }
@@ -5775,8 +5841,7 @@ fn build_directory_delete_buttons(
 fn add_directory_tab_color_path(path: PathBuf, ctx: &mut ViewContext<AppearanceSettingsPageView>) {
     TabSettings::handle(ctx).update(ctx, |settings, ctx| {
         let current = settings.directory_tab_colors.value();
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-        let key = canonical.to_string_lossy().to_string();
+        let key = canonical_directory_key(&path);
         let dominated_by_existing = current
             .0
             .get(&key)

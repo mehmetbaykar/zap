@@ -1,12 +1,12 @@
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use warpui::{Entity, ModelContext, SingletonEntity};
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use super::{ActionExecution, AnyActionExecution, ExecuteActionInput, PreprocessActionInput};
 use crate::ai::agent::{
     AIAgentAction, AIAgentActionType, DocumentContext, ReadDocumentsRequest, ReadDocumentsResult,
 };
-use crate::ai::document::ai_document_model::AIDocumentModel;
+use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel};
 
 pub struct ReadDocumentsExecutor;
 
@@ -38,22 +38,25 @@ impl ReadDocumentsExecutor {
             return ActionExecution::<ReadDocumentsResult>::InvalidAction;
         };
 
-        // Access the model synchronously before the async block
-        let model = AIDocumentModel::handle(ctx);
-        let documents: Vec<DocumentContext> = document_ids
-            .iter()
-            .filter_map(|id| {
-                let model = model.as_ref(ctx);
-                let content = model.get_document_content(id, ctx)?;
-                let version = model.get_current_document(id)?.version;
-                Some(DocumentContext {
-                    document_id: *id,
-                    content,
-                    line_ranges: vec![],
-                    document_version: version,
-                })
-            })
-            .collect();
+        let mut documents = Vec::with_capacity(document_ids.len());
+        let mut missing_documents = Vec::new();
+        for id in document_ids {
+            match try_read_document(id, ctx) {
+                Some(document) => documents.push(document),
+                None => missing_documents.push(*id),
+            }
+        }
+
+        if !missing_documents.is_empty() {
+            let missing_list = missing_documents
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return ActionExecution::Sync(
+                ReadDocumentsResult::Error(format!("Document(s) not found: {missing_list}")).into(),
+            );
+        }
 
         ActionExecution::Sync(ReadDocumentsResult::Success { documents }.into())
     }
@@ -70,3 +73,20 @@ impl ReadDocumentsExecutor {
 impl Entity for ReadDocumentsExecutor {
     type Event = ();
 }
+
+/// Reads one document, returning `None` if it is not loaded locally.
+fn try_read_document(id: &AIDocumentId, ctx: &AppContext) -> Option<DocumentContext> {
+    let model = AIDocumentModel::as_ref(ctx);
+    let content = model.get_document_content(id, ctx)?;
+    let version = model.get_current_document(id)?.version;
+    Some(DocumentContext {
+        document_id: *id,
+        content,
+        line_ranges: vec![],
+        document_version: version,
+    })
+}
+
+#[cfg(test)]
+#[path = "read_documents_tests.rs"]
+mod tests;

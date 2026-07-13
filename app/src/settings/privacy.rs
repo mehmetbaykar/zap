@@ -1,27 +1,13 @@
 use std::fmt::Display;
-use std::sync::Arc;
 
-use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use settings::macros::{define_settings_group, maybe_define_setting, register_settings_events};
-use settings::{RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud};
+use settings::{Setting, SupportedPlatforms, SyncToCloud};
 use warp_core::features::FeatureFlag;
-use warp_core::report_if_error;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, UpdateModel};
 
-// Zap (localization, Phase 5): `PreferencesSyncer` has been physically removed.
 use crate::ai::blocklist::telemetry_banner::should_collect_ai_ugc_telemetry;
-use crate::auth::AuthState;
-use crate::auth::AuthStateProvider;
-use crate::auth::SyncedUserSettings;
-use crate::cloud_object::model::persistence::ObjectStoreModel;
-use crate::report_error;
-// Zap Wave 3-1: the `AuthClient` trait + `MockAuthClient` were physically removed
-// together with server_api/auth.rs, and `SyncedUserSettings` was moved to `crate::auth`.
-// Zap Wave 3-1: `ServerApiProvider` is no longer used by this file ——
-// every call site of `auth_client = ServerApiProvider::as_ref(ctx).get_auth_client()`
-// was physically removed along with the AuthClient trait.
 use crate::terminal::safe_mode_settings::SafeModeSettings;
 use crate::workspaces::workspace::EnterpriseSecretRegex;
 
@@ -87,15 +73,13 @@ impl PartialEq for CustomSecretRegex {
 
 impl settings_value::SettingsValue for CustomSecretRegex {}
 
-// openWarp closed-source telemetry stripping: the three privacy toggles' defaults go from true → false. The original "default on"
-// was a commercial product's "opt-out" model; Zap has physically severed all three outbound paths — telemetry, crash reporting, and cloud conversation storage —
-// so a default-on toggle would only show ON to new users while nothing is actually sent, causing a cognitive disconnect. Changed to default OFF.
+// Zap defaults telemetry and crash reporting to off because their outbound paths are disabled.
 define_settings_group!(WarpDrivePrivacySettings, settings: [
     is_telemetry_enabled: IsTelemetryEnabled {
         type: bool,
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
-        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::No),
+        sync_to_cloud: SyncToCloud::Never,
         private: false,
         storage_key: "TelemetryEnabled",
         toml_path: "privacy.telemetry_enabled",
@@ -105,7 +89,7 @@ define_settings_group!(WarpDrivePrivacySettings, settings: [
         type: bool,
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
-        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::No),
+        sync_to_cloud: SyncToCloud::Never,
         private: false,
         storage_key: "CrashReportingEnabled",
         toml_path: "privacy.crash_reporting_enabled",
@@ -117,7 +101,7 @@ maybe_define_setting!(CustomSecretRegexList, group: PrivacySettings, {
     type: Vec<CustomSecretRegex>,
     default: Vec::new(),
     supported_platforms: SupportedPlatforms::ALL,
-    sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::No),
+    sync_to_cloud: SyncToCloud::Never,
     private: false,
     toml_path: "privacy.custom_secret_regex_list",
     description: "Custom regex patterns for detecting and redacting secrets.",
@@ -127,17 +111,13 @@ maybe_define_setting!(HasInitializedDefaultSecretRegexes, group: PrivacySettings
     type: bool,
     default: false,
     supported_platforms: SupportedPlatforms::ALL,
-    sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::No),
+    sync_to_cloud: SyncToCloud::Never,
     private: true,
 });
 
 /// Singleton model for managing the user's privacy settings (whether the user has enabled crash
 /// reporting and/or telemetry).
 pub struct PrivacySettings {
-    auth_state: Arc<AuthState>,
-    // Zap Wave 3-1: the `auth_client: Arc<dyn AuthClient>` field was physically removed along with the AuthClient trait.
-    // It was originally used to sync to the server when the telemetry / crash reporting settings changed;
-    // Zap no longer syncs any server-side settings.
     pub is_telemetry_enabled: bool,
     pub is_crash_reporting_enabled: bool,
     pub has_initialized_default_secret_regexes: HasInitializedDefaultSecretRegexes,
@@ -149,12 +129,10 @@ pub struct PrivacySettings {
     /// List of enterprise-level secret regexes provided by the organization.
     /// These are kept separate from user-level secrets to support additive behavior.
     pub enterprise_secret_regex_list: Vec<CustomSecretRegex>,
-    /// Whether or not the user's organization has forced telemetry on, in which case we ignore any
-    /// user local/cloud settings. If false, we fall back to the user's settings.
-    /// This is populated by the server when teams data is fetched.
+    /// Whether an organization policy has forced telemetry on. If false, use the local setting.
     pub is_telemetry_force_enabled: bool,
     /// Whether or not the user's organization has enabled enterprise secret redaction.
-    /// This is populated by the server when teams data is fetched.
+    /// This is populated when organization policy data is applied.
     pub is_enterprise_secret_redaction_enabled: bool,
 }
 
@@ -220,19 +198,15 @@ impl PrivacySettings {
         );
     }
 
-    /// Returns a new PrivacySettings object initialized from locally cached values. Server-side
-    /// settings are fetched later via `fetch_or_update_settings`, which is called from
-    /// `on_user_fetched` after the user's auth state is established.
+    /// Returns a new PrivacySettings object initialized from locally stored values.
     fn new(ctx: &mut ModelContext<Self>) -> Self {
-        let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
-
         // Initialize from `WarpDrivePrivacySettings`, which is the source of truth for these
         // booleans.
         let warp_drive_privacy = WarpDrivePrivacySettings::as_ref(ctx);
         let is_telemetry_enabled = *warp_drive_privacy.is_telemetry_enabled.value();
         let is_crash_reporting_enabled = *warp_drive_privacy.is_crash_reporting_enabled.value();
 
-        // Listen for changes to the object store and update ourselves when they happen.
+        // Listen for changes to the local settings group and update ourselves when they happen.
         ctx.subscribe_to_model(&WarpDrivePrivacySettings::handle(ctx), |me, event, ctx| {
             let privacy_settings = WarpDrivePrivacySettings::as_ref(ctx);
             match event {
@@ -257,7 +231,6 @@ impl PrivacySettings {
             HasInitializedDefaultSecretRegexes::new_from_storage(ctx);
 
         Self {
-            auth_state,
             is_crash_reporting_enabled,
             is_telemetry_enabled,
             user_secret_regex_list,
@@ -333,75 +306,10 @@ impl PrivacySettings {
         self.is_enterprise_secret_redaction_enabled = false;
     }
 
-    /// Fetch the user's privacy settings from the server if any or update the server settings.
-    pub fn fetch_or_update_settings(&self, _ctx: &mut ModelContext<Self>) {
-        // Zap Wave 3-1: the original `auth_client.get_user_settings().await` call was physically removed
-        // along with the entire AuthClient trait. After Zap's localization, privacy settings are stored locally only, so this entry point is a no-op.
-    }
-
-    /// Initializes state from the [`SyncedUserSettings`] fetched from the server, if any.
-    /// If there are no settings from the server, updates the server settings with local settings.
-    /// TODO: Make this a server-side db transaction.
-    fn initialize_from_fetched_settings_or_update_settings(
-        &mut self,
-        fetched_settings: Result<Option<SyncedUserSettings>>,
-        ctx: &mut ModelContext<PrivacySettings>,
-    ) {
-        match fetched_settings {
-            Ok(Some(fetched_settings)) => {
-                // Until the login experience stops hiding the telemetry settings,
-                // we assume that locally enabled telemetry is unintentional.
-                // As such, where settings differ, we respect whichever setting that is disabled.
-                self.overwrite_local_settings_if_cloud_disabled(fetched_settings, ctx);
-                // If any local setting is disabled, we have to update the server.
-                if !self.is_telemetry_enabled || !self.is_crash_reporting_enabled {
-                    self.update_server_with_local_settings(ctx);
-                }
-            }
-            Ok(None) => {
-                // This indicates the user had not logged in before.
-                log::info!("User has no synced privacy settings.");
-                self.update_server_with_local_settings(ctx);
-            }
-            Err(err) => {
-                report_error!(err.context("Failed to fetch user settings."));
-            }
-        }
-
-        self.maybe_sync_with_warp_drive_prefs(ctx);
-    }
-
-    fn overwrite_local_settings_if_cloud_disabled(
-        &mut self,
-        fetched_settings: SyncedUserSettings,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        // For now, only overwrite the user's locally stored setting if the cloud version
-        // has is_crash_reporting disabled. Until we implement a more reliable retry
-        // mechanism for update settings requests, in addition to possibly a UI for the
-        // user to resolve the conflicting settings themselves, default to "safe" behavior.
-        // Namely, we want to avoid incidentally overwriting is_crash_reporting_enabled to
-        // `true`.
-        if self.is_crash_reporting_enabled && !fetched_settings.is_crash_reporting_enabled {
-            self.set_is_crash_reporting_enabled(fetched_settings.is_crash_reporting_enabled, ctx);
-        }
-
-        // For now, only overwrite the user's locally stored setting if the cloud version
-        // has is_telemetry_enabled disabled. Until we implement a more reliable retry
-        // mechanism for update settings requests, in addition to possibly a UI for the
-        // user to resolve the conflicting settings themselves, default to "safe" behavior.
-        // Namely, we want to avoid incidentally overwriting is_telemetry_enabled to
-        // `true`.
-        if self.is_telemetry_enabled && !fetched_settings.is_telemetry_enabled {
-            self.set_is_telemetry_enabled(fetched_settings.is_telemetry_enabled, ctx);
-        }
-    }
-
     /// Constructor for tests only.
     #[cfg(test)]
     pub fn mock(_ctx: &mut ModelContext<Self>) -> Self {
         Self {
-            auth_state: Arc::new(AuthState::new_for_test()),
             is_crash_reporting_enabled: true,
             is_telemetry_enabled: true,
             user_secret_regex_list: CustomSecretRegexList::new(None),
@@ -430,8 +338,7 @@ impl PrivacySettings {
 
     /// Sets `is_crash_reporting_enabled` to the given value.
     ///
-    /// Additionally, this writes the given value to the user's local defaults, and additionally
-    /// sends a request to update the user's `is_crash_reporting_enabled` value stored server-side.
+    /// Additionally, this writes the given value to the user's local settings.
     /// Finally, emits a `PrivacySettingsEvent::UpdateIsCrashReportingEnabled` event.
     pub fn set_is_crash_reporting_enabled(
         &mut self,
@@ -449,13 +356,6 @@ impl PrivacySettings {
                     .set_value(new_value, ctx);
             });
 
-            if self.auth_state.is_logged_in() {
-                // Zap Wave 3-1: the original `auth_client.set_is_crash_reporting_enabled(new_value)` call
-                // was physically removed along with AuthClient. Zap only updates local state now.
-                log::debug!(
-                    "set_is_crash_reporting_enabled remote sync localized, new_value={new_value}"
-                );
-            }
             ctx.emit(PrivacySettingsChangedEvent::UpdateIsCrashReportingEnabled {
                 old_value,
                 new_value,
@@ -466,8 +366,7 @@ impl PrivacySettings {
 
     /// Sets `is_telemetry_enabled` to the given value.
     ///
-    /// Additionally, this writes the given value to the user's local defaults, and additionally
-    /// sends a request to update the user's `is_telemetry_enabled` value stored server-side.
+    /// Additionally, this writes the given value to the user's local settings.
     /// Finally, emits a `PrivacySettingsEvent::UpdateIsTelemetryEnabled` event.
     pub fn set_is_telemetry_enabled(
         &mut self,
@@ -483,12 +382,6 @@ impl PrivacySettings {
                 let _ = settings.is_telemetry_enabled.set_value(new_value, ctx);
             });
 
-            if self.auth_state.is_logged_in() {
-                // Zap Wave 3-1: same as above.
-                log::debug!(
-                    "set_is_telemetry_enabled remote sync localized, new_value={new_value}"
-                );
-            }
             ctx.emit(PrivacySettingsChangedEvent::UpdateIsTelemetryEnabled {
                 old_value,
                 new_value,
@@ -571,81 +464,6 @@ impl PrivacySettings {
                 .is_err()
             {
                 log::error!("Failed to set has_initialized_default_secret_regexes flag");
-            }
-        }
-    }
-
-    /// openWarp closed-source telemetry stripping P3: privacy settings are no longer synced to the upstream cloud settings.
-    /// After stripping, everything is persisted purely locally (callers still write settings.toml + the warp_drive local cache), with no outbound traffic.
-    fn update_server_with_local_settings(&self, _ctx: &mut ModelContext<Self>) {}
-
-    /// We wait until zap drive prefs have loaded and then either
-    /// 1) use them as the data store for is_telemetry_enabled and is_crash_reporting_enabled, if those
-    ///    values are set in zap drive, or
-    /// 2) update the zap drive prefs to match the values from the legacy user_settings endpoint so
-    ///    that we can use zap drive prefs going forward.
-    pub fn maybe_sync_with_warp_drive_prefs(&mut self, ctx: &mut ModelContext<Self>) {
-        // Wait for cloud objects to load, and, if telemetry & crash reporting are synced to zap drive
-        // initialize from the zap drive values.
-        ctx.spawn(
-            ObjectStoreModel::as_ref(ctx).initial_load_complete(),
-            Self::handle_warp_drive_objects_loaded,
-        );
-    }
-
-    fn handle_warp_drive_objects_loaded(&mut self, _: (), ctx: &mut ModelContext<Self>) {
-        self.initialize_default_regexes_once(ctx);
-        // Check if the zap drive preferences are set. If they are, and telemetry and crash reporting
-        // are set as zap drive prefs, then use those.  Otherwise, update the zap drive prefs to match
-        // the values from the legacy user_settings endpoint so that we can use zap drive prefs going forward.
-        let object_store_model = ObjectStoreModel::as_ref(ctx);
-        let cloud_prefs = object_store_model.get_all_preferences_by_storage_key();
-        let cloud_telemetry_value =
-            cloud_prefs
-                .get(IsTelemetryEnabled::storage_key())
-                .map(|pref| {
-                    pref.model()
-                        .string_model
-                        .value
-                        .as_bool()
-                        .unwrap_or_default()
-                });
-        let cloud_crash_reporting_value = cloud_prefs
-            .get(IsCrashReportingEnabled::storage_key())
-            .map(|pref| {
-                pref.model()
-                    .string_model
-                    .value
-                    .as_bool()
-                    .unwrap_or_default()
-            });
-
-        match (cloud_telemetry_value, cloud_crash_reporting_value) {
-            (Some(is_telemetry_enabled), Some(is_crash_reporting_enabled)) => {
-                log::info!(
-                    "Zap Drive privacy preferences are set, using those for telemetry={is_telemetry_enabled}, \
-                    crash_reporting={is_crash_reporting_enabled}"
-                );
-                self.set_is_telemetry_enabled(is_telemetry_enabled, ctx);
-                self.set_is_crash_reporting_enabled(is_crash_reporting_enabled, ctx);
-            }
-            _ => {
-                log::info!(
-                    "Zap Drive privacy preferences are not set, syncing local PrivacySettings values to \
-                    WarpDrivePrivacySettings and cloud. telemetry={}, crash_reporting={}",
-                    self.is_telemetry_enabled,
-                    self.is_crash_reporting_enabled
-                );
-                WarpDrivePrivacySettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .is_telemetry_enabled
-                        .set_value(self.is_telemetry_enabled, ctx));
-                    report_if_error!(settings
-                        .is_crash_reporting_enabled
-                        .set_value(self.is_crash_reporting_enabled, ctx));
-                });
-                // Zap (localization, Phase 5): the original `PreferencesSyncer::maybe_sync_local_prefs_to_cloud`
-                // synced local privacy settings to the cloud; it was physically removed along with the syncer. Local settings are written to sqlite only.
             }
         }
     }

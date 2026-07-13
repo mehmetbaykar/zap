@@ -67,8 +67,7 @@ pub use server_types::*;
 /// A newtype wrapping a model's serialized string.
 ///
 /// Zap (Wave 4): originally defined in `crate::server::sync_queue`; moved here after SyncQueue was
-/// fully deleted. Several models' `serialized()` still return it (used when writing to sqlite
-/// locally).
+/// fully deleted. Several local models still use it as their serialized representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SerializedModel(String);
 
@@ -567,7 +566,7 @@ where
     pub metadata: StoredObjectMetadata,
     pub permissions: StoredObjectPermissions,
     /// Tracks whether this object has a conflict with the server version.
-    /// This is runtime state (not persisted) - conflicts are always NoConflicts when loaded from SQLite.
+    /// This is runtime state (not persisted); newly constructed objects start with no conflicts.
     pub conflict_status: ConflictStatus,
 
     // Intentionally not public to prevent users of this class from holding
@@ -714,12 +713,12 @@ where
         }
     }
 
-    fn upsert_event(&self) -> ModelEvent {
-        self.model.upsert_event(self)
-    }
-
     fn display_name(&self) -> String {
         self.model.display_name()
+    }
+
+    fn upsert_event(&self) -> ModelEvent {
+        self.model.upsert_event(self)
     }
 
     fn renders_in_warp_drive(&self) -> bool {
