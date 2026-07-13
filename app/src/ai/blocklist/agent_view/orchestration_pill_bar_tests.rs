@@ -5,6 +5,7 @@ use warpui::{App, EntityId};
 #[test]
 fn descendant_conversation_ids_in_spawn_order_flattens_nested_children_preorder() {
     App::test((), |mut app| async move {
+        crate::test_util::settings::initialize_history_persistence_for_tests(&mut app);
         let terminal_view_id = EntityId::new();
         let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
 

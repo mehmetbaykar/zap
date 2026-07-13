@@ -5,6 +5,7 @@ use std::sync::mpsc::SyncSender;
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use warp_multi_agent_api as multi_agent_api;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 use warpui::{
     AppContext, EntityId, ModelHandle, SingletonEntity, ViewContext, ViewHandle, WindowId,
@@ -937,8 +938,12 @@ fn handle_terminal_view_event(
                 diff_mode,
                 open_code_review,
             } => {
+                let LocalOrRemotePath::Local(repo_path) = repo_path else {
+                    log::warn!("Ignoring code review comments for remote repository");
+                    return;
+                };
                 ctx.emit(pane_group::Event::InsertCodeReviewComments {
-                    repo_path: repo_path.to_path_buf(),
+                    repo_path: repo_path.clone(),
                     comments: comments.to_owned(),
                     diff_mode: diff_mode.to_owned(),
                     open_code_review: open_code_review.clone(),
@@ -1106,6 +1111,8 @@ fn handle_ai_history_event(
         | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
         | BlocklistAIHistoryEvent::ConversationAgentIdAssigned { .. }
         | BlocklistAIHistoryEvent::ConversationOwnershipTransferred { .. }
-        | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. } => (),
+        | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. }
+        | BlocklistAIHistoryEvent::ConversationUsageMetadataUpdated { .. }
+        | BlocklistAIHistoryEvent::LocalSharedSessionEstablished { .. } => (),
     }
 }

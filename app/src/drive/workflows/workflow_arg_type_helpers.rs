@@ -2,23 +2,15 @@ use std::collections::HashMap;
 
 use warpui::{AppContext, SingletonEntity, ViewHandle};
 
-use crate::{
-    cloud_object::{
-        model::persistence::ObjectStoreModel, update_manager::UpdateManager, Owner,
-        StoredObjectEventEntrypoint,
-    },
-    editor::EditorView,
-    server::ids::SyncId,
-    workflows::{
-        workflow::{Argument, ArgumentType},
-        workflow_enum::WorkflowEnum,
-    },
-};
-
-use super::{
-    enum_creation_dialog::{EnumCreationDialog, WorkflowEnumData},
-    workflow_arg_selector::WorkflowArgSelector,
-};
+use super::enum_creation_dialog::{EnumCreationDialog, WorkflowEnumData};
+use super::workflow_arg_selector::WorkflowArgSelector;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::cloud_object::{Owner, StoredObjectEventEntrypoint};
+use crate::editor::EditorView;
+use crate::server::ids::SyncId;
+use crate::workflows::workflow::{Argument, ArgumentType};
+use crate::workflows::workflow_enum::WorkflowEnum;
 
 #[derive(Debug, Clone)]
 pub struct ArgumentEditorRowIndex(pub usize);

@@ -1,21 +1,18 @@
 use std::path::{Path, PathBuf};
 
+use ai::diff_validation::DiffDelta;
 use warp_util::path::LineAndColumnArg;
+use warpui::elements::{DraggableState, Empty, MouseStateHandle};
 use warpui::{
-    elements::{DraggableState, Empty, MouseStateHandle},
     AppContext, Element, Entity, ModelHandle, TypedActionView, View, ViewContext, ViewHandle,
 };
 
-use super::{
-    buffer_location::LocalOrRemotePath, editor_management::CodeSource,
-    local_code_editor::LocalCodeEditorView,
-};
-use crate::pane_group::{
-    focus_state::PaneFocusHandle,
-    pane::view::{HeaderContent, HeaderRenderContext},
-    BackingView, CodePane, PaneConfiguration, PaneEvent,
-};
-use ai::diff_validation::DiffDelta;
+use super::buffer_location::LocalOrRemotePath;
+use super::editor_management::CodeSource;
+use super::local_code_editor::LocalCodeEditorView;
+use crate::pane_group::focus_state::PaneFocusHandle;
+use crate::pane_group::pane::view::{HeaderContent, HeaderRenderContext};
+use crate::pane_group::{BackingView, CodePane, PaneConfiguration, PaneEvent};
 
 // Keybinding constants - exported so AI document view can reuse
 pub const SAVE_FILE_BINDING_NAME: &str = "code_view:save";
@@ -89,12 +86,17 @@ pub struct TabData {
 }
 
 impl TabData {
+    /// Returns the file location (local or remote), if any.
+    pub fn location(&self) -> Option<&LocalOrRemotePath> {
+        self.location.as_ref()
+    }
+
     /// Returns the local filesystem path, if this tab is backed by a local file.
     /// Returns `None` for remote files and untitled tabs.
     pub fn local_path(&self) -> Option<PathBuf> {
         self.location
             .as_ref()
-            .and_then(|loc| loc.to_local_path().map(|p| p.to_path_buf()))
+            .and_then(|loc| PathBuf::try_from(loc.clone()).ok())
     }
 }
 
@@ -139,7 +141,7 @@ impl CodeView {
         line_col: Option<LineAndColumnArg>,
         ctx: &mut ViewContext<Self>,
     ) {
-        if let Some(path) = location.and_then(|loc| loc.to_local_path().map(|p| p.to_path_buf())) {
+        if let Some(path) = location.and_then(|loc| PathBuf::try_from(loc).ok()) {
             self.open_local(None, path, line_col, ctx);
         }
     }

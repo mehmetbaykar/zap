@@ -1,16 +1,15 @@
 use chrono::{Local, TimeZone};
 use std::sync::Arc;
+
+use settings::{Setting as _, SettingsManager};
+use warp_core::execution_mode::{AppExecutionMode, ExecutionMode};
 use warpui::{App, ModelHandle, UpdateModel};
 
+use super::*;
 use crate::{
     auth::{AuthManager, AuthStateProvider},
     settings::AutoupdateSettings,
 };
-
-use settings::{Setting as _, SettingsManager};
-use warp_core::execution_mode::{AppExecutionMode, ExecutionMode};
-
-use super::*;
 
 fn initialize_app(app: &mut App) -> ModelHandle<AutoupdateState> {
     app.add_singleton_model(|_| SettingsManager::default());

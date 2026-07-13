@@ -5,7 +5,6 @@ use crate::terminal::event::{BlockType, UserBlockCompleted};
 use crate::terminal::model::session::{ExecuteCommandOptions, Session, SessionsEvent};
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
 use crate::{
-    debounce::debounce,
     editor::EditorView,
     menu::{MenuItem, MenuItemFields},
     terminal::{
@@ -24,6 +23,7 @@ use futures::{pin_mut, FutureExt as _};
 use itertools::Itertools;
 use settings::Setting as _;
 use warp_completer::completer::{CommandExitStatus, CommandOutput};
+use warp_core::r#async::debounce;
 use warp_core::user_preferences::GetUserPreferences;
 
 use super::ChipResult;

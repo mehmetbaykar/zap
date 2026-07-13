@@ -1,26 +1,23 @@
 //! Manages how we serialize blocklist AI data for persistence.
 #![cfg_attr(not(feature = "local_fs"), allow(dead_code))]
 
-use std::{collections::HashMap, sync::Arc};
-use uuid::Uuid;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
-
-use crate::{
-    ai::{
-        agent::{
-            conversation::AIConversationId, AIAgentActionType, AIAgentAttachment, AIAgentContext,
-            AIAgentExchangeId, AIAgentInput, AIAgentPtyWriteMode, AskUserQuestionItem,
-            FileLocations, PassiveSuggestionResultType, ReadFilesRequest, UserQueryMode,
-        },
-        llms::LLMId,
-    },
-    terminal::model::block::{BlockId, SerializedBlock},
-};
+use uuid::Uuid;
 
 use super::AIQueryHistoryOutputStatus;
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::{
+    AIAgentActionType, AIAgentAttachment, AIAgentContext, AIAgentExchangeId, AIAgentInput,
+    AIAgentPtyWriteMode, AskUserQuestionItem, FileLocations, PassiveSuggestionResultType,
+    ReadFilesRequest, RequestComputerUseRequest, UseComputerRequest, UserQueryMode,
+};
+use crate::ai::llms::LLMId;
+use crate::terminal::model::block::{BlockId, SerializedBlock};
 /// Data we persist for each [`AIAgentExchange`] for use in history. Does not contain output data.
 #[derive(Debug, Deserialize, Clone)]
 pub struct PersistedAIInput {
@@ -190,6 +187,15 @@ pub(crate) enum PersistedAIAgentActionType {
     },
     SuggestPrompt,
     OpenCodeReview,
+    UseComputer {
+        action_summary: String,
+        actions: Vec<computer_use::Action>,
+        screenshot_params: Option<computer_use::ScreenshotParams>,
+    },
+    RequestComputerUse {
+        task_summary: String,
+        screenshot_params: Option<computer_use::ScreenshotParams>,
+    },
     AskUserQuestion {
         questions: Vec<AskUserQuestionItem>,
     },
@@ -270,6 +276,15 @@ impl From<&AIAgentActionType> for PersistedAIAgentActionType {
             | AIAgentActionType::ReadShellCommandOutput { .. }
             | AIAgentActionType::ReadSkill(_)
             | AIAgentActionType::TransferShellCommandControlToUser { .. } => Self::NotPersisted,
+            AIAgentActionType::UseComputer(request) => Self::UseComputer {
+                action_summary: request.action_summary.clone(),
+                actions: request.actions.clone(),
+                screenshot_params: request.screenshot_params,
+            },
+            AIAgentActionType::RequestComputerUse(request) => Self::RequestComputerUse {
+                task_summary: request.task_summary.clone(),
+                screenshot_params: request.screenshot_params,
+            },
             AIAgentActionType::AskUserQuestion { questions } => Self::AskUserQuestion {
                 questions: questions.clone(),
             },
@@ -362,6 +377,22 @@ impl TryFrom<PersistedAIAgentActionType> for AIAgentActionType {
                 Err(anyhow!("Restoration for suggested prompts is unsupported."))
             }
             PersistedAIAgentActionType::OpenCodeReview => Ok(Self::OpenCodeReview),
+            PersistedAIAgentActionType::UseComputer {
+                action_summary,
+                actions,
+                screenshot_params,
+            } => Ok(Self::UseComputer(UseComputerRequest {
+                action_summary,
+                actions,
+                screenshot_params,
+            })),
+            PersistedAIAgentActionType::RequestComputerUse {
+                task_summary,
+                screenshot_params,
+            } => Ok(Self::RequestComputerUse(RequestComputerUseRequest {
+                task_summary,
+                screenshot_params,
+            })),
             PersistedAIAgentActionType::AskUserQuestion { questions } => {
                 Ok(Self::AskUserQuestion { questions })
             }

@@ -1093,6 +1093,14 @@ impl CodeView {
                 // If there's no file ID, this is a new file - trigger Save As
                 self.save_as(index, callback, ctx)
             }
+            Err(ImmediateSaveError::RemoteDisconnected) => {
+                log::warn!("Cannot save: remote session disconnected");
+                CodeView::display_remote_disconnected_save_failure(ctx.window_id(), ctx);
+                if let Some(callback) = callback {
+                    callback(SaveOutcome::Failed, self, ctx);
+                }
+                SaveStatus::Failed(ImmediateSaveError::RemoteDisconnected)
+            }
             Err(err) => {
                 log::warn!("Failed to save file. {err:?}");
                 CodeView::display_save_failure(ctx.window_id(), ctx);
@@ -1159,6 +1167,15 @@ impl CodeView {
         ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
             let toast = DismissibleToast::error(crate::t!("code-failed-to-save-file-toast"))
                 .with_object_id("failed_to_save_file".to_string());
+            toast_stack.add_ephemeral_toast(toast, window_id, ctx);
+        });
+    }
+
+    fn display_remote_disconnected_save_failure(window_id: WindowId, ctx: &mut ViewContext<Self>) {
+        ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
+            let toast =
+                DismissibleToast::error(String::from("Cannot save — remote session disconnected."))
+                    .with_object_id("failed_to_save_file_remote_disconnected".to_string());
             toast_stack.add_ephemeral_toast(toast, window_id, ctx);
         });
     }
@@ -1834,6 +1851,7 @@ impl CodeView {
         )
         .with_color(text_color)
         .with_style(style)
+        .with_clip(ClipConfig::start())
         .finish();
         row.add_child(
             Shrinkable::new(
@@ -2331,25 +2349,43 @@ impl CodeView {
         ];
 
         #[cfg(feature = "local_fs")]
-        if let Some(path) = self.local_path(ctx) {
-            let reveal_label = if cfg!(target_os = "macos") {
-                "Reveal in Finder"
-            } else if cfg!(target_os = "windows") {
-                "Reveal in Explorer"
-            } else {
-                "Reveal in file manager"
-            };
-            items.extend([
-                MenuItem::Separator,
-                MenuItemFields::new(crate::t!("code-copy-file-path"))
-                    .with_on_select_action(CodeViewAction::CopyFilePath)
-                    .into_item(),
-                MenuItemFields::new(reveal_label)
-                    .with_on_select_action(CodeViewAction::RevealInFinder)
-                    .into_item(),
-            ]);
+        {
+            let active_location = self
+                .tab_at(self.active_tab_index)
+                .and_then(|t| t.location.as_ref());
+            let local_path = self.local_path(ctx);
 
-            if renders_in_warp_notebook_viewer(&path) {
+            if active_location.is_some() {
+                items.push(MenuItem::Separator);
+                items.push(
+                    MenuItemFields::new(crate::t!("code-copy-file-path"))
+                        .with_on_select_action(CodeViewAction::CopyFilePath)
+                        .into_item(),
+                );
+            }
+
+            if local_path.is_some() {
+                let reveal_label = if cfg!(target_os = "macos") {
+                    "Reveal in Finder"
+                } else if cfg!(target_os = "windows") {
+                    "Reveal in Explorer"
+                } else {
+                    "Reveal in file manager"
+                };
+                items.push(
+                    MenuItemFields::new(reveal_label)
+                        .with_on_select_action(CodeViewAction::RevealInFinder)
+                        .into_item(),
+                );
+            }
+
+            let renders_markdown_preview = match &local_path {
+                Some(path) => renders_in_warp_notebook_viewer(path),
+                None => active_location
+                    .map(|loc| is_markdown_file(&loc.language_path()))
+                    .unwrap_or(false),
+            };
+            if renders_markdown_preview {
                 items.push(
                     MenuItemFields::new(crate::t!("code-view-markdown-preview"))
                         .with_on_select_action(CodeViewAction::RenderMarkdown)
@@ -2508,9 +2544,16 @@ impl TypedActionView for CodeView {
 
             #[cfg(feature = "local_fs")]
             CodeViewAction::CopyFilePath => {
-                if let Some(path) = self.local_path(ctx) {
+                if let Some(location) = self
+                    .tab_at(self.active_tab_index)
+                    .and_then(|t| t.location.as_ref())
+                {
+                    let display_path = match location {
+                        BufferLocation::Local(path) => path.display().to_string(),
+                        BufferLocation::Remote(remote) => remote.path.as_str().to_string(),
+                    };
                     ctx.clipboard()
-                        .write(ClipboardContent::plain_text(path.display().to_string()));
+                        .write(ClipboardContent::plain_text(display_path));
                 }
             }
             #[cfg(feature = "local_fs")]

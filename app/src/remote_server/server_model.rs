@@ -23,13 +23,14 @@ use super::diff_state_tracker::{
 };
 use super::proto::{
     client_message, delete_file_response, discard_files_response, get_diff_state_response,
-    run_command_response, server_message, write_file_response, Abort, Authenticate, ClientMessage,
-    DeleteFile, DeleteFileResponse, DeleteFileSuccess, DiscardFilesError, DiscardFilesResponse,
-    DiscardFilesSuccess, ErrorCode, ErrorResponse, FailedFileRead, FileContextProto,
-    FileOperationError, GetDiffStateResponse, Initialize, InitializeResponse, NavigatedToDirectory,
-    NavigatedToDirectoryResponse, ReadFileContextResponse, RunCommandError, RunCommandErrorCode,
-    RunCommandRequest, RunCommandResponse, RunCommandSuccess, ServerMessage, SessionBootstrapped,
-    WriteFile, WriteFileResponse, WriteFileSuccess,
+    run_command_response, server_message, write_file_response, Abort, Authenticate, BranchInfo,
+    ClientMessage, DeleteFile, DeleteFileResponse, DeleteFileSuccess, DiscardFilesError,
+    DiscardFilesResponse, DiscardFilesSuccess, ErrorCode, ErrorResponse, FailedFileRead,
+    FileContextProto, FileOperationError, GetBranchesError, GetBranchesResponse,
+    GetBranchesSuccess, GetDiffStateResponse, Initialize, InitializeResponse,
+    NavigatedToDirectory, NavigatedToDirectoryResponse, ReadFileContextResponse, RunCommandError,
+    RunCommandErrorCode, RunCommandRequest, RunCommandResponse, RunCommandSuccess, ServerMessage,
+    SessionBootstrapped, WriteFile, WriteFileResponse, WriteFileSuccess,
 };
 
 use crate::code_review::diff_state::{DiffMode, FileStatusInfo};
@@ -56,6 +57,11 @@ use crate::code::global_buffer_model::{GlobalBufferModel, GlobalBufferModelEvent
 
 /// How long the daemon waits with no connections before exiting.
 pub const GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Server-side cap on the number of branches returned by `GetBranches`.
+/// Prevents a client from forcing the daemon to enumerate an arbitrarily
+/// large ref list.
+const MAX_BRANCH_COUNT_CAP: usize = 500;
 
 /// Unique identifier for a connected proxy session in daemon mode.
 pub type ConnectionId = uuid::Uuid;
@@ -718,18 +724,25 @@ impl ServerModel {
                 self.handle_unsubscribe_diff_state(msg, conn_id, ctx);
                 return; // fire-and-forget notification
             }
+            Some(client_message::Message::GetBranches(msg)) => {
+                self.handle_get_branches(msg, &request_id, conn_id, ctx)
+            }
             Some(client_message::Message::DiscardFiles(msg)) => {
                 self.handle_discard_files(msg, &request_id, ctx)
             }
             // Remote codebase indexing (semantic search over a Merkle-tree
             // sync to Warp Cloud) was removed with the cloud/embeddings
-            // stack; these proto variants are acknowledged with a graceful
-            // rejection rather than left unhandled, matching the
-            // `local_fs`-disabled fallback above.
+            // stack, and `UploadHandoffSnapshot` (local-to-cloud SSH-session
+            // handoff via GCS) depends on the same cloud AI proxy this fork
+            // replaces with BYOP providers; these proto variants are
+            // acknowledged with a graceful rejection rather than left
+            // unhandled, matching the `local_fs`-disabled fallback above.
             Some(
                 client_message::Message::IndexCodebase(_)
+                | client_message::Message::ResyncCodebase(_)
                 | client_message::Message::DropCodebaseIndex(_)
-                | client_message::Message::GetFragmentMetadataFromHash(_),
+                | client_message::Message::GetFragmentMetadataFromHash(_)
+                | client_message::Message::UploadHandoffSnapshot(_),
             ) => HandlerOutcome::Sync(server_message::Message::Error(ErrorResponse {
                 code: ErrorCode::InvalidRequest.into(),
                 message: "Remote codebase indexing is not supported".to_string(),
@@ -863,7 +876,8 @@ impl ServerModel {
 
     /// Handles `Abort` by cancelling the in-progress request it targets.
     /// Checks `ServerModel`'s own in-progress map first, then delegates to
-    /// the diff state manager for content reload requests.
+    /// the diff state manager for content reload requests, and finally checks
+    /// queued pending responses.
     /// This is a notification — no response is sent.
     fn handle_abort(&mut self, abort: Abort, request_id: &RequestId, ctx: &mut ModelContext<Self>) {
         let target_id = RequestId::from(abort.request_id_to_abort);
@@ -878,10 +892,17 @@ impl ServerModel {
                 .diff_states
                 .update(ctx, |mgr, _| mgr.abort_request(&target_id));
             if !found {
-                log::info!(
-                    "Abort for unknown/completed request (request_id={target_id}, \
-                     abort_request_id={request_id})"
-                );
+                // Check if the target is a queued pending response
+                // (not an in-flight reload).
+                let found_pending = self
+                    .diff_states
+                    .update(ctx, |mgr, _| mgr.abort_pending_response(&target_id));
+                if !found_pending {
+                    log::info!(
+                        "Abort for unknown/completed request (request_id={target_id}, \
+                         abort_request_id={request_id})"
+                    );
+                }
             }
         }
     }
@@ -1069,7 +1090,11 @@ impl ServerModel {
         // root path (Some) or None if no git repo was found.
         let path_str = msg.path.clone();
         let git_future = DetectedRepositories::handle(ctx).update(ctx, |repos, ctx| {
-            repos.detect_possible_git_repo(&path_str, RepoDetectionSource::TerminalNavigation, ctx)
+            repos.detect_possible_local_git_repo(
+                &path_str,
+                RepoDetectionSource::TerminalNavigation,
+                ctx,
+            )
         });
 
         let request_id_for_response = request_id.clone();
@@ -1981,6 +2006,90 @@ impl ServerModel {
                 }
             }
         }
+    }
+
+    // Zap: `UploadHandoffSnapshot` (local-to-cloud SSH-session handoff via GCS
+    // upload through `server::server_api::ai::AIClient`) is not wired in here —
+    // it depends entirely on the cloud AI proxy this fork replaces with BYOP
+    // providers, and has no local-only variant to keep. The client message is
+    // acknowledged with a graceful rejection in `handle_message` instead, and
+    // `remote_server::handoff_snapshot` is intentionally not declared as a
+    // module in `mod.rs`.
+
+    /// Handles `GetBranches` — request/response.
+    ///
+    /// Runs `get_all_branches` on the remote filesystem and responds with
+    /// the branch list.
+    fn handle_get_branches(
+        &mut self,
+        msg: super::proto::GetBranches,
+        request_id: &RequestId,
+        conn_id: ConnectionId,
+        ctx: &mut ModelContext<Self>,
+    ) -> HandlerOutcome {
+        let repo_path = match StandardizedPath::from_local_canonicalized(Path::new(&msg.repo_path))
+        {
+            Ok(p) => p.to_local_path_lossy(),
+            Err(e) => {
+                return HandlerOutcome::Sync(server_message::Message::GetBranchesResponse(
+                    GetBranchesResponse {
+                        result: Some(super::proto::get_branches_response::Result::Error(
+                            GetBranchesError {
+                                message: format!("Invalid repo_path: {e}"),
+                            },
+                        )),
+                    },
+                ));
+            }
+        };
+
+        let max_branch_count = msg
+            .max_branch_count
+            .map(|c| (c as usize).min(MAX_BRANCH_COUNT_CAP));
+        let include_remotes = msg.include_remotes;
+
+        log::info!(
+            "Handling GetBranches repo={} (request_id={request_id})",
+            msg.repo_path,
+        );
+
+        let request_id_for_response = request_id.clone();
+        let handle = self.spawn_request_handler(
+            request_id.clone(),
+            async move {
+                crate::util::git::get_all_branches(&repo_path, max_branch_count, include_remotes)
+                    .await
+            },
+            move |me, branches_result, _ctx| {
+                let message = match branches_result {
+                    Ok(branches) => {
+                        server_message::Message::GetBranchesResponse(GetBranchesResponse {
+                            result: Some(super::proto::get_branches_response::Result::Success(
+                                GetBranchesSuccess {
+                                    branches: branches
+                                        .into_iter()
+                                        .map(|entry| BranchInfo {
+                                            name: entry.name,
+                                            is_main: entry.is_main,
+                                        })
+                                        .collect(),
+                                },
+                            )),
+                        })
+                    }
+                    Err(e) => server_message::Message::GetBranchesResponse(GetBranchesResponse {
+                        result: Some(super::proto::get_branches_response::Result::Error(
+                            GetBranchesError {
+                                message: format!("{e:#}"),
+                            },
+                        )),
+                    }),
+                };
+                me.send_server_message(Some(conn_id), Some(&request_id_for_response), message);
+            },
+            ctx,
+        );
+        HandlerOutcome::Async(Some(handle))
     }
 
     /// Handles `DiscardFilesRequest` — request/response.

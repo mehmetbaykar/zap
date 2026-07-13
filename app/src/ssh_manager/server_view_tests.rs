@@ -311,7 +311,7 @@ fn selecting_onekey_dropdown_item_does_not_rebuild_dropdown_while_it_is_borrowed
         let dropdown = view.read(&app, |view, _| view.onekey_credential_dropdown.clone());
         dropdown.update(&mut app, |dropdown, ctx| {
             dropdown.handle_action(
-                &DropdownAction::SelectActionAndClose(SshServerAction::SelectOneKeyCredential(
+                &DropdownAction::select_action_and_close(SshServerAction::SelectOneKeyCredential(
                     Some(0),
                 )),
                 ctx,

@@ -1,24 +1,22 @@
 use warp_core::ui::appearance::Appearance;
-use warpui::{platform::WindowStyle, App};
-
-use crate::{
-    ai::blocklist::BlocklistAIHistoryModel,
-    auth::{AuthManager, AuthStateProvider},
-    cloud_object::update_manager::UpdateManager,
-    cloud_object::{
-        model::{persistence::ObjectStoreModel, view::ObjectStoreViewModel},
-        Space,
-    },
-    drive::index::DriveIndexSection,
-    network::NetworkStatus,
-    settings_view::keybindings::KeybindingChangedNotifier,
-    terminal::resizable_data::ResizableData,
-    test_util::settings::initialize_settings_for_tests,
-    workspaces::user_workspaces::UserWorkspaces,
-    Assets, ObjectActions,
-};
+use warpui::platform::WindowStyle;
+use warpui::App;
 
 use super::DrivePanel;
+use crate::ai::blocklist::BlocklistAIHistoryModel;
+use crate::auth::AuthManager;
+use crate::auth::AuthStateProvider;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::model::view::ObjectStoreViewModel;
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::cloud_object::Space;
+use crate::drive::index::DriveIndexSection;
+use crate::network::NetworkStatus;
+use crate::settings_view::keybindings::KeybindingChangedNotifier;
+use crate::terminal::resizable_data::ResizableData;
+use crate::test_util::settings::initialize_settings_for_tests;
+use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::{ObjectActions, ASSETS};
 
 fn initialize_app(app: &mut App) {
     initialize_settings_for_tests(app);
@@ -41,7 +39,7 @@ fn initialize_app(app: &mut App) {
 
 #[test]
 fn test_warp_drive_sections_with_no_team() {
-    App::test(Assets, |mut app| async move {
+    App::test(ASSETS, |mut app| async move {
         initialize_app(&mut app);
 
         // Instead of being in the panel module and depending on DrivePanel, this test should be in the index module.

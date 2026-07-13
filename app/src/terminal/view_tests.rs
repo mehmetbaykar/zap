@@ -69,7 +69,9 @@ use crate::terminal::model::blocks::{insert_block, TotalIndex};
 use crate::terminal::model::terminal_model::WithinBlock;
 use crate::terminal::session_settings::AgentToolbarChipSelection;
 use crate::terminal::shared_session::SharedSessionStatus;
-use crate::terminal::view::load_ai_conversation::RestoredAIConversation;
+use crate::terminal::view::load_ai_conversation::{
+    RestoreConversationEntryBehavior, RestoredAIConversation,
+};
 use crate::terminal::CLIAgent;
 use crate::test_util::ai_agent_tasks::{
     create_api_subtask, create_api_task, create_message, create_subagent_tool_call_message,
@@ -238,6 +240,7 @@ fn empty_agent_conversation_data_for_test() -> AgentConversationData {
         cli_subagent_block_snapshots_json: None,
         pinned: false,
         is_remote_child: false,
+        root_task_is_optimistic: None,
     }
 }
 
@@ -395,6 +398,7 @@ fn restores_cli_subagent_view_from_serialized_history_blocks() {
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
         });
@@ -431,6 +435,7 @@ fn restores_cli_subagent_terminal_output_from_persisted_snapshot() {
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
         });
@@ -481,6 +486,7 @@ fn restores_cli_subagent_snapshot_when_history_blocks_are_not_preloaded() {
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
         });
@@ -527,6 +533,7 @@ fn exiting_restored_cli_subagent_agent_view_inserts_entry_card() {
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
             view.enter_agent_view_for_conversation(
@@ -576,6 +583,7 @@ fn assert_exiting_restored_ordinary_agent_view_inserts_entry_card(origin: AgentV
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
             view.enter_agent_view_for_conversation(None, origin, conversation_id, ctx);
@@ -627,6 +635,7 @@ fn skips_cli_subagent_view_restore_without_matching_ai_metadata() {
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
         });
@@ -655,6 +664,7 @@ fn ordinary_agent_restore_does_not_create_cli_subagent_views() {
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
         });
@@ -676,11 +686,6 @@ fn ordinary_agent_restore_does_not_create_cli_subagent_views() {
 fn finished_cli_subagent_keeps_read_only_card_when_metadata_matches() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
-        // FinishedSubagent 会触发 sidecar 持久化，需要 GlobalResourceHandlesProvider。
-        let global_resource_handles = crate::GlobalResourceHandles::mock(&mut app);
-        app.add_singleton_model(|_| {
-            crate::GlobalResourceHandlesProvider::new(global_resource_handles)
-        });
 
         // 先恢复一个带 CLI subagent 的历史会话，建立带匹配 metadata 的 command block
         // 和一个 RestoredReadOnly 视图，模拟 SSH 会话在 agent view 里展开后的状态。
@@ -701,6 +706,7 @@ fn finished_cli_subagent_keeps_read_only_card_when_metadata_matches() {
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
         });
@@ -812,6 +818,7 @@ fn restored_cli_subagent_windows_ctrl_c_does_not_write_to_pty() {
                 view.view_id,
                 &CLISubagentViewEvent::WindowsCtrlC,
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
         });
@@ -1022,6 +1029,7 @@ fn submit_cli_agent_rich_input_restores_unlocked_input_config() {
                             is_locked: false,
                         },
                         true,
+                        None,
                         ctx,
                     );
                 });
@@ -1087,6 +1095,7 @@ fn unregister_cli_agent_session_restores_unlocked_input_config() {
                             is_locked: false,
                         },
                         true,
+                        None,
                         ctx,
                     );
                 });
@@ -1218,6 +1227,7 @@ fn appended_exchange_renders_in_current_owner_after_conversation_transfer() {
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(restored_conversation),
                 true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
         });
@@ -5152,6 +5162,7 @@ fn cli_agent_rich_input_shell_mode_uses_run_commands_hint_text() {
                             is_locked: true,
                         },
                         true,
+                        None,
                         ctx,
                     );
                 });

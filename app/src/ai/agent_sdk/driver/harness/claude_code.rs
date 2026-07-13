@@ -96,7 +96,6 @@ impl ThirdPartyHarness for ClaudeHarness {
             terminal_driver,
         )?))
     }
-
 }
 
 /// Command used to exit claude.

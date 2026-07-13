@@ -1,10 +1,9 @@
 use prost::Message;
 
+use super::*;
 use crate::proto::{
     client_message, server_message, ClientMessage, Initialize, InitializeResponse, ServerMessage,
 };
-
-use super::*;
 
 #[tokio::test]
 async fn round_trip_client_message() {
@@ -12,6 +11,7 @@ async fn round_trip_client_message() {
         request_id: "test-123".to_string(),
         message: Some(client_message::Message::Initialize(Initialize {
             auth_token: String::new(),
+            codebase_index_limits: None,
         })),
     };
 
@@ -123,6 +123,7 @@ fn try_extract_request_id_from_valid_message() {
         request_id: "abc-123".to_string(),
         message: Some(client_message::Message::Initialize(Initialize {
             auth_token: String::new(),
+            codebase_index_limits: None,
         })),
     };
     let buf = msg.encode_to_vec();

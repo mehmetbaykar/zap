@@ -1,113 +1,96 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
 use alias_bar::{AliasBar, AliasBarEvent};
 use argument_editor::{ArgumentEditorRow, DEFAULT_ARGUMENT_PREFIX};
 use env_var_selector::{EnvVarSelector, EnvVarSelectorEvent};
 use itertools::Itertools;
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::vec2f;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
 use string_offset::CharOffset;
 use syntax_highlightable::SyntaxHighlightable;
 use url::Url;
-
-use crate::{
-    ai::blocklist::secret_redaction::find_secrets_in_text,
-    appearance::Appearance,
-    auth::{AuthState, AuthStateProvider},
-    cloud_object::{
-        breadcrumbs::ContainingObject,
-        model::{
-            persistence::{ObjectStoreEvent, ObjectStoreModel},
-            view::ObjectStoreViewModel,
-        },
-        update_manager::{
-            FetchSingleObjectOption, ObjectOperation, OperationSuccessType, UpdateManager,
-            UpdateManagerEvent,
-        },
-        ObjectType, Owner, Revision, Space, StoredObject, StoredObjectEventEntrypoint,
-    },
-    drive::{
-        cloud_object_styling::warp_drive_icon_color,
-        drive_helpers::has_feature_gated_anonymous_user_reached_workflow_limit,
-        items::WarpDriveItemId,
-        sharing::{ContentEditability, SharingAccessLevel},
-        workflows::{
-            ai_assist::GeneratedCommandMetadataError,
-            arguments::ArgumentsState,
-            enum_creation_dialog::{EnumCreationDialog, EnumCreationDialogEvent, WorkflowEnumData},
-            workflow_arg_selector::{WorkflowArgSelector, WorkflowArgSelectorEvent},
-            workflow_arg_type_helpers::{self, ArgumentEditorRowIndex},
-        },
-        DriveObjectType, ObjectTypeAndId, ZapDriveObjectSettings,
-    },
-    editor::{
-        EditorOptions, EditorView, EnterAction, EnterSettings, Event as EditorEvent,
-        InteractionState, PlainTextEditorViewAction as EditorAction,
-        PropagateAndNoOpNavigationKeys, SingleLineEditorOptions, TextOptions, TextStyleOperation,
-    },
-    menu::{MenuItem, MenuItemFields},
-    network::NetworkStatus,
-    pane_group::{
-        focus_state::PaneFocusHandle, pane::view, BackingView, PaneConfiguration, PaneEvent,
-    },
-    send_telemetry_from_ctx,
-    server::{
-        ids::{ClientId, ServerId, SyncId},
-        telemetry::{ObjectTelemetryMetadata, TelemetryEvent, TelemetryObjectType},
-    },
-    settings::{
-        app_installation_detection::{UserAppInstallDetectionSettings, UserAppInstallStatus},
-        AISettings,
-    },
-    terminal::safe_mode_settings::get_secret_obfuscation_mode,
-    ui_components::{
-        breadcrumb::{render_breadcrumbs, BreadcrumbState},
-        buttons::{accent_icon_button, icon_button},
-        dialog::{dialog_styles, Dialog},
-        icons::Icon,
-    },
-    util::bindings::CustomAction,
-    view_components::{DismissibleToast, ToastType},
-    workflows::{
-        workflow::{Argument, Workflow},
-        WorkflowObject,
-    },
-    workspace::ToastStack,
-    FeatureFlag,
-};
-
-use warp_core::{context_flag::ContextFlag, settings::Setting, ui::theme::AnsiColorIdentifier};
+use warp_core::context_flag::ContextFlag;
+use warp_core::settings::Setting;
+use warp_core::ui::theme::AnsiColorIdentifier;
 use warp_editor::editor::NavigationKey;
+use warpui::clipboard::ClipboardContent;
+use warpui::elements::{
+    Align, Border, ChildAnchor, ChildView, Clipped, ClippedScrollStateHandle, ClippedScrollable,
+    ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Flex, Hoverable,
+    MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning, ParentAnchor,
+    ParentElement, ParentOffsetBounds, Radius, Rect, ScrollbarWidth, Shrinkable, Stack,
+};
+use warpui::fonts::{FamilyId, Weight};
+use warpui::keymap::EditableBinding;
+use warpui::platform::Cursor;
+use warpui::text_layout::TextStyle;
+use warpui::ui_components::button::{Button, ButtonVariant, TextAndIcon, TextAndIconAlignment};
+use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::{
-    clipboard::ClipboardContent,
-    elements::{
-        Align, Border, ChildAnchor, ChildView, Clipped, ClippedScrollStateHandle,
-        ClippedScrollable, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty,
-        Flex, Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning,
-        ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Rect, ScrollbarWidth, Shrinkable,
-        Stack,
-    },
-    fonts::{FamilyId, Weight},
-    keymap::EditableBinding,
-    platform::Cursor,
-    text_layout::TextStyle,
-    ui_components::{
-        button::{Button, ButtonVariant, TextAndIcon, TextAndIconAlignment},
-        components::{Coords, UiComponent, UiComponentStyles},
-    },
     AppContext, Element, Entity, FocusContext, ModelHandle, SingletonEntity, TypedActionView, View,
     ViewContext, ViewHandle, WindowId,
 };
 
-use super::{
-    aliases::WorkflowAliases, command_parser::WorkflowCommandDisplayData, WorkflowObjectModel,
-    WorkflowSource, WorkflowType, WorkflowViewMode,
+use super::aliases::WorkflowAliases;
+use super::command_parser::WorkflowCommandDisplayData;
+use super::{WorkflowObjectModel, WorkflowSource, WorkflowType, WorkflowViewMode};
+use crate::ai::blocklist::secret_redaction::find_secrets_in_text;
+use crate::appearance::Appearance;
+use crate::auth::{AuthState, AuthStateProvider};
+use crate::cloud_object::breadcrumbs::ContainingObject;
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
+use crate::cloud_object::model::view::ObjectStoreViewModel;
+use crate::cloud_object::update_manager::{
+    FetchSingleObjectOption, ObjectOperation, OperationSuccessType, UpdateManager,
+    UpdateManagerEvent,
 };
-
+use crate::cloud_object::{
+    ObjectType, Owner, Revision, Space, StoredObject, StoredObjectEventEntrypoint,
+};
+use crate::drive::cloud_object_styling::warp_drive_icon_color;
+use crate::drive::drive_helpers::has_feature_gated_anonymous_user_reached_workflow_limit;
+use crate::drive::items::WarpDriveItemId;
+use crate::drive::sharing::{ContentEditability, SharingAccessLevel};
+use crate::drive::workflows::ai_assist::GeneratedCommandMetadataError;
+use crate::drive::workflows::arguments::ArgumentsState;
+use crate::drive::workflows::enum_creation_dialog::{
+    EnumCreationDialog, EnumCreationDialogEvent, WorkflowEnumData,
+};
+use crate::drive::workflows::workflow_arg_selector::{
+    WorkflowArgSelector, WorkflowArgSelectorEvent,
+};
+use crate::drive::workflows::workflow_arg_type_helpers::{self, ArgumentEditorRowIndex};
+use crate::drive::{DriveObjectType, ObjectTypeAndId, ZapDriveObjectSettings};
+use crate::editor::{
+    EditorOptions, EditorView, EnterAction, EnterSettings, Event as EditorEvent, InteractionState,
+    PlainTextEditorViewAction as EditorAction, PropagateAndNoOpNavigationKeys,
+    SingleLineEditorOptions, TextOptions, TextStyleOperation,
+};
+use crate::menu::{MenuItem, MenuItemFields};
+use crate::network::NetworkStatus;
+use crate::pane_group::focus_state::PaneFocusHandle;
+use crate::pane_group::pane::view;
+use crate::pane_group::{BackingView, PaneConfiguration, PaneEvent};
+use crate::server::ids::{ClientId, ServerId, SyncId};
+use crate::server::telemetry::{ObjectTelemetryMetadata, TelemetryEvent, TelemetryObjectType};
+use crate::settings::app_installation_detection::{
+    UserAppInstallDetectionSettings, UserAppInstallStatus,
+};
+use crate::settings::AISettings;
+use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
+use crate::ui_components::breadcrumb::{render_breadcrumbs, BreadcrumbState};
+use crate::ui_components::buttons::{accent_icon_button, icon_button};
+use crate::ui_components::dialog::{dialog_styles, Dialog};
+use crate::ui_components::icons::Icon;
 #[cfg(target_family = "wasm")]
 use crate::uri::web_intent_parser::open_url_on_desktop;
+use crate::util::bindings::CustomAction;
+use crate::view_components::{DismissibleToast, ToastType};
+use crate::workflows::workflow::{Argument, Workflow};
+use crate::workflows::WorkflowObject;
+use crate::workspace::ToastStack;
+use crate::{send_telemetry_from_ctx, FeatureFlag};
 
 mod alias_argument_selector;
 mod alias_bar;

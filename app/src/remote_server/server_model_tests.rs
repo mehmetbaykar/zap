@@ -64,6 +64,7 @@ fn initialize_with_auth_token_stores_token() {
         model.handle_initialize(
             Initialize {
                 auth_token: "initial-token".to_string(),
+                codebase_index_limits: None,
             },
             &request_id(),
         );
@@ -79,6 +80,7 @@ fn empty_initialize_preserves_existing_auth_token() {
         model.handle_initialize(
             Initialize {
                 auth_token: "initial-token".to_string(),
+                codebase_index_limits: None,
             },
             &request_id(),
         );
@@ -86,6 +88,7 @@ fn empty_initialize_preserves_existing_auth_token() {
         model.handle_initialize(
             Initialize {
                 auth_token: String::new(),
+                codebase_index_limits: None,
             },
             &request_id(),
         );
@@ -101,6 +104,7 @@ fn authenticate_with_auth_token_replaces_auth_token() {
         model.handle_initialize(
             Initialize {
                 auth_token: "initial-token".to_string(),
+                codebase_index_limits: None,
             },
             &request_id(),
         );
@@ -120,6 +124,7 @@ fn empty_authenticate_preserves_existing_auth_token() {
         model.handle_initialize(
             Initialize {
                 auth_token: "initial-token".to_string(),
+                codebase_index_limits: None,
             },
             &request_id(),
         );

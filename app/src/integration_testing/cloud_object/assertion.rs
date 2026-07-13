@@ -1,4 +1,5 @@
-use warpui::{async_assert, integration::AssertionCallback};
+use warpui::async_assert;
+use warpui::integration::AssertionCallback;
 
 use crate::{
     cloud_object::{

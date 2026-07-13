@@ -26,8 +26,8 @@ use warpui::ModelSpawner;
 
 use crate::ai::agent_events::{
     run_agent_event_driver, AgentEventConsumer, AgentEventConsumerControlFlow,
-    AgentEventDriverConfig, AgentEventSource, AgentEventSourceItem, AgentEventStreamClient,
-    AgentRunEvent, MessageHydrator,
+    AgentEventDriverConfig, AgentEventFilter, AgentEventSource, AgentEventSourceItem,
+    AgentEventStreamClient, AgentRunEvent, MessageHydrator,
 };
 use crate::ai::agent_sdk::driver::{AgentDriver, OZ_MESSAGE_LISTENER_STATE_ROOT_ENV};
 
@@ -77,13 +77,21 @@ impl ProviderAgentEventSource {
 impl AgentEventSource for ProviderAgentEventSource {
     async fn open_stream(
         &self,
-        run_ids: &[String],
+        filter: &AgentEventFilter,
         since_sequence: i64,
     ) -> Result<ProviderAgentEventSourceStream> {
-        let stream = self
-            .client
-            .stream_agent_events(run_ids, since_sequence)
-            .await?;
+        let stream = match filter {
+            AgentEventFilter::RunIds(run_ids) => {
+                self.client
+                    .stream_agent_events(run_ids, since_sequence)
+                    .await?
+            }
+            AgentEventFilter::AncestorRunId(ancestor_run_id) => {
+                self.client
+                    .stream_agent_events_for_ancestor(ancestor_run_id, since_sequence)
+                    .await?
+            }
+        };
 
         let stream = stream.filter_map(|event_result| async move {
             match event_result {
@@ -635,7 +643,7 @@ async fn run_parent_bridge_forever(
     // The shared driver keeps `since_sequence` in memory across its own retry
     // loop, which is all this per-session bridge needs because the state dir is
     // not reused across sessions.
-    let config = AgentEventDriverConfig::retry_forever(vec![run_id.clone()], 0);
+    let config = AgentEventDriverConfig::retry_forever_run_ids(vec![run_id.clone()], 0);
     let source = ProviderAgentEventSource::new(agent_event_stream_client);
     let mut consumer = MessageBridgeEventConsumer { run_id, state_dir };
     run_agent_event_driver(source, config, &mut consumer).await

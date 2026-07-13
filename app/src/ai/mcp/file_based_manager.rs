@@ -1,21 +1,20 @@
-use super::MCPProvider;
-use super::{FileMCPWatcher, FileMCPWatcherEvent};
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
 use itertools::Itertools as _;
 use repo_metadata::repositories::DetectedRepositories;
-use std::collections::{hash_map::Entry, HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use warp_core::features::FeatureFlag;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
-use crate::{
-    ai::mcp::{
-        templatable_installation::TemplatableMCPServerInstallation,
-        ParsedTemplatableMCPServerResult,
-    },
-    settings::{ai::AISettings, AISettingsChangedEvent},
-    warp_managed_paths_watcher::warp_managed_mcp_config_path,
-};
+use super::{FileMCPWatcher, FileMCPWatcherEvent, MCPProvider};
+use crate::ai::mcp::templatable_installation::TemplatableMCPServerInstallation;
+use crate::ai::mcp::ParsedTemplatableMCPServerResult;
+use crate::settings::ai::AISettings;
+use crate::settings::AISettingsChangedEvent;
+use crate::warp_managed_paths_watcher::warp_managed_mcp_config_path;
 
 /// Singleton model to manage file-based MCP servers.
 #[derive(Default)]
@@ -72,7 +71,9 @@ impl FileBasedMCPManager {
         cwd: &Path,
         app: &AppContext,
     ) -> Vec<&TemplatableMCPServerInstallation> {
-        let repo_root = DetectedRepositories::as_ref(app).get_root_for_path(cwd);
+        let repo_root = DetectedRepositories::as_ref(app)
+            .get_root_for_path(&LocalOrRemotePath::Local(cwd.to_path_buf()))
+            .and_then(|r| PathBuf::try_from(r).ok());
         let candidate_roots = [dirs::home_dir(), repo_root];
 
         let mut servers = Vec::new();
@@ -192,8 +193,7 @@ impl FileBasedMCPManager {
             scanned_servers.insert(hash);
         }
 
-        // If file-based MCP is enabled, spawn any new servers.
-        self.spawn_file_based_servers(servers_to_spawn, ctx);
+        self.maybe_autostart_file_based_servers(servers_to_spawn, ctx);
 
         // Determine which servers have been removed.
         let servers_to_remove = previous_scanned_servers
@@ -273,14 +273,34 @@ impl FileBasedMCPManager {
     fn is_global_warp_root(root_path: &Path) -> bool {
         warp_managed_mcp_config_path().is_some_and(|path| root_path == path.root_path.as_path())
     }
+    fn auto_start_decision(&self, hash: u64, file_based_mcp_enabled: bool) -> AutoStartDecision {
+        let server_type = if self.is_global_warp_server(hash) {
+            FileBasedMCPServerType::GlobalWarp
+        } else if self.is_global_server(hash) {
+            FileBasedMCPServerType::GlobalThirdParty
+        } else {
+            FileBasedMCPServerType::ProjectScoped
+        };
+        let should_autostart = match server_type {
+            FileBasedMCPServerType::GlobalWarp => true,
+            FileBasedMCPServerType::GlobalThirdParty => file_based_mcp_enabled,
+            FileBasedMCPServerType::ProjectScoped => false,
+        };
 
-    fn spawn_file_based_servers(
+        AutoStartDecision {
+            should_autostart,
+            server_type,
+        }
+    }
+
+    /// Returns the UUIDs of servers that were actually auto-started.
+    fn maybe_autostart_file_based_servers(
         &mut self,
-        servers_to_spawn: Vec<TemplatableMCPServerInstallation>,
+        servers_to_consider: Vec<TemplatableMCPServerInstallation>,
         ctx: &mut ModelContext<Self>,
-    ) {
-        if servers_to_spawn.is_empty() {
-            return;
+    ) -> Vec<Uuid> {
+        if servers_to_consider.is_empty() {
+            return Vec::new();
         }
         let mcp_enabled = AISettings::as_ref(ctx).is_file_based_mcp_enabled(ctx);
 
@@ -290,15 +310,23 @@ impl FileBasedMCPManager {
         // - Project-scoped (any provider): never auto-spawn; require explicit opt-in
         //   via the "Detected from {provider}" section of the MCP settings.
         let mut to_spawn = Vec::new();
-        for installation in servers_to_spawn {
+        let mut auto_started_uuids = Vec::new();
+        for installation in servers_to_consider {
             let Some(hash) = installation.hash() else {
                 continue;
             };
-            if self.is_global_warp_server(hash) || (self.is_global_server(hash) && mcp_enabled) {
+            let installation_uuid = installation.uuid();
+            let server_name = installation.templatable_mcp_server().name.clone();
+            let AutoStartDecision {
+                should_autostart, ..
+            } = self.auto_start_decision(hash, mcp_enabled);
+            if should_autostart {
+                log::info!(
+                    "Auto-spawning file-based MCP server '{server_name}' ({installation_uuid})"
+                );
+                auto_started_uuids.push(installation_uuid);
                 to_spawn.push(installation);
             }
-
-            // Project-scoped installations are intentionally dropped from auto-spawn.
         }
 
         if !to_spawn.is_empty() {
@@ -306,6 +334,7 @@ impl FileBasedMCPManager {
                 installations: to_spawn,
             });
         }
+        auto_started_uuids
     }
 
     fn handle_file_based_mcp_enabled_change(&mut self, ctx: &mut ModelContext<Self>) {
@@ -318,7 +347,8 @@ impl FileBasedMCPManager {
             .file_based_servers
             .iter()
             .filter(|(hash, _)| {
-                self.is_global_server(**hash) && !self.is_global_warp_server(**hash)
+                self.auto_start_decision(**hash, true).server_type
+                    == FileBasedMCPServerType::GlobalThirdParty
             })
             .map(|(_, server)| server.clone())
             .collect();
@@ -415,6 +445,21 @@ impl FileBasedMCPManager {
         }
         Some(discovery_root)
     }
+}
+
+struct AutoStartDecision {
+    should_autostart: bool,
+    server_type: FileBasedMCPServerType,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FileBasedMCPServerType {
+    /// A file-based MCP server detected from Warp's global managed config.
+    GlobalWarp,
+    /// A file-based MCP server detected from a non-Warp provider's global user config.
+    GlobalThirdParty,
+    /// A file-based MCP server detected from a project/repository-scoped config.
+    ProjectScoped,
 }
 
 pub enum FileBasedMCPManagerEvent {

@@ -330,6 +330,8 @@ integration_tests! {
     test_goto_line_jumps_to_line,
     test_goto_line_with_column,
     test_goto_line_clamps_out_of_range,
+    test_code_editor_line_numbers_default_to_absolute,
+    test_code_editor_relative_line_numbers_follow_cursor,
 
     // AI document tests
     test_copy_ai_document_as_markdown_from_overflow_menu,

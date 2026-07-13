@@ -1377,6 +1377,8 @@ impl AgentDriver {
                 | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
                 | BlocklistAIHistoryEvent::ConversationAgentIdAssigned { .. }
                 | BlocklistAIHistoryEvent::ConversationOwnershipTransferred { .. }
+                | BlocklistAIHistoryEvent::ConversationUsageMetadataUpdated { .. }
+                | BlocklistAIHistoryEvent::LocalSharedSessionEstablished { .. }
                 | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. } => (),
             }
         });

@@ -1,12 +1,13 @@
+use settings::Setting as _;
+use warp_core::features::FeatureFlag;
+use warpui::{Entity, ModelContext, SingletonEntity, WindowId};
+
 use super::hoa_onboarding;
 use crate::auth::{AuthManager, AuthManagerEvent};
 use crate::channel::{Channel, ChannelState};
 // Zap (localization, Phase 5): `PreferencesSyncer` has been physically removed.
 use crate::settings::CodeSettings;
 use crate::terminal::general_settings::GeneralSettings;
-use settings::Setting as _;
-use warp_core::features::FeatureFlag;
-use warpui::{Entity, ModelContext, SingletonEntity, WindowId};
 
 /// A generic model for managing one-time modals that should be shown to users only once.
 ///

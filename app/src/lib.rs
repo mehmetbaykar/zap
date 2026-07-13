@@ -29,7 +29,6 @@ mod context_chips;
 mod crash_recovery;
 #[cfg(feature = "crash_reporting")]
 mod crash_reporting;
-mod debounce;
 mod debug_dump;
 mod default_terminal;
 mod drive;
@@ -179,6 +178,8 @@ pub use persistence::testing as sqlite_testing;
 
 use ::settings::{Setting, ToggleableSetting};
 pub use warp_core::errors::{report_error, report_if_error};
+// Re-export the debounce function to simplify imports.
+pub use warp_core::r#async::debounce;
 
 #[cfg(feature = "plugin_host")]
 pub use plugin::{run_plugin_host, PLUGIN_HOST_FLAG};
@@ -219,7 +220,7 @@ use crate::projects::ProjectManagementModel;
 use crate::server::experiments::ServerExperiments;
 use crate::session_management::{RunningSessionSummary, SessionNavigationData};
 use crate::settings::manager::SettingsManager;
-use crate::settings::{AccessibilitySettings, ScrollSettings, SelectionSettings};
+use crate::settings::{AISettings, AccessibilitySettings, ScrollSettings, SelectionSettings};
 use crate::settings_view::keybindings::KeybindingChangedNotifier;
 use crate::settings_view::DisplayCount;
 use crate::suggestions::ignored_suggestions_model::IgnoredSuggestionsModel;
@@ -244,7 +245,6 @@ use appearance::{Appearance, AppearanceManager};
 use channel::ChannelState;
 use interval_timer::IntervalTimer;
 use itertools::Itertools;
-use rust_embed::RustEmbed;
 use settings::{ExtraMetaKeys, PrivacySettings};
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -276,7 +276,7 @@ use crate::server::telemetry::{AppStartupInfo, CloseTarget, PaletteSource};
 use crate::terminal::CustomSecretRegexUpdater;
 use crate::util::bindings::is_binding_cross_platform;
 use crate::workspace::{PaneViewLocator, Workspace, WorkspaceAction};
-use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::workspaces::user_workspaces::{UserWorkspaces, UserWorkspacesEvent};
 use warp_logging::LogDestination;
 
 // Re-export the send_telemetry_from_ctx macro at the crate root level
@@ -296,18 +296,7 @@ use warpui::platform::TerminationMode;
 use warpui::windowing::state::ApplicationStage;
 use warpui::{AppContext, SingletonEntity, WindowId};
 
-#[derive(Clone, Copy, RustEmbed)]
-#[folder = "assets"]
-#[include = "bundled/**"] // Should be kept in sync with BUNDLED_ASSETS_DIR.
-#[include = "async/**"] // Should be kept in sync with ASYNC_ASSETS_DIR.
-#[cfg_attr(target_family = "wasm", exclude = "async/**")]
-// Excludes take precedence.
-// Standalone CLI builds (the `oz` tarball) are headless and never render the
-// onboarding/theme imagery in `async/`, so we exclude those bytes from the
-// embedded asset set to keep the CLI binary small — mirroring the carve-out
-// already applied for the WASM target above.
-#[cfg_attr(feature = "standalone", exclude = "async/**")]
-pub struct Assets;
+pub use warp_assets::Assets;
 
 pub static ASSETS: Assets = Assets;
 
@@ -499,14 +488,6 @@ impl LaunchMode {
     }
 }
 
-impl AssetProvider for Assets {
-    fn get(&self, path: &str) -> Result<Cow<'_, [u8]>> {
-        <Assets as RustEmbed>::get(path)
-            .map(|f| f.data)
-            .ok_or_else(|| anyhow!("no asset exists at path {}", path))
-    }
-}
-
 /// If the given event is a key down event containing alt modifiers, and those
 /// alt modifiers should be treated as meta keys, then remove the alts and
 /// prefix the keys with an escape. See WAR-472.
@@ -568,7 +549,7 @@ pub fn run() -> Result<()> {
     i18n::init(None);
 
     // Ensure feature flags are initialized before parsing command-line arguments.
-    init_feature_flags();
+    features::init_feature_flags();
 
     // Parse command-line arguments.
     let args = warp_cli::Args::from_env();
@@ -722,7 +703,7 @@ fn init_common(launch_mode: &LaunchMode, timer: Option<&mut IntervalTimer>) -> R
 
     // The `run` function already initializes feature flags, but ensure they're initialized here
     // for other entrypoints.
-    init_feature_flags();
+    features::init_feature_flags();
 
     if launch_mode.needs_profiling() {
         tracing::init()?;
@@ -736,10 +717,18 @@ fn init_common(launch_mode: &LaunchMode, timer: Option<&mut IntervalTimer>) -> R
             if crash_recovery::is_crash_recovery_process(launch_mode.args().as_ref()) {
                 warp_logging::init_for_crash_recovery_process()?;
             } else {
-                warp_logging::init(warp_logging::LogConfig { is_cli, log_destination })?;
+                warp_logging::init(warp_logging::LogConfig {
+                    is_cli,
+                    log_destination,
+                    ..Default::default()
+                })?;
             }
         } else {
-            warp_logging::init(warp_logging::LogConfig { is_cli, log_destination })?;
+            warp_logging::init(warp_logging::LogConfig {
+                is_cli,
+                log_destination,
+                ..Default::default()
+            })?;
         }
     }
 
@@ -910,6 +899,7 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         use warpui::platform::mac::AppExt;
+        use warpui::AssetProvider as _;
 
         let activate_on_launch = !launch_mode.is_integration_test()
             || std::env::var("WARPUI_USE_REAL_DISPLAY_IN_INTEGRATION_TESTS").is_ok();
@@ -924,8 +914,9 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     {
-        use crate::settings::ForceX11;
         use warpui::platform::linux::{self, AppBuilderExt};
+
+        use crate::settings::ForceX11;
 
         app_builder.set_window_class(ChannelState::app_id().to_string());
 
@@ -1158,23 +1149,23 @@ pub(crate) fn initialize_app(
     });
 
     let (
-        cloud_objects,
-        cached_workspaces,
-        current_workspace_uid,
-        app_state,
-        command_history,
-        restored_user_profiles,
-        time_of_next_force_object_refresh,
-        object_actions,
-        experiments,
-        ai_queries,
+        mut cloud_objects,
+        mut cached_workspaces,
+        mut current_workspace_uid,
+        mut app_state,
+        mut command_history,
+        mut restored_user_profiles,
+        mut time_of_next_force_object_refresh,
+        mut object_actions,
+        mut experiments,
+        mut ai_queries,
         nld_prompts,
-        multi_agent_conversations,
-        persisted_projects,
-        persisted_project_rules,
-        persisted_ignored_suggestions,
-        persisted_mcp_server_installations,
-        mcp_servers_to_restore,
+        mut multi_agent_conversations,
+        mut persisted_projects,
+        mut persisted_project_rules,
+        mut persisted_ignored_suggestions,
+        mut persisted_mcp_server_installations,
+        mut mcp_servers_to_restore,
     ) = sqlite_data
         .map(|sqlite_data| {
             (
@@ -1218,6 +1209,25 @@ pub(crate) fn initialize_app(
                 Default::default(),
             )
         });
+
+    if matches!(launch_mode, LaunchMode::RemoteServerDaemon { .. }) {
+        cloud_objects = Default::default();
+        cached_workspaces = Default::default();
+        current_workspace_uid = None;
+        app_state = None;
+        command_history = Default::default();
+        restored_user_profiles = Default::default();
+        time_of_next_force_object_refresh = None;
+        object_actions = Default::default();
+        experiments = Default::default();
+        ai_queries = Default::default();
+        multi_agent_conversations = Default::default();
+        persisted_projects = Default::default();
+        persisted_project_rules = Default::default();
+        persisted_ignored_suggestions = Default::default();
+        persisted_mcp_server_installations = Default::default();
+        mcp_servers_to_restore = Default::default();
+    }
 
     // Initialize a global model to track server-side experiment state.
     // This depends on the [`GlobalResourceHandlesProvider`] and so it must
@@ -1464,6 +1474,12 @@ pub(crate) fn initialize_app(
             } else {
                 RepoMetadataModel::new(ctx)
             };
+            model.register_ignored_path_interests(
+                ::ai::skills::SKILL_PROVIDER_DEFINITIONS
+                    .iter()
+                    .map(|provider| provider.skills_path.clone()),
+                ctx,
+            );
 
             // Subscribe to RemoteServerManager push events so that remote repo
             // metadata snapshots and incremental updates populate the remote
@@ -1685,10 +1701,13 @@ pub(crate) fn initialize_app(
         }
         ctx.add_singleton_model(move |_| restored);
     }
-    // Cross-pane pin set for the orchestration pill bar. Registered after
-    // the history model since it subscribes to history events.
+    // Per-conversation queued prompts. Registered after the history model
+    // since it subscribes to history events for cleanup.
+    ctx.add_singleton_model(ai::blocklist::QueuedQueryModel::new);
+    // Cross-pane UI state for the orchestration pill bar. Registered
+    // after the history model since it subscribes to history events.
     ctx.add_singleton_model(move |ctx| {
-        ai::blocklist::agent_view::orchestration_pin_model::OrchestrationPinModel::new(
+        ai::blocklist::agent_view::orchestration_pill_bar_model::OrchestrationPillBarModel::new(
             initial_pinned_conversations,
             ctx,
         )
@@ -1791,9 +1810,38 @@ pub(crate) fn initialize_app(
 
     ctx.add_singleton_model(LLMPreferences::new);
 
-    ctx.add_singleton_model(|ctx| {
+    let tip_model_handle = ctx.add_singleton_model(|ctx| {
         ai::agent_tips::AITipModel::<ai::AgentTip>::new_for_agent_tips(ctx)
     });
+    {
+        // Rebuild the tip pool when AI settings change so tips whose applicability
+        // depends on AI settings appear/disappear without waiting for the next cooldown cycle.
+        let tip_model_handle_for_ai = tip_model_handle.clone();
+        ctx.subscribe_to_model(&AISettings::handle(ctx), move |_, _, ctx| {
+            tip_model_handle_for_ai.update(ctx, |model, ctx| {
+                model.revalidate_tips(ctx);
+            });
+        });
+        // Also revalidate when workspace/team data changes (e.g. voice toggled at
+        // the org level). Billing metadata — including `warp_ai_policy.is_voice_enabled`
+        // — lives inside the team data, so `TeamsChanged` covers all policy updates.
+        let tip_model_handle_for_teams = tip_model_handle.clone();
+        ctx.subscribe_to_model(&UserWorkspaces::handle(ctx), move |_, event, ctx| {
+            if matches!(event, UserWorkspacesEvent::TeamsChanged) {
+                tip_model_handle_for_teams.update(ctx, |model, ctx| {
+                    model.revalidate_tips(ctx);
+                });
+            }
+        });
+        // Revalidate when any keybinding changes so tips with `<keybinding>`
+        // placeholders are hidden/shown when the referenced binding is cleared
+        // or reassigned.
+        ctx.subscribe_to_model(&KeybindingChangedNotifier::handle(ctx), move |_, _, ctx| {
+            tip_model_handle.update(ctx, |model, ctx| {
+                model.revalidate_tips(ctx);
+            });
+        });
+    }
 
     timer.mark_interval_end("SINGLETON_MODELS_REGISTERED");
 
@@ -2282,6 +2330,14 @@ fn on_close_window_cancelled(
     }
 }
 
+fn is_cloud_agent_web_home_launch_url(url: &Url) -> bool {
+    url.scheme() == ChannelState::url_scheme()
+        && url.host_str() == Some("action")
+        && url.path() == "/new_cloud_agent_conversation"
+        && url
+            .query_pairs()
+            .any(|(key, value)| key == "source" && value == "web_home")
+}
 fn launch(ctx: &mut warpui::AppContext, app_state: Option<AppState>, launch_mode: LaunchMode) {
     IntervalTimer::handle(ctx).update(ctx, |timer, _ctx| {
         timer.mark_interval_end("APP_LAUNCHED");
@@ -2299,6 +2355,12 @@ fn launch(ctx: &mut warpui::AppContext, app_state: Option<AppState>, launch_mode
 
     match launch_mode {
         LaunchMode::App { .. } | LaunchMode::Test { .. } => {
+            let should_skip_restore = launch_mode
+                .args()
+                .urls
+                .iter()
+                .any(is_cloud_agent_web_home_launch_url);
+            let app_state = if should_skip_restore { None } else { app_state };
             // Attempt to restore windows from the persisted application state.
             let arg = OpenFromRestoredArg { app_state };
             ctx.dispatch_global_action("root_view:open_from_restored", &arg);

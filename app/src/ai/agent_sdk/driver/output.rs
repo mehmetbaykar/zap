@@ -249,7 +249,9 @@ pub mod text {
                 | AIAgentActionResultType::EditDocuments(_)
                 | AIAgentActionResultType::CreateDocuments(_) => Ok(()),
                 AIAgentActionResultType::ReadShellCommandOutput { .. } => Ok(()),
+                AIAgentActionResultType::UseComputer(result) => writeln!(w, "{result}"),
                 AIAgentActionResultType::TransferShellCommandControlToUser { .. } => Ok(()),
+                AIAgentActionResultType::RequestComputerUse(result) => writeln!(w, "{result}"),
                 AIAgentActionResultType::AskUserQuestion(_) => Ok(()),
             },
         }
@@ -338,6 +340,12 @@ pub mod text {
                     | AIAgentActionType::CreateDocuments(_)
                     | AIAgentActionType::ReadShellCommandOutput { .. }
                     | AIAgentActionType::TransferShellCommandControlToUser { .. } => (),
+                    AIAgentActionType::UseComputer(request) => {
+                        writeln!(w, "Using computer: {}", request.action_summary)?;
+                    }
+                    AIAgentActionType::RequestComputerUse(request) => {
+                        writeln!(w, "Requesting computer use: {}", request.task_summary)?;
+                    }
                     AIAgentActionType::ReadSkill(request) => {
                         writeln!(w, "Reading skill: {}", request.skill)?;
                     }
@@ -485,7 +493,6 @@ pub mod json {
 
     use crate::ai::agent::comment::ReviewComment;
     use serde::Serialize;
-    use std::path::Path;
     use std::{
         borrow::Cow,
         io::{self, Write},
@@ -633,7 +640,7 @@ pub mod json {
     #[derive(Serialize)]
     struct JsonComment<'a> {
         comment_text: &'a str,
-        file_path: Option<&'a Path>,
+        file_path: Option<String>,
         line_number: Option<usize>,
         head_title: Option<&'a str>,
     }
@@ -943,8 +950,10 @@ pub mod json {
                     | AIAgentActionType::EditDocuments(_)
                     | AIAgentActionType::CreateDocuments(_)
                     | AIAgentActionType::ReadShellCommandOutput { .. }
+                    | AIAgentActionType::UseComputer(_)
                     | AIAgentActionType::ReadSkill(_)
-                    | AIAgentActionType::TransferShellCommandControlToUser { .. } => None,
+                    | AIAgentActionType::TransferShellCommandControlToUser { .. }
+                    | AIAgentActionType::RequestComputerUse(_) => None,
                     AIAgentActionType::AskUserQuestion { .. } => None,
                 },
                 AIAgentOutputMessageType::TodoOperation(operation) => match operation {
@@ -1007,7 +1016,11 @@ pub mod json {
         fn from(review_comment: &'a ReviewComment) -> Self {
             Self {
                 comment_text: review_comment.content.as_str(),
-                file_path: review_comment.diff.file_path.as_deref(),
+                file_path: review_comment
+                    .diff
+                    .file_path
+                    .as_ref()
+                    .map(|path| path.display_path()),
                 line_number: review_comment.diff.line_number,
                 head_title: review_comment.head_title.as_deref(),
             }
@@ -1184,6 +1197,7 @@ fn format_agent_text<W: Write>(text: &AIAgentText, w: &mut W) -> io::Result<()> 
                     | Some(CodeSource::New { .. })
                     | Some(CodeSource::FileTree { .. })
                     | Some(CodeSource::RemoteFileTree { .. })
+                    | Some(CodeSource::CommandPalette { .. })
                     | Some(CodeSource::Finder { .. })
                     | None => {}
                 }

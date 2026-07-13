@@ -1,12 +1,26 @@
-use crate::ai::agent::task::TaskId;
-use crate::ai::agent::{
-    AIAgentActionResult, AIAgentActionResultType, TransferShellCommandControlToUserResult,
-};
-use crate::terminal::model::block::BlockId;
-use chrono::DateTime;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use warp_core::command::ExitCode;
 use warp_multi_agent_api as api;
+
+use crate::ai::agent::task::TaskId;
+use crate::ai::agent::{
+    AIAgentActionResult, AIAgentActionResultType, AIAgentContext,
+    TransferShellCommandControlToUserResult,
+};
+use crate::terminal::model::block::BlockId;
+
+#[test]
+fn git_context_converts_head_and_branch() {
+    let context = vec![AIAgentContext::Git {
+        head: "abc123".to_string(),
+        branch: Some("feature/repo-pr".to_string()),
+    }];
+
+    let api_context = super::convert_context(&context);
+    let git = api_context.git.expect("expected git context");
+    assert_eq!(git.head, "abc123");
+    assert_eq!(git.branch, "feature/repo-pr");
+}
 
 #[test]
 fn transfer_control_snapshot_result_converts_to_tool_call_result_input() {

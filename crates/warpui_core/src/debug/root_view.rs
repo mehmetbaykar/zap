@@ -1,10 +1,9 @@
+use super::view_tree_debug_view::ViewTreeDebugView;
+use crate::elements::ChildView;
 use crate::{
-    elements::ChildView, AppContext, Element, Entity, EntityId, EntityIdMap, TypedActionView, View,
-    ViewContext,
+    AppContext, Element, Entity, EntityId, EntityIdMap, TypedActionView, View, ViewContext,
     ViewHandle, WindowId,
 };
-
-use super::view_tree_debug_view::ViewTreeDebugView;
 
 /// A root view for a window that provides debugging tools for the UI framework.
 pub(crate) struct DebugRootView {

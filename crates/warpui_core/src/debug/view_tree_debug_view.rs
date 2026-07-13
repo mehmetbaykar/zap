@@ -1,11 +1,11 @@
 use itertools::Itertools;
 use pathfinder_color::ColorU;
 
+use crate::elements::{
+    Align, Container, Fill, Hoverable, MouseStateHandle, ScrollStateHandle, Scrollable,
+    ScrollableElement, ScrollbarWidth, Text, UniformList, UniformListState,
+};
 use crate::{
-    elements::{
-        Align, Container, Fill, Hoverable, MouseStateHandle, ScrollStateHandle, Scrollable,
-        ScrollableElement, ScrollbarWidth, Text, UniformList, UniformListState,
-    },
     AppContext, Element, Entity, EntityId, EntityIdMap, TypedActionView, View, ViewContext,
     WeakViewHandle, WindowId,
 };

@@ -1,30 +1,26 @@
-use super::{
-    settings_page::{
-        render_body_item, MatchData, PageType, SettingsPageEvent, SettingsPageMeta,
-        SettingsPageViewHandle, SettingsWidget,
-    },
-    LocalOnlyIconState, SettingsSection, ToggleState,
-};
-use crate::{
-    appearance::Appearance,
-    autoupdate::{self, github, AutoupdateStage, AutoupdateState},
-    channel::ChannelState,
-    report_if_error,
-    settings::AutoupdateSettings,
-    workspace::WorkspaceAction,
-};
 use settings::Setting as _;
-use warp_core::{execution_mode::AppExecutionMode, settings::ToggleableSetting as _};
-use warpui::ui_components::switch::SwitchStateHandle;
-use warpui::{
-    assets::asset_cache::AssetSource,
-    elements::{
-        Align, CacheOption, ConstrainedBox, Container, CrossAxisAlignment, Element, Flex, Image,
-        MainAxisAlignment, MouseStateHandle, ParentElement, Wrap,
-    },
-    ui_components::components::UiComponent,
-    AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
+use warp_core::execution_mode::AppExecutionMode;
+use warp_core::settings::ToggleableSetting as _;
+use warpui::assets::asset_cache::AssetSource;
+use warpui::elements::{
+    Align, CacheOption, ConstrainedBox, Container, CrossAxisAlignment, Element, Flex, Image,
+    MainAxisAlignment, MouseStateHandle, ParentElement, Wrap,
 };
+use warpui::ui_components::components::UiComponent;
+use warpui::ui_components::switch::SwitchStateHandle;
+use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
+
+use super::settings_page::{
+    render_body_item, MatchData, PageType, SettingsPageEvent, SettingsPageMeta,
+    SettingsPageViewHandle, SettingsWidget,
+};
+use super::{LocalOnlyIconState, SettingsSection, ToggleState};
+use crate::appearance::Appearance;
+use crate::autoupdate::{self, github, AutoupdateStage, AutoupdateState};
+use crate::channel::ChannelState;
+use crate::report_if_error;
+use crate::settings::AutoupdateSettings;
+use crate::workspace::WorkspaceAction;
 
 #[derive(Debug, Clone)]
 pub enum AboutPageAction {

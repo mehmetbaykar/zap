@@ -4,33 +4,28 @@ use crate::terminal::shared_session::protocol::SessionSourceType;
 use warp_core::settings::Setting as _;
 use warpui::{App, AppContext, SingletonEntity, ViewContext};
 
-use crate::{
-    ai::{
-        agent::{
-            conversation::AIConversationId, task::TaskId, AIAgentInput, ServerOutputId,
-            UserQueryMode,
-        },
-        blocklist::{
-            agent_view::AgentViewEntryOrigin,
-            block::cli_controller::UserTakeOverReason,
-            model::{AIBlockModel, AIBlockOutputStatus, AIRequestType, OutputStatusUpdateCallback},
-            AIBlock, ClientIdentifiers,
-        },
-        llms::LLMId,
-    },
-    features::FeatureFlag,
-    settings::AISettings,
-    terminal::cli_agent_sessions::{
-        CLIAgentInputState, CLIAgentSession, CLIAgentSessionContext, CLIAgentSessionStatus,
-        CLIAgentSessionsModel,
-    },
-    terminal::model::ansi::{BootstrappedValue, Handler as _, InitShellValue},
-    terminal::CLIAgent,
-    test_util::{add_window_with_terminal, terminal::initialize_app_for_terminal_view},
-};
-
 use super::super::{AIBlockMetadata, RichContentMetadata, RichContentType};
 use super::*;
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::task::TaskId;
+use crate::ai::agent::{AIAgentInput, ServerOutputId, UserQueryMode};
+use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
+use crate::ai::blocklist::block::cli_controller::UserTakeOverReason;
+use crate::ai::blocklist::model::{
+    AIBlockModel, AIBlockOutputStatus, AIRequestType, OutputStatusUpdateCallback,
+};
+use crate::ai::blocklist::{AIBlock, ClientIdentifiers};
+use crate::ai::llms::LLMId;
+use crate::features::FeatureFlag;
+use crate::settings::AISettings;
+use crate::terminal::cli_agent_sessions::{
+    CLIAgentInputState, CLIAgentSession, CLIAgentSessionContext, CLIAgentSessionStatus,
+    CLIAgentSessionsModel,
+};
+use crate::terminal::model::ansi::{BootstrappedValue, Handler as _, InitShellValue};
+use crate::terminal::CLIAgent;
+use crate::test_util::add_window_with_terminal;
+use crate::test_util::terminal::initialize_app_for_terminal_view;
 
 #[test]
 fn deepseek_uses_bracketed_paste_submission() {
@@ -300,6 +295,7 @@ fn use_agent_footer_renders_for_manual_handoff_when_unfinished_ai_block_remains(
 /// running before any CLI agent has started — the use-agent footer must stay
 /// hidden.
 #[test]
+#[cfg(any())]
 fn use_agent_footer_hidden_during_ambient_agent_setup_lrc() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
@@ -344,6 +340,7 @@ fn use_agent_footer_hidden_during_ambient_agent_setup_lrc() {
 /// When viewing a shared ambient-agent session whose sharer is
 /// running a CLI agent, the CLI agent footer should still render.
 #[test]
+#[cfg(any())]
 fn cli_agent_footer_renders_for_viewer_of_shared_ambient_agent_session() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);

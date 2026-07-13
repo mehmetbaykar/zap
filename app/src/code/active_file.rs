@@ -1,8 +1,9 @@
 //! Module containing the definition of [`ActiveFileModel`],
 //! which tracks the currently focused file across an entire PaneGroup.
 
-use super::buffer_location::BufferLocation;
 use warpui::{Entity, ModelContext};
+
+use super::buffer_location::BufferLocation;
 
 /// Events emitted by the ActiveFileModel.
 #[derive(Debug, Clone)]

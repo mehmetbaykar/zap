@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
+
 use super::env_var_collection_search_item::EnvVarCollectionSearchItem;
 use super::notebook_search_item::NotebookSearchItem;
 use super::workflow_search_item::WorkflowSearchItem;
@@ -18,8 +22,6 @@ use crate::search::QueryFilter;
 use crate::server::ids::{ObjectUid, SyncId};
 use crate::settings::AISettings;
 use crate::workflows::WorkflowObject;
-use std::collections::HashMap;
-use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 /// Datasource that searches against all Zap Drive objects
 pub struct DataSource {
@@ -144,9 +146,8 @@ impl crate::search::mixer::SyncDataSource for DataSource {
                 self.searcher
                     .search_notebook(&query.text.to_lowercase(), app)
                     .map_err(|err| {
-                        Box::new(DataSourceSearchError {
-                            message: err.to_string(),
-                        }) as DataSourceRunErrorWrapper
+                        Box::new(DataSourceSearchError::new(err.to_string()))
+                            as DataSourceRunErrorWrapper
                     })?
                     .into_iter()
                     .map(QueryResult::from),
@@ -158,9 +159,8 @@ impl crate::search::mixer::SyncDataSource for DataSource {
                 self.searcher
                     .search_plans(&query.text.to_lowercase(), app)
                     .map_err(|err| {
-                        Box::new(DataSourceSearchError {
-                            message: err.to_string(),
-                        }) as DataSourceRunErrorWrapper
+                        Box::new(DataSourceSearchError::new(err.to_string()))
+                            as DataSourceRunErrorWrapper
                     })?
                     .into_iter()
                     .map(QueryResult::from),
@@ -183,9 +183,8 @@ impl crate::search::mixer::SyncDataSource for DataSource {
                     app,
                 )
                 .map_err(|err| {
-                    Box::new(DataSourceSearchError {
-                        message: err.to_string(),
-                    }) as DataSourceRunErrorWrapper
+                    Box::new(DataSourceSearchError::new(err.to_string()))
+                        as DataSourceRunErrorWrapper
                 })?
                 .into_iter()
                 .map(QueryResult::from),
@@ -199,9 +198,8 @@ impl crate::search::mixer::SyncDataSource for DataSource {
                 self.searcher
                     .search_env_var(&query.text.to_lowercase(), app)
                     .map_err(|err| {
-                        Box::new(DataSourceSearchError {
-                            message: err.to_string(),
-                        }) as DataSourceRunErrorWrapper
+                        Box::new(DataSourceSearchError::new(err.to_string()))
+                            as DataSourceRunErrorWrapper
                     })?
                     .into_iter()
                     .map(QueryResult::from),
@@ -522,11 +520,16 @@ impl WarpDriveSearcher for FuzzyWarpDriveSearcher {
 mod full_text_searcher {
     use std::sync::Arc;
 
+    use fuzzy_match::FuzzyMatchResult;
+    use itertools::Itertools;
+    use warp_search_core::define_search_schema;
+    use warpui::r#async::executor::Background;
+    use warpui::{AppContext, SingletonEntity};
+
     use crate::cloud_object::model::persistence::ObjectStoreModel;
     use crate::cloud_object::{
         GenericStringObjectFormat, JsonObjectType, ObjectType, StoredObject, StoredObjectLocation,
     };
-    use crate::define_search_schema;
     use crate::drive::folders::FolderObject;
     use crate::env_vars::EnvVarCollectionObject;
     use crate::notebooks::manager::NotebookManager;
@@ -543,10 +546,6 @@ mod full_text_searcher {
     use crate::search::workflows::fuzzy_match::FuzzyMatchWorkflowResult;
     use crate::server::ids::ObjectUid;
     use crate::workflows::WorkflowObject;
-    use fuzzy_match::FuzzyMatchResult;
-    use itertools::Itertools;
-    use warpui::r#async::executor::Background;
-    use warpui::{AppContext, SingletonEntity};
 
     /// Memory budget for the search index of zap drive.
     /// Zap could potentially have a lot of objects, so we increase it from the default of 50MB to 100MB

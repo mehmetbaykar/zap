@@ -78,7 +78,7 @@ enum SyncState {
 }
 
 /// Actions for the cloud sync settings page
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CloudSyncPageAction {
     /// Switch sync platform
     SetPlatform(SyncPlatformSetting),

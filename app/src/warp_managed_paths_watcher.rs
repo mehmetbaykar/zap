@@ -1,8 +1,8 @@
-use dirs::home_dir;
 use std::path::{Path, PathBuf};
 #[cfg(not(target_family = "wasm"))]
 use std::{fs, sync::Arc, time::Duration};
 
+use dirs::home_dir;
 #[cfg(not(target_family = "wasm"))]
 use notify_debouncer_full::notify::{RecursiveMode, WatchFilter};
 use repo_metadata::RepositoryUpdate;
@@ -51,6 +51,7 @@ pub(crate) fn warp_home_config_dir() -> Option<PathBuf> {
     warp_core::paths::warp_home_config_dir()
 }
 
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 pub(crate) fn warp_home_skills_dir() -> Option<PathBuf> {
     warp_core::paths::warp_home_skills_dir()
 }
@@ -67,6 +68,7 @@ pub(crate) struct WarpMcpConfigPath {
     pub(crate) config_path: PathBuf,
 }
 
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 pub(crate) fn warp_managed_skill_dirs() -> Vec<PathBuf> {
     warp_home_skills_dir().into_iter().collect()
 }
@@ -246,11 +248,15 @@ impl WarpManagedPathsWatcher {
             let config_local_dir = warp_core::paths::config_local_dir();
             let should_register_config_local_dir = config_local_dir != data_dir;
             let worktrees_dir = data_dir.join("worktrees");
+            // Safe to use for both directory registration and event emission.
+            // If this rejects `worktrees_dir`, every descendant should be rejected too,
+            // so the recursive watcher never prunes an ancestor needed to reach an allowed path.
+            let filter = Arc::new(move |path: &Path| !path.starts_with(&worktrees_dir));
             Self::register_path(
                 ctx,
                 &watcher,
                 data_dir.clone(),
-                WatchFilter::with_filter(Arc::new(move |path| !path.starts_with(&worktrees_dir))),
+                WatchFilter::with_filter(filter.clone(), filter),
                 RecursiveMode::Recursive,
                 "Zap data directory",
             );
@@ -288,13 +294,14 @@ impl WarpManagedPathsWatcher {
                     && (!should_register_config_local_dir
                         || !warp_home_config_dir.starts_with(&config_local_dir))
                 {
+                    // Watch the config directory non-recursively,
+                    // and ignore events for files other than the MCP config file.
+                    let emit = Arc::new(move |path: &Path| path == warp_home_mcp_config_path);
                     Self::register_path(
                         ctx,
                         &watcher,
                         warp_home_config_dir,
-                        WatchFilter::with_filter(Arc::new(move |path| {
-                            path == warp_home_mcp_config_path
-                        })),
+                        WatchFilter::with_filter(Arc::new(|_: &Path| true), emit),
                         RecursiveMode::NonRecursive,
                         "Zap home MCP config directory",
                     );
@@ -360,10 +367,10 @@ impl SingletonEntity for WarpManagedPathsWatcher {}
 
 #[cfg(test)]
 mod tests {
-    use dirs::home_dir;
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
 
+    use dirs::home_dir;
     use repo_metadata::{RepositoryUpdate, TargetFile};
 
     use super::{

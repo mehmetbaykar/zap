@@ -1,5 +1,6 @@
 use std::env;
 use std::process::Stdio;
+
 use warpui::integration::RERUN_EXIT_CODE;
 
 #[cfg(not(windows))]

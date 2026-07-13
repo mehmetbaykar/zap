@@ -136,6 +136,9 @@ crates/ai/src/index/full_source_code_embedding/merkle_tree/tree_tests.rs
 crates/ai/src/index/full_source_code_embedding/merkle_tree/tree.rs
 crates/ai/src/index/full_source_code_embedding/mod.rs
 crates/ai/src/index/full_source_code_embedding/snapshot.rs
+crates/cloud_object_client
+crates/cloud_object_models
+crates/cloud_objects
 crates/graphql/src/api/ai.rs
 crates/graphql/src/api/billing.rs
 crates/graphql/src/api/experiment.rs
@@ -191,3 +194,47 @@ WARP.md
 # add-strip: crates/input_classifier/src/fasttext/mod.rs
 # add-strip: crates/warp_util/src/content_version_test.rs
 # add-strip: crates/warpui_core/src/text_layout_test.rs
+# Slice 2 (8da83b42a..a44b70306) cloud/billing additions rejected:
+app/assets/bundled/svg/credit-card.svg
+app/assets/bundled/svg/qr-code-02.svg
+app/src/ai/ambient_agents/github_auth_url.rs
+app/src/ai/blocklist/local_agent_task_sync_model_tests.rs
+app/src/ai/blocklist/orchestration_topology.rs
+app/src/ai/blocklist/orchestration_topology_tests.rs
+app/src/ai/blocklist/usage/conversation_usage_view_tests.rs
+app/src/ai/blocklist/usage/rollup.rs
+app/src/ai/blocklist/usage/rollup_tests.rs
+app/src/remote_server/handoff_snapshot.rs
+app/src/server/iap.rs
+app/src/terminal/view/ambient_agent/delete_auth_secret_confirmation_dialog.rs
+app/src/workspace/auto_handoff.rs
+app/src/workspace/auto_handoff_tests.rs
+crates/http_client/src/iap.rs
+crates/warp_cli/src/api_key.rs
+crates/warp_cli/src/api_key_tests.rs
+crates/warp_cli/src/date_time.rs
+specs/APP-4460/TECH.md
+specs/APP-4483/PRODUCT.md
+specs/APP-4483/TECH.md
+specs/QUALITY-671/PRODUCT.md
+specs/QUALITY-671/TECH.md
+specs/QUALITY-702/PRODUCT.md
+specs/QUALITY-702/TECH.md
+specs/QUALITY-715/TECH.md
+specs/QUALITY-726/PRODUCT.md
+specs/QUALITY-726/TECH.md
+specs/REMOTE-1385/PRODUCT.md
+specs/REMOTE-1385/TECH.md
+specs/REMOTE-1499/PRODUCT.md
+specs/REMOTE-1499/STAGE-1.md
+specs/REMOTE-1499/TECH.md
+specs/REMOTE-1674/TECH.md
+specs/REMOTE-1696/PRODUCT.md
+specs/REMOTE-1696/TECH.md
+specs/ambient-agent-rtc-refresh-throttle/TECH.md
+specs/orch-pill-bar-web/PRODUCT.md
+specs/orch-pill-bar-web/TECH.md
+specs/orch-viewer-polling/TECH.md
+specs/qr-code/PRODUCT.md
+specs/qr-code/TECH.md
+specs/rtc-task-invalidation-phase1/TECH.md

@@ -4,35 +4,41 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::codebase_index_proto::{
-    proto_to_codebase_index_status_updated, proto_to_codebase_index_statuses_snapshot,
-    RemoteCodebaseIndexStatus,
-};
 use dashmap::DashMap;
 use futures::channel::oneshot;
 use futures::io::{AsyncRead, AsyncWrite};
 use warpui::r#async::{executor, FutureExt as _};
 
+use crate::codebase_index_proto::{
+    proto_to_codebase_index_status_updated, proto_to_codebase_index_statuses_snapshot,
+    RemoteCodebaseIndexStatus,
+};
 use crate::proto::{
-    client_message, get_fragment_metadata_from_hash_response, read_file_chunk_response,
-    server_message, Abort, Authenticate, BufferEdit, ClientMessage, CloseBuffer, CreateDirectory,
-    CreateDirectoryResponse, DeleteFile, DiffMode, DiffStateFileDelta, DiffStateMetadataUpdate,
-    DiffStateSnapshot, DiscardFilesRequest, DropCodebaseIndex, ErrorCode, FileStatusInfo,
-    FragmentMetadataLookupErrorCode, GetDiffState, GetDiffStateResponse,
+    client_message, get_branches_response, get_fragment_metadata_from_hash_response,
+    read_file_chunk_response, server_message, Abort, Authenticate, BranchInfo, BufferEdit,
+    ClientMessage, CloseBuffer, CodebaseResyncMode, CreateDirectory, CreateDirectoryResponse,
+    DeleteFile, DiffMode, DiffStateFileDelta, DiffStateMetadataUpdate, DiffStateSnapshot,
+    DiscardFilesRequest, DropCodebaseIndex, ErrorCode, FileStatusInfo,
+    FragmentMetadataLookupErrorCode, GetBranches, GetDiffState, GetDiffStateResponse,
     GetFragmentMetadataFromHash, GetFragmentMetadataFromHashSuccess, IndexCodebase, Initialize,
     InitializeResponse, ListDirectory, ListDirectoryResponse, LoadRepoMetadataDirectoryResponse,
     NavigatedToDirectoryResponse, OpenBuffer, OpenBufferResponse, ReadFileChunk,
     ReadFileChunkResponse, ReadFileContextRequest, ReadFileContextResponse, ResolveConflict,
-    ResolveConflictResponse, ResolvePath, ResolvePathResponse, RunCommandRequest,
+    ResolveConflictResponse, ResolvePath, ResolvePathResponse, ResyncCodebase, RunCommandRequest,
     RunCommandResponse, SaveBuffer, SaveBufferResponse, ServerMessage, SessionBootstrapped,
     TextEdit, UnsubscribeDiffState, WriteFile, WriteFileChunk, WriteFileChunkResponse,
 };
 use crate::repo_metadata_proto::{proto_snapshot_to_update, proto_to_repo_metadata_update};
 
-use crate::protocol::{self, ProtocolError, RequestId};
+#[cfg(not(target_family = "wasm"))]
+mod remote_server_log;
+#[cfg(not(target_family = "wasm"))]
+pub use remote_server_log::RemoteServerLog;
 use warp_core::{safe_error, safe_warn, SessionId};
 use warp_util::standardized_path::StandardizedPath;
 use warpui::r#async::TransportStream;
+
+use crate::protocol::{self, ProtocolError, RequestId};
 
 /// Default request timeout (2 minutes).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
@@ -128,14 +134,6 @@ pub enum ClientEvent {
     },
 }
 
-/// Parameters for the `Initialize` handshake, sent to the daemon at
-/// connection time.
-pub struct InitializeParams {
-    pub user_id: String,
-    pub user_email: String,
-    pub crash_reporting_enabled: bool,
-}
-
 /// A request-failure notification emitted by [`RemoteServerClient::send_request`].
 /// Delivered on a dedicated channel separate from the lifecycle
 /// [`ClientEvent`] stream so that holding this sender does not prevent
@@ -218,9 +216,11 @@ impl RemoteServerClient {
         Self,
         async_channel::Receiver<ClientEvent>,
         async_channel::Receiver<RequestFailedEvent>,
+        RemoteServerLog,
     ) {
-        spawn_stderr_forwarder(stderr, executor);
-        Self::new(stdout, stdin, executor)
+        let stderr_tail = spawn_stderr_forwarder(stderr, executor);
+        let (client, event_rx, failure_rx) = Self::new(stdout, stdin, executor);
+        (client, event_rx, failure_rx, stderr_tail)
     }
 }
 
@@ -281,8 +281,7 @@ impl RemoteServerClient {
     /// produces a brand-new client instance.
     ///
     /// Callers can use this as a cheap, non-blocking gate to skip work
-    /// that would otherwise fail with [`ClientError::Disconnected`] and
-    /// fire a `RequestFailed` telemetry event. Returning `false` does
+    /// that would otherwise fail with [`ClientError::Disconnected`]. Returning `false` does
     /// not guarantee the next request will succeed — it just means the
     /// reader task has not yet observed a disconnect.
     pub fn is_disconnected(&self) -> bool {
@@ -299,6 +298,7 @@ impl RemoteServerClient {
             request_id: request_id.to_string(),
             message: Some(client_message::Message::Initialize(Initialize {
                 auth_token: auth_token.unwrap_or_default().to_owned(),
+                codebase_index_limits: None,
             })),
         };
 
@@ -315,7 +315,6 @@ impl RemoteServerClient {
             }
         }
     }
-
     /// Sends an `IndexCodebase` request and awaits the initial status update.
     pub async fn index_codebase(
         &self,
@@ -343,22 +342,81 @@ impl RemoteServerClient {
                 crate::manager::RemoteServerOperation::IndexCodebase,
             )
             .await?;
+        Self::codebase_index_status_from_response("IndexCodebase", response)
+    }
 
+    /// Sends a `ResyncCodebase` request and awaits the resulting status update.
+    pub async fn resync_codebase(
+        &self,
+        repo_path: String,
+        auth_token: String,
+    ) -> Result<RemoteCodebaseIndexStatus, ClientError> {
+        self.send_resync_codebase(repo_path, auth_token, CodebaseResyncMode::Full)
+            .await
+    }
+
+    /// Sends a `ResyncCodebase` request in incremental mode and awaits the current status update.
+    pub async fn trigger_codebase_incremental_sync(
+        &self,
+        repo_path: String,
+        auth_token: String,
+    ) -> Result<RemoteCodebaseIndexStatus, ClientError> {
+        self.send_resync_codebase(repo_path, auth_token, CodebaseResyncMode::Incremental)
+            .await
+    }
+
+    async fn send_resync_codebase(
+        &self,
+        repo_path: String,
+        auth_token: String,
+        mode: CodebaseResyncMode,
+    ) -> Result<RemoteCodebaseIndexStatus, ClientError> {
+        let request_id = RequestId::new();
+        let repo_path_for_log = repo_path.clone();
+        let msg = ClientMessage {
+            request_id: request_id.to_string(),
+            message: Some(client_message::Message::ResyncCodebase(ResyncCodebase {
+                repo_path,
+                auth_token,
+                mode: mode.into(),
+            })),
+        };
+        log::info!(
+            "[Remote codebase indexing] Client sending ResyncCodebase: request_id={request_id} \
+             repo_path={repo_path_for_log} mode={mode:?}"
+        );
+
+        let response = self
+            .send_request(
+                request_id,
+                msg,
+                crate::manager::RemoteServerOperation::ResyncCodebase,
+            )
+            .await?;
+        Self::codebase_index_status_from_response("ResyncCodebase", response)
+    }
+
+    fn codebase_index_status_from_response(
+        operation: &str,
+        response: ServerMessage,
+    ) -> Result<RemoteCodebaseIndexStatus, ClientError> {
         match response.message {
             Some(server_message::Message::CodebaseIndexStatusUpdated(update)) => {
                 let status =
                     crate::codebase_index_proto::proto_to_codebase_index_status_updated(&update)
                         .ok_or(ClientError::UnexpectedResponse)?;
                 log::info!(
-                    "[Remote codebase indexing] Client received IndexCodebase response: \
-                     repo_path={} state={:?}",
+                    "[Remote codebase indexing] Client received {operation} response: \
+                     repo_path={} state={:?} root_hash_present={} failure_message={:?}",
                     status.repo_path,
-                    status.state
+                    status.state,
+                    status.root_hash.is_some(),
+                    status.failure_message,
                 );
                 Ok(status)
             }
             other => {
-                log::error!("Unexpected response variant for IndexCodebase: {other:?}");
+                log::error!("Unexpected response variant for {operation}: {other:?}");
                 Err(ClientError::UnexpectedResponse)
             }
         }
@@ -394,24 +452,7 @@ impl RemoteServerClient {
             )
             .await?;
 
-        match response.message {
-            Some(server_message::Message::CodebaseIndexStatusUpdated(update)) => {
-                let status =
-                    crate::codebase_index_proto::proto_to_codebase_index_status_updated(&update)
-                        .ok_or(ClientError::UnexpectedResponse)?;
-                log::info!(
-                    "[Remote codebase indexing] Client received DropCodebaseIndex response: \
-                     repo_path={} state={:?}",
-                    status.repo_path,
-                    status.state
-                );
-                Ok(status)
-            }
-            other => {
-                log::error!("Unexpected response variant for DropCodebaseIndex: {other:?}");
-                Err(ClientError::UnexpectedResponse)
-            }
-        }
+        Self::codebase_index_status_from_response("DropCodebaseIndex", response)
     }
 
     /// Maps backend content hashes to server-local fragment metadata for a synced repo snapshot.
@@ -639,7 +680,6 @@ impl RemoteServerClient {
         }
     }
 
-
     /// Deletes a file on the remote host.
     pub async fn delete_file(&self, path: String) -> Result<(), ClientError> {
         let request_id = RequestId::new();
@@ -684,11 +724,13 @@ impl RemoteServerClient {
                 path,
             })),
         };
-        let response = self.send_request(
+        let response = self
+            .send_request(
                 request_id,
                 msg,
                 crate::manager::RemoteServerOperation::ListDirectory,
-            ).await?;
+            )
+            .await?;
         match response.message {
             Some(server_message::Message::ListDirectoryResponse(resp)) => Ok(resp),
             other => {
@@ -705,11 +747,13 @@ impl RemoteServerClient {
             request_id: request_id.to_string(),
             message: Some(client_message::Message::ResolvePath(ResolvePath { path })),
         };
-        let response = self.send_request(
+        let response = self
+            .send_request(
                 request_id,
                 msg,
                 crate::manager::RemoteServerOperation::ResolvePath,
-            ).await?;
+            )
+            .await?;
         match response.message {
             Some(server_message::Message::ResolvePathResponse(resp)) => Ok(resp),
             other => {
@@ -731,11 +775,13 @@ impl RemoteServerClient {
                 path,
             })),
         };
-        let response = self.send_request(
+        let response = self
+            .send_request(
                 request_id,
                 msg,
                 crate::manager::RemoteServerOperation::CreateDirectory,
-            ).await?;
+            )
+            .await?;
         match response.message {
             Some(server_message::Message::CreateDirectoryResponse(resp)) => Ok(resp),
             other => {
@@ -761,11 +807,13 @@ impl RemoteServerClient {
                 max_bytes,
             })),
         };
-        let response = self.send_request(
+        let response = self
+            .send_request(
                 request_id,
                 msg,
                 crate::manager::RemoteServerOperation::ReadFileChunk,
-            ).await?;
+            )
+            .await?;
         match response.message {
             Some(server_message::Message::ReadFileChunkResponse(resp)) => Ok(resp),
             other => {
@@ -827,11 +875,13 @@ impl RemoteServerClient {
                 executable,
             })),
         };
-        let response = self.send_request(
+        let response = self
+            .send_request(
                 request_id,
                 msg,
                 crate::manager::RemoteServerOperation::WriteFileChunk,
-            ).await?;
+            )
+            .await?;
         match response.message {
             Some(server_message::Message::WriteFileChunkResponse(resp)) => Ok(resp),
             other => {
@@ -848,11 +898,13 @@ impl RemoteServerClient {
             request_id: request_id.to_string(),
             message: Some(client_message::Message::OpenBuffer(OpenBuffer { path })),
         };
-        let response = self.send_request(
+        let response = self
+            .send_request(
                 request_id,
                 msg,
                 crate::manager::RemoteServerOperation::OpenBuffer,
-            ).await?;
+            )
+            .await?;
         match response.message {
             Some(server_message::Message::OpenBufferResponse(resp)) => Ok(resp),
             other => {
@@ -907,11 +959,13 @@ impl RemoteServerClient {
             request_id: request_id.to_string(),
             message: Some(client_message::Message::SaveBuffer(SaveBuffer { path })),
         };
-        let response = self.send_request(
+        let response = self
+            .send_request(
                 request_id,
                 msg,
                 crate::manager::RemoteServerOperation::SaveBuffer,
-            ).await?;
+            )
+            .await?;
         match response.message {
             Some(server_message::Message::SaveBufferResponse(resp)) => Ok(resp),
             other => {
@@ -939,11 +993,13 @@ impl RemoteServerClient {
                 current_client_version,
             })),
         };
-        let response = self.send_request(
+        let response = self
+            .send_request(
                 request_id,
                 msg,
                 crate::manager::RemoteServerOperation::ResolveConflict,
-            ).await?;
+            )
+            .await?;
         match response.message {
             Some(server_message::Message::ResolveConflictResponse(resp)) => Ok(resp),
             other => {
@@ -991,9 +1047,11 @@ impl RemoteServerClient {
                 let status = proto_to_codebase_index_status_updated(&update)?;
                 log::info!(
                     "[Remote codebase indexing] Client received codebase index status push: \
-                     repo_path={} state={:?}",
+                     repo_path={} state={:?} root_hash_present={} failure_message={:?}",
                     status.repo_path,
-                    status.state
+                    status.state,
+                    status.root_hash.is_some(),
+                    status.failure_message,
                 );
                 Some(ClientEvent::CodebaseIndexStatusUpdated { status })
             }
@@ -1120,6 +1178,56 @@ impl RemoteServerClient {
             )),
         };
         self.send_notification(msg);
+    }
+
+    /// Sends a `GetBranches` request and awaits the response.
+    pub async fn get_branches(
+        &self,
+        repo_path: &StandardizedPath,
+        max_branch_count: Option<u32>,
+        include_remotes: bool,
+    ) -> Result<Vec<BranchInfo>, ClientError> {
+        let request_id = RequestId::new();
+        let msg = ClientMessage {
+            request_id: request_id.to_string(),
+            message: Some(client_message::Message::GetBranches(GetBranches {
+                repo_path: repo_path.to_string(),
+                max_branch_count,
+                include_remotes,
+            })),
+        };
+
+        let response = self
+            .send_request(
+                request_id,
+                msg,
+                crate::manager::RemoteServerOperation::GetBranches,
+            )
+            .await?;
+
+        match response.message {
+            Some(server_message::Message::GetBranchesResponse(resp)) => match resp.result {
+                Some(get_branches_response::Result::Success(success)) => Ok(success.branches),
+                Some(get_branches_response::Result::Error(e)) => Err(ClientError::ServerError {
+                    code: ErrorCode::Internal,
+                    message: e.message,
+                }),
+                None => {
+                    safe_error!(
+                        safe: ("Remote server empty result for GetBranches"),
+                        full: ("Remote server empty result for GetBranches")
+                    );
+                    Err(ClientError::UnexpectedResponse)
+                }
+            },
+            other => {
+                safe_error!(
+                    safe: ("Remote server unexpected response for GetBranches"),
+                    full: ("Remote server unexpected response for GetBranches: response={other:?}")
+                );
+                Err(ClientError::UnexpectedResponse)
+            }
+        }
     }
 
     /// Sends a `DiscardFiles` request and awaits the response.
@@ -1415,15 +1523,19 @@ impl RemoteServerClient {
     }
 }
 
-/// Spawns a background task that reads lines from the server's stderr and
-/// forwards them to the client's logging.
+/// Spawns a background task that reads lines from the server's stderr,
+/// forwards them to the client's logging, and retains the last few lines
+/// in a shared buffer for telemetry.
 #[cfg(not(target_family = "wasm"))]
 pub fn spawn_stderr_forwarder(
     stderr: impl AsyncRead + TransportStream,
     executor: &executor::Background,
-) {
+) -> RemoteServerLog {
     use futures::io::AsyncBufReadExt;
     use futures::StreamExt;
+
+    let tail = RemoteServerLog::new();
+    let tail_writer = tail.clone();
 
     executor
         .spawn(async move {
@@ -1431,9 +1543,12 @@ pub fn spawn_stderr_forwarder(
             let mut lines = reader.lines();
             while let Some(Ok(line)) = lines.next().await {
                 log::info!("[remote_server] {line}");
+                tail_writer.push(line);
             }
         })
         .detach();
+
+    tail
 }
 
 #[cfg(test)]

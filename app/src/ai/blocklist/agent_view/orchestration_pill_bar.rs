@@ -40,8 +40,8 @@ use crate::ai::blocklist::agent_view::orchestration_conversation_links::{
     is_conversation_open_in_other_visible_view, pane_group_id_containing_terminal_view,
     parent_conversation_id,
 };
-use crate::ai::blocklist::agent_view::orchestration_pin_model::{
-    OrchestrationPinEvent, OrchestrationPinModel,
+use crate::ai::blocklist::agent_view::orchestration_pill_bar_model::{
+    OrchestrationPillBarEvent, OrchestrationPillBarModel,
 };
 use crate::ai::blocklist::agent_view::{AgentViewController, AgentViewControllerEvent};
 use crate::ai::blocklist::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
@@ -99,7 +99,7 @@ fn pill_initial(name: &str) -> char {
 }
 /// Renders the orchestrator avatar disc shared by pill, breadcrumb, and transcript
 /// surfaces.
-pub(super) fn render_orchestrator_avatar_disc(
+pub(crate) fn render_orchestrator_avatar_disc(
     size: f32,
     theme: &WarpTheme,
     appearance: &Appearance,
@@ -115,7 +115,7 @@ pub(super) fn render_orchestrator_avatar_disc(
 
 /// Renders a child-agent avatar using the same deterministic-color + initial-letter
 /// treatment as the orchestration pill bar.
-pub(super) fn render_agent_avatar_disc(
+pub(crate) fn render_agent_avatar_disc(
     name: &str,
     size: f32,
     theme: &WarpTheme,
@@ -385,9 +385,9 @@ impl OrchestrationPillBar {
         });
 
         // Re-render whenever any pane toggles a pin so the bars stay in sync.
-        let pin_model = OrchestrationPinModel::handle(ctx);
+        let pin_model = OrchestrationPillBarModel::handle(ctx);
         ctx.subscribe_to_model(&pin_model, |_, _, event, ctx| match event {
-            OrchestrationPinEvent::PinSetChanged => ctx.notify(),
+            OrchestrationPillBarEvent::PinSetChanged => ctx.notify(),
         });
 
         Self {
@@ -580,7 +580,7 @@ impl OrchestrationPillBar {
         });
 
         // Stamp each child's current pin state; partitioning happens at render.
-        let pin_model = OrchestrationPinModel::as_ref(app);
+        let pin_model = OrchestrationPillBarModel::as_ref(app);
         for child in children {
             let name = child
                 .agent_name()
@@ -722,7 +722,7 @@ impl TypedActionView for OrchestrationPillBar {
                 // Singleton emits an event that drives the re-render in every
                 // pill bar, so no `ctx.notify()` needed here.
                 let id = *id;
-                OrchestrationPinModel::handle(ctx).update(ctx, |model, ctx| {
+                OrchestrationPillBarModel::handle(ctx).update(ctx, |model, ctx| {
                     model.toggle_pin(id, ctx);
                 });
             }

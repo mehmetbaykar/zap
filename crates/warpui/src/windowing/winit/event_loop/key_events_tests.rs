@@ -1,8 +1,8 @@
-use super::{get_input_key, text_fallback_event_for_unconverted_key, us_qwerty_fallback_for_chord};
 use winit::event::ElementState;
-use winit::keyboard::{
-    Key::Character, KeyCode, ModifiersState, NativeKeyCode, PhysicalKey, SmolStr,
-};
+use winit::keyboard::Key::Character;
+use winit::keyboard::{KeyCode, ModifiersState, NativeKeyCode, PhysicalKey, SmolStr};
+
+use super::{get_input_key, text_fallback_event_for_unconverted_key, us_qwerty_fallback_for_chord};
 
 #[test]
 fn test_get_input_key() {

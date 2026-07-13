@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 
-use warpui::{
-    current_render_window,
-    elements::HeadingFontSizeMultipliers,
-    fonts::{FamilyId, Weight},
-    Entity, ModelContext, SingletonEntity, WindowId,
-};
+use warpui::elements::HeadingFontSizeMultipliers;
+use warpui::fonts::{FamilyId, Weight};
+use warpui::{current_render_window, Entity, ModelContext, SingletonEntity, WindowId};
 
-use super::{builder::UiBuilder, theme::WarpTheme};
+use super::builder::UiBuilder;
+use super::theme::WarpTheme;
 
 /// The standard font size to use for headers (e.g.: in dialogs).
 const HEADER_FONT_SIZE: f32 = 18.;
@@ -371,7 +369,10 @@ impl Appearance {
             return &self.ui_builder;
         }
         match current_render_window() {
-            Some(w) => self.ui_builder_overrides.get(&w).unwrap_or(&self.ui_builder),
+            Some(w) => self
+                .ui_builder_overrides
+                .get(&w)
+                .unwrap_or(&self.ui_builder),
             None => &self.ui_builder,
         }
     }

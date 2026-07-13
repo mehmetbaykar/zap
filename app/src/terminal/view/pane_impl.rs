@@ -1,11 +1,25 @@
 //! This module contains the implementation of `BackingView` for `TerminalView`, as well as
 //! business logic for integrating the terminal view with the pane infra (`crate::pane_group`).
+use warpui::elements::{
+    ConstrainedBox, CrossAxisAlignment, Empty, Flex, MainAxisAlignment, MainAxisSize,
+    ParentElement, Shrinkable,
+};
+use warpui::prelude::{ChildView, Container};
+use warpui::text_layout::ClipConfig;
+use warpui::ui_components::components::UiComponent;
+use warpui::{
+    AppContext, Element, ModelHandle, SingletonEntity, TypedActionView, ViewContext,
+    WeakModelHandle,
+};
+
 use super::shared_session::adapter::Kind as SharedSessionKind;
 use super::{Event, PaneConfiguration, TerminalAction, TerminalViewState, Viewer};
 use crate::ai::agent::conversation::{
     AIConversation, ConversationStatus, ServerAIConversationMetadata,
 };
 use crate::ai::blocklist::agent_view::agent_view_bg_fill;
+use crate::ai::blocklist::agent_view::orchestration_conversation_links::parent_conversation_navigation_card;
+use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::appearance::Appearance;
 use crate::features::FeatureFlag;
 use crate::menu::{MenuItem, MenuItemFields};
@@ -14,34 +28,21 @@ use crate::pane_group::pane::view::header::components::{
     header_edge_min_width, render_pane_header_buttons, render_pane_header_title_text,
     render_three_column_header, CenteredHeaderEdgeWidth,
 };
-use crate::pane_group::pane::view::header::PANE_HEADER_HEIGHT;
-use crate::pane_group::pane::PaneStack;
-use crate::pane_group::{
-    pane::view, pane::view::PaneHeaderAction, BackingView, SplitPaneState,
-    TOGGLE_MAXIMIZE_PANE_BINDING_NAME,
-};
+use crate::pane_group::pane::view::header::{render_pane_header_draggable, PANE_HEADER_HEIGHT};
+use crate::pane_group::pane::view::PaneHeaderAction;
+use crate::pane_group::pane::{view, PaneStack};
+use crate::pane_group::{BackingView, SplitPaneState, TOGGLE_MAXIMIZE_PANE_BINDING_NAME};
 use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
 use crate::terminal::shared_session::participant_avatar_view::render_participants_and_role_elements;
 use crate::terminal::shared_session::render_util::shared_session_indicator_color;
 use crate::terminal::shared_session::SharedSessionActionSource;
-use crate::terminal::TerminalManager;
-use crate::terminal::TerminalView;
+use crate::terminal::{TerminalManager, TerminalView};
 use crate::ui_components::agent_icon::terminal_view_agent_icon_variant;
-use crate::ui_components::blended_colors;
 use crate::ui_components::buttons::icon_button_with_color;
 use crate::ui_components::icon_with_status::render_icon_with_status;
-use crate::ui_components::icons;
+use crate::ui_components::{blended_colors, icons};
 use crate::util::bindings::keybinding_name_to_display_string;
 use crate::workspace::tab_settings::TabSettings;
-use warpui::elements::{
-    ConstrainedBox, CrossAxisAlignment, Empty, Flex, MainAxisAlignment, MainAxisSize,
-    ParentElement, Shrinkable,
-};
-use warpui::prelude::{ChildView, Container};
-use warpui::text_layout::ClipConfig;
-use warpui::ui_components::components::UiComponent;
-use warpui::WeakModelHandle;
-use warpui::{AppContext, Element, ModelHandle, SingletonEntity, TypedActionView, ViewContext};
 
 /// Total size of the agent icon-with-status component rendered in the pane header.
 /// Sub-components (circle, badge, cloud) are derived inside `render_icon_with_status`.
@@ -370,6 +371,99 @@ impl TerminalView {
         (right_row.finish(), min_width)
     }
 
+    fn render_parent_conversation_header_card(&self, app: &AppContext) -> Option<Box<dyn Element>> {
+        if !(FeatureFlag::OrchestrationV2.is_enabled()
+            && FeatureFlag::AgentView.is_enabled()
+            && self.agent_view_controller.as_ref(app).is_fullscreen())
+        {
+            return None;
+        }
+
+        let active_conversation_id = self
+            .agent_view_controller
+            .as_ref(app)
+            .agent_view_state()
+            .active_conversation_id()?;
+        let active_conversation =
+            BlocklistAIHistoryModel::as_ref(app).conversation(&active_conversation_id)?;
+        parent_conversation_navigation_card(
+            active_conversation,
+            self.mouse_states.parent_conversation_header_link.clone(),
+            app,
+        )
+    }
+
+    fn maybe_add_parent_navigation_card(
+        &self,
+        header: Box<dyn Element>,
+        parent_conversation_header_card: Option<Box<dyn Element>>,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        // When `OrchestrationPillBar` is on, the pill bar takes the place of the
+        // parent navigation card (the parent pill is the "back to parent" link)
+        // and is shown for the orchestrator and the swap-target child panes.
+        // Split-off panes ("Open in new pane" / "Open in new tab") instead
+        // render a parent→child breadcrumb row so the user has a clear way
+        // back to the orchestrator without rendering the full sibling pill
+        // list a second time alongside the orchestrator's own pill bar.
+        if FeatureFlag::OrchestrationPillBar.is_enabled()
+            && FeatureFlag::AgentView.is_enabled()
+            && self.agent_view_controller.as_ref(app).is_fullscreen()
+        {
+            // The wrapping `Flex::column` would otherwise pass an infinite
+            // vertical max constraint down to its non-flex children. That
+            // breaks the title's vertical centering: with infinite max.y,
+            // the centered `Align` inside `render_three_column_header`
+            // collapses to the title's own (small) line-box height, and
+            // the outer row's `CrossAxisAlignment::Stretch` then pins the
+            // title to the top of the row. Pinning the header to its
+            // standard `PANE_HEADER_HEIGHT` here restores the finite
+            // vertical constraint the centering logic relies on, while
+            // letting the pill bar / breadcrumb row sit immediately below
+            // at its own height.
+            let pinned_header = ConstrainedBox::new(header)
+                .with_height(PANE_HEADER_HEIGHT)
+                .finish();
+            let secondary_row: Box<dyn Element> = if self.is_orchestration_split_off() {
+                crate::ai::blocklist::agent_view::orchestration_pill_bar::render_orchestration_breadcrumbs(
+                    self.agent_view_controller.as_ref(app),
+                    self.mouse_states.parent_conversation_header_link.clone(),
+                    self.mouse_states.breadcrumbs_horizontal_scroll.clone(),
+                    app,
+                )
+                .unwrap_or_else(|| Empty::new().finish())
+            } else {
+                ChildView::new(&self.orchestration_pill_bar).finish()
+            };
+            return Flex::column()
+                .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+                .with_child(pinned_header)
+                .with_child(secondary_row)
+                .finish();
+        }
+
+        if !FeatureFlag::OrchestrationV2.is_enabled() {
+            return header;
+        }
+
+        if let Some(parent_card) = parent_conversation_header_card {
+            Flex::column()
+                .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+                .with_child(
+                    Container::new(parent_card)
+                        .with_padding_left(4.)
+                        .with_padding_right(4.)
+                        .with_padding_top(4.)
+                        .with_padding_bottom(2.)
+                        .finish(),
+                )
+                .with_child(header)
+                .finish()
+        } else {
+            header
+        }
+    }
+
     fn render_terminal_pane_header(
         &self,
         header_ctx: &view::HeaderRenderContext,
@@ -377,6 +471,7 @@ impl TerminalView {
     ) -> Box<dyn Element> {
         let is_fullscreen_agent_view = FeatureFlag::AgentView.is_enabled()
             && self.agent_view_controller.as_ref(app).is_fullscreen();
+        let parent_conversation_header_card = self.render_parent_conversation_header_card(app);
 
         let left = self.maybe_render_header_back_button(app);
         let center = self.render_header_title(is_fullscreen_agent_view, header_ctx, app);
@@ -392,6 +487,21 @@ impl TerminalView {
             },
             header_ctx.header_left_inset,
             header_ctx.draggable_state.is_dragging(),
+        );
+        // Make only the title row draggable; the secondary row (pill
+        // bar / breadcrumbs / navigation card) sits outside the drag
+        // region so its own mouse-driven widgets (notably the pill
+        // bar's scrollbar thumb) keep their hit-targets.
+        let draggable_header = render_pane_header_draggable::<TerminalView>(
+            self.pane_configuration.clone(),
+            header,
+            header_ctx.draggable_state.clone(),
+            app,
+        );
+        let header = self.maybe_add_parent_navigation_card(
+            draggable_header,
+            parent_conversation_header_card,
+            app,
         );
 
         if is_fullscreen_agent_view {
@@ -502,7 +612,9 @@ impl BackingView for TerminalView {
     ) -> view::HeaderContent {
         view::HeaderContent::Custom {
             element: self.render_terminal_pane_header(header_ctx, app),
-            has_custom_draggable_behavior: false,
+            // We wrap only the title row in the drag handler ourselves;
+            // the secondary row stays interactive.
+            has_custom_draggable_behavior: true,
         }
     }
 

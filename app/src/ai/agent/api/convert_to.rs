@@ -5,19 +5,113 @@ use anyhow::anyhow;
 use chrono::{DateTime, Local, Timelike};
 use warp_multi_agent_api as api;
 
-use crate::ai::{
-    agent::{
-        AIAgentActionResult, AIAgentActionResultType, AIAgentAttachment, AIAgentContext,
-        AIAgentInput, DriveObjectPayload, MCPContext, PassiveSuggestionResultType,
-        PassiveSuggestionTrigger, RunningCommand, StaticQueryType, Suggestions, UserQueryMode,
-    },
-    block_context::BlockContext,
+use crate::ai::agent::{
+    AIAgentActionResult, AIAgentActionResultType, AIAgentAttachment, AIAgentContext, AIAgentInput,
+    DriveObjectPayload, MCPContext, PassiveSuggestionResultType, PassiveSuggestionTrigger,
+    RequestComputerUseResult, RunningCommand, StaticQueryType, Suggestions, UseComputerResult,
+    UserQueryMode,
 };
+use crate::ai::block_context::BlockContext;
 
 fn local_datetime_to_timestamp(timestamp: DateTime<Local>) -> prost_types::Timestamp {
     prost_types::Timestamp {
         seconds: timestamp.timestamp(),
         nanos: timestamp.timestamp_subsec_nanos() as i32,
+    }
+}
+
+fn convert_request_computer_use_result(
+    result: RequestComputerUseResult,
+) -> Result<api::request::input::tool_call_result::Result, ConvertToAPITypeError> {
+    match result {
+        RequestComputerUseResult::Approved {
+            screenshot,
+            platform,
+        } => Ok(
+            api::request::input::tool_call_result::Result::RequestComputerUse(
+                api::RequestComputerUseResult {
+                    result: Some(api::request_computer_use_result::Result::Approved(
+                        api::request_computer_use_result::Approved {
+                            screen_dimensions: Some(api::ScreenDimensions {
+                                width_px: screenshot.original_width as i32,
+                                height_px: screenshot.original_height as i32,
+                            }),
+                            initial_screenshot: Some(api::RawImage {
+                                data: screenshot.data,
+                                mime_type: screenshot.mime_type.to_string(),
+                                width: screenshot.width as i32,
+                                height: screenshot.height as i32,
+                            }),
+                            platform: convert_computer_use_platform(platform).into(),
+                        },
+                    )),
+                },
+            ),
+        ),
+        RequestComputerUseResult::Cancelled => Ok(
+            api::request::input::tool_call_result::Result::RequestComputerUse(
+                api::RequestComputerUseResult {
+                    result: Some(api::request_computer_use_result::Result::Rejected(
+                        api::request_computer_use_result::Rejected {},
+                    )),
+                },
+            ),
+        ),
+        RequestComputerUseResult::Error(message) => Ok(
+            api::request::input::tool_call_result::Result::RequestComputerUse(
+                api::RequestComputerUseResult {
+                    result: Some(api::request_computer_use_result::Result::Error(
+                        api::request_computer_use_result::Error { message },
+                    )),
+                },
+            ),
+        ),
+    }
+}
+
+fn convert_use_computer_result(
+    result: UseComputerResult,
+) -> Result<api::request::input::tool_call_result::Result, ConvertToAPITypeError> {
+    match result {
+        UseComputerResult::Success(result) => Ok(
+            api::request::input::tool_call_result::Result::UseComputer(api::UseComputerResult {
+                result: Some(api::use_computer_result::Result::Success(
+                    api::use_computer_result::Success {
+                        screenshot: result.screenshot.map(|screenshot| api::RawImage {
+                            data: screenshot.data,
+                            mime_type: screenshot.mime_type.to_string(),
+                            width: screenshot.width as i32,
+                            height: screenshot.height as i32,
+                        }),
+                        cursor_position: result.cursor_position.map(|position| api::Coordinates {
+                            x: position.x(),
+                            y: position.y(),
+                        }),
+                    },
+                )),
+            }),
+        ),
+        UseComputerResult::Error(message) => Ok(
+            api::request::input::tool_call_result::Result::UseComputer(api::UseComputerResult {
+                result: Some(api::use_computer_result::Result::Error(
+                    api::use_computer_result::Error { message },
+                )),
+            }),
+        ),
+        UseComputerResult::Cancelled => Err(ConvertToAPITypeError::Ignore),
+    }
+}
+
+fn convert_computer_use_platform(
+    platform: computer_use::Platform,
+) -> api::request_computer_use_result::approved::Platform {
+    use api::request_computer_use_result::approved::Platform;
+
+    match platform {
+        computer_use::Platform::Mac => Platform::Macos,
+        computer_use::Platform::Windows => Platform::Windows,
+        computer_use::Platform::LinuxX11 => Platform::LinuxX11,
+        computer_use::Platform::LinuxWayland => Platform::LinuxWayland,
     }
 }
 
@@ -653,6 +747,12 @@ impl TryFrom<AIAgentActionResult> for api::request::input::user_inputs::user_inp
             AIAgentActionResultType::ReadShellCommandOutput(read_shell_command_output_result) => {
                 Some(read_shell_command_output_result.try_into()?)
             }
+            AIAgentActionResultType::UseComputer(use_computer_result) => {
+                Some(convert_use_computer_result(use_computer_result)?)
+            }
+            AIAgentActionResultType::RequestComputerUse(request_computer_use_result) => Some(
+                convert_request_computer_use_result(request_computer_use_result)?,
+            ),
             AIAgentActionResultType::TransferShellCommandControlToUser(transfer_control_result) => {
                 Some(transfer_control_result.try_into()?)
             }
@@ -761,6 +861,12 @@ fn convert_context(context: &[AIAgentContext]) -> api::InputContext {
                     branch: branch.unwrap_or_default(),
                 });
             }
+            // The fork's pinned `warp_multi_agent_api::input_context::Git` message only
+            // carries `head`/`branch`; it has no `repository`/`pull_request` sub-messages
+            // to populate, so this context is gathered locally (see
+            // `context_model.rs::repository_context`/`pull_request_context`) but not yet
+            // transmittable to the BYOP backends.
+            AIAgentContext::Repository { .. } | AIAgentContext::PullRequest { .. } => {}
             AIAgentContext::Skills { skills } => {
                 api_context.updated_skills_context = Some(api::input_context::SkillsContext {
                     available_skills: skills
@@ -910,9 +1016,10 @@ impl From<BlockContext> for api::ExecutedShellCommand {
 /// Tries to convert a [`serde_json::Value`] to a [`prost_types::Value`].
 #[cfg_attr(target_family = "wasm", allow(dead_code))]
 fn serde_json_to_prost(value: serde_json::Value) -> Result<prost_types::Value, String> {
+    use std::collections::BTreeMap;
+
     use prost_types::value::Kind::*;
     use serde_json::Value::*;
-    use std::collections::BTreeMap;
 
     Ok(prost_types::Value {
         kind: Some(match value {

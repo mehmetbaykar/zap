@@ -1,5 +1,8 @@
+use crate::elements::Point;
+use crate::event::DispatchedEvent;
+use crate::geometry::vector::Vector2F;
+use crate::scene::ZIndex;
 use crate::{
-    elements::Point, event::DispatchedEvent, geometry::vector::Vector2F, scene::ZIndex,
     AfterLayoutContext, AppContext, ClipBounds, Element, EventContext, LayoutContext, PaintContext,
     SizeConstraint,
 };

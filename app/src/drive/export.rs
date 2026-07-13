@@ -1,12 +1,8 @@
+use std::collections::hash_map::{Entry, OccupiedEntry};
+use std::collections::HashMap;
 #[cfg(feature = "local_fs")]
 use std::io::ErrorKind;
-use std::{
-    collections::{
-        hash_map::{Entry, OccupiedEntry},
-        HashMap,
-    },
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 #[cfg(feature = "local_fs")]
 use aho_corasick::{AhoCorasick, MatchKind};
@@ -15,11 +11,10 @@ use anyhow::{anyhow, Context};
 #[cfg(feature = "local_fs")]
 use futures::AsyncWriteExt;
 use warp_util::path::ShellFamily;
-use warpui::{
-    platform::{file_picker::FilePickerError, FilePickerConfiguration, OperatingSystem},
-    r#async::SpawnedFutureHandle,
-    AppContext, Entity, ModelContext, SingletonEntity, WindowId,
-};
+use warpui::platform::file_picker::FilePickerError;
+use warpui::platform::{FilePickerConfiguration, OperatingSystem};
+use warpui::r#async::SpawnedFutureHandle;
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity, WindowId};
 
 #[cfg(feature = "local_fs")]
 use crate::{

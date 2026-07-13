@@ -1,25 +1,21 @@
-use pathfinder_geometry::{rect::RectF, vector::Vector2F};
+use pathfinder_geometry::rect::RectF;
+use pathfinder_geometry::vector::Vector2F;
 
+use super::util::{scroll_clipped_scrollable_handle_with_delta, scroll_delta_for_axis};
+use super::NewScrollableElement;
+#[cfg(debug_assertions)]
+use super::ScrollableAxis;
+use crate::elements::new_scrollable::util::child_constraint_for_axis;
+use crate::elements::{
+    Axis, ClippedScrollStateHandle, F32Ext, ScrollData, ScrollStateHandle, ScrollTarget,
+    ScrollToPositionMode, SelectableElement, Vector2FExt,
+};
+use crate::event::DispatchedEvent;
+use crate::units::{IntoPixels, Pixels};
 use crate::{
-    elements::{
-        new_scrollable::util::child_constraint_for_axis, Axis, ClippedScrollStateHandle, F32Ext,
-        ScrollData, ScrollStateHandle, SelectableElement, Vector2FExt,
-    },
-    event::DispatchedEvent,
-    units::{IntoPixels, Pixels},
     AfterLayoutContext, AppContext, Element, EventContext, LayoutContext, PaintContext,
     SizeConstraint,
 };
-
-#[cfg(debug_assertions)]
-use super::ScrollableAxis;
-use super::{
-    util::{scroll_clipped_scrollable_handle_with_delta, scroll_delta_for_axis},
-    NewScrollableElement,
-};
-
-use crate::elements::{ScrollTarget, ScrollToPositionMode};
-
 /// Holds state that depends on whether the scrolling axis should
 /// be managed automatically by the scrollable (clipped) or it should
 /// be managed manually by the child.

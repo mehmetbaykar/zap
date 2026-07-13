@@ -1,17 +1,16 @@
-use pathfinder_geometry::rect::RectF;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use warpui::platform::FullscreenState;
 
-use warpui::AppContext;
+use pathfinder_geometry::rect::RectF;
+use serde::{Deserialize, Serialize};
+use warpui::platform::FullscreenState;
+use warpui::{AppContext, SingletonEntity as _};
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent_conversations_model::AgentManagementFilters;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
-use crate::ai::blocklist::InputConfig;
-use crate::ai::blocklist::SerializedBlockListItem;
+use crate::ai::blocklist::{InputConfig, SerializedBlockListItem};
 use crate::code::editor_management::CodeSource;
 use crate::drive::ZapDriveObjectSettings;
 use crate::root_view::quake_mode_window_id;
@@ -22,7 +21,6 @@ use crate::terminal::ShellLaunchData;
 use crate::themes::theme::{AnsiColorIdentifier, ThemeKind};
 use crate::workspace::view::left_panel::ToolPanelView;
 use crate::workspace::WorkspaceRegistry;
-use warpui::SingletonEntity as _;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppState {

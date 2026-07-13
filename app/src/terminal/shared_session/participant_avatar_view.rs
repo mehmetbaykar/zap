@@ -1,29 +1,28 @@
+use instant::Duration;
+use pathfinder_color::ColorU;
+use pathfinder_geometry::vector::vec2f;
+use warpui::accessibility::AccessibilityContent;
+use warpui::elements::{
+    ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Fill,
+    Flex, Hoverable, MainAxisAlignment, MouseStateHandle, OffsetPositioning, ParentAnchor,
+    ParentElement, ParentOffsetBounds, Stack,
+};
+use warpui::platform::Cursor;
+use warpui::r#async::{SpawnedFutureHandle, Timer};
+use warpui::ui_components::components::{UiComponent, UiComponentStyles};
+use warpui::{
+    AppContext, Element, Entity, FocusContext, SingletonEntity, TypedActionView, View, ViewContext,
+    ViewHandle,
+};
+
+use super::render_util::non_hoverable_participant_avatar;
+use crate::appearance::Appearance;
 use crate::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields};
 use crate::pane_group::PaneHeaderAction;
 use crate::terminal::shared_session::protocol::{ParticipantId, ParticipantInfo, Role};
 use crate::terminal::view::TerminalAction;
-use crate::{
-    appearance::Appearance,
-    ui_components::{buttons::icon_button, icons::Icon},
-};
-use instant::Duration;
-use pathfinder_color::ColorU;
-use pathfinder_geometry::vector::vec2f;
-use warpui::r#async::{SpawnedFutureHandle, Timer};
-use warpui::{
-    accessibility::AccessibilityContent,
-    elements::{
-        ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Fill,
-        Flex, Hoverable, MainAxisAlignment, MouseStateHandle, OffsetPositioning, ParentAnchor,
-        ParentElement, ParentOffsetBounds, Stack,
-    },
-    platform::Cursor,
-    ui_components::components::{UiComponent, UiComponentStyles},
-    AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext,
-};
-use warpui::{FocusContext, ViewHandle};
-
-use super::render_util::non_hoverable_participant_avatar;
+use crate::ui_components::buttons::icon_button;
+use crate::ui_components::icons::Icon;
 
 #[derive(Debug, Clone)]
 pub enum HoveredElement {

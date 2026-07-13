@@ -3,20 +3,14 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use settings_value::SettingsValue;
-use warp_core::{
-    define_settings_group,
-    settings::{RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud},
-};
+use warp_core::define_settings_group;
+use warp_core::settings::{RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud};
 use warpui::{AppContext, ModelContext, SingletonEntity};
 
-use crate::{
-    cloud_object::{
-        model::persistence::{ObjectStoreEvent, ObjectStoreModel},
-        StoredObject as _,
-    },
-    drive::ObjectTypeAndId,
-    server::ids::SyncId,
-};
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
+use crate::cloud_object::StoredObject as _;
+use crate::drive::ObjectTypeAndId;
+use crate::server::ids::SyncId;
 
 define_settings_group!(WorkflowAliases, settings: [
     aliases: Aliases {

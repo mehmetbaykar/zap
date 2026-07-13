@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use ai::skills::SkillProvider;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::{
     elements::{
         Border, ChildView, Clipped, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox,
@@ -41,7 +42,7 @@ const FILTER_BUTTON_CORNER_RADIUS: f32 = 4.0;
 // adaptively by measured pixel width, so the number of sources is used as the collapse threshold.
 const FILTER_TABS_INLINE_MAX: usize = 4;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SkillManagerPanelAction {
     SelectProviderFilter(Option<SkillProvider>),
     EditSkill(PathBuf),
@@ -60,7 +61,7 @@ pub struct SkillManagerPanel {
     // FILTER_TABS_INLINE_MAX).
     source_dropdown: ViewHandle<Dropdown<SkillManagerPanelAction>>,
     filter_mouse_states: RefCell<HashMap<Option<SkillProvider>, MouseStateHandle>>,
-    row_mouse_states: RefCell<HashMap<PathBuf, MouseStateHandle>>,
+    row_mouse_states: RefCell<HashMap<LocalOrRemotePath, MouseStateHandle>>,
     list_scroll_state: ClippedScrollStateHandle,
 }
 
@@ -224,12 +225,7 @@ impl SkillManagerPanel {
                             && (query.is_empty()
                                 || duplicate.name.to_lowercase().contains(query)
                                 || duplicate.description.to_lowercase().contains(query)
-                                || duplicate
-                                    .path
-                                    .display()
-                                    .to_string()
-                                    .to_lowercase()
-                                    .contains(query))
+                                || duplicate.path.display_path().to_lowercase().contains(query))
                     })
                     .cloned()
                     .collect::<Vec<_>>();
@@ -248,11 +244,11 @@ impl SkillManagerPanel {
         items
             .iter()
             .flat_map(|item| item.duplicates.iter())
-            .any(|duplicate| duplicate.path.as_path() == path)
+            .any(|duplicate| duplicate.path.to_local_path() == Some(path))
     }
 
-    fn skill_row_position_id(path: &Path) -> String {
-        format!("skill-manager-row:{}", path.to_string_lossy())
+    fn skill_row_position_id(path: &LocalOrRemotePath) -> String {
+        format!("skill-manager-row:{}", path.display_path())
     }
 
     fn scroll_selected_path_into_view(&self, items: &[SkillInventoryItem]) {
@@ -264,7 +260,7 @@ impl SkillManagerPanel {
         }
 
         self.list_scroll_state.scroll_to_position(ScrollTarget {
-            position_id: Self::skill_row_position_id(path),
+            position_id: Self::skill_row_position_id(&LocalOrRemotePath::Local(path.to_path_buf())),
             mode: ScrollToPositionMode::FullyIntoView,
         });
     }
@@ -284,10 +280,10 @@ impl SkillManagerPanel {
             .clone()
     }
 
-    fn row_mouse_state_for(&self, path: &Path) -> MouseStateHandle {
+    fn row_mouse_state_for(&self, path: &LocalOrRemotePath) -> MouseStateHandle {
         self.row_mouse_states
             .borrow_mut()
-            .entry(path.to_path_buf())
+            .entry(path.clone())
             .or_default()
             .clone()
     }
@@ -444,7 +440,7 @@ impl SkillManagerPanel {
         appearance: &Appearance,
     ) -> Box<dyn Element> {
         let theme = appearance.theme();
-        let path = duplicate.path.display().to_string();
+        let path = duplicate.path.display_path();
         let mut meta = format!("{} · {}", duplicate.provider, duplicate.scope);
         if has_duplicates {
             if is_default {
@@ -481,7 +477,10 @@ impl SkillManagerPanel {
             theme.sub_text_color(theme.background()),
         );
 
-        let action = SkillManagerPanelAction::EditSkill(duplicate.path.clone());
+        let action = duplicate
+            .path
+            .to_local_path()
+            .map(|path| SkillManagerPanelAction::EditSkill(path.to_path_buf()));
         let position_id = Self::skill_row_position_id(&duplicate.path);
         let state = self.row_mouse_state_for(&duplicate.path);
         let row = Hoverable::new(state, move |mouse| {
@@ -524,7 +523,9 @@ impl SkillManagerPanel {
         })
         .with_cursor(Cursor::PointingHand)
         .on_mouse_down(move |ctx, _, _| {
-            ctx.dispatch_typed_action(action.clone());
+            if let Some(action) = action.clone() {
+                ctx.dispatch_typed_action(action);
+            }
         })
         .finish();
 
@@ -558,7 +559,7 @@ impl SkillManagerPanel {
                 let is_selected = self
                     .selected_path
                     .as_deref()
-                    .is_some_and(|path| path == duplicate.path.as_path());
+                    .is_some_and(|path| duplicate.path.to_local_path() == Some(path));
                 let is_default = duplicate.path == item.default_skill.path;
                 rows.add_child(self.render_skill_row(
                     duplicate,

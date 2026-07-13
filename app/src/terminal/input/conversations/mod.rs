@@ -4,13 +4,13 @@ mod data_source;
 mod search_item;
 mod view;
 
-pub use view::{InlineConversationMenuEvent, InlineConversationMenuView};
-
 use pathfinder_color::ColorU;
+pub use view::{InlineConversationMenuEvent, InlineConversationMenuView};
 use warp_core::ui::appearance::Appearance;
-use warpui::{keymap::Keystroke, SingletonEntity};
+use warpui::keymap::Keystroke;
+use warpui::SingletonEntity;
 
-use crate::ai::conversation_navigation::ConversationNavigationData;
+use crate::ai::agent_conversations_model::AgentConversationEntryId;
 use crate::terminal::input::inline_menu::{
     default_navigation_message_items, InlineMenuAction, InlineMenuMessageArgs, InlineMenuRowAction,
     InlineMenuType,
@@ -29,7 +29,7 @@ pub enum InlineConversationMenuTab {
 /// Action emitted when enter is hit on a conversation the inline conversation menu.
 #[derive(Clone, Debug)]
 pub struct AcceptConversation {
-    pub navigation_data: ConversationNavigationData,
+    pub item_id: AgentConversationEntryId,
 }
 
 impl InlineMenuAction for AcceptConversation {
@@ -44,9 +44,11 @@ impl InlineMenuAction for AcceptConversation {
         let mut items = Vec::new();
 
         if let Some(item) = inline_menu_model.selected_item() {
-            let data = &item.navigation_data;
+            // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed); the
+            // "go to conversation" vs. "continue in this pane" distinction it powered
+            // is not shown.
             let text = " continue in this pane";
-            let navigation_data = data.clone();
+            let item_id = item.item_id;
             items.push(MessageItem::clickable(
                 vec![
                     MessageItem::keystroke(Keystroke {
@@ -57,9 +59,7 @@ impl InlineMenuAction for AcceptConversation {
                 ],
                 move |ctx| {
                     ctx.dispatch_typed_action(InlineMenuRowAction::Accept {
-                        item: AcceptConversation {
-                            navigation_data: navigation_data.clone(),
-                        },
+                        item: AcceptConversation { item_id },
                         cmd_or_ctrl_enter: false,
                     });
                 },

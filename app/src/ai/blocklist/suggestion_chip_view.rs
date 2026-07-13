@@ -1,31 +1,27 @@
-use crate::ai::agent::{SuggestedAgentModeWorkflow, SuggestedLoggingId, SuggestedRule};
-use crate::ai::facts::AIFactObjectModel;
-use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
-use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
-use crate::cloud_object::update_manager::{
-    ObjectOperation, OperationSuccessType, UpdateManagerEvent,
-};
-use crate::drive::ObjectTypeAndId;
-use crate::server::ids::SyncId;
-use crate::view_components::action_button::{ActionButton, ActionButtonTheme, SecondaryTheme};
-use crate::TelemetryEvent;
-use crate::{
-    ai::facts::{AIFact, AIMemory},
-    cloud_object::update_manager::UpdateManager,
-    server::ids::ClientId,
-    ui_components::{blended_colors, icons::Icon},
-};
 use pathfinder_color::ColorU;
 use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::Fill;
+use warpui::elements::{Align, ChildView, Container, ParentElement, SavePosition, Stack};
 use warpui::{
-    elements::{Align, ChildView, Container, ParentElement, SavePosition, Stack},
     AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
 
 use super::suggested_agent_mode_workflow_modal::SuggestedAgentModeWorkflowAndId;
 use super::suggested_rule_modal::SuggestedRuleAndId;
+use crate::ai::agent::{SuggestedAgentModeWorkflow, SuggestedLoggingId, SuggestedRule};
+use crate::ai::facts::{AIFact, AIFactObjectModel, AIMemory};
+use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
+use crate::cloud_object::update_manager::{
+    ObjectOperation, OperationSuccessType, UpdateManager, UpdateManagerEvent,
+};
+use crate::drive::ObjectTypeAndId;
+use crate::server::ids::{ClientId, SyncId};
+use crate::ui_components::blended_colors;
+use crate::ui_components::icons::Icon;
+use crate::view_components::action_button::{ActionButton, ActionButtonTheme, SecondaryTheme};
+use crate::TelemetryEvent;
 
 const MAX_CHIP_WIDTH: f32 = 316.;
 

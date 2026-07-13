@@ -98,3 +98,13 @@ pub(super) fn run_daemon_app(
 // auth subsystem, that event had 0 emit points, so Wave 6-1 removed the event +
 // this subscription function + the call site in `lib.rs` together. The
 // `RemoteServerManager::rotate_auth_token` function body is kept for now.
+//
+// Zap: upstream's `current_codebase_index_limits` / `wire_auth_token_rotation`
+// codebase-index-limit wiring (gated on `AIRequestUsageModel` / subscription
+// usage quotas) was not ported — this fork has no billing/usage-quota system,
+// and the embedding-backed codebase index it would gate
+// (`ai::index::full_source_code_embedding`) was already stripped, see
+// `codebase_index_status.rs`. Likewise `handoff_snapshot` (local-to-cloud
+// SSH-session handoff via GCS upload through `server::server_api::ai`) is not
+// wired in here: it depends entirely on the cloud AI proxy this fork replaces
+// with BYOP providers, and has no local-only variant to keep.

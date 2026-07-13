@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize};
-use warp_multi_agent_api::{self as api, response_event::stream_finished};
+use warp_multi_agent_api::response_event::stream_finished;
+use warp_multi_agent_api::{self as api};
 
 use super::schema::{
     active_mcp_servers, agent_conversations, agent_tasks, ai_document_panes, ai_memory_panes,
@@ -908,13 +909,24 @@ impl AgentConversation {
     ///
     /// A conversation is restorable if:
     /// - It contains a single task or fewer, OR
-    /// - It contains multiple tasks where every task other than the root task has a parent task ID.
+    /// - It has exactly one parentless (root) task, OR
+    /// - It has multiple parentless tasks but exactly one of them has
+    ///   non-empty `messages`. This permits restoring conversations whose
+    ///   persisted state was corrupted by the pre-QUALITY-774 optimistic-root
+    ///   writer bug, where a stub root row co-existed with the real server
+    ///   root row. `AIConversation::new_restored` deterministically picks
+    ///   the real root in that shape via its restore-side dedupe.
+    ///
+    /// Non-root tasks need not be validated here: any task that does not
+    /// match the parentless predicate has, by construction, a non-empty
+    /// `parent_task_id`.
     pub fn is_restorable(&self) -> bool {
         if self.tasks.len() <= 1 {
             return true;
         }
 
-        // Find the root task(s) - tasks with no parent_task_id or empty parent_task_id
+        // Find parentless (root) tasks - tasks with no dependencies or with an
+        // empty parent_task_id.
         let root_tasks: Vec<_> = self
             .tasks
             .iter()
@@ -926,28 +938,18 @@ impl AgentConversation {
             })
             .collect();
 
-        // Must have exactly one root task
-        if root_tasks.len() != 1 {
-            return false;
+        match root_tasks.len() {
+            // Malformed: no parentless task means no root to anchor restore on.
+            0 => false,
+            // Single root: the normal happy path.
+            1 => true,
+            // Multi-root: only permit the specific [stub + real] shape
+            // produced by the pre-QUALITY-774 optimistic-root writer bug,
+            // where exactly one parentless row carries the real conversation
+            // content. The restore-side dedupe in
+            // `AIConversation::new_restored` will pick that real root.
+            _ => root_tasks.iter().filter(|t| !t.messages.is_empty()).count() == 1,
         }
-
-        // All non-root tasks must have a non-empty parent_task_id
-        self.tasks.iter().all(|task| {
-            // Root task is always valid
-            if task
-                .dependencies
-                .as_ref()
-                .map(|deps| deps.parent_task_id.is_empty())
-                .unwrap_or(true)
-            {
-                return true;
-            }
-
-            // Non-root tasks must have a non-empty parent_task_id
-            task.dependencies
-                .as_ref()
-                .is_some_and(|deps| !deps.parent_task_id.is_empty())
-        })
     }
 }
 
@@ -1003,6 +1005,15 @@ pub struct AgentConversationData {
     /// The local conversation ID of the parent conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_conversation_id: Option<String>,
+    /// Legacy marker that previously recorded whether the root task was still
+    /// optimistic when this conversation was persisted. Retained on the struct
+    /// for backward-compatible deserialization of rows written by older builds;
+    /// new writes always emit `None` and restore code ignores the value.
+    ///
+    // TODO: Remove this field once no live local DBs still contain
+    // `Some(true)` rows that legacy code paths might trip over.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_task_is_optimistic: Option<bool>,
     /// The run identifier for v2 orchestration. For local agents this arrives
     /// via StreamInit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1060,6 +1071,10 @@ pub fn token_usage_category_display_name(category: &str) -> String {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelTokenUsage {
+    /// Identifier used for both display and replay. For warp/byok rows this is the
+    /// server-known model id; for custom endpoint rows this is the resolved alias
+    /// (or fallback label) — the upstream `config_key` is translated into this
+    /// label once at ingestion time and is not retained separately.
     pub model_id: String,
     /// Alias for backward compat: old persisted data used `total_tokens` for warp usage.
     #[serde(default, alias = "total_tokens")]
@@ -1067,9 +1082,13 @@ pub struct ModelTokenUsage {
     #[serde(default)]
     pub byok_tokens: u32,
     #[serde(default)]
+    pub custom_endpoint_tokens: u32,
+    #[serde(default)]
     pub warp_token_usage_by_category: HashMap<TokenUsageCategory, u32>,
     #[serde(default)]
     pub byok_token_usage_by_category: HashMap<TokenUsageCategory, u32>,
+    #[serde(default)]
+    pub custom_endpoint_token_usage_by_category: HashMap<TokenUsageCategory, u32>,
 }
 
 impl ModelTokenUsage {
@@ -1102,16 +1121,37 @@ impl ModelTokenUsage {
     pub fn to_proto_byok_usage(&self) -> Option<(String, stream_finished::ModelTokenUsage)> {
         self.to_proto_usage(self.byok_tokens, &self.byok_token_usage_by_category)
     }
+    #[allow(deprecated)]
+    pub fn to_proto_custom_endpoint_usage(
+        &self,
+    ) -> Option<(String, stream_finished::ModelTokenUsage)> {
+        if self.custom_endpoint_tokens == 0 {
+            return None;
+        }
+        Some((
+            self.model_id.clone(),
+            stream_finished::ModelTokenUsage {
+                model_id: self.model_id.clone(),
+                total_tokens: self.custom_endpoint_tokens,
+                token_usage_by_category: self
+                    .custom_endpoint_token_usage_by_category
+                    .iter()
+                    .map(|(cat, tokens)| (cat.clone(), *tokens))
+                    .collect(),
+            },
+        ))
+    }
 
     #[allow(deprecated)]
     pub fn to_proto_combined(&self) -> stream_finished::ModelTokenUsage {
         stream_finished::ModelTokenUsage {
             model_id: self.model_id.clone(),
-            total_tokens: self.warp_tokens + self.byok_tokens,
+            total_tokens: self.warp_tokens + self.byok_tokens + self.custom_endpoint_tokens,
             token_usage_by_category: self
                 .warp_token_usage_by_category
                 .iter()
                 .chain(self.byok_token_usage_by_category.iter())
+                .chain(self.custom_endpoint_token_usage_by_category.iter())
                 .fold(HashMap::new(), |mut acc, (cat, tokens)| {
                     *acc.entry(cat.clone()).or_insert(0) += tokens;
                     acc
@@ -1323,7 +1363,108 @@ pub struct NewMCPServerInstallation {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentConversationData;
+    use std::collections::HashMap;
+
+    use warp_multi_agent_api as api;
+
+    use super::{AgentConversation, AgentConversationData, ModelTokenUsage};
+
+    fn parentless_task(id: &str, message_count: usize) -> api::Task {
+        api::Task {
+            id: id.to_string(),
+            description: String::new(),
+            dependencies: None,
+            messages: (0..message_count)
+                .map(|i| api::Message {
+                    id: format!("{id}-msg-{i}"),
+                    task_id: id.to_string(),
+                    server_message_data: String::new(),
+                    citations: vec![],
+                    message: None,
+                    request_id: String::new(),
+                    timestamp: None,
+                })
+                .collect(),
+            summary: String::new(),
+            server_data: String::new(),
+        }
+    }
+
+    fn child_task(id: &str, parent_id: &str) -> api::Task {
+        api::Task {
+            id: id.to_string(),
+            description: String::new(),
+            dependencies: Some(api::task::Dependencies {
+                parent_task_id: parent_id.to_string(),
+            }),
+            messages: vec![],
+            summary: String::new(),
+            server_data: String::new(),
+        }
+    }
+
+    fn conversation_with_tasks(tasks: Vec<api::Task>) -> AgentConversation {
+        AgentConversation {
+            conversation: Default::default(),
+            tasks,
+        }
+    }
+
+    /// Legacy [stub + real] root shape produced by the pre-QUALITY-774
+    /// optimistic-root writer bug must be considered restorable so the
+    /// restore-side dedupe in `AIConversation::new_restored` can pick the
+    /// real root.
+    #[test]
+    fn is_restorable_accepts_legacy_stub_plus_real_root_shape() {
+        let conversation = conversation_with_tasks(vec![
+            parentless_task("optimistic-stub-uuid", 0),
+            parentless_task("server-root-id", 2),
+            child_task("child-1", "server-root-id"),
+        ]);
+        assert!(conversation.is_restorable());
+    }
+
+    /// Multi-root with multiple real roots (each non-empty) is genuinely
+    /// ambiguous and must remain rejected — the dedupe heuristic cannot
+    /// disambiguate between two real roots.
+    #[test]
+    fn is_restorable_rejects_multi_root_with_multiple_real_roots() {
+        let conversation = conversation_with_tasks(vec![
+            parentless_task("root-a", 1),
+            parentless_task("root-b", 1),
+        ]);
+        assert!(!conversation.is_restorable());
+    }
+
+    /// Multi-root where every candidate is empty has nothing to anchor
+    /// restore on and must remain rejected.
+    #[test]
+    fn is_restorable_rejects_multi_root_with_no_real_root() {
+        let conversation = conversation_with_tasks(vec![
+            parentless_task("stub-1", 0),
+            parentless_task("stub-2", 0),
+        ]);
+        assert!(!conversation.is_restorable());
+    }
+
+    /// Normal happy path: a single parentless root plus well-formed child
+    /// tasks remains restorable.
+    #[test]
+    fn is_restorable_accepts_single_root_plus_subtasks() {
+        let conversation = conversation_with_tasks(vec![
+            parentless_task("root", 1),
+            child_task("child-1", "root"),
+            child_task("child-2", "root"),
+        ]);
+        assert!(conversation.is_restorable());
+    }
+
+    /// Empty or single-task conversations are trivially restorable.
+    #[test]
+    fn is_restorable_accepts_empty_and_single_task_conversations() {
+        assert!(conversation_with_tasks(vec![]).is_restorable());
+        assert!(conversation_with_tasks(vec![parentless_task("root", 0)]).is_restorable());
+    }
 
     #[test]
     fn agent_conversation_data_roundtrips_last_event_sequence() {
@@ -1339,6 +1480,7 @@ mod tests {
             pinned: false,
             is_remote_child: false,
             parent_conversation_id: None,
+            root_task_is_optimistic: None,
             run_id: None,
             autoexecute_override: None,
             last_event_sequence: Some(42),
@@ -1362,6 +1504,60 @@ mod tests {
             serde_json::from_str(legacy_json).expect("legacy rows must deserialize");
 
         assert_eq!(data.orchestration_harness_type.as_deref(), Some("orbit"));
+    }
+
+    #[test]
+    fn agent_conversation_data_roundtrips_remote_child_marker() {
+        let data = AgentConversationData {
+            server_conversation_token: None,
+            conversation_usage_metadata: None,
+            reverted_action_ids: None,
+            forked_from_server_conversation_token: None,
+            artifacts_json: None,
+            parent_agent_id: None,
+            agent_name: None,
+            orchestration_harness_type: None,
+            pinned: false,
+            is_remote_child: true,
+            parent_conversation_id: None,
+            root_task_is_optimistic: None,
+            run_id: None,
+            autoexecute_override: None,
+            last_event_sequence: None,
+            compaction_state_json: None,
+            byop_repair_state_json: None,
+            cli_subagent_block_snapshots_json: None,
+        };
+        let json = serde_json::to_string(&data).expect("serialize");
+        let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
+        assert!(roundtripped.is_remote_child);
+    }
+
+    #[test]
+    fn agent_conversation_data_roundtrips_optimistic_root_marker() {
+        let data = AgentConversationData {
+            server_conversation_token: None,
+            conversation_usage_metadata: None,
+            reverted_action_ids: None,
+            forked_from_server_conversation_token: None,
+            artifacts_json: None,
+            parent_agent_id: None,
+            agent_name: None,
+            orchestration_harness_type: None,
+            pinned: false,
+            is_remote_child: false,
+            parent_conversation_id: None,
+            root_task_is_optimistic: Some(true),
+            run_id: None,
+            autoexecute_override: None,
+            last_event_sequence: None,
+            compaction_state_json: None,
+            byop_repair_state_json: None,
+            cli_subagent_block_snapshots_json: None,
+        };
+        let json = serde_json::to_string(&data).expect("serialize");
+        let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(roundtripped.root_task_is_optimistic, Some(true));
     }
 
     #[test]
@@ -1391,6 +1587,7 @@ mod tests {
             pinned: false,
             is_remote_child: false,
             parent_conversation_id: None,
+            root_task_is_optimistic: None,
             run_id: None,
             autoexecute_override: None,
             last_event_sequence: None,
@@ -1423,6 +1620,7 @@ mod tests {
             pinned: false,
             is_remote_child: false,
             parent_conversation_id: None,
+            root_task_is_optimistic: None,
             run_id: None,
             autoexecute_override: None,
             last_event_sequence: None,
@@ -1454,6 +1652,7 @@ mod tests {
             pinned: false,
             is_remote_child: false,
             parent_conversation_id: None,
+            root_task_is_optimistic: None,
             run_id: None,
             autoexecute_override: None,
             last_event_sequence: None,
@@ -1471,6 +1670,104 @@ mod tests {
             roundtripped.cli_subagent_block_snapshots_json,
             data.cli_subagent_block_snapshots_json
         );
+    }
+
+    #[test]
+    fn agent_conversation_data_roundtrips_pinned() {
+        let data = AgentConversationData {
+            server_conversation_token: None,
+            conversation_usage_metadata: None,
+            reverted_action_ids: None,
+            forked_from_server_conversation_token: None,
+            artifacts_json: None,
+            parent_agent_id: None,
+            agent_name: None,
+            orchestration_harness_type: None,
+            pinned: true,
+            is_remote_child: false,
+            parent_conversation_id: None,
+            root_task_is_optimistic: None,
+            run_id: None,
+            autoexecute_override: None,
+            last_event_sequence: None,
+            compaction_state_json: None,
+            byop_repair_state_json: None,
+            cli_subagent_block_snapshots_json: None,
+        };
+        let json = serde_json::to_string(&data).expect("serialize");
+        let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
+        assert!(roundtripped.pinned);
+    }
+
+    #[test]
+    fn agent_conversation_data_skips_serializing_unpinned() {
+        let data = AgentConversationData {
+            server_conversation_token: None,
+            conversation_usage_metadata: None,
+            reverted_action_ids: None,
+            forked_from_server_conversation_token: None,
+            artifacts_json: None,
+            parent_agent_id: None,
+            agent_name: None,
+            orchestration_harness_type: None,
+            pinned: false,
+            is_remote_child: false,
+            parent_conversation_id: None,
+            root_task_is_optimistic: None,
+            run_id: None,
+            autoexecute_override: None,
+            last_event_sequence: None,
+            compaction_state_json: None,
+            byop_repair_state_json: None,
+            cli_subagent_block_snapshots_json: None,
+        };
+        let json = serde_json::to_string(&data).expect("serialize");
+        assert!(
+            !json.contains("pinned"),
+            "Unpinned default should be skipped: {json}"
+        );
+    }
+
+    #[test]
+    fn agent_conversation_data_legacy_rows_default_to_unpinned() {
+        let legacy_json = r#"{"server_conversation_token":null}"#;
+        let data: AgentConversationData =
+            serde_json::from_str(legacy_json).expect("legacy rows must deserialize");
+        assert!(!data.pinned);
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn model_token_usage_replays_custom_endpoint_usage_by_model_id() {
+        let usage = ModelTokenUsage {
+            model_id: "Friendly alias".to_string(),
+            custom_endpoint_tokens: 6,
+            custom_endpoint_token_usage_by_category: HashMap::from([(
+                "primary_agent".to_string(),
+                6,
+            )]),
+            ..Default::default()
+        };
+
+        let (key, proto) = usage
+            .to_proto_custom_endpoint_usage()
+            .expect("custom endpoint usage should serialize for replay");
+
+        assert_eq!(key, "Friendly alias");
+        assert_eq!(proto.model_id, "Friendly alias");
+        assert_eq!(proto.total_tokens, 6);
+        assert_eq!(proto.token_usage_by_category.get("primary_agent"), Some(&6));
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn model_token_usage_replay_skips_non_custom_endpoint_entries() {
+        let warp_only = ModelTokenUsage {
+            model_id: "warp-model".to_string(),
+            warp_tokens: 4,
+            ..Default::default()
+        };
+        assert!(warp_only.to_proto_custom_endpoint_usage().is_none());
     }
 }
 

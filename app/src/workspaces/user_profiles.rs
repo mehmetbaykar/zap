@@ -26,6 +26,13 @@ impl From<crate::persistence::model::UserProfile> for UserProfileWithUID {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+pub fn user_profile_from_persistence(
+    user_profile: crate::persistence::model::UserProfile,
+) -> UserProfileWithUID {
+    user_profile.into()
+}
+
 /// Private struct for internal mapping between the user's uid and the important information we might
 /// want to query about them.
 pub struct UserProfileData {

@@ -1,56 +1,49 @@
-use crate::ui_components::blended_colors;
 use core::fmt::{self, Display};
-use itertools::Itertools as _;
-use pathfinder_color::ColorU;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use super::{
-    about_page::AboutPageView,
-    ai_page::{AISettingsPageAction, AISettingsPageView},
-    appearance_page::AppearanceSettingsPageView,
-    cloud_sync_page::CloudSyncPageView,
-    code_page::CodeSettingsPageView,
-    features_page::FeaturesPageView,
-    keybindings::KeybindingsView,
-    mcp_servers_page::MCPServersSettingsPageView,
-    network_page::NetworkPageView,
-    warp_drive_page::WarpDriveSettingsPageView,
-    warpify_page::WarpifyPageView,
-    SettingsSection,
-};
-use crate::{
-    appearance::Appearance,
-    settings::PreferencesSettings,
-    themes::theme::Fill,
-    ui_components::icons::Icon,
-    view_components::{Dropdown, SubmittableTextInput},
-};
+use itertools::Itertools as _;
+use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::vec2f;
 use settings::Setting;
-use warp_core::{
-    settings::SyncToCloud,
-    ui::{color::blend::Blend, theme::color::internal_colors},
+use warp_core::settings::SyncToCloud;
+use warp_core::ui::color::blend::Blend;
+use warp_core::ui::theme::color::internal_colors;
+use warpui::elements::new_scrollable::{
+    ClippedAxisConfiguration, DualAxisConfig, SingleAxisConfig,
 };
-use warpui::{
-    elements::{
-        new_scrollable::{ClippedAxisConfiguration, DualAxisConfig, SingleAxisConfig},
-        Align, Border, ChildAnchor, ChildView, ClippedScrollStateHandle, ConstrainedBox, Container,
-        CornerRadius, CrossAxisAlignment, Element, Empty, Expanded, Flex, Hoverable,
-        MainAxisAlignment, MainAxisSize, MouseStateHandle, NewScrollable, OffsetPositioning,
-        ParentAnchor, ParentElement, ParentOffsetBounds, Radius, SavePosition, ScrollTarget,
-        ScrollToPositionMode, Shrinkable, SizeConstraintCondition, SizeConstraintSwitch, Stack,
-        Text,
-    },
-    fonts::{Properties, Weight},
-    platform::Cursor,
-    ui_components::{
-        button::{Button, ButtonVariant},
-        components::{Coords, UiComponent, UiComponentStyles},
-    },
-    units::Pixels,
-    Action, AppContext, SingletonEntity, ViewContext, ViewHandle,
+use warpui::elements::{
+    Align, Border, ChildAnchor, ChildView, ClippedScrollStateHandle, ConstrainedBox, Container,
+    CornerRadius, CrossAxisAlignment, Element, Empty, Expanded, Flex, Hoverable, MainAxisAlignment,
+    MainAxisSize, MouseStateHandle, NewScrollable, OffsetPositioning, ParentAnchor, ParentElement,
+    ParentOffsetBounds, Radius, SavePosition, ScrollTarget, ScrollToPositionMode, Shrinkable,
+    SizeConstraintCondition, SizeConstraintSwitch, Stack, Text,
 };
+use warpui::fonts::{Properties, Weight};
+use warpui::platform::Cursor;
+use warpui::ui_components::button::{Button, ButtonVariant};
+use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
+use warpui::units::Pixels;
+use warpui::{Action, AppContext, SingletonEntity, ViewContext, ViewHandle};
+
+use super::about_page::AboutPageView;
+use super::ai_page::{AISettingsPageAction, AISettingsPageView};
+use super::appearance_page::AppearanceSettingsPageView;
+use super::cloud_sync_page::CloudSyncPageView;
+use super::code_page::CodeSettingsPageView;
+use super::features_page::FeaturesPageView;
+use super::keybindings::KeybindingsView;
+use super::mcp_servers_page::MCPServersSettingsPageView;
+use super::network_page::NetworkPageView;
+use super::warp_drive_page::WarpDriveSettingsPageView;
+use super::warpify_page::WarpifyPageView;
+use super::SettingsSection;
+use crate::appearance::Appearance;
+use crate::settings::PreferencesSettings;
+use crate::themes::theme::Fill;
+use crate::ui_components::blended_colors;
+use crate::ui_components::icons::Icon;
+use crate::view_components::{Dropdown, DropdownItemAction, SubmittableTextInput};
 
 pub const TOGGLE_BUTTON_RIGHT_PADDING: f32 = 5.;
 pub const HEADER_PADDING: f32 = 15.;
@@ -938,7 +931,7 @@ pub fn render_dropdown_item_label(
     }
 }
 
-pub(crate) fn render_dropdown_item<T: Clone + Action>(
+pub(crate) fn render_dropdown_item<T: DropdownItemAction>(
     appearance: &Appearance,
     label: &str,
     secondary_text: Option<&str>,

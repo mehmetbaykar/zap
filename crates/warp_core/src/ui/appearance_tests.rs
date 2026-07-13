@@ -1,6 +1,7 @@
+use warpui::color::ColorU;
+
 use super::*;
 use crate::ui::theme::mock_terminal_colors;
-use warpui::color::ColorU;
 
 fn mock_appearance() -> Appearance {
     use super::super::theme::Fill;
@@ -268,7 +269,10 @@ fn test_per_window_theme_override_resolution() {
     // global theme/ui_builder is always returned.
     set_current_render_window(Some(window_a));
     assert!(std::ptr::eq(appearance.theme(), &appearance.theme));
-    assert!(std::ptr::eq(appearance.ui_builder(), &appearance.ui_builder));
+    assert!(std::ptr::eq(
+        appearance.ui_builder(),
+        &appearance.ui_builder
+    ));
     set_current_render_window(None);
 
     // Insert an override for window A directly (bypassing `ModelContext`, which
@@ -296,7 +300,10 @@ fn test_per_window_theme_override_resolution() {
     // Ambient == B (no override) → the global theme is returned.
     set_current_render_window(Some(window_b));
     assert!(std::ptr::eq(appearance.theme(), &appearance.theme));
-    assert!(std::ptr::eq(appearance.ui_builder(), &appearance.ui_builder));
+    assert!(std::ptr::eq(
+        appearance.ui_builder(),
+        &appearance.ui_builder
+    ));
 
     // Ambient == None (e.g. non-render reads) → the global theme is returned.
     set_current_render_window(None);

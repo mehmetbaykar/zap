@@ -40,7 +40,7 @@ impl SyncPlatform {
 }
 
 /// Sync result
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncResult {
     Success {
         version: i64,

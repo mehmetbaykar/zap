@@ -1,21 +1,25 @@
-use crate::localization::localized;
-use crate::model::OnboardingStateModel;
-
-use super::OnboardingSlide;
 use pathfinder_color::ColorU;
 use ui_components::{button, Component as _, Options as _};
-use warp_core::ui::{appearance::Appearance, theme::color::internal_colors, Icon};
+use warp_core::ui::appearance::Appearance;
+use warp_core::ui::theme::color::internal_colors;
+use warp_core::ui::Icon;
+use warpui::elements::shimmering_text::{
+    ShimmerConfig, ShimmeringTextElement, ShimmeringTextStateHandle,
+};
+use warpui::elements::{
+    Align, ConstrainedBox, Container, CrossAxisAlignment, Flex, FormattedTextElement,
+    MainAxisAlignment, MainAxisSize, ParentElement,
+};
+use warpui::keymap::Keystroke;
+use warpui::text_layout::TextAlignment;
 use warpui::{
-    elements::{
-        shimmering_text::{ShimmerConfig, ShimmeringTextElement, ShimmeringTextStateHandle},
-        Align, ConstrainedBox, Container, CrossAxisAlignment, Flex, FormattedTextElement,
-        MainAxisAlignment, MainAxisSize, ParentElement,
-    },
-    keymap::Keystroke,
-    text_layout::TextAlignment,
     AppContext, Element, Entity, ModelHandle, SingletonEntity as _, TypedActionView, View,
     ViewContext,
 };
+
+use super::OnboardingSlide;
+use crate::localization::localized;
+use crate::model::OnboardingStateModel;
 
 #[derive(Clone, Debug)]
 pub enum IntroSlideAction {

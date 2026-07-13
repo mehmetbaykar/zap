@@ -1,11 +1,14 @@
-use std::{fmt, path::PathBuf};
+use std::fmt;
+use std::path::PathBuf;
 
 use clap::{Args, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    config_file::ConfigFileArgs, mcp::MCPSpec, model::ModelArgs, share::ShareArgs, skill::SkillSpec,
-};
+use crate::config_file::ConfigFileArgs;
+use crate::mcp::MCPSpec;
+use crate::model::ModelArgs;
+use crate::share::ShareArgs;
+use crate::skill::SkillSpec;
 
 /// Output format for agent results.
 #[derive(Debug, Copy, Clone, ValueEnum, Eq, PartialEq, Default)]
@@ -266,8 +269,8 @@ pub struct RunAgentArgs {
     ///
     /// When used with --prompt, the skill provides the base context and the prompt is the task.
     ///
-    /// To automate a skill on a schedule, use `oz schedule create --skill <SPEC>`.
-    #[arg(long = "skill", value_name = "SPEC")]
+    /// To automate a skill on a schedule, use `oz schedule create --skill <SKILL>`.
+    #[arg(long = "skill", value_name = "SKILL")]
     pub skill: Option<SkillSpec>,
 
     /// Name for this agent task.
@@ -312,8 +315,24 @@ pub struct RunAgentArgs {
     #[arg(long = "sandboxed", hide = true)]
     pub sandboxed: bool,
     /// IAM role ARN to use for federated AWS Bedrock credentials for this run.
-    #[arg(long = "bedrock-inference-role", value_name = "ROLE_ARN", hide = true)]
+    #[arg(
+        long = "bedrock-inference-role",
+        value_name = "ROLE_ARN",
+        requires = "bedrock_role_region",
+        hide = true
+    )]
     pub bedrock_inference_role: Option<String>,
+
+    /// AWS region to use for the STS `AssumeRoleWithWebIdentity` call that
+    /// mints federated Bedrock credentials. Required together with
+    /// `--bedrock-inference-role`.
+    #[arg(
+        long = "bedrock-role-region",
+        value_name = "REGION",
+        requires = "bedrock_inference_role",
+        hide = true
+    )]
+    pub bedrock_role_region: Option<String>,
 
     #[command(flatten)]
     pub computer_use: HiddenComputerUseArgs,

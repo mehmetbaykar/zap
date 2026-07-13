@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 
 use settings::Setting;
 use warp_util::path::user_friendly_path;
+use warpui::elements::{
+    Border, ChildView, ConstrainedBox, Container, CrossAxisAlignment, Flex, Hoverable,
+    MainAxisSize, MouseStateHandle, ParentElement, Text,
+};
+use warpui::platform::Cursor;
 use warpui::{
-    elements::{
-        Border, ChildView, ConstrainedBox, Container, CrossAxisAlignment, Flex, Hoverable,
-        MainAxisSize, MouseStateHandle, ParentElement, Text,
-    },
-    platform::Cursor,
     AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
 

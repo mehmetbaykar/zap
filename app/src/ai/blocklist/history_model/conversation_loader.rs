@@ -19,7 +19,10 @@ use crate::terminal::model::block::SerializedBlock;
 #[cfg(feature = "local_fs")]
 use crate::persistence::agent::read_agent_conversation_by_id;
 
-use super::{AIConversationMetadata, BlocklistAIHistoryModel, MAX_HISTORICAL_CONVERSATIONS};
+use super::{
+    agent_id_key_from_persisted_data, AIConversationMetadata, BlocklistAIHistoryModel,
+    MAX_HISTORICAL_CONVERSATIONS,
+};
 
 /// A conversation transcript from a CLI agent harness (e.g. Claude Code).
 #[derive(Debug, Clone)]
@@ -76,7 +79,11 @@ pub fn convert_persisted_conversation_to_ai_conversation_with_metadata(
 
     let conversation_data = serde_json::from_str::<AgentConversationData>(&conversation_data).ok();
 
-    match AIConversation::new_restored(conversation_id, tasks, conversation_data) {
+    match AIConversation::new_restored_synthesizing_on_empty(
+        conversation_id,
+        tasks,
+        conversation_data,
+    ) {
         Ok(mut conversation) => {
             // 持久化 Task 里的旧消息可能没有 CurrentTime/timestamp,恢复 exchange 时会退到
             // Unix epoch。SQLite 行级更新时间是这个会话最后写入的可靠兜底时间。
@@ -204,10 +211,39 @@ impl BlocklistAIHistoryModel {
         let conversations = conversations
             .iter()
             .sorted_by_key(|c| c.conversation.last_modified_at)
-            .rev();
+            .rev()
+            .take(MAX_HISTORICAL_CONVERSATIONS)
+            .collect_vec();
+
+        // Seed persisted agent identifiers before resolving child links. The
+        // newest-first ordering can place a child before its parent, and v2
+        // children may only carry the parent's run_id.
+        for agent_conv in &conversations {
+            if !agent_conv.is_restorable() {
+                continue;
+            }
+            let Ok(conversation_id) =
+                AIConversationId::try_from(agent_conv.conversation.conversation_id.clone())
+            else {
+                continue;
+            };
+            let Ok(conversation_data) = serde_json::from_str::<AgentConversationData>(
+                &agent_conv.conversation.conversation_data,
+            ) else {
+                continue;
+            };
+            if let Some(agent_id) = agent_id_key_from_persisted_data(&conversation_data) {
+                self.agent_id_to_conversation_id
+                    .insert(agent_id.to_owned(), conversation_id);
+            }
+            if let Some(token) = conversation_data.server_conversation_token {
+                self.server_token_to_conversation_id
+                    .insert(ServerConversationToken::new(token), conversation_id);
+            }
+        }
 
         let collected: HashMap<AIConversationId, AIConversationMetadata> = conversations
-            .take(MAX_HISTORICAL_CONVERSATIONS)
+            .into_iter()
             .filter_map(|agent_conv| {
                 // Try to convert the conversation ID
                 let conversation_id = match AIConversationId::try_from(
@@ -233,17 +269,19 @@ impl BlocklistAIHistoryModel {
                     &agent_conv.conversation.conversation_data,
                 )
                 .ok();
-                if let Some(parent_id_str) = conversation_data
-                    .as_ref()
-                    .and_then(|data| data.parent_conversation_id.as_deref())
-                {
-                    if let Ok(parent_id) = AIConversationId::try_from(parent_id_str.to_string()) {
-                        self.children_by_parent
-                            .entry(parent_id)
-                            .or_default()
-                            .push(conversation_id);
+                if let Some(conversation_data) = conversation_data.as_ref() {
+                    let is_child = conversation_data.parent_conversation_id.is_some()
+                        || conversation_data.parent_agent_id.is_some();
+                    if is_child {
+                        if let Some(parent_id) =
+                            self.resolved_parent_conversation_id_from_persisted_data(
+                                conversation_data,
+                            )
+                        {
+                            self.index_child_conversation(conversation_id, parent_id);
+                        }
+                        return None;
                     }
-                    return None;
                 }
 
                 // Skip conversations that contain AutoCodeDiff system queries but do not contain any UserQuery messages.

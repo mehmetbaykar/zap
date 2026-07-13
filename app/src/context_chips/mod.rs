@@ -24,23 +24,21 @@ use smol_str::SmolStr;
 use warp_core::ui::color::blend::Blend;
 use warp_core::ui::color::contrast::{high_enough_contrast, MinimumAllowedContrast};
 use warp_core::ui::theme::{Fill, WarpTheme};
-use warpui::{
-    color::ColorU,
-    elements::Text,
-    fonts::{Properties, Weight},
-};
-
-use crate::ui_components::{blended_colors, icons::Icon};
-use crate::{appearance::Appearance, features::FeatureFlag, themes::theme::PromptColors};
+use warpui::color::ColorU;
+use warpui::elements::Text;
+use warpui::fonts::{Properties, Weight};
 
 #[allow(unused_imports)]
 pub use self::context_chip::{
     ChipAvailability, ChipDisabledReason, ChipRuntimeCapabilities, ExternalCommandsAvailability,
 };
-use self::{
-    context_chip::{ChipFingerprintInput, ChipRuntimePolicy, ContextChip, RefreshConfig},
-    renderer::RendererStyles,
-};
+use self::context_chip::{ChipFingerprintInput, ChipRuntimePolicy, ContextChip, RefreshConfig};
+use self::renderer::RendererStyles;
+use crate::appearance::Appearance;
+use crate::features::FeatureFlag;
+use crate::themes::theme::PromptColors;
+use crate::ui_components::blended_colors;
+use crate::ui_components::icons::Icon;
 
 /// The value of a context chip. Most chips produce plain text, but some
 /// (like `GitDiffStats`) carry structured data to avoid string round-trips.
@@ -105,10 +103,17 @@ impl From<String> for ChipValue {
     }
 }
 
-pub(crate) fn github_pr_number_from_url(url: &str) -> Option<&str> {
+pub(crate) fn github_pr_number_from_url(url: &str) -> Option<i32> {
     let (_, tail) = url.trim().rsplit_once("/pull/")?;
     let number = tail.split(['/', '?', '#']).next()?;
-    (!number.is_empty() && number.chars().all(|c| c.is_ascii_digit())).then_some(number)
+    parse_github_pr_number(number)
+}
+
+fn parse_github_pr_number(number: &str) -> Option<i32> {
+    if !number.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    number.parse::<i32>().ok().filter(|number| *number > 0)
 }
 
 pub(crate) fn github_pr_display_text_from_url(url: &str) -> Option<String> {

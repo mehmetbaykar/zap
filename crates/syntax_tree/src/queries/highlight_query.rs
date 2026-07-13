@@ -1,13 +1,15 @@
-use std::{cell::RefCell, collections::HashMap, iter, ops::Range, sync::Arc};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::iter;
+use std::ops::Range;
+use std::sync::Arc;
 
 use arborium::tree_sitter::{Node, Parser, Query, QueryCursor, TextProvider, Tree};
 use rangemap::RangeMap;
 use streaming_iterator::StreamingIterator;
 use string_offset::{ByteOffset, CharOffset};
-use warp_editor::content::{
-    buffer::{Buffer, ToBufferByteOffset, ToBufferCharOffset},
-    text::Bytes,
-};
+use warp_editor::content::buffer::{Buffer, ToBufferByteOffset, ToBufferCharOffset};
+use warp_editor::content::text::Bytes;
 use warpui::color::ColorU;
 
 thread_local! {

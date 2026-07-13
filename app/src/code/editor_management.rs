@@ -1,23 +1,19 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    path::PathBuf,
-};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
-use crate::ai::skills::SkillOpenOrigin;
 use ai::skills::SkillReference;
 use serde::{Deserialize, Serialize};
 use warp_util::path::LineAndColumnArg;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, ViewHandle, WindowId};
 
-use crate::{
-    ai::agent::AIAgentActionId,
-    code_review::code_review_view::CodeReviewView,
-    pane_group::{PaneGroup, PaneId},
-    workspace::PaneViewLocator,
-};
-
 use super::buffer_location::BufferLocation;
 use super::view::CodeView;
+use crate::ai::agent::AIAgentActionId;
+use crate::ai::skills::SkillOpenOrigin;
+use crate::code_review::code_review_view::CodeReviewView;
+use crate::pane_group::{PaneGroup, PaneId};
+use crate::workspace::PaneViewLocator;
 
 pub struct CodeEditorSummary<'a> {
     pub unsaved_changes: Vec<&'a CodeEditorStatus>,
@@ -128,6 +124,8 @@ pub enum CodeSource {
     RemoteFileTree {
         remote_path: super::buffer_location::RemotePath,
     },
+    /// Opened from command palette file search.
+    CommandPalette { path: PathBuf },
     /// Opened from macOS Finder via "Open With".
     Finder { path: PathBuf },
     /// Opened from a skill.
@@ -149,6 +147,7 @@ impl CodeSource {
             | Self::ProjectRules { .. }
             | Self::FileTree { .. }
             | Self::RemoteFileTree { .. }
+            | Self::CommandPalette { .. }
             | Self::Finder { .. }
             | Self::Skill { .. } => None,
         }
@@ -162,6 +161,7 @@ impl CodeSource {
             Self::Link { path, .. }
             | Self::ProjectRules { path }
             | Self::FileTree { path }
+            | Self::CommandPalette { path }
             | Self::Finder { path }
             | Self::Skill { path, .. } => Some(path.clone()),
         }
@@ -180,6 +180,7 @@ impl CodeSource {
             Self::Link { path, .. }
             | Self::ProjectRules { path }
             | Self::FileTree { path }
+            | Self::CommandPalette { path }
             | Self::Finder { path }
             | Self::Skill { path, .. } => Some(BufferLocation::Local(path.clone())),
         }
@@ -217,6 +218,7 @@ impl CodeSource {
             Self::ProjectRules { .. } => "project_rules",
             Self::FileTree { .. } => "file_tree",
             Self::RemoteFileTree { .. } => "remote_file_tree",
+            Self::CommandPalette { .. } => "command_palette",
             Self::Finder { .. } => "finder",
             Self::Skill { .. } => "skill",
         }

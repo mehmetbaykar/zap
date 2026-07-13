@@ -405,9 +405,8 @@ impl TaskStore {
 
 #[cfg(test)]
 mod testing {
-    use crate::ai::agent::task::TaskId;
-
     use super::TaskStore;
+    use crate::ai::agent::task::TaskId;
 
     impl TaskStore {
         pub fn contains(&self, task_id: &TaskId) -> bool {

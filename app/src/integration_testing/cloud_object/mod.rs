@@ -1,10 +1,12 @@
 mod assertion;
 
-pub use assertion::*;
-use futures::{future::join_all, FutureExt};
-use itertools::Itertools;
 use std::future::Future;
 use std::pin::Pin;
+
+pub use assertion::*;
+use futures::future::join_all;
+use futures::FutureExt;
+use itertools::Itertools;
 use warpui::{App, SingletonEntity};
 
 use crate::{

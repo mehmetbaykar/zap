@@ -1,41 +1,31 @@
 use std::path::PathBuf;
 
 use uuid::Uuid;
-
+use warp_core::execution_mode::ExecutionMode;
 use warp_util::path::EscapeChar;
 use warpui::{App, EntityId, ModelHandle};
 
-use warp_core::execution_mode::ExecutionMode;
-
-use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
-use crate::{
-    ai::{
-        agent::conversation::AIConversationId,
-        blocklist::{
-            permissions::{
-                CommandExecutionPermission, CommandExecutionPermissionDeniedReason,
-                FileReadPermission, FileReadPermissionAllowedReason,
-                FileReadPermissionDeniedReason, FileWritePermission,
-                FileWritePermissionAllowedReason, FileWritePermissionDeniedReason,
-            },
-            CommandExecutionPermissionAllowedReason,
-        },
-        execution_profiles::{
-            profiles::AIExecutionProfilesModel, ActionPermission, WriteToPtyPermission,
-        },
-        mcp::templatable_manager::TemplatableMCPServerManager,
-    },
-    auth::AuthStateProvider,
-    cloud_object::model::persistence::ObjectStoreModel,
-    cloud_object::update_manager::UpdateManager,
-    network::NetworkStatus,
-    settings::{AgentModeCommandExecutionPredicate, PrivacySettings},
-    test_util::settings::initialize_settings_for_tests_with_mode,
-    workspaces::{user_workspaces::UserWorkspaces, workspace::SandboxedAgentSettings},
-    GlobalResourceHandles, GlobalResourceHandlesProvider, LaunchMode,
-};
-
 use super::{BlocklistAIHistoryModel, BlocklistAIPermissions};
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::blocklist::permissions::{
+    CommandExecutionPermission, CommandExecutionPermissionDeniedReason, FileReadPermission,
+    FileReadPermissionAllowedReason, FileReadPermissionDeniedReason, FileWritePermission,
+    FileWritePermissionAllowedReason, FileWritePermissionDeniedReason,
+};
+use crate::ai::blocklist::CommandExecutionPermissionAllowedReason;
+use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
+use crate::ai::execution_profiles::{ActionPermission, WriteToPtyPermission};
+use crate::ai::mcp::templatable_manager::TemplatableMCPServerManager;
+use crate::auth::AuthStateProvider;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::network::NetworkStatus;
+use crate::settings::{AgentModeCommandExecutionPredicate, PrivacySettings};
+use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
+use crate::test_util::settings::initialize_settings_for_tests_with_mode;
+use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::workspaces::workspace::SandboxedAgentSettings;
+use crate::{GlobalResourceHandles, GlobalResourceHandlesProvider, LaunchMode};
 
 struct PermissionsTestState {
     convo_id: AIConversationId,
@@ -1389,7 +1379,6 @@ fn test_sandboxed_denylist_used_in_sandboxed_mode() {
         });
     })
 }
-
 
 // Zap: org execute-commands denylist tests removed — org/team settings are a
 // Warp-team feature; this fork is teamless (current_team() is a None stub), so

@@ -1,64 +1,9 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use super::{
-    cli_controller::{CLISubagentController, CLISubagentEvent, UserTakeOverReason},
-    model::{AIBlockModel, AIBlockModelImpl, AIBlockOutputStatus},
-    view_impl::common::{
-        render_switch_control_to_user_button, render_warping_indicator,
-        render_warping_indicator_base, ButtonProps, ForceRefreshButtonProps, MaybeShimmeringText,
-        WarpingIndicatorProps, WarpingProps, LOAD_OUTPUT_MESSAGE, WAITING_FOR_USER_INPUT_MESSAGE,
-    },
-};
-use crate::{ai::agent_tips::AITipModel, terminal::input::buffer_model::InputBufferUpdateEvent};
-use crate::{
-    ai::blocklist::agent_view::{
-        agent_view_bg_fill, child_agent_status_card::ChildAgentStatusCard, AgentMessageBar,
-        AgentViewController, EphemeralMessageModel,
-    },
-    terminal::input::{
-        buffer_model::InputBufferModel, slash_command_model::SlashCommandModel,
-        suggestions_mode_model::InputSuggestionsModeModel,
-    },
-};
 use warp_multi_agent_api as api;
 
-use crate::{
-    ai::{
-        agent::{
-            conversation::AIConversationId, icons, AIAgentExchangeId, AIAgentOutput,
-            AIAgentOutputMessageType, CancellationReason, SummarizationType,
-        },
-        blocklist::{
-            agent_view::shortcuts::AgentShortcutViewModel,
-            ai_brand_color,
-            model::AIBlockModelHelper,
-            summarization_cancel_dialog::{
-                self, SummarizationCancelDialog, SummarizationCancelDialogEvent,
-            },
-            BlocklistAIActionEvent, BlocklistAIActionModel, BlocklistAIContextEvent,
-            BlocklistAIContextModel, BlocklistAIController, BlocklistAIHistoryEvent,
-            BlocklistAIInputEvent, BlocklistAIInputModel, ResponseStreamId,
-        },
-        llms::LLMPreferences,
-        AgentTip,
-    },
-    send_telemetry_from_app_ctx,
-    server::telemetry::TelemetryEvent,
-    settings::{InputModeSettings, InputSettings},
-    settings_view::keybindings::KeybindingChangedNotifier,
-    terminal::{
-        input::SET_INPUT_MODE_TERMINAL_ACTION_NAME,
-        model::block::LONG_RUNNING_COMMAND_DURATION_MS,
-        model_events::{ModelEvent, ModelEventDispatcher},
-        view::ambient_agent::{AmbientAgentViewModel, AmbientAgentViewModelEvent},
-        warpify::render::LEFT_STRIPE_WIDTH,
-        TerminalModel, CANCEL_COMMAND_KEYBINDING, TOGGLE_AUTOEXECUTE_MODE_KEYBINDING,
-        TOGGLE_HIDE_CLI_RESPONSES_KEYBINDING, TOGGLE_QUEUE_NEXT_PROMPT_KEYBINDING,
-    },
-    util::bindings::keybinding_name_to_keystroke,
-    BlocklistAIHistoryModel,
-};
 use instant::Instant;
+use markdown_parser::FormattedTextFragment;
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
 use warp_core::{
@@ -66,15 +11,61 @@ use warp_core::{
     ui::{appearance::Appearance, theme::Fill},
 };
 use warpui::elements::shimmering_text::ShimmeringTextStateHandle;
+use warpui::elements::{Border, Container, Empty, Flex, MouseStateHandle, ParentElement, Text};
+use warpui::keymap::Keystroke;
+use warpui::presenter::ChildView;
+use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::{
-    elements::{Border, Container, Empty, Flex, MouseStateHandle, ParentElement, Text},
-    keymap::Keystroke,
-    presenter::ChildView,
-    r#async::SpawnedFutureHandle,
-    AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, View, ViewContext,
-    ViewHandle,
+    AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
+    ViewContext, ViewHandle,
 };
-use warpui::{r#async::Timer, TypedActionView};
+
+use super::cli_controller::{CLISubagentController, CLISubagentEvent, UserTakeOverReason};
+use super::model::{AIBlockModel, AIBlockModelImpl, AIBlockOutputStatus};
+use super::view_impl::common::{
+    render_switch_control_to_user_button, render_warping_indicator, render_warping_indicator_base,
+    AutoExecuteButtonProps, ButtonProps, ForceRefreshButtonProps, MaybeShimmeringText,
+    WarpingIndicatorProps, WarpingProps, LOAD_OUTPUT_MESSAGE, WAITING_FOR_USER_INPUT_MESSAGE,
+};
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::{
+    icons, AIAgentExchangeId, AIAgentOutput, AIAgentOutputMessageType, CancellationReason,
+    SummarizationType,
+};
+use crate::ai::agent_tips::AITipModel;
+use crate::ai::blocklist::agent_view::child_agent_status_card::ChildAgentStatusCard;
+use crate::ai::blocklist::agent_view::shortcuts::AgentShortcutViewModel;
+use crate::ai::blocklist::agent_view::{
+    agent_view_bg_fill, AgentMessageBar, AgentViewController, EphemeralMessageModel,
+};
+use crate::ai::blocklist::model::AIBlockModelHelper;
+use crate::ai::blocklist::summarization_cancel_dialog::{
+    self, SummarizationCancelDialog, SummarizationCancelDialogEvent,
+};
+use crate::ai::blocklist::{
+    ai_brand_color, BlocklistAIActionEvent, BlocklistAIActionModel, BlocklistAIContextEvent,
+    BlocklistAIContextModel, BlocklistAIController, BlocklistAIHistoryEvent, BlocklistAIInputEvent,
+    BlocklistAIInputModel, QueuedQueryEvent, QueuedQueryModel, ResponseStreamId,
+};
+use crate::ai::llms::LLMPreferences;
+use crate::ai::AgentTip;
+use crate::server::telemetry::TelemetryEvent;
+use crate::settings::{InputModeSettings, InputSettings};
+use crate::settings_view::keybindings::KeybindingChangedNotifier;
+use crate::terminal::input::buffer_model::{InputBufferModel, InputBufferUpdateEvent};
+use crate::terminal::input::slash_command_model::SlashCommandModel;
+use crate::terminal::input::suggestions_mode_model::InputSuggestionsModeModel;
+use crate::terminal::input::SET_INPUT_MODE_TERMINAL_ACTION_NAME;
+use crate::terminal::model::block::LONG_RUNNING_COMMAND_DURATION_MS;
+use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
+use crate::terminal::view::ambient_agent::{AmbientAgentViewModel, AmbientAgentViewModelEvent};
+use crate::terminal::warpify::render::LEFT_STRIPE_WIDTH;
+use crate::terminal::{
+    TerminalModel, CANCEL_COMMAND_KEYBINDING, TOGGLE_AUTOEXECUTE_MODE_KEYBINDING,
+    TOGGLE_HIDE_CLI_RESPONSES_KEYBINDING, TOGGLE_QUEUE_NEXT_PROMPT_KEYBINDING,
+};
+use crate::util::bindings::keybinding_name_to_keystroke;
+use crate::{send_telemetry_from_app_ctx, BlocklistAIHistoryModel};
 
 pub fn init(app: &mut AppContext) {
     summarization_cancel_dialog::init(app);
@@ -87,7 +78,6 @@ struct StateHandles {
     stop_button: MouseStateHandle,
     take_over_button: MouseStateHandle,
     hide_cli_responses_button: MouseStateHandle,
-    github_auth_link: MouseStateHandle,
     /// Tracks hover/press state for the inline `Check now` affordance rendered next to
     /// `Last seen by agent ...` while the agent is polling a long-running command.
     force_refresh_button: MouseStateHandle,
@@ -216,11 +206,12 @@ impl BlocklistAIStatusBar {
             }
         });
         ctx.subscribe_to_model(&context_model, |_, _, event, ctx| {
-            if matches!(
-                event,
-                BlocklistAIContextEvent::PendingQueryStateUpdated
-                    | BlocklistAIContextEvent::QueueNextPromptToggled
-            ) {
+            if matches!(event, BlocklistAIContextEvent::PendingQueryStateUpdated) {
+                ctx.notify();
+            }
+        });
+        ctx.subscribe_to_model(&QueuedQueryModel::handle(ctx), |_, _, event, ctx| {
+            if matches!(event, QueuedQueryEvent::QueueNextPromptToggled { .. }) {
                 ctx.notify();
             }
         });
@@ -282,6 +273,11 @@ impl BlocklistAIStatusBar {
                 keybinding_name_to_keystroke(TOGGLE_QUEUE_NEXT_PROMPT_KEYBINDING, ctx);
             me.set_terminal_input_keystroke =
                 keybinding_name_to_keystroke(SET_INPUT_MODE_TERMINAL_ACTION_NAME, ctx);
+            ctx.notify();
+        });
+
+        ctx.observe(&AITipModel::handle(ctx), |me, tip_model, ctx| {
+            me.current_tip = tip_model.as_ref(ctx).current_tip().cloned();
             ctx.notify();
         });
 
@@ -821,23 +817,22 @@ impl BlocklistAIStatusBar {
                 shimmering_text_handle: &self.shimmering_text_handle,
                 summarization_start_time: self.summarization_start_time,
                 auto_execute_button: (!model.request_type(app).is_passive_code_diff()).then_some(
-                    ButtonProps {
+                    AutoExecuteButtonProps {
                         button_handle: &self.state_handles.autoexecute_button,
                         keystroke: self.autoexecute_keystroke.as_ref(),
                         is_active: model
                             .conversation(app)
                             .map(|c| c.autoexecute_any_action())
                             .unwrap_or(false),
+                        is_locked: false,
                     },
                 ),
                 queue_next_prompt_button: FeatureFlag::QueueSlashCommand.is_enabled().then_some(
                     ButtonProps {
                         button_handle: &self.state_handles.queue_next_prompt_button,
                         keystroke: self.queue_next_prompt_keystroke.as_ref(),
-                        is_active: self
-                            .context_model
-                            .as_ref(app)
-                            .is_queue_next_prompt_enabled(),
+                        is_active: QueuedQueryModel::as_ref(app)
+                            .is_queue_next_prompt_enabled(conversation.id()),
                     },
                 ),
                 stop_button: Some(ButtonProps {
@@ -892,9 +887,10 @@ fn latest_model_used_before_exchange<V: View>(
 }
 
 fn render_agent_tip(tip: &AgentTip, app: &AppContext) -> Box<dyn Element> {
-    use crate::ai::agent_tips::AITip;
     use markdown_parser::{FormattedTextFragment, FormattedTextLine};
     use warpui::text_layout::ClipConfig;
+
+    use crate::ai::agent_tips::AITip;
 
     let appearance = Appearance::as_ref(app);
     let theme = appearance.theme();

@@ -1,34 +1,27 @@
-use std::{
-    collections::{HashMap, HashSet},
-    iter,
-};
+use std::collections::{HashMap, HashSet};
+use std::iter;
 
-use crate::terminal::shared_session::protocol::{
-    InputReplicaId, ParticipantInfo, ParticipantList, ParticipantPresenceUpdate, PresenceUpdate,
-    Role, RoleRequestId, Selection, Viewer,
-};
+use asset_cache::AssetCacheExt as _;
 use futures::future::BoxFuture;
 use futures_util::future::join_all;
 use itertools::{Either, Itertools};
 use pathfinder_color::ColorU;
 use rand::Rng;
+use warpui::assets::asset_cache::{AssetCache, AssetState};
+use warpui::image_cache::ImageType;
+use warpui::r#async::SpawnedFutureHandle;
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
-use asset_cache::AssetCacheExt as _;
-use warpui::{
-    assets::asset_cache::{AssetCache, AssetState},
-    image_cache::ImageType,
-    r#async::SpawnedFutureHandle,
-    AppContext, Entity, ModelContext, SingletonEntity,
+use crate::auth::UserUid;
+use crate::editor::{CursorColors, PeerSelectionData};
+use crate::terminal::model::block::BlockId;
+use crate::terminal::model::blocks::BlockList;
+use crate::terminal::model::terminal_model::BlockIndex;
+use crate::terminal::shared_session::protocol::{
+    InputReplicaId, ParticipantId, ParticipantInfo, ParticipantList, ParticipantPresenceUpdate,
+    PresenceUpdate, Role, RoleRequestId, Selection, Viewer,
 };
-
-use crate::terminal::shared_session::protocol::ParticipantId;
-
-use crate::{
-    auth::UserUid,
-    editor::{CursorColors, PeerSelectionData},
-    terminal::model::{block::BlockId, blocks::BlockList, terminal_model::BlockIndex},
-    util::color::coloru_with_opacity,
-};
+use crate::util::color::coloru_with_opacity;
 
 /// Selections have 25% opacity.
 pub fn text_selection_color(participant_color: ColorU) -> ColorU {

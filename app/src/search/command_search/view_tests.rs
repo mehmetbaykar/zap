@@ -1,14 +1,15 @@
-use warpui::{platform::WindowStyle, App};
-
-use crate::{
-    auth::AuthManager, cloud_object::model::persistence::ObjectStoreModel,
-    cloud_object::update_manager::UpdateManager, network::NetworkStatus,
-    settings_view::keybindings::KeybindingChangedNotifier, system::SystemStats,
-    test_util::settings::initialize_settings_for_tests,
-    workspaces::user_workspaces::UserWorkspaces,
-};
+use warpui::platform::WindowStyle;
+use warpui::App;
 
 use super::*;
+use crate::auth::AuthManager;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::network::NetworkStatus;
+use crate::settings_view::keybindings::KeybindingChangedNotifier;
+use crate::system::SystemStats;
+use crate::test_util::settings::initialize_settings_for_tests;
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 fn initialize_app(app: &mut App) {
     initialize_settings_for_tests(app);

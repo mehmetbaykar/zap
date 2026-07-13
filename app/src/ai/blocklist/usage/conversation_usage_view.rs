@@ -78,8 +78,8 @@ impl ConversationUsageView {
         }
     }
     /// Helper to collect models grouped by category.
-    /// Returns a HashMap mapping category name to list of (model_id, is_byok) tuples.
-    /// Handles both category-based fields and legacy warp_tokens/byok_tokens fields.
+    /// Returns a HashMap mapping category name to list of (model_id, shows_key_icon) tuples.
+    /// Handles category-based fields plus legacy token-total fallbacks.
     fn collect_models_by_category(&self) -> HashMap<String, Vec<(String, bool)>> {
         let mut entries_by_category: HashMap<String, Vec<(String, bool)>> = HashMap::new();
 
@@ -101,6 +101,14 @@ impl ConversationUsageView {
                         .push((model.model_id.clone(), true));
                 }
             }
+            for (category, &tokens) in &model.custom_endpoint_token_usage_by_category {
+                if tokens > 0 {
+                    entries_by_category
+                        .entry(category.clone())
+                        .or_default()
+                        .push((model.model_id.clone(), true));
+                }
+            }
         }
 
         // Fallback to legacy fields for backwards compatibility
@@ -113,6 +121,12 @@ impl ConversationUsageView {
                         .push((model.model_id.clone(), false));
                 }
                 if model.byok_tokens > 0 {
+                    entries_by_category
+                        .entry(PRIMARY_AGENT_CATEGORY.to_string())
+                        .or_default()
+                        .push((model.model_id.clone(), true));
+                }
+                if model.custom_endpoint_tokens > 0 {
                     entries_by_category
                         .entry(PRIMARY_AGENT_CATEGORY.to_string())
                         .or_default()
@@ -216,7 +230,7 @@ impl ConversationUsageView {
                 labels.push(render_label_text(&label_text, appearance));
             }
 
-            // Build comma-separated list of models, with BYOK indicator using Icon::Key
+            // Build comma-separated list of models, with external-key indicator using Icon::Key
             let mut model_elements: Vec<Box<dyn Element>> = vec![];
             let mut sorted_models: Vec<_> = models.iter().collect();
             sorted_models.sort_by(|a, b| a.0.cmp(&b.0));

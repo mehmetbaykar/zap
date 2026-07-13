@@ -1,6 +1,9 @@
 mod convert;
 
-use std::{fmt::Display, ops::Range, path::PathBuf, time::Duration};
+use std::fmt::Display;
+use std::ops::Range;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
@@ -8,23 +11,18 @@ use strum_macros::EnumDiscriminants;
 use uuid::Uuid;
 use warp_terminal::model::BlockId;
 
-use crate::{
-    agent::{
-        action_result::{
-            AIAgentActionResultType, AskUserQuestionResult, CallMCPToolResult,
-            CreateDocumentsResult, EditDocumentsResult, FileGlobResult, FileGlobV2Result,
-            GrepResult, InsertReviewCommentsResult, ReadDocumentsResult, ReadFilesResult,
-            ReadMCPResourceResult, ReadShellCommandOutputResult, ReadSkillResult,
-            RequestCommandOutputResult, RequestFileEditsResult, SuggestNewConversationResult,
-            SuggestPromptResult, TransferShellCommandControlToUserResult,
-            WriteToLongRunningShellCommandResult,
-        },
-        AIAgentCitation, FileLocations,
-    },
-    diff_validation::ParsedDiff,
-    document::AIDocumentId,
-    skills::SkillReference,
+use crate::agent::action_result::{
+    AIAgentActionResultType, AskUserQuestionResult, CallMCPToolResult, CreateDocumentsResult,
+    EditDocumentsResult, FileGlobResult, FileGlobV2Result, GrepResult, InsertReviewCommentsResult,
+    ReadDocumentsResult, ReadFilesResult, ReadMCPResourceResult, ReadShellCommandOutputResult,
+    ReadSkillResult, RequestCommandOutputResult, RequestComputerUseResult, RequestFileEditsResult,
+    SuggestNewConversationResult, SuggestPromptResult, TransferShellCommandControlToUserResult,
+    UseComputerResult, WriteToLongRunningShellCommandResult,
 };
+use crate::agent::{AIAgentCitation, FileLocations};
+use crate::diff_validation::ParsedDiff;
+use crate::document::AIDocumentId;
+use crate::skills::SkillReference;
 
 #[derive(Debug, Clone, Eq, PartialEq, EnumDiscriminants)]
 pub enum AIAgentActionType {
@@ -119,11 +117,15 @@ pub enum AIAgentActionType {
         delay: Option<ShellCommandDelay>,
     },
 
+    UseComputer(UseComputerRequest),
+
     InsertCodeReviewComments {
         repo_path: PathBuf,
         comments: Vec<InsertReviewComment>,
         base_branch: Option<String>,
     },
+
+    RequestComputerUse(RequestComputerUseRequest),
 
     // AI requested to read a skill.
     ReadSkill(ReadSkillRequest),
@@ -204,8 +206,14 @@ impl AIAgentActionType {
             Self::ReadShellCommandOutput { .. } => AIAgentActionResultType::ReadShellCommandOutput(
                 ReadShellCommandOutputResult::Cancelled,
             ),
+            Self::UseComputer(_) => {
+                AIAgentActionResultType::UseComputer(UseComputerResult::Cancelled)
+            }
             Self::InsertCodeReviewComments { .. } => {
                 AIAgentActionResultType::InsertReviewComments(InsertReviewCommentsResult::Cancelled)
+            }
+            Self::RequestComputerUse(_) => {
+                AIAgentActionResultType::RequestComputerUse(RequestComputerUseResult::Cancelled)
             }
             Self::ReadSkill(_) => AIAgentActionResultType::ReadSkill(ReadSkillResult::Cancelled),
             Self::TransferShellCommandControlToUser { .. } => {
@@ -240,7 +248,9 @@ impl AIAgentActionType {
             Self::EditDocuments(_) => "Editing documents",
             Self::CreateDocuments(_) => "Creating documents",
             Self::ReadShellCommandOutput { .. } => "Reading shell output",
+            Self::UseComputer(_) => "Using computer",
             Self::InsertCodeReviewComments { .. } => "Inserting review comments",
+            Self::RequestComputerUse(_) => "Requesting computer use",
             Self::ReadSkill(_) => "Reading skill",
             Self::TransferShellCommandControlToUser { .. } => "Transferring control",
             Self::AskUserQuestion { .. } => "Asking question",
@@ -271,9 +281,11 @@ impl AIAgentActionType {
             Self::EditDocuments(_) => "Edit documents".to_string(),
             Self::CreateDocuments(_) => "Create documents".to_string(),
             Self::ReadShellCommandOutput { .. } => "Read shell command output".to_string(),
+            Self::UseComputer(_) => "Use computer".to_string(),
             Self::InsertCodeReviewComments { comments, .. } => {
                 format!("Insert {} code review comments", comments.len())
             }
+            Self::RequestComputerUse(_) => "Request computer use".to_string(),
             Self::ReadSkill(_) => "Read skill".to_string(),
             Self::TransferShellCommandControlToUser { .. } => {
                 "Transfer shell command control to user".to_string()
@@ -392,6 +404,14 @@ impl Display for AIAgentActionType {
                     "ReadShellCommandOutput (block id: {block_id}): with {delay} delay"
                 )
             }
+            AIAgentActionType::UseComputer(req) => {
+                write!(
+                    f,
+                    "UseComputer: {} actions, screenshot_params={:?}",
+                    req.actions.len(),
+                    req.screenshot_params
+                )
+            }
             AIAgentActionType::InsertCodeReviewComments { comments, .. } => {
                 let file_paths = comments
                     .iter()
@@ -408,6 +428,9 @@ impl Display for AIAgentActionType {
                     comments.len(),
                     file_paths
                 )
+            }
+            AIAgentActionType::RequestComputerUse(req) => {
+                write!(f, "RequestComputerUse: {}", req.task_summary)
             }
             AIAgentActionType::ReadSkill(req) => {
                 write!(f, "ReadSkill: {}", req.skill)
@@ -513,6 +536,22 @@ pub struct DocumentToCreate {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CreateDocumentsRequest {
     pub documents: Vec<DocumentToCreate>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct UseComputerRequest {
+    pub action_summary: String,
+    pub actions: Vec<computer_use::Action>,
+    /// If set, a screenshot will be captured after the actions are executed.
+    pub screenshot_params: Option<computer_use::ScreenshotParams>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RequestComputerUseRequest {
+    /// A short summary of the task.
+    pub task_summary: String,
+    /// If set, a screenshot will be captured after the actions are executed.
+    pub screenshot_params: Option<computer_use::ScreenshotParams>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

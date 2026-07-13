@@ -9,7 +9,7 @@ use ai::agent::action_result::AnyFileContent;
 #[cfg(feature = "local_fs")]
 use ai::skills::parse_skill;
 use ai::skills::SkillReference;
-use std::path::Path;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::{ModelContext, SingletonEntity};
 
 use crate::ai::agent::AIAgentActionType;
@@ -107,24 +107,27 @@ impl ReadSkillExecutor {
         #[cfg(feature = "local_fs")]
         if let SkillReference::Path(path) = skill_ref {
             if extract_skill_parent_directory(path).is_ok() {
-                let path = path.clone();
-                let skill_ref_for_async = skill_ref.clone();
-                return ActionExecution::new_async(
-                    async move { parse_skill(&path) },
-                    move |parsed, _app| match parsed {
-                        Ok(skill) => AIAgentActionResultType::ReadSkill(ReadSkillResult::Success {
-                            content: FileContext::new(
-                                skill.path.to_string_lossy().into_owned(),
-                                AnyFileContent::StringContent(skill.content.clone()),
-                                skill.line_range.clone(),
-                                None,
-                            ),
-                        }),
-                        Err(err) => AIAgentActionResultType::ReadSkill(ReadSkillResult::Error(
-                            format!("Skill not found: {skill_ref_for_async:?} ({err})"),
-                        )),
-                    },
-                );
+                if let Some(path) = path.to_local_path().map(ToOwned::to_owned) {
+                    let skill_ref_for_async = skill_ref.clone();
+                    return ActionExecution::new_async(
+                        async move { parse_skill(&path) },
+                        move |parsed, _app| match parsed {
+                            Ok(skill) => {
+                                AIAgentActionResultType::ReadSkill(ReadSkillResult::Success {
+                                    content: FileContext::new(
+                                        skill.path.display_path(),
+                                        AnyFileContent::StringContent(skill.content.clone()),
+                                        skill.line_range.clone(),
+                                        None,
+                                    ),
+                                })
+                            }
+                            Err(err) => AIAgentActionResultType::ReadSkill(ReadSkillResult::Error(
+                                format!("Skill not found: {skill_ref_for_async:?} ({err})"),
+                            )),
+                        },
+                    );
+                }
             }
         }
 
@@ -160,7 +163,7 @@ fn success_execution(
     skill: &ai::skills::ParsedSkill,
 ) -> ActionExecution<anyhow::Result<ai::skills::ParsedSkill>> {
     let content = FileContext::new(
-        skill.path.to_string_lossy().into_owned(),
+        skill.path.display_path(),
         AnyFileContent::StringContent(skill.content.clone()),
         skill.line_range.clone(),
         None,
@@ -173,7 +176,8 @@ fn success_execution(
 /// A real SKILL.md path contains a path separator (`/` or `\`) or is an absolute path, whereas the name from a BYOP
 /// tool call (e.g. `"build-feature"`) is a plain string. Distinguishing the two
 /// avoids misinterpreting `/home/.../SKILL.md` as a name and missing the filesystem fallback.
-fn name_candidate(p: &Path) -> Option<&str> {
+fn name_candidate(p: &LocalOrRemotePath) -> Option<&str> {
+    let p = p.to_local_path()?;
     if p.is_absolute() {
         return None;
     }

@@ -99,7 +99,9 @@ pub fn render_section_label(label: &str, appearance: &Appearance) -> Box<dyn Ele
     .finish()
 }
 
-fn render_filterable_dropdown_row<T: Clone + 'static + std::fmt::Debug + Send + Sync>(
+fn render_filterable_dropdown_row<
+    T: Clone + PartialEq + 'static + std::fmt::Debug + Send + Sync,
+>(
     appearance: &Appearance,
     label: &str,
     desc: &str,
@@ -171,7 +173,7 @@ fn render_info_section(
     Container::new(description).with_margin_bottom(12.).finish()
 }
 
-fn render_permission_row<T: Clone + 'static + std::fmt::Debug + Send + Sync>(
+fn render_permission_row<T: Clone + PartialEq + 'static + std::fmt::Debug + Send + Sync>(
     appearance: &Appearance,
     icon: Icon,
     label: &str,

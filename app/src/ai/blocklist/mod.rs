@@ -6,6 +6,7 @@ pub mod code_block;
 mod context_model;
 mod controller;
 mod passive_suggestions;
+pub(crate) mod queued_query;
 pub(super) use controller::RequestInput;
 pub mod history_model;
 pub mod inline_action;
@@ -28,18 +29,21 @@ pub(crate) use action_model::{
     FileReadResult, PromptSuggestionExecutor, PromptSuggestionExecutorEvent, ReadFileContextResult,
     RequestFileEditsFormatKind, ShellCommandExecutor, ShellCommandExecutorEvent,
 };
-
 #[cfg(any(test, feature = "integration_tests"))]
 pub(crate) use block::model::testing::FakeAIBlockModel;
 pub(crate) use block::{init, model, AIBlock, AIBlockEvent, RequestedEditResolution};
-
+pub use block::{keyboard_navigable_buttons, toggleable_items};
 pub(crate) use context_model::{
     block_context_from_terminal_model, AttachmentType, BlocklistAIContextEvent,
     BlocklistAIContextModel, PendingAttachment, PendingFile, PendingQueryState,
 };
+pub use controller::input_context::{
+    BLOCK_CONTEXT_ATTACHMENT_REGEX, DIFF_HUNK_ATTACHMENT_REGEX, DRIVE_OBJECT_ATTACHMENT_REGEX,
+};
+pub(crate) use controller::response_stream::ResponseStreamId;
 pub(crate) use controller::{
-    response_stream::ResponseStreamId, BlocklistAIController, BlocklistAIControllerEvent,
-    ClientIdentifiers, SessionContext, SlashCommandRequest,
+    BlocklistAIController, BlocklistAIControllerEvent, ClientIdentifiers, SessionContext,
+    SlashCommandRequest,
 };
 pub(crate) use history_model::{
     AIQueryHistory, AIQueryHistoryOutputStatus, BlocklistAIHistoryEvent, BlocklistAIHistoryModel,
@@ -47,31 +51,30 @@ pub(crate) use history_model::{
 };
 pub(crate) use input_model::{
     BlocklistAIInputEvent, BlocklistAIInputModel, InputConfig, InputType,
+    InputTypeAutoDetectionSource,
 };
 pub(crate) use passive_suggestions::{
     LegacyPassiveSuggestionsEvent, LegacyPassiveSuggestionsModel, MaaPassiveSuggestionsEvent,
     MaaPassiveSuggestionsModel, PassiveSuggestionsModels,
 };
+pub use permissions::{BlocklistAIPermissions, CommandExecutionPermissionAllowedReason};
 #[cfg_attr(target_family = "wasm", allow(unused))]
 pub(crate) use persistence::PersistedAIInputType;
 pub(crate) use persistence::{PersistedAIInput, SerializedBlockListItem};
+pub(crate) use queued_query::{
+    AutofireAction, QueuedQuery, QueuedQueryEvent, QueuedQueryId, QueuedQueryModel,
+    QueuedQueryOrigin,
+};
+pub use suggestion_chip_view::*;
+pub use view_util::error_color;
 pub(crate) use view_util::{
-    ai_brand_color, ai_indicator_height, get_ai_block_overflow_menu_element_position_id,
-    get_attached_blocks_chip_element_position_id, render_ai_agent_mode_icon,
-    render_ai_follow_up_icon, ATTACH_AS_AGENT_MODE_CONTEXT_TEXT, CLAUDE_ORANGE,
+    ai_brand_color, ai_indicator_height, format_credits,
+    get_ai_block_overflow_menu_element_position_id, get_attached_blocks_chip_element_position_id,
+    render_ai_agent_mode_icon, render_ai_follow_up_icon, ATTACH_AS_AGENT_MODE_CONTEXT_TEXT,
+    CLAUDE_ORANGE,
 };
 
-pub(crate) use view_util::format_credits;
-
 pub use crate::ai::blocklist::block::{secret_redaction, TextLocation};
-pub use block::keyboard_navigable_buttons;
-pub use block::toggleable_items;
 pub(crate) use controller::input_context::{
     drive_object_attachment_for_reference, plan_attachment_for_reference,
 };
-pub use controller::input_context::{
-    BLOCK_CONTEXT_ATTACHMENT_REGEX, DIFF_HUNK_ATTACHMENT_REGEX, DRIVE_OBJECT_ATTACHMENT_REGEX,
-};
-pub use permissions::{BlocklistAIPermissions, CommandExecutionPermissionAllowedReason};
-pub use suggestion_chip_view::*;
-pub use view_util::error_color;

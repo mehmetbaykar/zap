@@ -8,36 +8,34 @@ mod mac;
 #[cfg(windows)]
 mod windows;
 
-use crate::features::FeatureFlag;
-use crate::send_telemetry_sync_from_app_ctx;
-use crate::server::telemetry::TelemetryEvent;
-use crate::settings::AutoupdateSettings;
-use crate::workspace::Workspace;
-use crate::{
-    channel::Channel, report_if_error, send_telemetry_from_ctx, server::datetime_ext::DateTimeExt,
-    ChannelState,
-};
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::time::Duration;
+
 use ::channel_versions::{ParsedVersion, VersionInfo};
 use anyhow::{anyhow, Context as _, Result};
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use rand::Rng as _;
 use settings::Setting as _;
-use std::collections::VecDeque;
-use std::sync::Arc;
-use std::time::Duration;
 use warp_core::execution_mode::AppExecutionMode;
+use warpui::accessibility::{AccessibilityContent, WarpA11yRole};
 use warpui::platform::TerminationMode;
 use warpui::r#async::Timer;
 use warpui::windowing::state::ApplicationStage;
 use warpui::windowing::{self, WindowManager};
-use warpui::{
-    accessibility::{AccessibilityContent, WarpA11yRole},
-    AppContext,
-};
-use warpui::{Entity, ModelContext, SingletonEntity, ViewContext};
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity, ViewContext};
 
 pub use self::changelog::get_current_changelog;
 use self::channel_versions::fetch_channel_versions;
+use crate::channel::Channel;
+use crate::features::FeatureFlag;
+use crate::server::datetime_ext::DateTimeExt;
+use crate::server::telemetry::TelemetryEvent;
+use crate::settings::AutoupdateSettings;
+use crate::workspace::Workspace;
+use crate::{
+    report_if_error, send_telemetry_from_ctx, send_telemetry_sync_from_app_ctx, ChannelState,
+};
 
 /// SHA-256 verification shared across all three platforms after an OSS download completes:
 /// 1. If no matching asset is found in the cached release, skip (degrade to no verification);

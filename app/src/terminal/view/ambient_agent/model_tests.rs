@@ -70,7 +70,7 @@ fn queue_handoff_auto_submit_enters_waiting_state_without_consuming_launch() {
                 }
             ));
             let request = model.request().expect("request should be populated");
-            assert_eq!(request.prompt, "fix tests");
+            assert_eq!(request.prompt.as_deref(), Some("fix tests"));
             assert_eq!(
                 request.conversation_id.as_deref(),
                 Some("forked-conversation")
@@ -133,7 +133,7 @@ fn fresh_launch_queues_handoff_with_no_conversation_id() {
         assert!(queued);
         model.read(&app, |model, _| {
             let request = model.request().expect("request should be populated");
-            assert_eq!(request.prompt, "fix tests");
+            assert_eq!(request.prompt.as_deref(), Some("fix tests"));
             assert!(request.conversation_id.is_none());
             assert_eq!(request.attachments.len(), 1);
         });

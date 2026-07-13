@@ -2,18 +2,14 @@
 //! This captures application crashes due to Unix signals like SIGSEGV (segfault) or Windows
 //! exceptions without uploading them to a remote crash service.
 
-use std::{
-    collections::HashMap,
-    fs::File,
-    io,
-    path::{Path, PathBuf},
-    process,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use command::blocking::Command;

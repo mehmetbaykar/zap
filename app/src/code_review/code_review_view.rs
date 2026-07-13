@@ -93,7 +93,7 @@ use crate::terminal::cli_agent::{
 };
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::EditorSettings;
-use crate::util::git::get_all_branches;
+use crate::util::git::BranchEntry;
 #[cfg(feature = "local_fs")]
 use crate::util::openable_file_type::resolve_file_target_with_editor_choice;
 #[cfg(feature = "local_fs")]
@@ -195,6 +195,7 @@ use warp_editor::{
 use warp_util::{
     content_version::ContentVersion,
     file::{FileLoadError, FileSaveError},
+    local_or_remote_path::LocalOrRemotePath,
     path::LineAndColumnArg,
     standardized_path::StandardizedPath,
 };
@@ -285,8 +286,6 @@ pub(crate) enum PrimaryGitActionMode {
     Push,
     /// Nothing to commit or push, and no existing PR. Primary = Create PR, chevron hidden.
     CreatePr,
-    /// Nothing to commit or push, and a PR exists for this branch. Primary = PR #N, chevron hidden.
-    ViewPr,
     /// No upstream tracking branch, but local commits exist. Primary = Publish, chevron hidden.
     Publish,
 }
@@ -350,10 +349,10 @@ fn file_status_changed_deleted_state(
 #[derive(Clone, Debug, PartialEq)]
 pub enum CodeReviewAction {
     OpenInNewTab {
-        path: PathBuf,
+        path: String,
         line_and_column: Option<LineAndColumnArg>,
     },
-    ToggleFileExpanded(PathBuf),
+    ToggleFileExpanded(String),
     OpenHeaderMenu,
     SetDiffMode(DiffMode),
     ToggleFileSidebar,
@@ -361,19 +360,19 @@ pub enum CodeReviewAction {
     ToggleMaximize,
     SaveAllUnsavedFiles,
     SaveAllFiles {
-        paths: Vec<PathBuf>,
+        paths: Vec<String>,
     },
     RefreshGitState,
     UndoRevert,
     Close,
     EmitPaneEvent(PaneEvent),
-    ShowDiscardConfirmDialog(Option<PathBuf>),
+    ShowDiscardConfirmDialog(Option<String>),
     ConfirmDiscardFile,
     CancelDiscardFile,
     ToggleStashChanges,
-    ToggleFileSelection(PathBuf),
+    ToggleFileSelection(String),
     AddDiffSetAsContext(DiffSetScope),
-    CopyFilePath(PathBuf),
+    CopyFilePath(String),
     OpenCommentComposerFromHeader,
     ShowFindBar,
     FocusView,
@@ -400,7 +399,7 @@ pub struct FileState {
 }
 
 pub(crate) struct LoadedState {
-    pub(crate) file_states: IndexMap<PathBuf, FileState>,
+    pub(crate) file_states: IndexMap<String, FileState>,
     pub(crate) total_additions: usize,
     pub(crate) total_deletions: usize,
     pub(crate) files_changed: usize,
@@ -418,14 +417,14 @@ impl LoadedState {
     /// Returns a list of pairs of code editor views and the absolute paths of their underlying files.
     fn editor_absolute_file_paths(
         &self,
-        repo_path: &Path,
-    ) -> Vec<(ViewHandle<LocalCodeEditorView>, PathBuf)> {
+        repo_path: &LocalOrRemotePath,
+    ) -> Vec<(ViewHandle<LocalCodeEditorView>, LocalOrRemotePath)> {
         self.file_states
             .values()
             .filter_map(|file_state| {
                 let editor = file_state.editor_state.as_ref()?.editor().clone();
-                let file_path = repo_path.join(&file_state.file_diff.file_path);
-                Some((editor, file_path))
+                let file_location = repo_path.join(&file_state.file_diff.file_path);
+                Some((editor, file_location))
             })
             .collect()
     }
@@ -488,11 +487,11 @@ pub enum CodeReviewViewEvent {
     /// A higher-level view (RightPanelView) handles routing to an available terminal.
     SubmitReviewComments {
         comments: AgentReviewCommentBatch,
-        repo_path: PathBuf,
+        repo_path: LocalOrRemotePath,
     },
     /// Request to open a file in a new tab (e.g. goto-definition).
     OpenFileInNewTab {
-        path: PathBuf,
+        path: LocalOrRemotePath,
         line_and_column: Option<LineAndColumnArg>,
     },
 }
@@ -558,9 +557,9 @@ impl DiscardOperationType {
 
 pub struct DiscardDialogState {
     show_discard_confirm_dialog: bool,
-    discard_file_paths: Vec<PathBuf>,
-    selected_files: HashMap<PathBuf, bool>,
-    file_checkbox_mouse_states: HashMap<PathBuf, MouseStateHandle>,
+    discard_file_paths: Vec<String>,
+    selected_files: HashMap<String, bool>,
+    file_checkbox_mouse_states: HashMap<String, MouseStateHandle>,
     discard_confirm_button: ViewHandle<ActionButton>,
     discard_cancel_button: ViewHandle<ActionButton>,
     stash_changes_enabled: bool,
@@ -582,16 +581,16 @@ struct PendingPreciseScroll {
 
 /// Per-repository state container.
 struct RepositoryState {
-    repo_path: PathBuf,
+    repo_path: LocalOrRemotePath,
     state: CodeReviewViewState,
-    available_branches: Vec<(String, bool)>, // (branch_name, is_main_branch)
+    available_branches: Vec<BranchEntry>,
 
     /// Whether a file has been explicitly expanded (true) or collapsed (false).
-    file_expanded: HashMap<PathBuf, bool>,
+    file_expanded: HashMap<String, bool>,
 }
 
 impl RepositoryState {
-    fn new(repo_path: PathBuf) -> Self {
+    fn new(repo_path: LocalOrRemotePath) -> Self {
         Self {
             repo_path,
             state: CodeReviewViewState::None,
@@ -702,19 +701,18 @@ pub struct CodeReviewView {
 }
 
 impl CodeReviewView {
-    pub fn repo_path(&self) -> Option<&PathBuf> {
+    pub fn repo_path(&self) -> Option<&LocalOrRemotePath> {
         self.active_repo.as_ref().map(|repo| &repo.repo_path)
     }
 
-    fn to_standardized_path(&self, path: &PathBuf) -> Option<StandardizedPath> {
-        if path.is_absolute() {
-            Some(StandardizedPath::from_local_absolute_unchecked(path))
+    fn to_standardized_path(&self, repo_relative_path: &str) -> Option<StandardizedPath> {
+        if Path::new(repo_relative_path).is_absolute() {
+            Some(StandardizedPath::from_local_absolute_unchecked(Path::new(
+                repo_relative_path,
+            )))
         } else {
             let repo_path = self.repo_path()?;
-            let absolute_path = repo_path.join(path);
-            Some(StandardizedPath::from_local_absolute_unchecked(
-                &absolute_path,
-            ))
+            Some(repo_path.join(repo_relative_path).path_component())
         }
     }
 
@@ -738,7 +736,7 @@ impl CodeReviewView {
 
         self.diff_state_model.update(ctx, |model, ctx| {
             model.set_code_review_metadata_refresh_enabled(true, ctx);
-            model.load_diffs_for_current_repo(false, ctx);
+            model.load_diffs_for_current_repo(false, true, ctx);
         });
     }
 
@@ -814,7 +812,7 @@ impl CodeReviewView {
 
     fn clear_comment_locations(
         &self,
-        editor_file_paths: &[(ViewHandle<LocalCodeEditorView>, PathBuf)],
+        editor_file_paths: &[(ViewHandle<LocalCodeEditorView>, LocalOrRemotePath)],
         ctx: &mut ViewContext<Self>,
     ) {
         for (editor, _) in editor_file_paths {
@@ -829,14 +827,17 @@ impl CodeReviewView {
     fn collect_comments_by_file(
         &self,
         model: &ModelHandle<ReviewCommentBatch>,
-        editor_file_paths: &[(ViewHandle<LocalCodeEditorView>, PathBuf)],
+        editor_file_paths: &[(ViewHandle<LocalCodeEditorView>, LocalOrRemotePath)],
         ctx: &mut ViewContext<Self>,
-    ) -> HashMap<PathBuf, Vec<EditorReviewComment>> {
+    ) -> HashMap<LocalOrRemotePath, Vec<EditorReviewComment>> {
         model.read(ctx, |batch, _| {
             editor_file_paths
                 .iter()
-                .map(|(_, file_path)| {
-                    (file_path.clone(), batch.editor_comments_for_file(file_path))
+                .map(|(_, file_location)| {
+                    (
+                        file_location.clone(),
+                        batch.editor_comments_for_file(file_location),
+                    )
                 })
                 .collect::<HashMap<_, _>>()
         })
@@ -904,7 +905,7 @@ impl CodeReviewView {
     }
 
     pub fn new(
-        repo_path: Option<PathBuf>,
+        repo_path: Option<LocalOrRemotePath>,
         diff_state_model: ModelHandle<DiffStateModel>,
         comment_batch_model: Option<ModelHandle<ReviewCommentBatch>>,
         terminal_view: Option<WeakViewHandle<TerminalView>>,
@@ -1168,7 +1169,10 @@ impl CodeReviewView {
         let comment_list = self.comment_list_view.as_ref(ctx).debug_state(ctx);
 
         CodeReviewCommentDebugState {
-            repo_path: self.repo_path().cloned(),
+            repo_path: self
+                .repo_path()
+                .and_then(LocalOrRemotePath::to_local_path)
+                .map(Path::to_path_buf),
             has_active_comment_model: self.active_comment_model.is_some(),
             comment_list,
         }
@@ -1256,57 +1260,9 @@ impl CodeReviewView {
     }
 
     fn fetch_branches_and_setup_dropdown(&mut self, ctx: &mut ViewContext<Self>) {
-        let Some(repo_path) = self.repo_path().cloned() else {
-            return;
-        };
-        let fetched_repo_path = repo_path.clone();
-        ctx.spawn(
-            async move {
-                get_all_branches(&repo_path, None, false /* include_remotes */)
-                    .await
-            },
-            move |me, branches_result, ctx| {
-                // If the active repo changed while branches were being fetched,
-                // discard the stale result.
-                if me.repo_path() != Some(&fetched_repo_path) {
-                    return;
-                }
-                match branches_result {
-                    Ok(branches) => {
-                        if let Some(repo) = me.active_repo.as_mut() {
-                            let branch_count = branches.len();
-                            let repo_path = &repo.repo_path;
-                            safe_info!(
-                                safe: ("Code Review: Set available_branches with {} branches", branch_count),
-                                full: (
-                                    "Code Review: Set available_branches for repo {:?} with {} branches",
-                                    repo_path,
-                                    branch_count
-                                )
-                            );
-                            repo.available_branches = branches;
-                        }
-                        me.update_diff_selector_selection(ctx);
-                    }
-                    Err(err) => {
-                        log::warn!("Failed to fetch branches: {err}");
-                        // Fallback to default dropdown with just uncommitted changes and main branch
-                        if let Some(repo) = me.active_repo.as_mut() {
-                            let repo_path = &repo.repo_path;
-                            safe_info!(
-                                safe: ("Code Review: Set available_branches to empty (fallback after error)"),
-                                full: (
-                                    "Code Review: Set available_branches to empty for repo {:?} (fallback after error)",
-                                    repo_path
-                                )
-                            );
-                            repo.available_branches = vec![];
-                        }
-                        me.update_diff_selector_selection(ctx);
-                    }
-                }
-            },
-        );
+        self.diff_state_model.update(ctx, |model, ctx| {
+            model.fetch_branches(ctx);
+        });
     }
 
     pub(crate) fn build_diff_targets(&self, ctx: &ViewContext<Self>) -> Vec<DiffTarget> {
@@ -1333,7 +1289,7 @@ impl CodeReviewView {
             let already_present = repo
                 .available_branches
                 .iter()
-                .any(|(name, _)| name == branch_name);
+                .any(|entry| entry.name == *branch_name);
             if !already_present {
                 targets.push(DiffTarget::new(
                     branch_name.clone(),
@@ -1344,10 +1300,10 @@ impl CodeReviewView {
         }
 
         // 3. Main branch, if known.
-        let main_branch = repo.available_branches.iter().find(|(_, is_main)| *is_main);
-        if let Some((main_branch_name, _)) = main_branch {
+        let main_branch = repo.available_branches.iter().find(|entry| entry.is_main);
+        if let Some(main_entry) = main_branch {
             targets.push(DiffTarget::new(
-                main_branch_name.clone(),
+                main_entry.name.clone(),
                 DiffMode::MainBranch,
                 matches!(current_mode, DiffMode::MainBranch),
             ));
@@ -1356,22 +1312,22 @@ impl CodeReviewView {
         // 4. Other branches, filtered to exclude main and the currently
         // checked-out branch (the latter is functionally the same as
         // "Uncommitted changes").
-        for (branch_name, is_main) in repo.available_branches.iter() {
-            if *is_main {
+        for entry in repo.available_branches.iter() {
+            if entry.is_main {
                 continue;
             }
             if let Some(current_name) = &current_branch_name {
-                if branch_name == current_name {
+                if entry.name == *current_name {
                     continue;
                 }
             }
             let is_selected = match &current_mode {
-                DiffMode::OtherBranch(name) => name == branch_name,
+                DiffMode::OtherBranch(name) => name == &entry.name,
                 DiffMode::Head | DiffMode::MainBranch => false,
             };
             targets.push(DiffTarget::new(
-                branch_name.clone(),
-                DiffMode::OtherBranch(branch_name.clone()),
+                entry.name.clone(),
+                DiffMode::OtherBranch(entry.name.clone()),
                 is_selected,
             ));
         }
@@ -1420,7 +1376,7 @@ impl CodeReviewView {
         );
 
         self.diff_state_model.update(ctx, |model, ctx| {
-            model.set_diff_mode(mode, false, ctx);
+            model.set_diff_mode(mode, false, true, ctx);
         });
         self.update_diff_selector_selection(ctx);
         self.invalidate_all(None, ctx);
@@ -1734,7 +1690,7 @@ impl CodeReviewView {
             .find(|(_, file_state)| {
                 let editor_filepath = &file_state.file_diff.file_path;
                 // Editor file paths are relative, while comment filepaths are absolute.
-                file_path.ends_with(editor_filepath)
+                file_path.path_component().ends_with(editor_filepath)
             })
     }
 
@@ -2126,7 +2082,7 @@ impl CodeReviewView {
                 self.fetch_branches_and_setup_dropdown(ctx);
                 self.update_diff_selector_selection(ctx);
             }
-            DiffStateModelEvent::NewDiffsComputed(diffs) => {
+            DiffStateModelEvent::NewDiffsComputed { diffs, .. } => {
                 self.invalidate_all(diffs.as_ref().map(|d| d.as_ref()), ctx);
                 if FeatureFlag::GitOperationsInCodeReview.is_enabled() {
                     self.update_git_operations_ui(ctx);
@@ -2165,6 +2121,12 @@ impl CodeReviewView {
                 // so the user can still see what they were looking at.
                 ctx.notify();
             }
+            DiffStateModelEvent::BranchesReceived(branches) => {
+                if let Some(repo) = self.active_repo.as_mut() {
+                    repo.available_branches = branches.clone();
+                }
+                self.update_diff_selector_selection(ctx);
+            }
         }
     }
 
@@ -2179,7 +2141,7 @@ impl CodeReviewView {
     /// file from the queue-based invalidation path.
     fn update_from_single_file_diff_result(
         &mut self,
-        file_path: PathBuf,
+        file_path: String,
         updated_diff: Option<Arc<FileDiffAndContent>>,
         ctx: &mut ViewContext<Self>,
     ) {
@@ -2277,14 +2239,7 @@ impl CodeReviewView {
             }
             DiffState::NotInRepository => {
                 if let Some(repo) = self.active_repo.as_mut() {
-                    if repo.repo_path.as_os_str().is_empty() {
-                        repo.state = CodeReviewViewState::NoRepoFound;
-                    } else {
-                        log::info!(
-                            "Code Review Panel: Setting state to loading after receiving 'not in repository' message."
-                        );
-                        repo.state = CodeReviewViewState::None;
-                    }
+                    repo.state = CodeReviewViewState::NoRepoFound;
                 }
                 ctx.notify();
                 return;
@@ -2571,7 +2526,7 @@ impl CodeReviewView {
 
     pub fn editor_lens_for_location(
         &self,
-        path: &Path,
+        path: &LocalOrRemotePath,
         line: Range<EditorLineLocation>,
         ctx: &AppContext,
     ) -> Option<Box<dyn Element>> {
@@ -2734,7 +2689,7 @@ impl CodeReviewView {
         file: &FileDiffAndContent,
         ctx: &mut ViewContext<Self>,
     ) -> Option<CodeReviewEditorState> {
-        let repo_path = self.repo_path()?;
+        let repo_path = self.repo_path()?.clone();
         // Skip editor creation for binary files or files without content (e.g., pure renames)
         if file.file_diff.is_binary || file.content_at_head.is_none() {
             None
@@ -2745,7 +2700,8 @@ impl CodeReviewView {
             self.create_code_review_model(file, ctx)
         } else {
             let self_handle = ctx.handle();
-            let full_file_path = repo_path.join(&file.file_diff.file_path);
+            let full_file_location = repo_path.join(&file.file_diff.file_path);
+            let full_file_path = full_file_location.to_local_path()?.to_path_buf();
 
             let local_code_view = ctx.add_typed_action_view(|ctx| {
                 let editor = LocalCodeEditorView::new_with_global_buffer(
@@ -2808,20 +2764,14 @@ impl CodeReviewView {
                 &local_code_view,
                 file,
                 true,
-                &self.comment_line_numbers_for_file(&file.file_diff.file_path, ctx),
+                &self.comment_line_numbers_for_file(&full_file_location, ctx),
                 ctx,
             );
 
             ctx.subscribe_to_view(&local_code_view, {
-                let diff_file_path = file.file_diff.file_path.clone();
+                let file_location = full_file_location.clone();
                 move |me, editor, event, ctx| {
-                    me.handle_local_code_editor_events(
-                        editor,
-                        event,
-                        &full_file_path,
-                        &diff_file_path,
-                        ctx,
-                    );
+                    me.handle_local_code_editor_events(editor, event, &file_location, ctx);
                 }
             });
 
@@ -2835,7 +2785,7 @@ impl CodeReviewView {
         file: &FileDiffAndContent,
         ctx: &mut ViewContext<Self>,
     ) -> Option<CodeReviewEditorState> {
-        let repo_path = self.repo_path()?;
+        let repo_path = self.repo_path()?.clone();
 
         if file.file_diff.is_binary {
             None
@@ -2868,9 +2818,10 @@ impl CodeReviewView {
                 editor_view
             });
 
-            let full_file_path = repo_path.join(&file.file_diff.file_path);
+            let full_file_location = repo_path.join(&file.file_diff.file_path);
+            let language_path = full_file_location.path_component();
             code_editor_view.update(ctx, |editor, ctx| {
-                editor.set_language_with_path(&full_file_path, ctx);
+                editor.set_language_with_path(&language_path, ctx);
             });
 
             ctx.subscribe_to_view(&code_editor_view, {
@@ -2898,8 +2849,7 @@ impl CodeReviewView {
                 local_code_view
             });
 
-            let comment_line_numbers =
-                self.comment_line_numbers_for_file(&file.file_diff.file_path, ctx);
+            let comment_line_numbers = self.comment_line_numbers_for_file(&full_file_location, ctx);
 
             Self::apply_diff_to_code_editor(
                 &local_code_view,
@@ -2910,15 +2860,9 @@ impl CodeReviewView {
             );
 
             ctx.subscribe_to_view(&local_code_view, {
-                let diff_file_path = file.file_diff.file_path.clone();
+                let file_location = full_file_location.clone();
                 move |me, editor, event, ctx| {
-                    me.handle_local_code_editor_events(
-                        editor,
-                        event,
-                        &full_file_path,
-                        &diff_file_path,
-                        ctx,
-                    );
+                    me.handle_local_code_editor_events(editor, event, &file_location, ctx);
                 }
             });
 
@@ -2932,37 +2876,42 @@ impl CodeReviewView {
         &mut self,
         editor: ViewHandle<LocalCodeEditorView>,
         event: &LocalCodeEditorEvent,
-        full_file_path: &Path,
-        diff_file_path: &Path,
+        file_location: &LocalOrRemotePath,
         ctx: &mut ViewContext<Self>,
     ) {
         match event {
             LocalCodeEditorEvent::FileSaved => {
                 send_telemetry_from_ctx!(CodeReviewTelemetryEvent::FileSaved, ctx);
 
-                ctx.emit(CodeReviewViewEvent::FileSaved {
-                    path: full_file_path.to_path_buf(),
-                });
+                if let Some(path) = file_location.to_local_path() {
+                    ctx.emit(CodeReviewViewEvent::FileSaved {
+                        path: path.to_path_buf(),
+                    });
+                }
             }
             LocalCodeEditorEvent::FailedToSave { error } => {
-                ctx.emit(CodeReviewViewEvent::FileSaveError {
-                    path: full_file_path.to_path_buf(),
-                    error: error.clone(),
-                });
+                if let Some(path) = file_location.to_local_path() {
+                    ctx.emit(CodeReviewViewEvent::FileSaveError {
+                        path: path.to_path_buf(),
+                        error: error.clone(),
+                    });
+                }
             }
             LocalCodeEditorEvent::DelayedRenderingFlushed => {
                 // Mark the editor as loaded so we can render it.
                 // This is only relevant for global buffer mode.
-                self.mark_editor_loaded_for_file(diff_file_path, ctx);
+                self.mark_editor_loaded_for_file(file_location, ctx);
                 ctx.notify();
             }
             LocalCodeEditorEvent::FailedToLoad { error } => {
                 // Also mark as loaded on failure so we don't wait forever.
-                self.mark_editor_loaded_for_file(diff_file_path, ctx);
-                ctx.emit(CodeReviewViewEvent::FileLoadError {
-                    path: full_file_path.to_path_buf(),
-                    error: error.clone(),
-                });
+                self.mark_editor_loaded_for_file(file_location, ctx);
+                if let Some(path) = file_location.to_local_path() {
+                    ctx.emit(CodeReviewViewEvent::FileLoadError {
+                        path: path.to_path_buf(),
+                        error: error.clone(),
+                    });
+                }
                 ctx.notify();
             }
             LocalCodeEditorEvent::SelectionAddedAsContext {
@@ -2995,7 +2944,7 @@ impl CodeReviewView {
                 let head = self.get_current_head(ctx);
                 let comment_with_file_context = AttachedReviewComment::from_editor_review_comment(
                     comment.clone(),
-                    file_path.to_path_buf(),
+                    LocalOrRemotePath::Local(file_path.to_path_buf()),
                     base,
                     head,
                 );
@@ -3035,16 +2984,10 @@ impl CodeReviewView {
             LocalCodeEditorEvent::DiffStatusUpdated => {}
             LocalCodeEditorEvent::ViewportUpdated => {}
             LocalCodeEditorEvent::LayoutInvalidated => {
-                if let CodeReviewViewState::Loaded(state) = self.state() {
-                    if let Some(index) = state
-                        .file_states
-                        .iter()
-                        .position(|f| f.1.file_diff.file_path == *diff_file_path)
-                    {
-                        self.viewported_list_state
-                            .invalidate_height_for_index(index);
-                        ctx.notify();
-                    }
+                if let Some(index) = self.file_state_index_for_location(file_location) {
+                    self.viewported_list_state
+                        .invalidate_height_for_index(index);
+                    ctx.notify();
                 }
             }
             _ => (),
@@ -3057,7 +3000,11 @@ impl CodeReviewView {
         })
     }
 
-    fn comment_line_numbers_for_file(&self, file_path: &Path, app: &AppContext) -> Vec<LineCount> {
+    fn comment_line_numbers_for_file(
+        &self,
+        file_path: &LocalOrRemotePath,
+        app: &AppContext,
+    ) -> Vec<LineCount> {
         self.active_comment_model
             .as_ref()
             .map(|model| {
@@ -3068,9 +3015,27 @@ impl CodeReviewView {
             .unwrap_or_default()
     }
 
+    fn file_state_index_for_location(&self, file_location: &LocalOrRemotePath) -> Option<usize> {
+        let repo_path = self.repo_path()?;
+        let CodeReviewViewState::Loaded(loaded_state) = self.state() else {
+            return None;
+        };
+
+        loaded_state.file_states.values().position(|file_state| {
+            file_location == &repo_path.join(&file_state.file_diff.file_path)
+        })
+    }
+
     /// Marks the editor for the given file path as loaded.
     /// This is called when LocalCodeEditorEvent::DelayedRenderingFlushed or FailedToLoad fires.
-    fn mark_editor_loaded_for_file(&mut self, file_path: &Path, ctx: &mut ViewContext<Self>) {
+    fn mark_editor_loaded_for_file(
+        &mut self,
+        file_location: &LocalOrRemotePath,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let Some(file_index) = self.file_state_index_for_location(file_location) else {
+            return;
+        };
         let Some(repo) = self.active_repo.as_mut() else {
             return;
         };
@@ -3079,7 +3044,7 @@ impl CodeReviewView {
             return;
         };
 
-        if let Some(file_state) = loaded_state.file_states.get_mut(file_path) {
+        if let Some((_, file_state)) = loaded_state.file_states.get_index_mut(file_index) {
             if let Some(editor_state) = &mut file_state.editor_state {
                 editor_state.set_loaded();
             }
@@ -3206,7 +3171,7 @@ impl CodeReviewView {
     fn relocate_comments(
         comments: impl IntoIterator<Item = AttachedReviewComment>,
         state: &LoadedState,
-        repo_path: &Path,
+        repo_path: &LocalOrRemotePath,
         ctx: &mut ViewContext<Self>,
     ) -> RelocateCommentsResult {
         let mut fallback_count = 0;
@@ -3267,7 +3232,7 @@ impl CodeReviewView {
                 } else {
                     comment.outdated = false;
                     comment.target = AttachedReviewCommentTarget::Line {
-                        absolute_file_path: absolute_file_path.to_path_buf(),
+                        absolute_file_path: absolute_file_path.clone(),
                         line: new_location,
                         content: new_content,
                     };
@@ -3289,7 +3254,7 @@ impl CodeReviewView {
             return;
         };
 
-        let Some(repo_path) = self.repo_path() else {
+        let Some(repo_path) = self.repo_path().cloned() else {
             log::error!("Failed to relocate PR comments: CodeReviewView has no repo path");
             return;
         };
@@ -3304,7 +3269,7 @@ impl CodeReviewView {
             batch.take_pending_imported_comments_for_branch(diff_mode)
         });
 
-        let newly_imported = attach_pending_imported_comments(pending_imported, repo_path);
+        let newly_imported = attach_pending_imported_comments(pending_imported, &repo_path);
         let newly_imported_ids: HashSet<CommentId> = newly_imported.iter().map(|c| c.id).collect();
         comments.extend(newly_imported);
 
@@ -3315,7 +3280,7 @@ impl CodeReviewView {
         let RelocateCommentsResult {
             comments: relocated_comments,
             fallback_count,
-        } = Self::relocate_comments(comments, state, repo_path, ctx);
+        } = Self::relocate_comments(comments, state, &repo_path, ctx);
 
         if fallback_count > 0 {
             send_telemetry_from_ctx!(
@@ -3916,7 +3881,7 @@ impl CodeReviewView {
                 .finish(),
             );
 
-        if let Some(repo_path) = self.repo_path() {
+        if let Some(repo_path) = self.repo_path().and_then(LocalOrRemotePath::to_local_path) {
             // Check for initialized project-scoped rules.
             if let Some(rules) =
                 ProjectContextModel::as_ref(app).find_applicable_project_rules(repo_path)
@@ -4114,20 +4079,22 @@ impl CodeReviewView {
                         };
 
                         let file_key = repo_path
-                            .and_then(|repo_path| absolute_file_path.strip_prefix(repo_path).ok())
-                            .unwrap_or(absolute_file_path.as_path())
-                            .to_string_lossy()
-                            .to_string();
+                            .and_then(|repo_path| repo_path.strip_repo_prefix(absolute_file_path))
+                            .unwrap_or_else(|| absolute_file_path.display_path());
 
                         diff_set.entry(file_key).or_default().push(hunk);
                     }
                 }
                 AttachedReviewCommentTarget::File { absolute_file_path } => {
-                    if let CodeReviewViewState::Loaded(loaded_state) = self.state() {
+                    if let (Some(repo_path), CodeReviewViewState::Loaded(loaded_state)) =
+                        (repo_path, self.state())
+                    {
                         let file_diffs = loaded_state
                             .file_states
                             .values()
-                            .filter(|fs| absolute_file_path.ends_with(&fs.file_diff.file_path))
+                            .filter(|fs| {
+                                absolute_file_path == &repo_path.join(&fs.file_diff.file_path)
+                            })
                             .map(|fs| &fs.file_diff);
                         let hunks = convert_file_diffs_to_diffset_hunks(file_diffs);
                         diff_set.extend(hunks);
@@ -4418,15 +4385,12 @@ impl CodeReviewView {
         file_state: &FileState,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
-        let file_name = file_state
-            .file_diff
-            .file_path
+        let repo_relative_path = Path::new(&file_state.file_diff.file_path);
+        let file_name = repo_relative_path
             .file_name()
             .and_then(|file_name| file_name.to_str())
             .unwrap_or_default();
-        let dir_path = file_state
-            .file_diff
-            .file_path
+        let dir_path = repo_relative_path
             .parent()
             .and_then(|parent| parent.to_str())
             .unwrap_or_default();
@@ -4661,7 +4625,7 @@ impl CodeReviewView {
     ) -> Box<dyn Element> {
         let theme = appearance.theme();
 
-        let file_name = file.file_diff.file_path.display().to_string();
+        let file_name = file.file_diff.file_path.clone();
 
         let mut left_section = Flex::row()
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -5083,7 +5047,7 @@ impl CodeReviewView {
     }
 
     fn get_file_stats(
-        file_path: &PathBuf,
+        file_path: &str,
         loaded: &LoadedState,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
@@ -5103,13 +5067,13 @@ impl CodeReviewView {
 
     /// If checkbox_element is Some, it will be rendered on the left
     fn render_single_file_row(
-        file_path: &Path,
+        file_path: &str,
         stats: Box<dyn Element>,
         checkbox_element: Option<Box<dyn Element>>,
         app: &AppContext,
     ) -> Box<dyn Element> {
         let file_path_element = render_file_search_row(
-            file_path,
+            Path::new(file_path),
             FileSearchRowOptions {
                 ..Default::default()
             },
@@ -5334,17 +5298,14 @@ impl CodeReviewView {
     }
 
     fn create_file_status_info(&self, path: StandardizedPath) -> FileStatusInfo {
-        let Some(local_path) = path.to_local_path() else {
-            return FileStatusInfo {
-                path,
-                status: GitFileStatus::Modified,
-            };
-        };
         let status = match self.state() {
             CodeReviewViewState::Loaded(loaded_state) => loaded_state
                 .file_states
-                .get(&local_path)
-                .map(|fs| fs.file_diff.status.clone())
+                .iter()
+                .find_map(|(repo_relative_path, fs)| {
+                    (self.to_standardized_path(repo_relative_path) == Some(path.clone()))
+                        .then(|| fs.file_diff.status.clone())
+                })
                 .unwrap_or(GitFileStatus::Modified),
             _ => GitFileStatus::Modified,
         };
@@ -5402,7 +5363,7 @@ impl CodeReviewView {
 
     fn handle_code_editor_event(
         &mut self,
-        file_path: PathBuf,
+        file_path: String,
         editor: ViewHandle<CodeEditorView>,
         event: &CodeEditorEvent,
         ctx: &mut ViewContext<Self>,
@@ -5444,7 +5405,13 @@ impl CodeReviewView {
             }
             CodeEditorEvent::ContentChanged { origin, .. } => {
                 if origin.from_user() {
-                    ctx.emit(CodeReviewViewEvent::FileEdited { path: file_path });
+                    if let Some(repo_path) =
+                        self.repo_path().and_then(LocalOrRemotePath::to_local_path)
+                    {
+                        ctx.emit(CodeReviewViewEvent::FileEdited {
+                            path: repo_path.join(&file_path),
+                        });
+                    }
 
                     if let Some((view_handle, content_version)) = self.last_revert.take() {
                         let same_content_version =
@@ -5536,7 +5503,7 @@ impl CodeReviewView {
                 terminal_view.input().update(ctx, |input, ctx| {
                     input.append_to_buffer(&location, ctx);
                     // Ensure agent mode for AI features
-                    input.ensure_agent_mode_for_ai_features(true, ctx);
+                    input.ensure_agent_mode_for_ai_features(true, None, ctx);
                 });
             });
         }
@@ -5568,9 +5535,6 @@ impl CodeReviewView {
     /// Insert diff set as context in the terminal input (either all files or a specific file)
     #[cfg(feature = "local_fs")]
     fn insert_diff_as_context(&mut self, scope: DiffSetScope, ctx: &mut ViewContext<Self>) {
-        let Some(repo_path) = self.repo_path() else {
-            return;
-        };
         if let Some(terminal_view) = self
             .terminal_view
             .as_ref()
@@ -5653,7 +5617,7 @@ impl CodeReviewView {
 
                 if files_to_process.is_empty() {
                     if let DiffSetScope::File(path) = &scope {
-                        log::warn!("Could not find file state for path: {}", path.display());
+                        log::warn!("Could not find file state for path: {path}");
                     }
                     return;
                 }
@@ -5677,14 +5641,13 @@ impl CodeReviewView {
                     &scope,
                     &self.diff_state_model.as_ref(ctx).diff_mode(ctx),
                     main_branch_name.as_deref(),
-                    repo_path,
                 );
 
                 // Insert the reference into the terminal input
                 terminal_view.update(ctx, |terminal_view, ctx| {
                     terminal_view.input().update(ctx, |input, ctx| {
                         input.append_to_buffer(&format!("{attachment_reference} "), ctx);
-                        input.ensure_agent_mode_for_ai_features(true, ctx);
+                        input.ensure_agent_mode_for_ai_features(true, None, ctx);
                     });
                 });
 
@@ -5777,11 +5740,11 @@ impl CodeReviewView {
     /// Insert diff hunk as an inline attachment in the terminal input
     fn insert_diff_hunk_as_context(
         &mut self,
-        file_path: PathBuf,
+        file_path: String,
         line_range: Range<warp_editor::render::model::LineCount>,
         ctx: &mut ViewContext<Self>,
     ) {
-        let Some(repo_path) = self.repo_path() else {
+        let Some(repo_path) = self.repo_path().map(LocalOrRemotePath::path_component) else {
             return;
         };
         // Try to get the terminal view and insert the context
@@ -5790,19 +5753,10 @@ impl CodeReviewView {
                 terminal_view.read(ctx, |terminal_view, _| terminal_view.is_long_running());
             let active_cli_agent = terminal_view.read(ctx, |tv, ctx| tv.active_cli_agent(ctx));
 
-            let relative_path = if file_path.is_absolute() {
-                file_path
-                    .strip_prefix(repo_path)
-                    .unwrap_or(&file_path)
-                    .to_path_buf()
-            } else {
-                file_path.clone()
-            };
-
             // Case 1: CLI agent — send location + change stats to PTY or rich input
             if active_cli_agent.is_some() {
                 if let Some((_, lines_added, lines_removed)) =
-                    self.extract_diff_hunk_data(&relative_path, &line_range)
+                    self.extract_diff_hunk_data(&file_path, &line_range)
                 {
                     // Use relative_path so the prompt shows repo-relative paths (e.g. src/foo.rs)
                     // rather than absolute machine-specific paths.
@@ -5810,7 +5764,7 @@ impl CodeReviewView {
                     let end_line = line_range.end.as_usize();
                     let routing = terminal_view.update(ctx, |tv, ctx| {
                         tv.send_diff_hunk_to_cli_agent_or_rich_input(
-                            &relative_path,
+                            &file_path,
                             start_line,
                             end_line,
                             lines_added,
@@ -5841,7 +5795,7 @@ impl CodeReviewView {
                 let full_path = repo_path.join(&file_path);
                 let start_line = line_range.start.as_usize() + 1;
                 let end_line = line_range.end.as_usize();
-                let path_with_range = format!("{}:{start_line}-{end_line} ", full_path.display());
+                let path_with_range = format!("{full_path}:{start_line}-{end_line} ");
                 terminal_view.update(ctx, |terminal_view, ctx| {
                     terminal_view.handle_file_tree_drop_on_active_command(&path_with_range, ctx);
                 });
@@ -5856,10 +5810,10 @@ impl CodeReviewView {
                 return;
             }
             if let Some((hunk, lines_added, lines_removed)) =
-                self.extract_diff_hunk_data(&relative_path, &line_range)
+                self.extract_diff_hunk_data(&file_path, &line_range)
             {
                 // Create a descriptive key using filename and line range
-                let filename = relative_path.display().to_string();
+                let filename = file_path.clone();
                 // Use 1-indexed, inclusive line numbers for the user visible range.
 
                 let diff_hunk_key =
@@ -5871,7 +5825,7 @@ impl CodeReviewView {
                 terminal_view.update(ctx, |terminal_view, ctx| {
                     terminal_view.input().update(ctx, |input, ctx| {
                         input.append_to_buffer(&format!("{attachment_reference} "), ctx);
-                        input.ensure_agent_mode_for_ai_features(true, ctx);
+                        input.ensure_agent_mode_for_ai_features(true, None, ctx);
                     });
                 });
 
@@ -5950,7 +5904,7 @@ impl CodeReviewView {
     /// Extract diff hunk data for the given file and line range
     fn extract_diff_hunk_data(
         &self,
-        file_path: &PathBuf,
+        file_path: &str,
         line_range: &Range<warp_editor::render::model::LineCount>,
     ) -> Option<(DiffHunk, u32, u32)> {
         if let CodeReviewViewState::Loaded(state) = self.state() {
@@ -6040,13 +5994,13 @@ impl CodeReviewView {
         diff_lines.join("\n")
     }
 
-    fn save_files(&mut self, paths: &[PathBuf], ctx: &mut ViewContext<Self>) {
+    fn save_files(&mut self, paths: &[String], ctx: &mut ViewContext<Self>) {
         for path in paths {
             self.save_file(path, ctx);
         }
     }
 
-    fn save_file(&mut self, path: &PathBuf, ctx: &mut ViewContext<CodeReviewView>) {
+    fn save_file(&mut self, path: &str, ctx: &mut ViewContext<CodeReviewView>) {
         if let CodeReviewViewState::Loaded(state) = self.state() {
             if let Some(file_state) = state.file_states.get(path) {
                 if let Some(editor) = file_state.editor_state.as_ref().map(|state| state.editor()) {
@@ -6055,7 +6009,7 @@ impl CodeReviewView {
                     {
                         safe_error!(
                             safe: ("Failed to save file: {err}"),
-                            full: ("Failed to save file {}: {err:?}", path.display())
+                            full: ("Failed to save file {path}: {err:?}")
                         );
                     }
                 }
@@ -6093,12 +6047,12 @@ impl CodeReviewView {
         }
     }
 
-    /// Refreshes metadata and PR info after a git operation (commit, push, etc.).
+    /// Refreshes metadata after a git operation (commit, push, etc.).
     /// Diff reloading is left to the file watcher (for commits) or skipped
     /// entirely (for push/create-PR where the working directory is unchanged).
     fn refresh_after_git_operation(&mut self, ctx: &mut ViewContext<Self>) {
         self.diff_state_model.update(ctx, |model, ctx| {
-            model.refresh_metadata_and_pr_info(ctx);
+            model.refresh_metadata_after_git_operation(ctx);
         });
         ctx.notify();
     }
@@ -6134,7 +6088,11 @@ impl CodeReviewView {
         {
             return;
         }
-        let Some(repo_path) = self.repo_path().cloned() else {
+        let Some(repo_path) = self
+            .repo_path()
+            .and_then(LocalOrRemotePath::to_local_path)
+            .map(Path::to_path_buf)
+        else {
             return;
         };
         let branch_name = self
@@ -6144,15 +6102,11 @@ impl CodeReviewView {
 
         let dialog = match kind {
             GitDialogKind::Commit => {
-                // Hide the "Commit and create PR" intent when it wouldn't make
-                // sense: a PR already exists for this branch, or we're on the
-                // repo's main branch (creating a PR from main is invalid).
+                // Hide the "Commit and create PR" intent on the main branch.
                 // `has_upstream` controls the label/icon on the push-chained
                 // intent (Commit and push vs Commit and publish).
                 let diff_state = self.diff_state_model.as_ref(ctx);
-                let allow_create_pr = diff_state.pr_info(ctx).is_none()
-                    && !diff_state.is_pr_info_refreshing(ctx)
-                    && !diff_state.is_on_main_branch(ctx);
+                let allow_create_pr = !diff_state.is_on_main_branch(ctx);
                 let has_upstream = diff_state.upstream_ref(ctx).is_some();
                 ctx.add_typed_action_view(|ctx| {
                     GitDialog::new_for_commit(
@@ -6205,7 +6159,6 @@ impl CodeReviewView {
         let has_uncommitted_changes = self.has_uncommitted_changes(app);
         let has_upstream = diff_state.upstream_ref(app).is_some();
         let has_local_commits = !diff_state.unpushed_commits(app).is_empty();
-        let is_pr_info_refreshing = diff_state.is_pr_info_refreshing(app);
         // False when upstream == main (e.g. after `git checkout -b feature origin/master`),
         // which means the branch hasn't been pushed to its own remote ref yet.
         let upstream_differs_from_main = diff_state.upstream_differs_from_main(app);
@@ -6216,13 +6169,7 @@ impl CodeReviewView {
             PrimaryGitActionMode::Publish
         } else if has_local_commits {
             PrimaryGitActionMode::Push
-        } else if diff_state.pr_info(app).is_some() {
-            PrimaryGitActionMode::ViewPr
-        } else if !is_pr_info_refreshing
-            && has_upstream
-            && !diff_state.is_on_main_branch(app)
-            && upstream_differs_from_main
-        {
+        } else if has_upstream && !diff_state.is_on_main_branch(app) && upstream_differs_from_main {
             PrimaryGitActionMode::CreatePr
         } else {
             // Nothing actionable — show Commit disabled.
@@ -6289,32 +6236,6 @@ impl CodeReviewView {
                     button.clear_adjoined_side(ctx);
                 });
             }
-            PrimaryGitActionMode::ViewPr => {
-                let diff_state = self.diff_state_model.as_ref(ctx);
-                let pr_info = diff_state.pr_info(ctx).cloned();
-                let is_pr_info_refreshing = diff_state.is_pr_info_refreshing(ctx);
-                if let Some(pr_info) = pr_info {
-                    let url = pr_info.url.clone();
-                    let number = pr_info.number;
-                    let label = format!("PR #{number}");
-                    self.git_primary_action_button.update(ctx, |button, ctx| {
-                        button.set_label(label, ctx);
-                        button.set_icon(Some(Icon::Github), ctx);
-                        button.set_disabled(is_pr_info_refreshing, ctx);
-                        button.set_tooltip(
-                            is_pr_info_refreshing.then_some("Refreshing PR info"),
-                            ctx,
-                        );
-                        button.set_on_click(
-                            move |ctx| {
-                                ctx.dispatch_typed_action(CodeReviewAction::ViewPr(url.clone()))
-                            },
-                            ctx,
-                        );
-                        button.clear_adjoined_side(ctx);
-                    });
-                }
-            }
             PrimaryGitActionMode::Publish => {
                 self.git_primary_action_button.update(ctx, |button, ctx| {
                     button.set_label(crate::t!("common-publish"), ctx);
@@ -6363,34 +6284,19 @@ impl CodeReviewView {
         }
     }
 
-    /// Returns the PR dropdown item: "PR #N" linking to the existing PR, or
-    /// "Create PR" to open the dialog. Create PR is disabled on main, when the
+    /// Returns the Create PR dropdown item. It is disabled on main, when the
     /// branch has no upstream, or when the upstream is the same ref as main
     /// (e.g. a worktree branch whose tracking was auto-set to origin/master).
     fn pr_menu_item(&self, app: &AppContext) -> MenuItem<CodeReviewAction> {
         let diff_state = self.diff_state_model.as_ref(app);
-        let is_pr_info_refreshing = diff_state.is_pr_info_refreshing(app);
-        if let Some(pr_info) = diff_state.pr_info(app).cloned() {
-            MenuItemFields::new(format!("PR #{}", pr_info.number))
-                .with_icon(Icon::Github)
-                .with_on_select_action(CodeReviewAction::ViewPr(pr_info.url))
-                .with_disabled(is_pr_info_refreshing)
-                .into_item()
-        } else {
-            let is_on_main = diff_state.is_on_main_branch(app);
-            let has_upstream = diff_state.upstream_ref(app).is_some();
-            let upstream_differs_from_main = diff_state.upstream_differs_from_main(app);
-            MenuItemFields::new(crate::t!("code-review-create-pr"))
-                .with_icon(Icon::Github)
-                .with_on_select_action(CodeReviewAction::OpenCreatePrDialog)
-                .with_disabled(
-                    is_pr_info_refreshing
-                        || is_on_main
-                        || !has_upstream
-                        || !upstream_differs_from_main,
-                )
-                .into_item()
-        }
+        let is_on_main = diff_state.is_on_main_branch(app);
+        let has_upstream = diff_state.upstream_ref(app).is_some();
+        let upstream_differs_from_main = diff_state.upstream_differs_from_main(app);
+        MenuItemFields::new(crate::t!("code-review-create-pr"))
+            .with_icon(Icon::Github)
+            .with_on_select_action(CodeReviewAction::OpenCreatePrDialog)
+            .with_disabled(is_on_main || !has_upstream || !upstream_differs_from_main)
+            .into_item()
     }
 
     /// Items for the git operations dropdown (chevron button). All three
@@ -6418,9 +6324,7 @@ impl CodeReviewView {
                 Self::push_or_publish_menu_item(has_upstream, false),
                 self.pr_menu_item(app),
             ],
-            PrimaryGitActionMode::CreatePr
-            | PrimaryGitActionMode::ViewPr
-            | PrimaryGitActionMode::Publish => {
+            PrimaryGitActionMode::CreatePr | PrimaryGitActionMode::Publish => {
                 // Chevron is hidden in these modes, so the menu is never opened.
                 vec![]
             }
@@ -6536,7 +6440,7 @@ impl CodeReviewView {
         items
     }
 
-    fn get_unsaved_file_paths(&self, app: &AppContext) -> Vec<PathBuf> {
+    fn get_unsaved_file_paths(&self, app: &AppContext) -> Vec<String> {
         let mut unsaved_paths = Vec::new();
         if let CodeReviewViewState::Loaded(state) = self.state() {
             for file_state in state.file_states.values() {
@@ -6577,16 +6481,12 @@ impl CodeReviewView {
 
     pub fn open_file_in_tab(
         &self,
-        path: &Path,
+        path: LocalOrRemotePath,
         line_and_column: Option<LineAndColumnArg>,
         ctx: &mut ViewContext<Self>,
     ) {
-        let Some(repo_path) = self.repo_path() else {
-            return;
-        };
-        let full_path = repo_path.join(path);
         ctx.emit(CodeReviewViewEvent::OpenFileInNewTab {
-            path: full_path,
+            path,
             line_and_column,
         });
     }
@@ -6633,7 +6533,7 @@ impl CodeReviewView {
 
     pub(super) fn editor_for_path(
         &self,
-        path: &Path,
+        path: &LocalOrRemotePath,
         ctx: &AppContext,
     ) -> Option<ViewHandle<LocalCodeEditorView>> {
         match self.state() {
@@ -6643,7 +6543,7 @@ impl CodeReviewView {
                 .filter_map(|file| file.editor_state.as_ref())
                 .find_map(|state| {
                     let editor_path = state.editor.as_ref(ctx).file_path();
-                    if editor_path == Some(path) {
+                    if path.to_local_path() == editor_path {
                         Some(state.editor.clone())
                     } else {
                         None
@@ -6822,7 +6722,11 @@ impl TypedActionView for CodeReviewView {
                     return;
                 };
                 let full_path = repo_path.join(path);
-                self.open_code_review_file(full_path, *line_and_column, ctx);
+                if let Some(local_path) = full_path.to_local_path() {
+                    self.open_code_review_file(local_path.to_path_buf(), *line_and_column, ctx);
+                } else {
+                    self.open_file_in_tab(full_path, *line_and_column, ctx);
+                }
             }
             CodeReviewAction::ToggleFileExpanded(path) => {
                 let (file_index, now_expanded, chevron_button) = {
@@ -6954,8 +6858,8 @@ impl TypedActionView for CodeReviewView {
             }
             CodeReviewAction::RefreshGitState => {
                 self.diff_state_model.update(ctx, |model, ctx| {
-                    model.load_diffs_for_current_repo(false, ctx);
-                    model.refresh_metadata_and_pr_info(ctx);
+                    model.load_diffs_for_current_repo(false, true, ctx);
+                    model.refresh_metadata_after_git_operation(ctx);
                 });
             }
             CodeReviewAction::UndoRevert => {
@@ -7117,10 +7021,8 @@ impl TypedActionView for CodeReviewView {
             CodeReviewAction::CopyFilePath(path) => {
                 if let Some(repo_path) = self.repo_path() {
                     let absolute_path = repo_path.join(path);
-                    if let Some(path_str) = absolute_path.to_str() {
-                        ctx.clipboard()
-                            .write(ClipboardContent::plain_text(path_str.to_string()));
-                    }
+                    ctx.clipboard()
+                        .write(ClipboardContent::plain_text(absolute_path.display_path()));
                 }
             }
             CodeReviewAction::ShowFindBar => self.show_find_bar(ctx),
@@ -7224,7 +7126,8 @@ impl BackingView for CodeReviewView {
             let file_names = unsaved_file_paths
                 .iter()
                 .filter_map(|path| {
-                    path.file_name()
+                    Path::new(path)
+                        .file_name()
                         .and_then(|name| name.to_str())
                         .map(|s| s.to_string())
                 })

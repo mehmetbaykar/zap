@@ -1,29 +1,31 @@
 #[cfg(target_os = "macos")]
 use std::fs;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
+use std::sync::Arc;
 
+use diesel::connection::SimpleConnection;
+use pathfinder_geometry::rect::RectF;
+use pathfinder_geometry::vector::Vector2F;
 use warp_core::features::FeatureFlag;
-
-use crate::{
-    app_state::{
-        AppState, CodePaneSnapShot, CodePaneTabSnapshot, LeafContents, LeafSnapshot,
-        PaneNodeSnapshot, TabSnapshot, TerminalPaneSnapshot, WindowSnapshot,
-    },
-    cloud_object::{Owner, StoredObjectPermissions},
-    code::editor_management::CodeSource,
-    notebooks::{NotebookObject, NotebookObjectModel},
-    persistence::{model::ObjectPermissions, BlockCompleted, ModelEvent, PersistenceScope},
-    server::ids::ClientId,
-    server_time::ServerTimestamp,
-    tab::SelectedTabColor,
-    terminal::model::block::SerializedBlock,
-    terminal::ShellLaunchData,
-};
 
 use super::{
     app_database_file_path, database_file_path_for_scope, decode_path, deduplicate_events,
     encode_path, read_sqlite_data, save_app_state, setup_database,
 };
+use crate::app_state::{
+    AppState, CodePaneSnapShot, CodePaneTabSnapshot, LeafContents, LeafSnapshot, PaneNodeSnapshot,
+    TabSnapshot, TerminalPaneSnapshot, WindowSnapshot,
+};
+use crate::cloud_object::{Owner, StoredObjectPermissions};
+use crate::code::editor_management::CodeSource;
+use crate::notebooks::{NotebookObject, NotebookObjectModel};
+use crate::persistence::model::ObjectPermissions;
+use crate::persistence::{BlockCompleted, ModelEvent, PersistenceScope};
+use crate::server::ids::ClientId;
+use crate::server_time::ServerTimestamp;
+use crate::tab::SelectedTabColor;
+use crate::terminal::model::block::SerializedBlock;
+use crate::terminal::ShellLaunchData;
 
 #[test]
 fn app_scope_database_path_matches_app_database_path() {
@@ -60,6 +62,31 @@ fn remote_server_daemon_scope_database_path_handles_empty_identity_key() {
         PathBuf::from(shellexpand::tilde(&expected_data_dir).into_owned()).join("warp.sqlite")
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn remote_server_daemon_database_permissions_are_owner_only() {
+    use std::fs::Permissions;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let daemon_dir = tempdir.path().join("daemon");
+    let database_path = daemon_dir.join("warp.sqlite");
+
+    std::fs::create_dir_all(&daemon_dir).expect("daemon dir should be created");
+    std::fs::set_permissions(&daemon_dir, Permissions::from_mode(0o755))
+        .expect("daemon dir permissions should be set");
+    std::fs::write(&database_path, b"").expect("database file should be created");
+    std::fs::set_permissions(&database_path, Permissions::from_mode(0o644))
+        .expect("database file permissions should be set");
+
+    super::ensure_owner_only_dir(&daemon_dir).expect("daemon dir should be owner-only");
+    super::ensure_owner_only_file(&database_path).expect("database file should be owner-only");
+
+    assert_eq!(daemon_dir.metadata().unwrap().mode() & 0o777, 0o700);
+    assert_eq!(database_path.metadata().unwrap().mode() & 0o777, 0o600);
+}
+
 #[test]
 fn test_deduplicate_snapshots() {
     let local_notebook = NotebookObject::new_local(
@@ -547,5 +574,90 @@ fn test_deserialize_corrupted_guests() {
             anyone_with_link: None,
             guests: vec![],
         })
+    );
+}
+
+// Regression: GH#10083. The macOS green-tile button could leave a 1px-wide
+// window bound in `AppContext::window_bounds`, which previously round-tripped
+// through SQLite and restored as an unusable 1px sliver. Bounds below the
+// platform minimum window size must be dropped on save.
+#[test]
+fn test_sqlite_drops_too_small_bounds_on_save() {
+    use diesel::prelude::*;
+
+    use crate::persistence::schema::windows;
+
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("warp.sqlite");
+    let mut conn = setup_database(&database_path).expect("database should initialize");
+
+    let mut snapshot = test_terminal_window_snapshot(false);
+    snapshot.bounds = Some(RectF::new(
+        Vector2F::new(0.0, -1410.0),
+        Vector2F::new(1.0, 1410.0),
+    ));
+
+    let app_state = AppState {
+        windows: vec![snapshot],
+        active_window_index: Some(0),
+        block_lists: Default::default(),
+        running_mcp_servers: Default::default(),
+    };
+
+    save_app_state(&mut conn, &app_state).expect("app state should save");
+
+    // Query the row directly so the assertion isolates the save guard and is
+    // not masked by the read-side guard in `read_sqlite_data`.
+    let row: (Option<f32>, Option<f32>, Option<f32>, Option<f32>) = windows::dsl::windows
+        .select((
+            windows::columns::window_width,
+            windows::columns::window_height,
+            windows::columns::origin_x,
+            windows::columns::origin_y,
+        ))
+        .first(&mut conn)
+        .expect("a windows row should have been inserted");
+
+    assert_eq!(
+        row,
+        (None, None, None, None),
+        "save-path guard must persist NULL bound columns for sub-minimum geometry"
+    );
+}
+
+// Regression: GH#10083. Users whose warp.sqlite already contains a 1px row
+// (because they hit the bug on an earlier build) must still recover to default
+// geometry on next launch rather than restoring the sliver.
+#[test]
+fn test_sqlite_drops_too_small_bounds_on_read() {
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("warp.sqlite");
+    let mut conn = setup_database(&database_path).expect("database should initialize");
+
+    // Save with no bounds so a row exists, then corrupt it directly to bypass
+    // the save-path guard and simulate a pre-existing bad row.
+    let app_state = AppState {
+        windows: vec![test_terminal_window_snapshot(false)],
+        active_window_index: Some(0),
+        block_lists: Default::default(),
+        running_mcp_servers: Default::default(),
+    };
+    save_app_state(&mut conn, &app_state).expect("app state should save");
+
+    conn.batch_execute(
+        "UPDATE windows \
+         SET window_width = 1.0, window_height = 1410.0, \
+             origin_x = 0.0, origin_y = -1410.0",
+    )
+    .expect("corrupting update should succeed");
+
+    let restored = read_sqlite_data(&mut conn, None)
+        .expect("app state should load")
+        .app_state;
+
+    assert_eq!(restored.windows.len(), 1);
+    assert!(
+        restored.windows[0].bounds.is_none(),
+        "tiny persisted bounds must be discarded on read so users recover from a corrupt DB"
     );
 }

@@ -5,18 +5,18 @@
 //! operations to whichever is active.
 //! All consumers should use `DiffStateModel` rather than accessing sub-models directly.
 
-use crate::util::git::{Commit, PrInfo};
-use warp_core::SessionId;
-use warp_util::remote_path::RemotePath;
-use warpui::{AppContext, ModelContext, ModelHandle};
-
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use warp_util::remote_path::RemotePath;
 use warp_util::standardized_path::StandardizedPath;
+use warpui::{AppContext, ModelContext, ModelHandle};
 
 use crate::code_review::diff_size_limits::DiffSize;
+use crate::util::git::{BranchEntry, Commit, PrInfo};
 #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
 mod local;
 #[cfg(feature = "local_fs")]
@@ -108,7 +108,9 @@ pub struct DiffHunk {
 /// This matches Git Desktop's FileDiff structure.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FileDiff {
-    pub file_path: PathBuf,
+    /// Repo-relative path for this diff file. Absolute file identities should use
+    /// `StandardizedPath` or `LocalOrRemotePath` at API boundaries.
+    pub file_path: String,
     pub status: GitFileStatus,
     pub hunks: Arc<Vec<DiffHunk>>,
     pub is_binary: bool,
@@ -253,6 +255,7 @@ impl DiffMode {
 
 /// User-visible representation of the diffs we've loaded,
 /// which only includes changes against the specific base the user has selected.
+#[derive(Debug)]
 pub enum DiffState {
     NotInRepository,
     Loading,
@@ -304,17 +307,23 @@ pub enum DiffStateModelEvent {
     /// Event dispatched when the current branch changes.
     CurrentBranchChanged,
     /// Event dispatched when new diffs are computed (full reload).
-    NewDiffsComputed(Option<Arc<GitDiffWithBaseContent>>),
+    NewDiffsComputed {
+        diffs: Option<Arc<GitDiffWithBaseContent>>,
+        load_duration: Option<Duration>,
+    },
     /// Event dispatched when a single file's diff is updated incrementally.
     SingleFileUpdated {
-        path: PathBuf,
+        /// Repo-relative path for the updated file.
+        path: String,
         diff: Option<Arc<FileDiffAndContent>>,
     },
     /// Event dispatched when diff metadata (stats, branch info) is refreshed.
-    MetadataRefreshed(DiffMetadata),
+    MetadataRefreshed(Box<DiffMetadata>),
     /// The remote connection was lost. Stale diffs should be preserved while
     /// the model waits for a new subscription.
     ConnectionLost,
+    /// Branch list received from the backend (local git or remote server).
+    BranchesReceived(Vec<BranchEntry>),
 }
 
 // ── Unified model ────────────────────────────────────────────────────────
@@ -345,16 +354,15 @@ impl DiffStateModel {
         Self::Local(local)
     }
 
-    /// Creates a new remote-backed `DiffStateModel`. Requires a connected
-    /// `session_id` to anchor the initial `GetDiffState` subscription.
-    pub fn new_remote(
-        remote_path: RemotePath,
-        session_id: SessionId,
-        ctx: &mut ModelContext<Self>,
-    ) -> Self {
-        let remote = ctx.add_model(|ctx| {
-            RemoteDiffStateModel::new(remote_path, DiffMode::default(), session_id, ctx)
-        });
+    /// Creates a new remote-backed `DiffStateModel`. The model is
+    /// session-agnostic and is keyed by `(host_id, repo, mode)`; the
+    /// `RemoteServerManager` resolves a connected session for the host at
+    /// every outbound RPC, so the wrapper does not need to thread a
+    /// `SessionId` through. Callers must ensure a session for the host is
+    /// connected before constructing.
+    pub fn new_remote(remote_path: RemotePath, ctx: &mut ModelContext<Self>) -> Self {
+        let remote =
+            ctx.add_model(|ctx| RemoteDiffStateModel::new(remote_path, DiffMode::default(), ctx));
         ctx.subscribe_to_model(&remote, Self::forward_event);
         Self::Remote(remote)
     }
@@ -366,8 +374,14 @@ impl DiffStateModel {
             DiffStateModelEvent::CurrentBranchChanged => {
                 ctx.emit(DiffStateModelEvent::CurrentBranchChanged);
             }
-            DiffStateModelEvent::NewDiffsComputed(diffs) => {
-                ctx.emit(DiffStateModelEvent::NewDiffsComputed(diffs.clone()));
+            DiffStateModelEvent::NewDiffsComputed {
+                diffs,
+                load_duration,
+            } => {
+                ctx.emit(DiffStateModelEvent::NewDiffsComputed {
+                    diffs: diffs.clone(),
+                    load_duration: *load_duration,
+                });
             }
             DiffStateModelEvent::SingleFileUpdated { path, diff } => {
                 ctx.emit(DiffStateModelEvent::SingleFileUpdated {
@@ -380,6 +394,9 @@ impl DiffStateModel {
             }
             DiffStateModelEvent::ConnectionLost => {
                 ctx.emit(DiffStateModelEvent::ConnectionLost);
+            }
+            DiffStateModelEvent::BranchesReceived(branches) => {
+                ctx.emit(DiffStateModelEvent::BranchesReceived(branches.clone()));
             }
         }
     }
@@ -449,20 +466,6 @@ impl DiffStateModel {
         }
     }
 
-    pub(crate) fn pr_info<'a>(&self, ctx: &'a AppContext) -> Option<&'a PrInfo> {
-        match self {
-            Self::Local(m) => m.as_ref(ctx).pr_info(),
-            Self::Remote(m) => m.as_ref(ctx).pr_info(),
-        }
-    }
-
-    pub(crate) fn is_pr_info_refreshing(&self, ctx: &AppContext) -> bool {
-        match self {
-            Self::Local(m) => m.as_ref(ctx).is_pr_info_refreshing(),
-            Self::Remote(m) => m.as_ref(ctx).is_pr_info_refreshing(),
-        }
-    }
-
     pub(crate) fn is_git_operation_blocked(&self, ctx: &AppContext) -> bool {
         match self {
             Self::Local(m) => m.as_ref(ctx).is_git_operation_blocked(ctx),
@@ -483,17 +486,18 @@ impl DiffStateModel {
         &self,
         mode: DiffMode,
         should_fetch_base: bool,
+        track_load_duration: bool,
         ctx: &mut ModelContext<Self>,
     ) {
         match self {
             Self::Local(local) => {
                 local.update(ctx, |local, ctx| {
-                    local.set_diff_mode(mode, should_fetch_base, ctx);
+                    local.set_diff_mode(mode, should_fetch_base, track_load_duration, ctx);
                 });
             }
             Self::Remote(model) => {
                 model.update(ctx, |model, ctx| {
-                    model.set_diff_mode(mode, ctx);
+                    model.set_diff_mode(mode, track_load_duration, ctx);
                 });
             }
         }
@@ -512,7 +516,7 @@ impl DiffStateModel {
             }
             Self::Remote(model) => {
                 model.update(ctx, |model, ctx| {
-                    model.set_diff_mode(mode, ctx);
+                    model.set_diff_mode(mode, true, ctx);
                 });
             }
         }
@@ -521,15 +525,20 @@ impl DiffStateModel {
     pub(crate) fn load_diffs_for_current_repo(
         &self,
         should_fetch_base: bool,
+        track_load_duration: bool,
         ctx: &mut ModelContext<Self>,
     ) {
         match self {
             Self::Local(local) => {
                 local.update(ctx, |local, ctx| {
-                    local.load_diffs_for_current_repo(should_fetch_base, ctx);
+                    local.load_diffs_for_current_repo(should_fetch_base, track_load_duration, ctx);
                 });
             }
-            Self::Remote(_) => {}
+            Self::Remote(remote) => {
+                remote.update(ctx, |remote, ctx| {
+                    remote.fetch_fresh_snapshot(track_load_duration, ctx);
+                });
+            }
         }
     }
 
@@ -548,11 +557,26 @@ impl DiffStateModel {
         }
     }
 
-    pub(crate) fn refresh_metadata_and_pr_info(&self, ctx: &mut ModelContext<Self>) {
+    pub(crate) fn fetch_branches(&self, ctx: &mut ModelContext<Self>) {
         match self {
             Self::Local(local) => {
                 local.update(ctx, |local, ctx| {
-                    local.refresh_metadata_and_pr_info(ctx);
+                    local.fetch_branches(ctx);
+                });
+            }
+            Self::Remote(model) => {
+                model.update(ctx, |model, ctx| {
+                    model.fetch_branches(ctx);
+                });
+            }
+        }
+    }
+
+    pub(crate) fn refresh_metadata_after_git_operation(&self, ctx: &mut ModelContext<Self>) {
+        match self {
+            Self::Local(local) => {
+                local.update(ctx, |local, ctx| {
+                    local.refresh_metadata_after_git_operation(ctx);
                 });
             }
             Self::Remote(_) => {}

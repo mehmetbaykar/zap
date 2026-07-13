@@ -19,6 +19,8 @@ use crate::ai::restored_conversations::RestoredAgentConversations;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::Space;
 #[cfg(feature = "local_fs")]
+use crate::code::buffer_location::RemotePath as CodeRemotePath;
+#[cfg(feature = "local_fs")]
 use crate::code::editor_management::CodeSource;
 use crate::code::view::CodeViewAction;
 use crate::code_review::comments::{AttachedReviewComment, PendingImportedReviewComment};
@@ -39,7 +41,9 @@ use crate::terminal::cli_agent_sessions::plugin_manager::PluginModalKind;
 use crate::terminal::view::inline_banner::{
     ZeroStatePromptSuggestionTriggeredFrom, ZeroStatePromptSuggestionType,
 };
-use crate::terminal::view::load_ai_conversation::RestoredAIConversation;
+use crate::terminal::view::load_ai_conversation::{
+    RestoreConversationEntryBehavior, RestoredAIConversation,
+};
 use crate::undo_close::UndoCloseStack;
 use crate::undo_close::UndoCloseStackEvent;
 #[cfg(target_family = "wasm")]
@@ -74,6 +78,7 @@ use warp_cli::agent::Harness;
 use warp_core::command::ExitCode;
 use warp_core::context_flag::ContextFlag;
 use warp_core::HostId;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warp_util::path::convert_wsl_to_windows_host_path;
 #[cfg(feature = "local_fs")]
 use warp_util::path::LineAndColumnArg;
@@ -1619,7 +1624,7 @@ impl PaneGroup {
                         settings,
                     } => Box::new(NotebookPane::restore(notebook_id, &settings, ctx)?),
                     NotebookPaneSnapshot::LocalFileNotebook { path } => Box::new(FilePane::new(
-                        path,
+                        path.map(LocalOrRemotePath::Local),
                         None,
                         #[cfg(feature = "local_fs")]
                         None,
@@ -2658,6 +2663,7 @@ impl PaneGroup {
                 terminal_view.restore_conversation_after_view_creation(
                     RestoredAIConversation::new(child_conversation),
                     true,
+                    RestoreConversationEntryBehavior::PreserveAgentViewState,
                     ctx,
                 );
                 terminal_view.enter_agent_view(
@@ -3248,6 +3254,7 @@ impl PaneGroup {
                     view.restore_conversation_after_view_creation(
                         RestoredAIConversation::new(*conversation),
                         true,
+                        RestoreConversationEntryBehavior::EnterRestoredConversation,
                         ctx,
                     );
                 });
@@ -3268,6 +3275,7 @@ impl PaneGroup {
                     view.restore_conversation_and_directory_context(
                         LoadedConversationData::CLIAgent(cli_conversation),
                         true,
+                        RestoreConversationEntryBehavior::PreserveAgentViewState,
                         |_, _| {},
                         ctx,
                     );
@@ -4085,7 +4093,7 @@ impl PaneGroup {
     fn replace_file_pane_with_code_pane(
         &mut self,
         file_pane_id: PaneId,
-        path: std::path::PathBuf,
+        path: LocalOrRemotePath,
         source: Option<crate::code::editor_management::CodeSource>,
         ctx: &mut ViewContext<Self>,
     ) {
@@ -4093,10 +4101,15 @@ impl PaneGroup {
         use crate::pane_group::CodePane;
 
         // Use the provided source if available.
-        let source = source.unwrap_or(CodeSource::Link {
-            path,
-            range_start: None,
-            range_end: None,
+        let source = source.unwrap_or_else(|| match path {
+            LocalOrRemotePath::Local(path) => CodeSource::Link {
+                path,
+                range_start: None,
+                range_end: None,
+            },
+            LocalOrRemotePath::Remote(remote_path) => CodeSource::RemoteFileTree {
+                remote_path: CodeRemotePath::new(remote_path.host_id, remote_path.path),
+            },
         });
 
         let code_pane = CodePane::new(source, None, ctx);
@@ -4128,7 +4141,7 @@ impl PaneGroup {
             }
         });
 
-        let file_pane = FilePane::new(Some(path), session, source, ctx);
+        let file_pane = FilePane::new(Some(LocalOrRemotePath::Local(path)), session, source, ctx);
         let success = self.replace_pane(code_pane_id, file_pane, false, ctx);
 
         if !success {

@@ -14,7 +14,8 @@ pub(crate) use driver::{
 };
 pub(crate) use driver::{
     run_agent_event_driver, AgentEventConsumer, AgentEventConsumerControlFlow,
-    AgentEventDriverConfig, AgentEventSource, AgentEventSourceItem,
+    AgentEventDriverConfig, AgentEventFilter, AgentEventSource, AgentEventSourceItem,
+    AgentMessageEventMetadata,
 };
 pub(crate) use message_hydrator::MessageHydrator;
 
@@ -27,6 +28,12 @@ pub(crate) trait AgentEventStreamClient: 'static + Send + Sync {
         run_ids: &[String],
         since_sequence: i64,
     ) -> Result<http_client::EventSourceStream>;
+
+    async fn stream_agent_events_for_ancestor(
+        &self,
+        ancestor_run_id: &str,
+        since_sequence: i64,
+    ) -> Result<http_client::EventSourceStream>;
 }
 
 pub(crate) struct DisabledAgentEventStreamClient;
@@ -37,6 +44,16 @@ impl AgentEventStreamClient for DisabledAgentEventStreamClient {
     async fn stream_agent_events(
         &self,
         _run_ids: &[String],
+        _since_sequence: i64,
+    ) -> Result<http_client::EventSourceStream> {
+        Err(anyhow!(
+            "Agent event stream disabled in Zap - RTC endpoint is removed"
+        ))
+    }
+
+    async fn stream_agent_events_for_ancestor(
+        &self,
+        _ancestor_run_id: &str,
         _since_sequence: i64,
     ) -> Result<http_client::EventSourceStream> {
         Err(anyhow!(

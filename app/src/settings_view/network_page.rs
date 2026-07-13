@@ -59,7 +59,7 @@ fn read_system_proxy_env() -> (String, String, String) {
     (read("HTTPS_PROXY"), read("HTTP_PROXY"), read("NO_PROXY"))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum NetworkPageAction {
     /// The dropdown selected a ProxyMode item; persist it to settings.
     SetProxyMode(ProxyMode),
@@ -80,7 +80,7 @@ pub enum NetworkPageAction {
 }
 
 /// The probe method chosen for this test. Used to pick the appropriate description for the result text.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TestKind {
     /// TCP probe of the proxy host:port (verifies the proxy itself is reachable, suitable for corporate intranet / VPN proxies).
     /// Used for Custom mode and for System mode when the system proxy can be detected from environment variables.
@@ -91,7 +91,7 @@ enum TestKind {
 }
 
 /// Test result (returned from the async task to handle_action on the main thread).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestOutcome {
     kind: TestKind,
     result: Result<u128, String>,

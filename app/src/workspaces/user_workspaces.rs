@@ -24,12 +24,10 @@ use warp_core::{
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, Tracked};
 
 #[cfg(test)]
+use super::workspace::WorkspaceMemberUsageInfo;
 use crate::workspaces::workspace::{
     AIAutonomyPolicy, BillingMetadata, WorkspaceMember, WorkspaceSettings,
 };
-
-#[cfg(test)]
-use super::workspace::WorkspaceMemberUsageInfo;
 
 #[derive(Debug)]
 pub enum UserWorkspacesEvent {

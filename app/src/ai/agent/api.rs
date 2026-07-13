@@ -2,45 +2,40 @@ pub(crate) mod convert_conversation;
 mod convert_from;
 mod convert_to;
 
+use std::path::Path;
+use std::pin::Pin;
+use std::sync::Arc;
+
 pub use ai::agent::convert::ConvertToAPITypeError;
 use ai::api_keys::ApiKeyManager;
 pub use convert_from::{
     user_inputs_from_messages, ConversionParams, ConvertAPIMessageToClientOutputMessage,
     MaybeAIAgentOutputMessage, MessageToAIAgentOutputMessageError,
 };
-
 use futures_lite::Stream;
 use serde::Serialize;
-use std::path::Path;
-use std::pin::Pin;
-use std::sync::Arc;
 use warp_core::channel::ChannelState;
 use warp_core::execution_mode::AppExecutionMode;
 use warp_core::features::FeatureFlag;
-
-use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::ambient_agents::AmbientAgentTaskId;
-use crate::{
-    ai::api_error::AIApiError,
-    ai::{blocklist::SessionContext, llms::LLMId},
-};
+use warp_core::user_preferences::GetUserPreferences;
+use warpui::{AppContext, EntityId, SingletonEntity as _};
 
 use super::{AIAgentInput, MCPContext, MCPServer, RequestMetadata, RunningCommand, Suggestions};
-use crate::ai::blocklist::{BlocklistAIPermissions, RequestInput};
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::ai::api_error::AIApiError;
+use crate::ai::blocklist::{BlocklistAIPermissions, RequestInput, SessionContext};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::facts::{AIFact, AIFactObjectModel};
+use crate::ai::llms::LLMId;
 use crate::ai::mcp::templatable_manager::TemplatableMCPServerInfo;
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::StoredObject;
-#[cfg(not(target_family = "wasm"))]
-use crate::remote_server::codebase_index_model::RemoteCodebaseIndexModel;
 use crate::settings::AISettings;
 use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use warp_core::user_preferences::GetUserPreferences;
-use warpui::{AppContext, EntityId, SingletonEntity as _};
 
 /// Unique, server-generated conversation-scoped token to be roundtripped to the API when sending
 /// requests that follow-up within a given conversation.
@@ -110,13 +105,12 @@ pub struct RequestParams {
 
     /// User-provided API keys for AI providers (BYO API Key).
     pub api_keys: Option<warp_multi_agent_api::request::settings::ApiKeys>,
-    pub allow_use_of_warp_credits_with_byok: bool,
+    pub allow_use_of_warp_credits: bool,
     pub autonomy_level: warp_multi_agent_api::AutonomyLevel,
     pub isolation_level: warp_multi_agent_api::IsolationLevel,
     pub web_search_enabled: bool,
     pub computer_use_enabled: bool,
     pub ask_user_question_enabled: bool,
-    pub remote_codebase_search_available: bool,
     pub research_agent_enabled: bool,
     pub supported_tools_override: Option<Vec<warp_multi_agent_api::ToolType>>,
     /// Zap BYOP only: local conversation id, used only for request-readiness diagnostic logs.
@@ -225,13 +219,12 @@ impl RequestParams {
             planning_enabled: true,
             should_redact_secrets: false,
             api_keys: None,
-            allow_use_of_warp_credits_with_byok: false,
+            allow_use_of_warp_credits: false,
             autonomy_level: warp_multi_agent_api::AutonomyLevel::Supervised,
             isolation_level: warp_multi_agent_api::IsolationLevel::None,
             web_search_enabled: false,
             computer_use_enabled: false,
             ask_user_question_enabled: false,
-            remote_codebase_search_available: false,
             research_agent_enabled: false,
             supported_tools_override: None,
             byop_conversation_id: Some(AIConversationId::new()),
@@ -342,8 +335,7 @@ impl RequestParams {
             is_byo_enabled,
             user_workspaces.is_aws_bedrock_credentials_enabled(app),
         );
-        let allow_use_of_warp_credits_with_byok =
-            *AISettings::as_ref(app).can_use_warp_credits_with_byok;
+        let allow_use_of_warp_credits = false;
 
         let app_execution_mode = AppExecutionMode::as_ref(app);
         let autonomy_level = if app_execution_mode.is_autonomous() {
@@ -377,13 +369,6 @@ impl RequestParams {
         let ask_user_question_enabled = BlocklistAIPermissions::as_ref(app)
             .get_ask_user_question_setting(app, terminal_view_id)
             != crate::ai::execution_profiles::AskUserQuestionPermission::Never;
-        #[cfg(not(target_family = "wasm"))]
-        let remote_codebase_search_available = FeatureFlag::RemoteCodebaseIndexing.is_enabled()
-            && RemoteCodebaseIndexModel::as_ref(app)
-                .active_repo_availability(&session_context, None)
-                .is_ready();
-        #[cfg(target_family = "wasm")]
-        let remote_codebase_search_available = false;
 
         let byop_target_task_id = if request_input.input_messages.len() == 1 {
             request_input
@@ -436,13 +421,12 @@ impl RequestParams {
             planning_enabled: true,
             should_redact_secrets,
             api_keys,
-            allow_use_of_warp_credits_with_byok,
+            allow_use_of_warp_credits,
             autonomy_level,
             isolation_level,
             web_search_enabled,
             computer_use_enabled,
             ask_user_question_enabled,
-            remote_codebase_search_available,
             research_agent_enabled,
             supported_tools_override: request_input.supported_tools_override.clone(),
             byop_conversation_id: Some(conversation.id),

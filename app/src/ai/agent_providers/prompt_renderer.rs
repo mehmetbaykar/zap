@@ -315,12 +315,11 @@ fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptConte
                     branch: branch.clone(),
                 });
             }
+            AIAgentContext::Repository { .. } | AIAgentContext::PullRequest { .. } => {}
             AIAgentContext::Skills { skills } => {
                 for s in skills {
                     let path = match &s.reference {
-                        ai::skills::SkillReference::Path(p) => {
-                            Some(p.to_string_lossy().into_owned())
-                        }
+                        ai::skills::SkillReference::Path(p) => Some(p.display_path()),
                         // Bundled skills load via InvokeSkill, not read_skill.
                         // Omit skill_path to avoid guiding the model toward a
                         // value that will always fail BYOP's skill_by_reference.
@@ -645,7 +644,7 @@ mod tests {
 
         let skill_path = "/home/user/.agents/skills/open-browser-use/SKILL.md";
         let skill = SkillDescriptor {
-            reference: SkillReference::Path(skill_path.into()),
+            reference: SkillReference::Path(std::path::PathBuf::from(skill_path).into()),
             name: "open-browser-use".into(),
             description: "Automates Chrome browser operations.".into(),
             scope: SkillScope::Project,

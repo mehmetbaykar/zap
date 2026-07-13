@@ -1,34 +1,30 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use settings::{Setting, ToggleableSetting};
 use warp_core::features::FeatureFlag;
-use warpui::{
-    elements::{Flex, MouseStateHandle, ParentElement},
-    ui_components::{components::UiComponent, switch::SwitchStateHandle},
-    Element, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
-};
+use warpui::elements::{Flex, MouseStateHandle, ParentElement};
+use warpui::ui_components::components::UiComponent;
+use warpui::ui_components::switch::SwitchStateHandle;
+use warpui::{Element, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
-use crate::{
-    appearance::Appearance,
-    report_if_error, send_telemetry_from_ctx,
-    server::telemetry::TelemetryEvent,
-    settings_view::settings_page::{
-        render_body_item, render_dropdown_item, AdditionalInfo, LocalOnlyIconState, ToggleState,
-    },
-    util::file::external_editor::{
-        settings::{
-            EditorChoice, EditorLayout, OpenCodePanelsFileEditor, OpenFileEditor, OpenFileLayout,
-            PreferMarkdownViewer, PreferTabbedEditorView,
-        },
-        EditorSettings, SUPPORTED_EDITORS,
-    },
-    view_components::{Dropdown, DropdownItem},
+use crate::appearance::Appearance;
+use crate::server::telemetry::TelemetryEvent;
+use crate::settings_view::settings_page::{
+    render_body_item, render_dropdown_item, AdditionalInfo, LocalOnlyIconState, ToggleState,
 };
+use crate::util::file::external_editor::settings::{
+    EditorChoice, EditorLayout, OpenCodePanelsFileEditor, OpenFileEditor, OpenFileLayout,
+    PreferMarkdownViewer, PreferTabbedEditorView,
+};
+use crate::util::file::external_editor::{EditorSettings, SUPPORTED_EDITORS};
+use crate::view_components::{Dropdown, DropdownItem};
+use crate::{report_if_error, send_telemetry_from_ctx};
 
 // The literals have been migrated to Fluent: `settings-external-editor-tabbed-header` /
 // `settings-external-editor-tabbed-desc`.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExternalEditorAction {
     SetEditor(EditorChoice),
     SetCodePanelsEditor(EditorChoice),

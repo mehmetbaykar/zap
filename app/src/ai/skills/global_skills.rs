@@ -1,13 +1,11 @@
 //! Helpers for resolving per-agent "global" skill specs into repos to
 //! ensure are available on disk before the agent runs.
 
-use std::{
-    collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
-};
+use std::collections::{HashMap, HashSet};
 
 use ai::skills::{provider_rank, ParsedSkill};
 use warp_cli::skill::SkillSpec;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 /// Returns the subset of skills that were explicitly requested by the given skill specs.
 ///
@@ -15,7 +13,7 @@ use warp_cli::skill::SkillSpec;
 /// in provider precedence order. For full-path specs, it matches the exact path relative to the
 /// repo root.
 pub fn filter_skills_by_spec(
-    repo_path: &Path,
+    repo_path: &LocalOrRemotePath,
     skills: Vec<ParsedSkill>,
     specs: &[SkillSpec],
 ) -> Vec<ParsedSkill> {
@@ -46,10 +44,10 @@ pub fn filter_skills_by_spec(
 }
 
 fn matching_skill_path(
-    repo_path: &Path,
-    skills_by_path: &HashMap<PathBuf, &ParsedSkill>,
+    repo_path: &LocalOrRemotePath,
+    skills_by_path: &HashMap<LocalOrRemotePath, &ParsedSkill>,
     spec: &SkillSpec,
-) -> Option<PathBuf> {
+) -> Option<LocalOrRemotePath> {
     if spec.is_full_path() {
         let path = repo_path.join(&spec.skill_identifier);
         return skills_by_path.contains_key(&path).then_some(path);
@@ -58,10 +56,10 @@ fn matching_skill_path(
 }
 
 fn matching_simple_skill_path(
-    repo_path: &Path,
-    skills_by_path: &HashMap<PathBuf, &ParsedSkill>,
+    repo_path: &LocalOrRemotePath,
+    skills_by_path: &HashMap<LocalOrRemotePath, &ParsedSkill>,
     skill_name: &str,
-) -> Option<PathBuf> {
+) -> Option<LocalOrRemotePath> {
     let mut matches = skills_by_path
         .values()
         .copied()
@@ -71,7 +69,7 @@ fn matching_simple_skill_path(
     matches.sort_by(|left, right| {
         provider_rank(left.provider)
             .cmp(&provider_rank(right.provider))
-            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.path.display_path().cmp(&right.path.display_path()))
     });
     matches.into_iter().map(|skill| skill.path.clone()).next()
 }

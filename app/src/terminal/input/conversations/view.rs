@@ -6,8 +6,8 @@ use std::sync::LazyLock;
 use warpui::elements::ChildView;
 use warpui::{Element, Entity, ModelHandle, View, ViewContext, ViewHandle};
 
+use crate::ai::agent_conversations_model::AgentConversationEntryId;
 use crate::ai::blocklist::agent_view::AgentViewController;
-use crate::ai::conversation_navigation::ConversationNavigationData;
 use crate::features::FeatureFlag;
 use crate::search::data_source::{Query, QueryFilter};
 use crate::search::mixer::SearchMixer;
@@ -26,9 +26,7 @@ use crate::terminal::model::session::active_session::ActiveSession;
 #[derive(Debug, Clone)]
 pub enum InlineConversationMenuEvent {
     /// User 'accepted' a conversation (hit enter).
-    NavigateToConversation {
-        conversation_navigation_data: Box<ConversationNavigationData>,
-    },
+    NavigateToConversation { item_id: AgentConversationEntryId },
     /// User dismissed the menu (escape or click).
     Dismissed,
 }
@@ -103,7 +101,7 @@ impl InlineConversationMenuView {
         ctx.subscribe_to_view(&menu_view, |me, _, event, ctx| match event {
             InlineMenuEvent::AcceptedItem { item, .. } => {
                 ctx.emit(InlineConversationMenuEvent::NavigateToConversation {
-                    conversation_navigation_data: Box::new(item.navigation_data.clone()),
+                    item_id: item.item_id,
                 });
             }
             InlineMenuEvent::SelectedItem { .. } | InlineMenuEvent::NoResults => (),

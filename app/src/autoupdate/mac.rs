@@ -1,9 +1,5 @@
 #![allow(deprecated)]
 
-use command::{blocking, r#async::Command};
-use futures::StreamExt;
-use futures_lite::future;
-use instant::Instant;
 use std::{
     env,
     ffi::CString,
@@ -13,13 +9,18 @@ use std::{
     str,
     time::Duration,
 };
-use warp_core::safe_error;
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use channel_versions::VersionInfo;
-use nix::unistd::{fchown, getgid};
-use nix::{errno::Errno, unistd::getuid};
+use command::blocking;
+use command::r#async::Command;
+use futures::StreamExt;
+use futures_lite::future;
+use instant::Instant;
+use nix::errno::Errno;
+use nix::unistd::{fchown, getgid, getuid};
 use warp_core::macos::get_bundle_path;
+use warp_core::safe_error;
 use warpui::{AppContext, ModelContext, SingletonEntity};
 
 use crate::{

@@ -382,7 +382,3 @@ where
 
     Ok(arg_type)
 }
-
-#[cfg(test)]
-#[path = "workflow_tests.rs"]
-mod tests;

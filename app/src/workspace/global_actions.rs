@@ -1,29 +1,29 @@
-use crate::network::NetworkStatus;
-use crate::persistence::ModelEvent;
-// Zap Wave 3-1: the `AuthClient` trait and the `workspace:debug_create_anonymous_user`
-// debug action were physically removed along with the retirement of the auth subsystem.
-use crate::app_state::get_app_state;
-use crate::terminal::alt_screen_reporting::AltScreenReporting;
-use crate::terminal::general_settings::GeneralSettings;
-use crate::workspace::cross_window_tab_drag::CrossWindowTabDrag;
-// Zap Wave 3-1: `ServerApiProvider` is no longer used by this file; the `debug_create_anonymous_user`
-// debug action was physically removed along with AuthClient.
-use ::settings::ToggleableSetting;
-use warp_core::execution_mode::AppExecutionMode;
-
-use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::agent::AIAgentExchangeId;
-use crate::root_view::OpenPath;
-use crate::undo_close::UndoCloseStack;
-use crate::workspace::{Workspace, WorkspaceAction};
-use crate::GlobalResourceHandlesProvider;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use ::settings::ToggleableSetting;
 use futures::stream::AbortHandle;
+use warp_core::execution_mode::AppExecutionMode;
 use warpui::r#async::Timer;
 use warpui::windowing::WindowManager;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, TypedActionView};
+
+// Zap Wave 3-1: the `auth` module, `AuthClient` trait, `ServerApiProvider`, and the
+// `workspace:debug_create_anonymous_user` / `app:maybe_log_out` / `app:log_out` debug actions
+// were physically removed along with the retirement of the auth subsystem. Zap no longer has a
+// concept of anonymous users or logging out.
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::AIAgentExchangeId;
+use crate::app_state::get_app_state;
+use crate::network::NetworkStatus;
+use crate::persistence::ModelEvent;
+use crate::root_view::OpenPath;
+use crate::terminal::alt_screen_reporting::AltScreenReporting;
+use crate::terminal::general_settings::GeneralSettings;
+use crate::undo_close::UndoCloseStack;
+use crate::workspace::cross_window_tab_drag::CrossWindowTabDrag;
+use crate::workspace::{Workspace, WorkspaceAction};
+use crate::GlobalResourceHandlesProvider;
 
 /// Specifies where a forked conversation should be opened.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

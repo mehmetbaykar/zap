@@ -2,32 +2,29 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use ai::agent::convert::ToolToAIAgentActionError;
+use ai::agent::UnknownCitationTypeError;
+use ai::skills::{skill_reference_from_read_skill_ref, SkillPathOrigin};
+use api::ask_user_question::question::QuestionType;
+use warp_core::channel::ChannelState;
+use warp_multi_agent_api as api;
+
 use crate::ai::agent::api::convert_conversation::{
     convert_input_context, convert_tool_call_result_to_input,
 };
 use crate::ai::agent::comment::CodeReview;
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::todos::AIAgentTodoList;
+use crate::ai::agent::util::parse_markdown_into_text_and_code_sections;
 use crate::ai::agent::{
-    util::parse_markdown_into_text_and_code_sections, AIAgentAction, AIAgentActionType,
-    AIAgentCitation, AIAgentInput, AIAgentOutputMessage, AIAgentText, AIAgentTodo,
-    ArtifactCreatedData, MessageId, SuggestedAgentModeWorkflow, SuggestedRule, Suggestions,
-    TodoOperation,
-};
-use crate::ai::agent::{
-    CloneRepositoryURL, SubagentCall, SubagentType, SummarizationType, WebFetchStatus,
+    AIAgentAction, AIAgentActionType, AIAgentAttachment, AIAgentCitation, AIAgentInput,
+    AIAgentOutputMessage, AIAgentText, AIAgentTodo, ArtifactCreatedData, CloneRepositoryURL,
+    MessageId, ReadSkillRequest, SubagentCall, SubagentType, SuggestedAgentModeWorkflow,
+    SuggestedRule, Suggestions, SummarizationType, TodoOperation, UserQueryMode, WebFetchStatus,
     WebSearchStatus,
 };
 use crate::ai::artifact_download::sanitized_basename;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
-use ai::agent::convert::ToolToAIAgentActionError;
-use ai::agent::UnknownCitationTypeError;
-use ai::skills::SkillReference;
-use api::ask_user_question::question::QuestionType;
-use warp_core::channel::ChannelState;
-use warp_multi_agent_api as api;
-
-use crate::ai::agent::{AIAgentAttachment, UserQueryMode};
 
 impl TryFrom<api::Attachment> for AIAgentAttachment {
     type Error = anyhow::Error;
@@ -51,6 +48,18 @@ impl TryFrom<api::Attachment> for AIAgentAttachment {
     }
 }
 
+fn convert_read_skill(
+    read_skill: api::message::tool_call::ReadSkill,
+    skill_path_origin: &SkillPathOrigin,
+) -> Result<AIAgentActionType, ToolToAIAgentActionError> {
+    let Some(reference) = read_skill.skill_reference else {
+        return Err(ToolToAIAgentActionError::MissingSkillReference);
+    };
+    let skill = skill_reference_from_read_skill_ref(reference, skill_path_origin)
+        .map_err(|_| ToolToAIAgentActionError::MissingSkillReference)?;
+    Ok(AIAgentActionType::ReadSkill(ReadSkillRequest { skill }))
+}
+
 /// Converts proto UserQueryMode to the internal UserQueryMode type
 pub(crate) fn convert_user_query_mode(mode: Option<&api::UserQueryMode>) -> UserQueryMode {
     let Some(mode) = mode else {
@@ -71,16 +80,6 @@ pub(crate) fn convert_user_query_mode(mode: Option<&api::UserQueryMode>) -> User
 // convert_run_agents) were removed; native-side orchestration types
 // (RunAgentsRequest et al.) remain local-only and are no longer populated
 // from an incoming proto tool call.
-
-fn convert_skill_reference(skill_ref: api::SkillRef) -> Option<SkillReference> {
-    match skill_ref.skill_reference {
-        Some(api::skill_ref::SkillReference::Path(path)) => Some(SkillReference::Path(path.into())),
-        Some(api::skill_ref::SkillReference::BundledSkillId(id)) => {
-            Some(SkillReference::BundledSkillId(id))
-        }
-        None => None,
-    }
-}
 
 /// Unexpected errors when trying to convert an [`api::Message`] to an [`AIAgentOutputMessage`].
 #[derive(Debug, thiserror::Error)]
@@ -116,6 +115,7 @@ pub struct ConversionParams<'a> {
     pub task_id: &'a TaskId,
     pub current_todo_list: Option<&'a AIAgentTodoList>,
     pub active_code_review: Option<&'a CodeReview>,
+    pub skill_path_origin: &'a SkillPathOrigin,
 }
 
 /// Trait for converting an [`api::Message`] to an [`AIAgentOutputMessage`].
@@ -635,10 +635,11 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
             api::message::tool_call::Tool::TransferShellCommandControlToUser(
                 transfer_shell_command_control_to_user,
             ) => create_standard_action(transfer_shell_command_control_to_user.into()),
-            api::message::tool_call::Tool::UseComputer(_)
-            | api::message::tool_call::Tool::RequestComputerUse(_) => {
-                // Computer Use has been removed; even if the model issues these two kinds of calls, they are not dispatched.
-                Err(ToolToAIAgentActionError::UnexpectedTool)
+            api::message::tool_call::Tool::UseComputer(use_computer) => {
+                create_standard_action(use_computer.try_into()?)
+            }
+            api::message::tool_call::Tool::RequestComputerUse(request_computer_use) => {
+                create_standard_action(request_computer_use.into())
             }
             api::message::tool_call::Tool::Subagent(subagent) => {
                 use api::message::tool_call::subagent::Metadata;
@@ -648,22 +649,8 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
                     Some(Metadata::Advice(_)) => SubagentType::Advice,
                     Some(Metadata::ComputerUse(_)) => SubagentType::ComputerUse,
                     Some(Metadata::Summarization(_)) => SubagentType::Summarization,
-                    Some(Metadata::ConversationSearch(cs_meta)) => {
-                        let query = if cs_meta.query.is_empty() {
-                            None
-                        } else {
-                            Some(cs_meta.query)
-                        };
-                        let conversation_id = if cs_meta.conversation_id.is_empty() {
-                            None
-                        } else {
-                            Some(cs_meta.conversation_id)
-                        };
-                        SubagentType::ConversationSearch {
-                            query,
-                            conversation_id,
-                        }
-                    }
+                    // This fork does not carry the server-backed conversation-search metadata.
+                    Some(Metadata::ConversationSearch(_)) => SubagentType::Unknown,
                     Some(Metadata::WarpDocumentationSearch(_)) => {
                         SubagentType::WarpDocumentationSearch
                     }
@@ -678,7 +665,7 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
                 create_standard_action(insert_review_comments.into())
             }
             api::message::tool_call::Tool::ReadSkill(read_skill) => {
-                create_standard_action(read_skill.try_into()?)
+                create_standard_action(convert_read_skill(read_skill, params.skill_path_origin)?)
             }
             api::message::tool_call::Tool::AskUserQuestion(ask) => {
                 let questions = ask

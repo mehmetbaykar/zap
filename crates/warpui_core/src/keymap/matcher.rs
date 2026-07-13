@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
+use itertools::Either;
+
 use super::{
     BindingLens, Context, CustomTag, EditableBinding, EditableBindingLens, FixedBinding, Keymap,
     Keystroke, Trigger,
 };
-use crate::{actions::StandardAction, Action, EntityId, EntityIdMap};
-use itertools::Either;
-use std::sync::Arc;
+use crate::actions::StandardAction;
+use crate::{Action, EntityId, EntityIdMap};
 
 #[derive(Default)]
 pub struct Matcher {

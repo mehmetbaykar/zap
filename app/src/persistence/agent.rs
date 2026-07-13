@@ -1,7 +1,10 @@
-use diesel::associations::HasTable;
-use diesel::{prelude::*, result::Error, SqliteConnection};
-use prost::Message;
 use std::collections::{HashMap, HashSet};
+
+use diesel::associations::HasTable;
+use diesel::prelude::*;
+use diesel::result::Error;
+use diesel::SqliteConnection;
+use prost::Message;
 use warp_multi_agent_api as api;
 
 use super::model::{AgentConversation, AgentConversationData};
@@ -42,8 +45,7 @@ pub(super) fn upsert_agent_conversation<'a>(
     tasks: impl IntoIterator<Item = &'a api::Task>,
     conversation_data_param: AgentConversationData,
 ) -> Result<(), UpsertConversationError> {
-    use diesel::ExpressionMethods;
-    use diesel::QueryDsl;
+    use diesel::{ExpressionMethods, QueryDsl};
     use schema::agent_conversations::dsl::*;
     use schema::agent_tasks::dsl as tasks_dsl;
     const MAX_PERSISTED_CONVERSATION_COUNT: i64 = 100;
@@ -233,8 +235,7 @@ pub(super) fn delete_agent_conversations(
     conn: &mut SqliteConnection,
     conversation_ids: Vec<String>,
 ) -> Result<(), diesel::result::Error> {
-    use diesel::ExpressionMethods;
-    use diesel::QueryDsl;
+    use diesel::{ExpressionMethods, QueryDsl};
     use schema::agent_conversations::dsl::*;
     use schema::agent_tasks::dsl as tasks_dsl;
 

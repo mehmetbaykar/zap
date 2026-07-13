@@ -1,34 +1,27 @@
-use super::{
-    common::{
-        add_command_xray_overlay, add_input_suggestions_overlays, add_voltron_overlay,
-        add_workflow_info_overlay, wrap_input_with_terminal_padding_and_focus_handler,
-    },
-    Input, InputAction, InputDropTargetData,
-};
-use crate::{
-    ai::blocklist::{
-        agent_view::{
-            agent_view_bg_fill,
-            shortcuts::{render_agent_shortcuts_view, AgentShortcutsViewContext},
-            AgentViewState,
-        },
-        InputType,
-    },
-    appearance::Appearance,
-    context_chips::spacing::{self},
-    features::FeatureFlag,
-    settings::InputModeSettings,
-    terminal::{settings::TerminalSettings, view::TerminalAction},
-    BlocklistAIHistoryModel,
-};
 use warp_core::settings::Setting;
-use warpui::{
-    elements::{
-        Border, Container, DropTarget, Element, Flex, Hoverable, ParentElement, SavePosition, Stack,
-    },
-    presenter::ChildView,
-    AppContext, SingletonEntity as _,
+use warpui::elements::{
+    Border, Container, DropTarget, Element, Flex, Hoverable, ParentElement, SavePosition, Stack,
 };
+use warpui::presenter::ChildView;
+use warpui::{AppContext, SingletonEntity as _};
+
+use super::common::{
+    add_command_xray_overlay, add_input_suggestions_overlays, add_voltron_overlay,
+    add_workflow_info_overlay, wrap_input_with_terminal_padding_and_focus_handler,
+};
+use super::{Input, InputAction, InputDropTargetData};
+use crate::ai::blocklist::agent_view::shortcuts::{
+    render_agent_shortcuts_view, AgentShortcutsViewContext,
+};
+use crate::ai::blocklist::agent_view::{agent_view_bg_fill, AgentViewState};
+use crate::ai::blocklist::InputType;
+use crate::appearance::Appearance;
+use crate::context_chips::spacing::{self};
+use crate::features::FeatureFlag;
+use crate::settings::InputModeSettings;
+use crate::terminal::settings::TerminalSettings;
+use crate::terminal::view::TerminalAction;
+use crate::BlocklistAIHistoryModel;
 
 impl Input {
     /// Renders the input when there is an active `AgentView`.
@@ -246,7 +239,13 @@ impl Input {
                 app,
             ));
         }
-        column.add_children([ChildView::new(&self.agent_status_view).finish(), input]);
+        column.add_child(ChildView::new(&self.agent_status_view).finish());
+        if let Some(panel) = self.queued_prompts_panel.as_ref() {
+            if panel.as_ref(app).should_render(app) {
+                column.add_child(ChildView::new(panel).finish());
+            }
+        }
+        column.add_child(input);
 
         let mut outer_stack = Stack::new().with_constrain_absolute_children();
         outer_stack.add_child(column.finish());

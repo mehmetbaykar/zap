@@ -32,7 +32,6 @@ pub const TEST_USER_UID: &str = "test_user_uid";
 pub mod user_uid;
 
 pub use user_uid::UserUid;
-
 #[derive(Clone, Copy, Debug)]
 pub enum OwnerType {
     Team,

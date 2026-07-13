@@ -187,7 +187,6 @@ impl From<SshCommandError> for crate::transport::Error {
     }
 }
 
-
 /// Uploads a single file to the remote host over the existing ControlMaster
 /// socket.
 pub async fn scp_upload(

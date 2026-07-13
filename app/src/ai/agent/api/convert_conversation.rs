@@ -4,6 +4,16 @@
 //! If some UI state is stored in the client, it needs to also be represented in the proto tasks somehow so it can be restored.
 //! Some conversions may be lossy if it's not important to recover that UI state.
 
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use ai::agent::action_result::{AskUserQuestionAnswerItem, AskUserQuestionResult, ReadSkillResult};
+use ai::skills::{ParsedSkill, SkillPathOrigin};
+use chrono::{DateTime, Local, TimeZone};
+use warp_core::command::ExitCode;
+use warp_multi_agent_api as api;
+use warp_multi_agent_api::ask_user_question_result::answer_item::Answer as AskUserQuestionAnswer;
+
 use crate::ai::agent::api::convert_from::{
     convert_user_query_mode, ConversionParams, ConvertAPIMessageToClientOutputMessage,
     MaybeAIAgentOutputMessage,
@@ -22,7 +32,7 @@ use crate::ai::agent::{
     ReadMCPResourceResult, ReadShellCommandOutputResult, RequestCommandOutputResult,
     RequestFileEditsResult, ServerOutputId, Shared, ShellCommandCompletedTrigger,
     ShellCommandError, SuggestNewConversationResult, SuggestPromptResult,
-    TransferShellCommandControlToUserResult, UpdatedFileContext,
+    TransferShellCommandControlToUserResult, UpdatedFileContext, UserQueryMode,
     WriteToLongRunningShellCommandResult,
 };
 use crate::ai::block_context::BlockContext;
@@ -31,16 +41,6 @@ use crate::ai::llms::LLMId;
 use crate::ai_assistant::execution_context::{WarpAiExecutionContext, WarpAiOsContext};
 use crate::terminal::model::block::BlockId;
 use crate::terminal::model::terminal_model::BlockIndex;
-use ai::agent::action_result::{AskUserQuestionAnswerItem, AskUserQuestionResult, ReadSkillResult};
-use ai::skills::ParsedSkill;
-use chrono::{DateTime, Local, TimeZone};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use warp_core::command::ExitCode;
-use warp_multi_agent_api as api;
-use warp_multi_agent_api::ask_user_question_result::answer_item::Answer as AskUserQuestionAnswer;
-
-use crate::ai::agent::UserQueryMode;
 
 /// Converts InputContext from the API to the application type `Arc<[AIAgentContext]>`
 #[allow(clippy::single_range_in_vec_init)]
@@ -149,7 +149,8 @@ pub(crate) fn convert_input_context(context: Option<&api::InputContext>) -> Arc<
             };
 
             // Convert binary data to base64
-            use base64::{engine::general_purpose, Engine};
+            use base64::engine::general_purpose;
+            use base64::Engine;
             let data = general_purpose::STANDARD.encode(&image.data);
 
             result.push(AIAgentContext::Image(ImageContext {
@@ -372,7 +373,10 @@ impl ConvertToExchanges for &api::Task {
                 }
                 api::message::Message::InvokeSkill(invoke_skill) => {
                     if let Some(api_skill) = invoke_skill.skill.clone() {
-                        if let Ok(parsed_skill) = ParsedSkill::try_from(api_skill) {
+                        if let Ok(parsed_skill) = ParsedSkill::try_from_api_with_origin(
+                            api_skill,
+                            &SkillPathOrigin::RestoredDisplayOnly,
+                        ) {
                             let user_query = invoke_skill
                                 .user_query
                                 .clone()
@@ -434,6 +438,7 @@ impl ConvertToExchanges for &api::Task {
                         // TODO(alokedesai): Support persistence for the code review state.
                         active_code_review: None,
                         task_id: &TaskId::new(api_message.task_id.clone()),
+                        skill_path_origin: &SkillPathOrigin::Unavailable,
                     })
                 {
                     current_outputs.push(output_msg);

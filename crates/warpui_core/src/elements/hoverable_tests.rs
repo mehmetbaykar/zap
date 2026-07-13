@@ -1,21 +1,20 @@
-use crate::EntityIdSet;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use pathfinder_geometry::vector::vec2f;
+
 use super::*;
-use crate::elements::DispatchEventResult;
+use crate::elements::{
+    ChildAnchor, ConstrainedBox, DispatchEventResult, EventHandler, OffsetPositioning,
+    ParentAnchor, ParentElement, ParentOffsetBounds, Rect, Stack, Text,
+};
+use crate::fonts::FamilyId;
+use crate::platform::WindowStyle;
 use crate::r#async::Timer;
 use crate::{
-    elements::{
-        ChildAnchor, ConstrainedBox, EventHandler, OffsetPositioning, ParentAnchor, ParentElement,
-        ParentOffsetBounds, Rect, Stack, Text,
-    },
-    fonts::FamilyId,
-    platform::WindowStyle,
-    App, AppContext, Entity, Event, Presenter, TypedActionView, ViewContext, WindowInvalidation,
-};
-use pathfinder_geometry::vector::vec2f;
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    rc::Rc,
+    App, AppContext, Entity, EntityIdSet, Event, Presenter, TypedActionView, ViewContext,
+    WindowInvalidation,
 };
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]

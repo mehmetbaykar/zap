@@ -1,9 +1,10 @@
-use anyhow::Result;
 use std::cell::RefCell;
 use std::collections::HashMap;
 #[cfg(feature = "local_fs")]
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+use anyhow::Result;
 use warpui::{Entity, ModelContext, SingletonEntity};
 
 use super::GlobalRules;

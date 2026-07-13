@@ -2,27 +2,28 @@ use pathfinder_geometry::vector::vec2f;
 use string_offset::ByteOffset;
 use warp_core::ui::appearance::Appearance;
 use warp_editor::model::CoreEditorModel;
-use warpui::{platform::WindowStyle, App};
-
-use crate::search::files::model::FileSearchModel;
+use warpui::platform::WindowStyle;
+use warpui::App;
 
 use super::MenuSource;
 use crate::auth::AuthStateProvider;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::model::view::ObjectStoreViewModel;
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::editor::InteractionState;
+use crate::network::NetworkStatus;
+use crate::notebooks::editor::keys::NotebookKeybindings;
+use crate::notebooks::notebook::NotebookView;
 use crate::pane_group::focus_state::{PaneFocusHandle, PaneGroupFocusState};
 use crate::pane_group::{BackingView as _, PaneId};
+use crate::search::files::model::FileSearchModel;
+use crate::settings_view::keybindings::KeybindingChangedNotifier;
 use crate::terminal::keys::TerminalKeybindings;
-use crate::{
-    cloud_object::model::{persistence::ObjectStoreModel, view::ObjectStoreViewModel},
-    cloud_object::update_manager::UpdateManager,
-    editor::InteractionState,
-    network::NetworkStatus,
-    notebooks::{editor::keys::NotebookKeybindings, notebook::NotebookView},
-    settings_view::keybindings::KeybindingChangedNotifier,
-    test_util::settings::initialize_settings_for_tests,
-    workspace::ActiveSession,
-    workspaces::{user_profiles::UserProfiles, user_workspaces::UserWorkspaces},
-    GlobalResourceHandles, GlobalResourceHandlesProvider,
-};
+use crate::test_util::settings::initialize_settings_for_tests;
+use crate::workspace::ActiveSession;
+use crate::workspaces::user_profiles::UserProfiles;
+use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::{GlobalResourceHandles, GlobalResourceHandlesProvider};
 
 fn initialize_app(app: &mut App) {
     initialize_settings_for_tests(app);

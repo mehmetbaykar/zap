@@ -1,4 +1,4 @@
-use warp_util::path::LineAndColumnArg;
+use warp_util::{local_or_remote_path::LocalOrRemotePath, path::LineAndColumnArg};
 use warpui::{AppContext, ModelHandle, SingletonEntity, View, ViewContext, ViewHandle};
 
 use crate::{
@@ -127,13 +127,19 @@ impl PaneContent for CodePane {
                 CodeViewEvent::TabChanged { file_path, .. } => {
                     if let Some(path) = file_path {
                         pane_group.active_file_model().update(ctx, |model, ctx| {
-                            model.active_file_changed(crate::code::buffer_location::BufferLocation::Local(path.clone()), ctx);
+                            model.active_file_changed(
+                                crate::code::buffer_location::BufferLocation::Local(path.clone()),
+                                ctx,
+                            );
                         });
                     }
                 }
                 CodeViewEvent::FileOpened { file_path, .. } => {
                     pane_group.active_file_model().update(ctx, |model, ctx| {
-                        model.active_file_changed(crate::code::buffer_location::BufferLocation::Local(file_path.clone()), ctx);
+                        model.active_file_changed(
+                            crate::code::buffer_location::BufferLocation::Local(file_path.clone()),
+                            ctx,
+                        );
                     });
 
                     // Track the opened file in the OpenedFilesModel
@@ -142,11 +148,15 @@ impl PaneContent for CodePane {
                         use crate::code::opened_files::OpenedFilesModel;
                         use repo_metadata::repositories::DetectedRepositories;
 
-                        if let Some(repo_path) =
-                            DetectedRepositories::as_ref(ctx).get_root_for_path(file_path)
+                        if let Some(repo_path) = DetectedRepositories::as_ref(ctx)
+                            .get_root_for_path(&LocalOrRemotePath::Local(file_path.clone()))
                         {
                             OpenedFilesModel::handle(ctx).update(ctx, |opened_files, ctx| {
-                                opened_files.file_opened(repo_path, file_path.clone(), ctx);
+                                opened_files.file_opened(
+                                    repo_path,
+                                    &LocalOrRemotePath::Local(file_path.clone()),
+                                    ctx,
+                                );
                             });
                         }
                     }

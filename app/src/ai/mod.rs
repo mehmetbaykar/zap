@@ -20,6 +20,8 @@ pub(crate) mod block_context;
 pub(crate) mod blocklist;
 pub(crate) mod byop_compaction;
 pub(crate) mod byop_readiness;
+#[cfg(any(feature = "local_fs", not(target_family = "wasm")))]
+pub(crate) mod codebase_auto_indexing;
 pub mod control_code_parser;
 pub(crate) mod conversation_navigation;
 pub(crate) mod conversation_status_ui;
@@ -27,7 +29,7 @@ pub(crate) mod conversation_utils;
 pub(crate) mod document;
 pub(crate) mod harness_display;
 pub(crate) mod llms;
-pub(crate) mod local_child_harnesses;
+pub(crate) mod local_harness_setup;
 pub mod onboarding;
 pub(crate) mod predict;
 pub(crate) mod project_rules_persister;

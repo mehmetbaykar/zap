@@ -4,12 +4,12 @@ mod agent_view_block;
 pub mod child_agent_status_card;
 mod controller;
 pub(crate) mod conversation_navigation_links;
+mod ephemeral_message_model;
+mod inline_agent_view_header;
 pub(crate) mod orchestration_avatar;
 pub(crate) mod orchestration_conversation_links;
 pub(crate) mod orchestration_pill_bar;
-pub(crate) mod orchestration_pin_model;
-mod ephemeral_message_model;
-mod inline_agent_view_header;
+pub(crate) mod orchestration_pill_bar_model;
 pub mod shortcuts;
 mod zero_state_block;
 

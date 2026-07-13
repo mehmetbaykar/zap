@@ -2,16 +2,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use warpui::{
-    elements::MouseStateHandle, AppContext, EntityId, SingletonEntity, ViewContext, ViewHandle,
-    WindowId,
-};
+use warpui::elements::MouseStateHandle;
+use warpui::{AppContext, EntityId, SingletonEntity, ViewContext, ViewHandle, WindowId};
 
 use super::OneTimeModalModel;
+use crate::appearance::Appearance;
+use crate::pane_group::PaneId;
+use crate::terminal::TerminalView;
 use crate::window_settings::WindowSettings;
-use crate::{
-    appearance::Appearance, pane_group::PaneId, terminal::TerminalView, workspace::Workspace,
-};
+use crate::workspace::Workspace;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// What composes a pane (i.e. the pane group and the pane itself).

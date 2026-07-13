@@ -1,8 +1,9 @@
 use ui_components::Component;
 use warp_core::ui::appearance::Appearance;
+use warpui::elements::Empty;
+use warpui::keymap::macros::*;
+use warpui::keymap::{FixedBinding, Keystroke};
 use warpui::{
-    elements::Empty,
-    keymap::{macros::*, FixedBinding, Keystroke},
     AppContext, Element, Entity, EventContext, ModelHandle, SingletonEntity, TypedActionView, View,
     ViewContext,
 };
@@ -16,16 +17,16 @@ pub struct OnboardingKeybindings {
     pub toggle_input_mode: String,
     /// Display string for submitting to local agent (e.g., "⌘⏎")
     pub submit_to_local_agent: String,
+    /// Display string for returning to terminal mode (e.g., "Esc")
+    pub return_to_terminal_mode: String,
 }
 
-use crate::{
-    callout::model::{
-        AgentModalityCalloutState, FinalState, OnboardingCalloutModel, OnboardingCalloutModelEvent,
-        OnboardingCalloutState, OnboardingQuery, UniversalInputCalloutState,
-    },
-    components::onboarding_callout::{self, Button, StepStatus},
-    OnboardingIntention,
+use crate::callout::model::{
+    AgentModalityCalloutState, FinalState, OnboardingCalloutModel, OnboardingCalloutModelEvent,
+    OnboardingCalloutState, OnboardingQuery, UniversalInputCalloutState,
 };
+use crate::components::onboarding_callout::{self, Button, StepStatus};
+use crate::OnboardingIntention;
 
 /// Options for rendering a callout.
 struct CalloutOptions {
@@ -120,66 +121,30 @@ fn get_agent_modality_callout_options(
     keybindings: &OnboardingKeybindings,
 ) -> Option<CalloutOptions> {
     let total_steps = match intention {
-        OnboardingIntention::Terminal => 2,
-        OnboardingIntention::AgentDrivenDevelopment => 4,
+        OnboardingIntention::Terminal => 1,
+        OnboardingIntention::AgentDrivenDevelopment => 2,
     };
 
     match state {
-        AgentModalityCalloutState::MeetTerminalInput => {
-            let title = if has_project || intention == OnboardingIntention::Terminal {
-                localized_static(
-                    "onboarding-callout-meet-terminal-title",
-                    "Meet your terminal input",
-                )
-            } else {
-                localized_static(
-                    "onboarding-callout-meet-updated-terminal-title",
-                    "Meet your updated terminal input",
-                )
-            };
-            Some(CalloutOptions {
-                title,
-                text: format!(
-                    "{} {} {}",
-                    localized(
-                        "onboarding-callout-meet-terminal-text-prefix",
-                        "Run commands from the terminal, or use"
-                    ),
-                    keybindings.submit_to_local_agent,
-                    localized(
-                        "onboarding-callout-meet-terminal-text-suffix",
-                        "to start or send to the agent."
-                    ),
-                ),
-                step: StepStatus::new(0, total_steps),
-                left_button: None,
-                right_button: ButtonOptions {
-                    text: localized("common-next", "Next"),
-                    action: OnboardingCalloutViewAction::NextClicked,
-                    keystroke: Some(Keystroke::parse("enter").unwrap_or_default()),
-                },
-                checkbox: None,
-            })
-        }
-        AgentModalityCalloutState::NaturalLanguageSupport => {
+        AgentModalityCalloutState::TerminalMode => {
             let is_final_step = intention == OnboardingIntention::Terminal;
             // Show different callout content based on initial NL detection state
             if initial_natural_language_detection_enabled {
                 // NL detection was already enabled - show simpler "overrides" callout without checkbox
                 Some(CalloutOptions {
                     title: localized_static(
-                        "onboarding-callout-nl-overrides-title",
-                        "Natural language overrides",
+                        "onboarding-callout-terminal-welcome-title",
+                        "Welcome to terminal mode",
                     ),
                     text: format!(
                         "{} {}.",
                         localized(
-                            "onboarding-callout-nl-overrides-text-prefix",
-                            "You can always override any auto-detection using"
+                            "onboarding-callout-terminal-mode-text-prefix",
+                            "Run commands here, just like a regular terminal. If you type a question or task using natural language, Zap can suggest opening it in agent mode. You can always override using"
                         ),
                         keybindings.toggle_input_mode,
                     ),
-                    step: StepStatus::new(1, total_steps),
+                    step: StepStatus::new(0, total_steps),
                     left_button: None,
                     right_button: ButtonOptions {
                         text: if is_final_step {
@@ -196,18 +161,18 @@ fn get_agent_modality_callout_options(
                 // NL detection was disabled - show full explanation with checkbox to enable
                 Some(CalloutOptions {
                     title: localized_static(
-                        "onboarding-callout-nl-support-title",
-                        "Natural language support",
+                        "onboarding-callout-terminal-mode-title",
+                        "You’re in terminal mode",
                     ),
                     text: format!(
                         "{} {}.",
                         localized(
-                            "onboarding-callout-nl-support-text-prefix",
-                            "Natural language input is off by default. If enabled, you can type requests in plain English and Zap will autodetect queries for the agent. You can always override them using"
+                            "onboarding-callout-terminal-mode-text-prefix",
+                            "Run commands here, just like a regular terminal. If you type a question or task using natural language, Zap can suggest opening it in agent mode. You can always override using"
                         ),
                         keybindings.toggle_input_mode,
                     ),
-                    step: StepStatus::new(1, total_steps),
+                    step: StepStatus::new(0, total_steps),
                     left_button: None,
                     right_button: ButtonOptions {
                         text: if is_final_step {
@@ -228,36 +193,18 @@ fn get_agent_modality_callout_options(
                 })
             }
         }
-        AgentModalityCalloutState::IntroducingAgentExperience => Some(CalloutOptions {
-            title: localized_static(
-                "onboarding-callout-new-agent-title",
-                "Introducing Zap's new agent experience",
-            ),
-            text: localized(
-                "onboarding-callout-new-agent-text",
-                "Agent conversations are now their own scoped view outside of your terminal. Simply hit ESC to return to the terminal at any point.",
-            ),
-            step: StepStatus::new(2, total_steps),
-            left_button: None,
-            right_button: ButtonOptions {
-                text: localized("common-next", "Next"),
-                action: OnboardingCalloutViewAction::NextClicked,
-                keystroke: Some(Keystroke::parse("enter").unwrap_or_default()),
-            },
-            checkbox: None,
-        }),
-        AgentModalityCalloutState::UpdatedAgentInput => {
+        AgentModalityCalloutState::AgentMode => {
             if has_project {
                 Some(CalloutOptions {
                     title: localized_static(
-                        "onboarding-callout-updated-agent-input-title",
-                        "Updated agent input",
+                        "onboarding-callout-agent-mode-title",
+                        "You're in agent mode",
                     ),
                     text: localized(
-                        "onboarding-callout-updated-agent-input-project-text",
-                        "Your agent input will detect natural language as well as commands by default. Use ! to lock the input in bash mode to write commands.\n\nSubmit the query below to have the agent initialize this project, or ⊗ to clear the input and start your own!",
+                        "onboarding-callout-agent-mode-project-text",
+                        "Agent mode gives your questions and tasks their own conversation, so you can ask follow-ups without leaving your terminal workflow.\n\nSubmit the query below to have the agent initialize this project, or ⊗ to clear the input and start your own!",
                     ),
-                    step: StepStatus::new(3, total_steps),
+                    step: StepStatus::new(1, total_steps),
                     left_button: Some(ButtonOptions {
                         text: localized(
                             "onboarding-callout-skip-initialization",
@@ -276,14 +223,22 @@ fn get_agent_modality_callout_options(
             } else {
                 Some(CalloutOptions {
                     title: localized_static(
-                        "onboarding-callout-updated-agent-input-title",
-                        "Updated agent input",
+                        "onboarding-callout-agent-mode-title",
+                        "You're in agent mode",
                     ),
-                    text: localized(
-                        "onboarding-callout-updated-agent-input-text",
-                        "Your agent input will detect natural language as well as commands by default. Use ! to lock the input in bash mode to write commands.",
+                    text: format!(
+                        "{} {} {}",
+                        localized(
+                            "onboarding-callout-agent-mode-no-project-text-prefix",
+                            "Agent mode gives your questions and tasks their own conversation, so you can ask follow-ups without leaving your terminal workflow. Press"
+                        ),
+                        keybindings.return_to_terminal_mode,
+                        localized(
+                            "onboarding-callout-agent-mode-no-project-text-suffix",
+                            "to return to terminal mode at any point."
+                        ),
                     ),
-                    step: StepStatus::new(3, total_steps),
+                    step: StepStatus::new(1, total_steps),
                     left_button: Some(ButtonOptions {
                         text: localized("onboarding-callout-back-terminal", "Back to terminal"),
                         action: OnboardingCalloutViewAction::BackToTerminalClicked,
@@ -452,11 +407,11 @@ impl OnboardingCalloutView {
     }
 
     /// Returns true if the callout should be positioned above the zero state.
-    /// For UpdatedAgentInput state, always position relative to the input box instead.
+    /// For the agent experience state, always position relative to the input box instead.
     pub fn should_position_above_zero_state(&self, app: &AppContext) -> bool {
         !matches!(
             self.model.as_ref(app).state(),
-            OnboardingCalloutState::AgentModality(AgentModalityCalloutState::UpdatedAgentInput)
+            OnboardingCalloutState::AgentModality(AgentModalityCalloutState::AgentMode)
         )
     }
 

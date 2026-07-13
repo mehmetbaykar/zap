@@ -1,4 +1,27 @@
 use std::collections::HashSet;
+use std::time::Duration;
+
+use chrono::Local;
+use fuzzy_match::FuzzyMatchResult;
+use repo_metadata::repositories::DetectedRepositories;
+use repo_metadata::watcher::DirectoryWatcher;
+use repo_metadata::RepoMetadataModel;
+use smol_str::SmolStr;
+use unindent::Unindent;
+#[cfg(feature = "voice_input")]
+use voice_input::VoiceInputToggledFrom;
+use warp_completer::completer::{
+    EngineFileType, Match, MatchStrategy, MatchedSuggestion, Priority, Suggestion,
+    SuggestionResults, SuggestionType,
+};
+use warp_completer::meta::Span;
+use warp_util::user_input::UserInput;
+use warpui::platform::WindowStyle;
+use warpui::r#async::Timer;
+use warpui::text::SelectionType;
+use warpui::{App, ReadModel, UpdateView, WindowId};
+use watcher::HomeDirectoryWatcher;
+use workflows::workflow::{Argument, ArgumentType, Workflow};
 
 use super::*;
 use crate::ai::agent::DriveObjectPayload;
@@ -15,27 +38,22 @@ use crate::ai::AIRequestUsageModel;
 use crate::auth::AuthManager;
 use crate::auth::AuthStateProvider;
 use crate::changelog_model::ChangelogModel;
+use crate::cloud_object::update_manager::UpdateManager;
 use crate::cloud_object::{
     model::persistence::ObjectStoreModel, GenericStringObjectFormat, JsonObjectType, ObjectType,
     Owner,
 };
+use crate::context_chips::prompt::Prompt;
+use crate::editor::{DisplayPoint, EditorAction, Point, TextStyleOperation};
+use crate::input_suggestions::{HistoryOrder, Item};
+use crate::network::NetworkStatus;
+use crate::notebooks::{NotebookObject, NotebookObjectModel};
 use crate::pricing::PricingInfoModel;
 use crate::search::files::model::FileSearchModel;
 use crate::server::ids::ClientId;
 use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
 use crate::terminal::input::slash_command_model::SlashCommandEntryState;
 use crate::terminal::input::slash_commands::SlashCommandsEvent;
-use crate::warp_managed_paths_watcher::WarpManagedPathsWatcher;
-use repo_metadata::repositories::DetectedRepositories;
-use repo_metadata::watcher::DirectoryWatcher;
-use repo_metadata::RepoMetadataModel;
-use watcher::HomeDirectoryWatcher;
-
-use crate::cloud_object::update_manager::UpdateManager;
-use crate::editor::{EditorAction, TextStyleOperation};
-use crate::input_suggestions::{HistoryOrder, Item};
-use crate::network::NetworkStatus;
-use crate::notebooks::{NotebookObject, NotebookObjectModel};
 
 use crate::settings::import::model::ImportedConfigModel;
 use crate::settings::{AliasExpansionSettings, AppEditorSettings, InputBoxType, PrivacySettings};
@@ -44,12 +62,11 @@ use crate::settings_view::keybindings::KeybindingChangedNotifier;
 use crate::system::SystemInfo;
 use crate::system::SystemStats;
 use crate::terminal::alt_screen_reporting::AltScreenReporting;
+use crate::terminal::block_list_viewport::ScrollPosition;
 use crate::terminal::event::BootstrappedEvent;
+use crate::terminal::general_settings::UserDefaultShellUnsupportedBannerState;
 use crate::terminal::keys::TerminalKeybindings;
 use crate::terminal::local_shell::LocalShellState;
-use crate::workspaces::user_workspaces::UserWorkspaces;
-
-use crate::terminal::block_list_viewport::ScrollPosition;
 use crate::terminal::local_tty::shell::ShellStarter;
 use crate::terminal::model::ansi::{Handler, PromptMetadata};
 use crate::terminal::model::block::SerializedBlock;
@@ -58,50 +75,21 @@ use crate::terminal::model::grid::Dimensions as _;
 use crate::terminal::model::index::Side;
 use crate::terminal::model::session::{BootstrapSessionType, SessionInfo};
 use crate::terminal::model::terminal_model::BlockIndex;
-
-use chrono::Local;
-use warpui::text::SelectionType;
-
-use crate::experiments;
+use crate::terminal::resizable_data::ResizableData;
 use crate::terminal::shared_session::protocol::Role;
 use crate::terminal::shell::ShellType;
-use crate::test_util::settings::initialize_settings_for_tests;
-use crate::themes::theme::AnsiColorIdentifier;
-use crate::workspace::{ActiveSession, OneTimeModalModel, ToastStack, WorkspaceRegistry};
-use crate::{
-    editor::{DisplayPoint, Point},
-    terminal::TerminalView,
-};
-use fuzzy_match::FuzzyMatchResult;
-use smol_str::SmolStr;
-use warp_completer::completer::{
-    EngineFileType, Match, MatchStrategy, MatchedSuggestion, Priority, Suggestion,
-    SuggestionResults, SuggestionType,
-};
-use warp_completer::meta::Span;
-
-use unindent::Unindent;
-
-#[cfg(feature = "voice_input")]
-use voice_input::VoiceInputToggledFrom;
-use warpui::platform::WindowStyle;
-use warpui::{App, ReadModel, UpdateView, WindowId};
-
 use crate::terminal::universal_developer_input::UniversalDeveloperInputButtonBarEvent;
-
-use warp_util::user_input::UserInput;
-use workflows::{
-    workflow::{Argument, ArgumentType, Workflow},
-    WorkflowObject, WorkflowObjectModel,
-};
-
-use crate::context_chips::prompt::Prompt;
-use crate::terminal::general_settings::UserDefaultShellUnsupportedBannerState;
-use crate::terminal::resizable_data::ResizableData;
 use crate::terminal::view::inline_banner::ByoLlmAuthBannerSessionState;
 use crate::terminal::writeable_pty::command_history::update_command_history;
+use crate::terminal::TerminalView;
+use crate::test_util::settings::initialize_settings_for_tests;
+use crate::themes::theme::AnsiColorIdentifier;
+use crate::warp_managed_paths_watcher::WarpManagedPathsWatcher;
+use crate::workspace::{ActiveSession, OneTimeModalModel, ToastStack, WorkspaceRegistry};
 use crate::workspaces::user_profiles::UserProfiles;
-use crate::{GlobalResourceHandles, GlobalResourceHandlesProvider};
+use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::{experiments, GlobalResourceHandles, GlobalResourceHandlesProvider};
+use workflows::{WorkflowObject, WorkflowObjectModel};
 
 pub fn initialize_app(app: &mut App) {
     initialize_settings_for_tests(app);
@@ -135,6 +123,9 @@ pub fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_| ActiveSession::default());
     app.add_singleton_model(AIRequestUsageModel::new_for_test);
     app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+    // QueuedQueryModel subscribes to history events; register after the
+    // history model is in place.
+    app.add_singleton_model(crate::ai::blocklist::QueuedQueryModel::new);
     app.add_singleton_model(|_| CLIAgentSessionsModel::new());
     app.add_singleton_model(BlocklistAIPermissions::new);
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
@@ -144,6 +135,7 @@ pub fn initialize_app(app: &mut App) {
     app.add_singleton_model(DirectoryWatcher::new);
     app.add_singleton_model(|_| DetectedRepositories::default());
     app.add_singleton_model(|_| UserProfiles::new(Vec::new()));
+    app.add_singleton_model(crate::remote_server::manager::RemoteServerManager::new);
     app.add_singleton_model(|_| crate::code_review::git_status_update::GitStatusUpdateModel::new());
     app.add_singleton_model(RepoMetadataModel::new);
     app.add_singleton_model(FileSearchModel::new);
@@ -194,11 +186,12 @@ pub fn initialize_app(app: &mut App) {
     });
     app.add_singleton_model(AgentConversationsModel::new);
     app.add_singleton_model(|ctx| {
-        crate::ai::blocklist::agent_view::orchestration_pin_model::OrchestrationPinModel::new(
+        crate::ai::blocklist::agent_view::orchestration_pill_bar_model::OrchestrationPillBarModel::new(
             Default::default(),
             ctx,
         )
     });
+    app.add_singleton_model(|ctx| crate::ai::agent_tips::AITipModel::new_for_agent_tips(ctx));
     // `LocalShellState` captures the user's interactive login-shell PATH (used
     // for MCP/sbx executable resolution). Tests don't exercise that capture, so
     // register the singleton in its `NotLoaded` state to satisfy callers that
@@ -402,11 +395,15 @@ pub fn simulate_directory_for_completion<A, S>(
 {
     let directory = directory.into();
     terminal.update(app, |terminal, ctx| {
-        terminal.model.lock().block_list_mut().prompt_only_precmd(PromptMetadata {
-            pwd: Some(directory.clone()),
-            session_id: Some(session_id.into()),
-            ..Default::default()
-        });
+        terminal
+            .model
+            .lock()
+            .block_list_mut()
+            .prompt_only_precmd(PromptMetadata {
+                pwd: Some(directory.clone()),
+                session_id: Some(session_id.into()),
+                ..Default::default()
+            });
 
         // Normally, the precmd message should be sufficient to also set this block metadata.
         // However, in unit tests the foreground executor does not relay the event.
@@ -5093,6 +5090,7 @@ fn test_alias_expansion_disabled_in_ai_input_mode() {
                         is_locked: true,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -5121,6 +5119,7 @@ fn test_alias_expansion_disabled_in_ai_input_mode() {
                         is_locked: true,
                     },
                     false, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -5504,6 +5503,7 @@ fn test_voice_input_toggle_preserves_lock_state() {
                         is_locked: true,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -5549,6 +5549,7 @@ fn test_voice_input_toggle_preserves_lock_state() {
                         is_locked: false, // Unlocked (auto-detection enabled)
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -5599,6 +5600,7 @@ fn test_input_type_button_explicit_lock() {
                         is_locked: false,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -5632,6 +5634,15 @@ fn test_input_type_button_explicit_lock() {
             after_click_config.is_locked,
             "Input should be locked when user explicitly clicks AgentMode button"
         );
+        let after_click_source = input.read(&app, |input, _| {
+            app.read_model(input.ai_input_model(), |ai_input, _| {
+                ai_input.last_ai_autodetection_source()
+            })
+        });
+        assert_eq!(
+            after_click_source,
+            Some(InputTypeAutoDetectionSource::ManualToggle)
+        );
 
         // Explicitly click Terminal button - should lock to Shell mode
         input.update(&mut app, |input, ctx| {
@@ -5651,6 +5662,15 @@ fn test_input_type_button_explicit_lock() {
         assert!(
             final_config.is_locked,
             "Input should be locked when user explicitly clicks Terminal button"
+        );
+        let final_source = input.read(&app, |input, _| {
+            app.read_model(input.ai_input_model(), |ai_input, _| {
+                ai_input.last_ai_autodetection_source()
+            })
+        });
+        assert_eq!(
+            final_source,
+            Some(InputTypeAutoDetectionSource::ManualToggle)
         );
     });
 }
@@ -5676,6 +5696,7 @@ fn test_auto_detection_toggle() {
                         is_locked: true,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -5925,6 +5946,7 @@ fn test_image_attachment_preserves_lock_state() {
                         is_locked: true,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -5949,6 +5971,15 @@ fn test_image_attachment_preserves_lock_state() {
             locked_config.is_locked,
             "Lock state should be preserved when selecting image"
         );
+        let locked_source = input.read(&app, |input, _| {
+            app.read_model(input.ai_input_model(), |ai_input, _| {
+                ai_input.last_ai_autodetection_source()
+            })
+        });
+        assert_eq!(
+            locked_source,
+            Some(InputTypeAutoDetectionSource::AttachmentForcedAi)
+        );
 
         // Test with unlocked Shell mode
         input.update(&mut app, |input, ctx| {
@@ -5959,6 +5990,7 @@ fn test_image_attachment_preserves_lock_state() {
                         is_locked: false,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -5982,6 +6014,15 @@ fn test_image_attachment_preserves_lock_state() {
         assert!(
             !unlocked_config.is_locked,
             "Auto-detection should be preserved when selecting image"
+        );
+        let unlocked_source = input.read(&app, |input, _| {
+            app.read_model(input.ai_input_model(), |ai_input, _| {
+                ai_input.last_ai_autodetection_source()
+            })
+        });
+        assert_eq!(
+            unlocked_source,
+            Some(InputTypeAutoDetectionSource::AttachmentForcedAi)
         );
     });
 }
@@ -6027,6 +6068,76 @@ fn test_ai_context_menu_closes_when_space_immediately_after_at_symbol() {
         });
     });
 }
+#[test]
+fn test_terminal_prefix_sets_shell_prefix_decision_source() {
+    App::test((), |mut app| async move {
+        let _am_flag = FeatureFlag::AgentMode.override_enabled(true);
+        let _agent_view_flag = FeatureFlag::AgentView.override_enabled(true);
+
+        initialize_app(&mut app);
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+        terminal.update(&mut app, |view, ctx| {
+            view.agent_view_controller().update(ctx, |controller, ctx| {
+                controller
+                    .try_enter_agent_view(
+                        None,
+                        AgentViewEntryOrigin::Input {
+                            was_prompt_autodetected: false,
+                        },
+                        ctx,
+                    )
+                    .expect("Should be able to enter agent view");
+            });
+        });
+        input.update(&mut app, |input, ctx| {
+            input.user_insert(TERMINAL_INPUT_PREFIX, ctx);
+        });
+
+        input.read(&app, |input, ctx| {
+            assert!(input.buffer_text(ctx).is_empty());
+            app.read_model(input.ai_input_model(), |input_model, _| {
+                assert_eq!(input_model.input_type(), InputType::Shell);
+                assert!(input_model.is_input_type_locked());
+                assert_eq!(
+                    input_model.last_ai_autodetection_source(),
+                    Some(InputTypeAutoDetectionSource::ShellPrefix)
+                );
+            });
+        });
+    });
+}
+
+#[test]
+fn test_source_less_locked_config_clears_decision_source() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+
+        input.update(&mut app, |input, ctx| {
+            input.ai_input_model().update(ctx, |input_model, ctx| {
+                let locked_shell_config = InputConfig {
+                    input_type: InputType::Shell,
+                    is_locked: true,
+                };
+                input_model.set_input_config(
+                    locked_shell_config,
+                    true,
+                    Some(InputTypeAutoDetectionSource::ShellPrefix),
+                    ctx,
+                );
+                input_model.set_input_config(locked_shell_config, true, None, ctx);
+            });
+        });
+
+        input.read(&app, |input, _| {
+            app.read_model(input.ai_input_model(), |input_model, _| {
+                assert_eq!(input_model.last_ai_autodetection_source(), None);
+            });
+        });
+    });
+}
 
 #[test]
 fn test_ai_context_menu_preserves_lock_state() {
@@ -6049,6 +6160,7 @@ fn test_ai_context_menu_preserves_lock_state() {
                         is_locked: true,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -6083,6 +6195,7 @@ fn test_ai_context_menu_preserves_lock_state() {
                         is_locked: false,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -6489,6 +6602,7 @@ fn test_input_config_transitions() {
                         is_locked: true,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -6657,7 +6771,7 @@ fn test_remove_ignored_suggestion_on_ai_query_execution() {
         // Set up AI input mode and execute the query
         input.update(&mut app, |input, ctx| {
             input.ai_input_model.update(ctx, |ai_input, ctx| {
-                ai_input.set_input_type(InputType::AI, ctx);
+                ai_input.set_input_type(InputType::AI, None, ctx);
             });
             input.clear_buffer_and_reset_undo_stack(ctx);
             input.user_insert(test_query, ctx);
@@ -6742,6 +6856,7 @@ fn test_terminal_only_ai_enter_enters_agent_view_and_clears_buffer() {
                         is_locked: false,
                     },
                     false, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -6803,6 +6918,7 @@ fn test_terminal_only_escape_locks_shell_mode() {
                         is_locked: false,
                     },
                     true, /* is_input_buffer_empty */
+                    None,
                     ctx,
                 );
             });
@@ -6820,6 +6936,12 @@ fn test_terminal_only_escape_locks_shell_mode() {
         });
         assert_eq!(config.input_type, InputType::Shell);
         assert!(config.is_locked);
+        let source = input.read(&app, |input, _| {
+            app.read_model(input.ai_input_model(), |ai_input, _| {
+                ai_input.last_ai_autodetection_source()
+            })
+        });
+        assert_eq!(source, Some(InputTypeAutoDetectionSource::ManualToggle));
     });
 }
 

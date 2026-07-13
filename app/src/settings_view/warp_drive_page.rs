@@ -1,22 +1,50 @@
-use super::{
-    settings_page::{
-        render_body_item, AdditionalInfo, MatchData, PageType, SettingsPageMeta,
-        SettingsPageViewHandle, SettingsWidget,
-    },
-    LocalOnlyIconState, SettingsSection, ToggleState,
-};
-use crate::{appearance::Appearance, drive::settings::WarpDriveSettings};
-use warp_core::{features::FeatureFlag, report_if_error, settings::ToggleableSetting as _};
+use warp_core::features::FeatureFlag;
+use warp_core::report_if_error;
+use warp_core::settings::ToggleableSetting as _;
+use warpui::elements::{Element, MouseStateHandle};
+use warpui::keymap::ContextPredicate;
+use warpui::ui_components::{components::UiComponent, switch::SwitchStateHandle};
 use warpui::{
-    elements::{Element, MouseStateHandle},
-    ui_components::{components::UiComponent, switch::SwitchStateHandle},
-    AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
+    id, Action, AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
+
+use super::settings_page::{
+    render_body_item, AdditionalInfo, MatchData, PageType, SettingsPageMeta,
+    SettingsPageViewHandle, SettingsWidget,
+};
+use super::{
+    flags, LocalOnlyIconState, SettingActionPairContexts, SettingActionPairDescriptions,
+    SettingsAction, SettingsSection, ToggleSettingActionPair, ToggleState,
+};
+use crate::appearance::Appearance;
+use crate::drive::settings::WarpDriveSettings;
 
 #[derive(Debug, Clone)]
 pub enum WarpDriveSettingsPageAction {
     ToggleShowWarpDrive,
     OpenUrl(String),
+}
+
+pub fn init_actions_from_parent_view<T: Action + Clone>(
+    app: &mut AppContext,
+    context: &ContextPredicate,
+    builder: fn(SettingsAction) -> T,
+) {
+    ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
+        vec![ToggleSettingActionPair::custom(
+            SettingActionPairDescriptions::new("Enable Zap Drive", "Disable Zap Drive"),
+            builder(SettingsAction::ZapDrive(
+                WarpDriveSettingsPageAction::ToggleShowWarpDrive,
+            )),
+            SettingActionPairContexts::new(
+                context.clone() & !id!(flags::ENABLE_WARP_DRIVE),
+                context.clone() & id!(flags::ENABLE_WARP_DRIVE),
+            ),
+            None,
+        )
+        .with_enabled(|| FeatureFlag::ZapNewSettingsModes.is_enabled())],
+        app,
+    );
 }
 
 pub struct WarpDriveSettingsPageView {

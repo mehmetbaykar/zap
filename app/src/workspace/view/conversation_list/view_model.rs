@@ -1,3 +1,6 @@
+use fuzzy_match::match_indices_case_insensitive;
+use warpui::{AppContext, Entity, ModelContext, ModelHandle, SingletonEntity};
+
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent_conversations_model::{
     AgentConversationEntry, AgentConversationEntryId, AgentConversationsModel,
@@ -5,8 +8,6 @@ use crate::ai::agent_conversations_model::{
     CreatorFilter, OwnerFilter, SourceFilter, StatusFilter,
 };
 use crate::ai::ambient_agents::AmbientAgentTaskId;
-use fuzzy_match::match_indices_case_insensitive;
-use warpui::{AppContext, Entity, ModelContext, ModelHandle, SingletonEntity};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ConversationOrTaskId {

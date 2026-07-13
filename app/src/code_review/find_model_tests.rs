@@ -20,6 +20,7 @@ use string_offset::CharOffset;
 use warp_core::ui::appearance::Appearance;
 use warp_editor::content::buffer::InitialBufferState;
 use warp_editor::render::element::VerticalExpansionBehavior;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::elements::Empty;
 use warpui::platform::WindowStyle;
 use warpui::{App, Element as _, ModelHandle, ViewHandle};
@@ -166,11 +167,11 @@ fn create_find_model_with_query(
     let (window_id, _) = app.add_window(WindowStyle::NotStealFocus, |_| TestView);
 
     let diff_state_model = app.add_model(DiffStateModel::new_for_test);
-    let repo_path = PathBuf::from("/tmp/test");
+    let repo_path = LocalOrRemotePath::from(PathBuf::from("/tmp/test"));
     let working_directories_model = app.add_model(|_| WorkingDirectoriesModel::new());
     let code_review_comment_batch =
         working_directories_model.update(app, |working_directories, ctx| {
-            working_directories.get_or_create_code_review_comments(repo_path.as_path(), ctx)
+            working_directories.get_or_create_code_review_comments(&repo_path, ctx)
         });
 
     let code_review_view = app.add_view(window_id, |ctx| {

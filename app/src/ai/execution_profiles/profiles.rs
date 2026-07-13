@@ -9,7 +9,7 @@ use warp_core::channel::ChannelState;
 use warp_core::user_preferences::GetUserPreferences;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
 
-use crate::ai::llms::LLMId;
+use crate::ai::llms::{LLMId, LLMPreferences};
 use crate::ai::mcp::templatable_manager::TemplatableMCPServerManagerEvent;
 use crate::cloud_object::model::persistence::{ObjectStoreEvent, UpdateSource};
 use crate::{send_telemetry_from_ctx, LaunchMode, TelemetryEvent};
@@ -715,9 +715,25 @@ impl AIExecutionProfilesModel {
             ctx,
         );
 
-        if changed {
+        // Gate on the limit being non-empty. The limit is cleared during
+        // reconciliation, which runs inside an `LLMPreferences` update where the
+        // `LLMPreferences::as_ref` read below would panic.
+        if changed && limit.is_some() {
+            let Some(profile) = self.get_profile_by_id(profile_id, ctx) else {
+                return;
+            };
+            let llm_preferences = LLMPreferences::as_ref(ctx);
+            let model_info = profile
+                .data()
+                .base_model
+                .as_ref()
+                .and_then(|id| llm_preferences.get_llm_info(id))
+                .unwrap_or_else(|| llm_preferences.get_default_base_model());
             send_telemetry_from_ctx!(
-                TelemetryEvent::AIExecutionProfileContextWindowSelected { tokens: limit },
+                TelemetryEvent::AIExecutionProfileContextWindowSelected {
+                    tokens: limit,
+                    model_id: model_info.id.to_string(),
+                },
                 ctx
             );
         }
@@ -922,6 +938,39 @@ impl AIExecutionProfilesModel {
             send_telemetry_from_ctx!(
                 TelemetryEvent::AIExecutionProfileSettingUpdated {
                     setting_type: "ask_user_question".to_string(),
+                    setting_value: format!("{permission:?}"),
+                },
+                ctx
+            );
+        }
+    }
+
+    pub fn set_run_agents(
+        &mut self,
+        profile_id: ClientProfileId,
+        permission: super::RunAgentsPermission,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let current_value = self
+            .get_profile_by_id(profile_id, ctx)
+            .map(|p| p.data().run_agents);
+
+        self.edit_profile_internal(
+            profile_id,
+            |profile| {
+                if profile.run_agents != permission {
+                    profile.run_agents = permission;
+                    return true;
+                }
+                false
+            },
+            ctx,
+        );
+
+        if current_value != Some(permission) {
+            send_telemetry_from_ctx!(
+                TelemetryEvent::AIExecutionProfileSettingUpdated {
+                    setting_type: "run_agents".to_string(),
                     setting_value: format!("{permission:?}"),
                 },
                 ctx

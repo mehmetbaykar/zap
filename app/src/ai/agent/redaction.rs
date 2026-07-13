@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
+use super::super::blocklist::block::secret_redaction::{
+    find_secrets_in_text, SECRET_REDACTION_REPLACEMENT_CHARACTER,
+};
 use crate::ai::agent::{
     AIAgentActionResultType, AIAgentAttachment, AIAgentContext, AIAgentInput, AnyFileContent,
     AskUserQuestionAnswerItem, AskUserQuestionResult, BlockContext, PassiveSuggestionResultType,
     PassiveSuggestionTrigger, RequestCommandOutputResult, TransferShellCommandControlToUserResult,
-};
-
-use super::super::blocklist::block::secret_redaction::{
-    find_secrets_in_text, SECRET_REDACTION_REPLACEMENT_CHARACTER,
 };
 
 /// Redact all detected secrets in-place within the given string.
@@ -197,6 +196,11 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
                     | AIAgentActionResultType::EditDocuments(_)
                     | AIAgentActionResultType::CreateDocuments(_) => {}
 
+                    // Computer Use results contain screenshots, coordinates, dimensions, and
+                    // platform metadata; there is no text payload that can be redacted here.
+                    AIAgentActionResultType::UseComputer(_)
+                    | AIAgentActionResultType::RequestComputerUse(_) => {}
+
                     // TransferShellCommandControlToUser result - similar to WriteToLongRunningShellCommand
                     AIAgentActionResultType::TransferShellCommandControlToUser(result) => {
                         match result {
@@ -214,9 +218,8 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
                     }
                     AIAgentActionResultType::AskUserQuestion(result) => {
                         redact_ask_user_question_result(result);
-                    }
-                    // Orchestrate results contain agent IDs / canonical error
-                    // strings only; no user-provided text to redact.
+                    } // Orchestrate results contain agent IDs / canonical error
+                      // strings only; no user-provided text to redact.
                 }
             }
             AIAgentInput::FetchReviewComments { repo_path, context } => {
@@ -301,6 +304,8 @@ fn redact_context(context: &mut [AIAgentContext]) {
             | AIAgentContext::Codebase { .. }
             | AIAgentContext::ProjectRules { .. }
             | AIAgentContext::Git { .. }
+            | AIAgentContext::Repository { .. }
+            | AIAgentContext::PullRequest { .. }
             | AIAgentContext::File(_)
             | AIAgentContext::Skills { .. } => {}
         }

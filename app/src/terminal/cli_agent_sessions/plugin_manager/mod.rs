@@ -6,21 +6,20 @@ pub(crate) mod opencode;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fmt;
-use std::io;
 use std::path::PathBuf;
+use std::{fmt, io};
 
 use async_trait::async_trait;
-
-use crate::features::FeatureFlag;
-use crate::terminal::model::session::LocalCommandExecutor;
-use crate::terminal::shell::ShellType;
-use crate::terminal::CLIAgent;
 use claude::ClaudeCodePluginManager;
 use codex::CodexPluginManager;
 use deepseek::DeepSeekPluginManager;
 use gemini::GeminiPluginManager;
 use opencode::OpenCodePluginManager;
+
+use crate::features::FeatureFlag;
+use crate::terminal::model::session::LocalCommandExecutor;
+use crate::terminal::shell::ShellType;
+use crate::terminal::CLIAgent;
 
 /// Distinguishes whether the plugin instructions modal should show install or update steps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +161,18 @@ pub(crate) trait CliAgentPluginManager: Send + Sync {
         false
     }
 
+    fn is_platform_plugin_installed(&self) -> bool {
+        true
+    }
+
+    fn platform_plugin_needs_update(&self) -> bool {
+        false
+    }
+
+    fn has_local_marketplace_override(&self) -> bool {
+        false
+    }
+
     /// Install the Zap notification plugin.
     /// Default returns an error — only agents with `can_auto_install() == true` should override.
     async fn install(&self) -> Result<(), PluginInstallError> {
@@ -201,6 +212,14 @@ pub(crate) trait CliAgentPluginManager: Send + Sync {
 
     /// Manual update instructions for the modal UI.
     fn update_instructions(&self) -> &'static PluginInstructions;
+
+    async fn install_platform_plugin(&self) -> Result<(), PluginInstallError> {
+        Ok(())
+    }
+
+    async fn update_platform_plugin(&self) -> Result<(), PluginInstallError> {
+        self.install_platform_plugin().await
+    }
 }
 
 /// Returns a plugin manager for the given CLI agent, or `None` if the agent

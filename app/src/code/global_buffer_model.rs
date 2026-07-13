@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use bimap::BiMap;
-
 use futures_util::stream::AbortHandle;
 use string_offset::{ByteOffset, CharOffset};
 use warp_core::features::FeatureFlag;

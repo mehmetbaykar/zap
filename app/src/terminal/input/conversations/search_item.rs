@@ -2,20 +2,15 @@
 
 use fuzzy_match::FuzzyMatchResult;
 use ordered_float::OrderedFloat;
-use warp_core::ui::color::coloru_with_opacity;
 use warp_core::ui::theme::Fill;
-use warp_core::ui::Icon;
 use warpui::elements::{ConstrainedBox, Container, Highlight, ParentElement, Shrinkable, Text};
 use warpui::fonts::{Properties, Weight};
 use warpui::prelude::{Align, CrossAxisAlignment, Flex, MainAxisAlignment, MainAxisSize};
-use warpui::scene::{CornerRadius, Radius};
 use warpui::text_layout::ClipConfig;
 use warpui::{AppContext, Element, SingletonEntity};
 
-use crate::ai::agent::conversation::ConversationStatus;
-use crate::ai::blocklist::BlocklistAIHistoryModel;
-use crate::ai::conversation_navigation::ConversationNavigationData;
-use crate::ai::conversation_status_ui::{render_status_element, STATUS_ELEMENT_PADDING};
+use crate::ai::agent_conversations_model::AgentConversationEntry;
+use crate::ai::conversation_status_ui::render_status_element;
 use crate::appearance::Appearance;
 use crate::search::{ItemHighlightState, SearchItem};
 use crate::terminal::input::conversations::AcceptConversation;
@@ -25,24 +20,17 @@ use crate::util::time_format::format_approx_duration_from_now_utc;
 /// Search item for rendering a conversation in the inline conversation menu.
 #[derive(Debug, Clone)]
 pub(super) struct ConversationSearchItem {
-    navigation_data: ConversationNavigationData,
+    entry: AgentConversationEntry,
     name_match_result: Option<FuzzyMatchResult>,
     score: OrderedFloat<f64>,
-    conversation_status: Option<ConversationStatus>,
 }
 
 impl ConversationSearchItem {
-    pub fn new(navigation_data: ConversationNavigationData, app: &AppContext) -> Self {
-        let history_model = BlocklistAIHistoryModel::as_ref(app);
-        let conversation_status = history_model
-            .conversation(&navigation_data.id)
-            .map(|conversation| conversation.status().clone());
-
+    pub fn new(entry: AgentConversationEntry) -> Self {
         Self {
-            navigation_data,
+            entry,
             name_match_result: None,
             score: OrderedFloat(f64::MIN),
-            conversation_status,
         }
     }
 
@@ -66,26 +54,7 @@ impl SearchItem for ConversationSearchItem {
         appearance: &Appearance,
     ) -> Box<dyn Element> {
         let icon_size = inline_styles::font_size(appearance);
-        let icon = match &self.conversation_status {
-            Some(conversation_status) => {
-                render_status_element(conversation_status, icon_size, appearance)
-            }
-            None => {
-                let icon_color = appearance
-                    .theme()
-                    .sub_text_color(appearance.theme().background());
-                Container::new(
-                    ConstrainedBox::new(Icon::History.to_warpui_icon(icon_color).finish())
-                        .with_width(icon_size)
-                        .with_height(icon_size)
-                        .finish(),
-                )
-                .with_uniform_padding(STATUS_ELEMENT_PADDING)
-                .with_background(coloru_with_opacity(icon_color.into(), 10))
-                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)))
-                .finish()
-            }
-        };
+        let icon = render_status_element(&self.entry.display.status, icon_size, appearance);
 
         Container::new(icon)
             .with_margin_right(inline_styles::ICON_MARGIN)
@@ -106,7 +75,9 @@ impl SearchItem for ConversationSearchItem {
         let primary_text_color = inline_styles::primary_text_color(theme, background_color.into());
         let secondary_text_color = theme.disabled_text_color(background_color.into());
 
-        let title = &self.navigation_data.title;
+        // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed); the
+        // "open in different pane" indicator it powered is not shown.
+        let title = &self.entry.display.title;
         let full_text = title.clone();
 
         let mut name_text = Text::new_inline(full_text, appearance.ui_font_family(), font_size)
@@ -133,7 +104,7 @@ impl SearchItem for ConversationSearchItem {
         // We want the timestamp 'column' to have fixed width so clipping is consistent,
         // limit the timestamp width to about 10 chars.
         let timestamp = Text::new_inline(
-            format_approx_duration_from_now_utc(self.navigation_data.last_updated.to_utc()),
+            format_approx_duration_from_now_utc(self.entry.display.last_updated),
             appearance.ui_font_family(),
             font_size,
         )
@@ -167,7 +138,7 @@ impl SearchItem for ConversationSearchItem {
 
     fn accept_result(&self) -> Self::Action {
         AcceptConversation {
-            navigation_data: self.navigation_data.clone(),
+            item_id: self.entry.id,
         }
     }
 
@@ -176,6 +147,6 @@ impl SearchItem for ConversationSearchItem {
     }
 
     fn accessibility_label(&self) -> String {
-        format!("Conversation: {}", self.navigation_data.title)
+        format!("Conversation: {}", self.entry.display.title)
     }
 }

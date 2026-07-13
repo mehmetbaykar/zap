@@ -1,11 +1,13 @@
+use std::fmt::Display;
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+use uuid::{NonNilUuid, Uuid};
+
 use crate::ai::agent::conversation::{AIConversation, ConversationStatus};
 use crate::ai::agent::{
     AIAgentOutputStatus, CancellationReason, FinishedAIAgentOutput, RenderableAIError,
 };
-use serde::{Deserialize, Serialize};
-use std::fmt::Display;
-use std::str::FromStr;
-use uuid::{NonNilUuid, Uuid};
 
 pub mod github_auth_notifier;
 pub mod spawn;
@@ -111,6 +113,7 @@ pub fn conversation_output_status_from_conversation(
             blocked_action: blocked_action.clone(),
         });
     }
+
     if let Some(last_exchange) = conversation.root_task_exchanges().last() {
         if let AIAgentOutputStatus::Finished { finished_output } = &last_exchange.output_status {
             let status = match finished_output {

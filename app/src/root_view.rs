@@ -1364,6 +1364,8 @@ pub enum NewWorkspaceSource {
         options: Box<NewTerminalOptions>,
         initial_query: Option<String>,
     },
+    /// Starts the workspace with the Cloud Agent setup tab.
+    AmbientAgent,
     /// A tab is being transferred from another window via the transferable views framework.
     /// The workspace will create a placeholder tab, which will be replaced by the transferred
     /// PaneGroup after window creation.
@@ -1897,16 +1899,6 @@ impl RootView {
                 mark_local_onboarding_completed(ctx);
                 if FeatureFlag::HOAOnboardingFlow.is_enabled() {
                     mark_hoa_onboarding_completed(ctx);
-                }
-
-                // Terminal-intent users should not see the conversation list
-                // auto-opened for discoverability.
-                if matches!(selected_settings, SelectedSettings::Terminal { .. }) {
-                    AISettings::handle(ctx).update(ctx, |settings, ctx| {
-                        report_if_error!(settings
-                            .has_auto_opened_conversation_list
-                            .set_value(true, ctx));
-                    });
                 }
 
                 let is_logged_in = AuthStateProvider::as_ref(ctx).get().is_logged_in();
@@ -2489,9 +2481,10 @@ impl RootView {
         key_code: &warpui::platform::keyboard::KeyCode,
         ctx: &mut ViewContext<Self>,
     ) -> bool {
-        use crate::settings::AISettings;
         use voice_input::{VoiceInput, VoiceInputState, VoiceInputToggledFrom};
         use warpui::event::KeyState;
+
+        use crate::settings::AISettings;
 
         // Check that the released key matches the configured voice input toggle key.
         let ai_settings = AISettings::as_ref(ctx);
@@ -2540,12 +2533,10 @@ impl RootView {
 
         if FeatureFlag::ZapNewSettingsModes.is_enabled() && FeatureFlag::TabConfigs.is_enabled() {
             let intention = tutorial.intention();
-            // Terminal-intent users skip the session config modal.
             if matches!(intention, OnboardingIntention::AgentDrivenDevelopment) {
                 workspace.update(ctx, |view, ctx| {
-                    view.set_pending_onboarding_intention(intention);
                     view.open_vertical_tabs_panel_if_enabled(ctx);
-                    view.show_session_config_modal(ctx);
+                    view.start_agent_onboarding_tutorial(tutorial, ctx);
                 });
             } else {
                 workspace.update(ctx, |view, ctx| {

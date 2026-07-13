@@ -1,15 +1,38 @@
 #[allow(dead_code)]
 pub mod entry;
 
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
+use clap::ValueEnum;
 pub use entry::{
     AgentConversationEntry, AgentConversationEntryId, AgentConversationNavigationSubject,
     AgentConversationProvenance,
 };
+use futures::stream::AbortHandle;
+use instant::Instant;
+use itertools::Itertools;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use warp_cli::agent::Harness;
+use warp_core::execution_mode::AppExecutionMode;
+use warp_core::features::FeatureFlag;
+use warp_core::report_error;
+use warp_core::ui::theme::color::internal_colors;
+use warp_core::ui::theme::WarpTheme;
+use warpui::color::ColorU;
+use warpui::r#async::Timer;
+use warpui::windowing::{StateEvent, WindowManager};
+use warpui::{
+    duration_with_jitter, AppContext, Entity, EntityId, ModelContext, RequestState,
+    SingletonEntity, WindowId,
+};
 
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
-use crate::ai::ambient_agents::AmbientAgentTaskId;
-use crate::ai::ambient_agents::{AgentSource, AmbientAgentTask, AmbientAgentTaskState};
+use crate::ai::ambient_agents::{
+    AgentSource, AmbientAgentTask, AmbientAgentTaskId, AmbientAgentTaskState,
+};
 use crate::ai::artifacts::Artifact;
 use crate::ai::blocklist::{
     format_credits, BlocklistAIHistoryEvent, BlocklistAIHistoryModel, ConversationStatusUpdate,
@@ -19,17 +42,6 @@ use crate::auth::{AuthStateProvider, UserUid};
 use crate::ui_components::icons::Icon;
 use crate::workspace::{RestoreConversationLayout, WorkspaceAction};
 use crate::workspaces::user_profiles::UserProfiles;
-use chrono::{DateTime, Utc};
-use clap::ValueEnum;
-use itertools::Itertools;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::{HashMap, HashSet};
-use warp_cli::agent::Harness;
-use warp_core::features::FeatureFlag;
-use warp_core::ui::theme::{color::internal_colors, WarpTheme};
-use warpui::color::ColorU;
-use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, WindowId};
-
 const SESSION_EXPIRATION_TIME: chrono::Duration = chrono::Duration::weeks(1);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -1230,7 +1242,9 @@ impl AgentConversationsModel {
             // UpdateTaskDescription, last_updated uses exchange.start_time which is set at append time).
             | BlocklistAIHistoryEvent::UpdatedStreamingExchange { .. }
             | BlocklistAIHistoryEvent::ConversationOwnershipTransferred { .. }
-            | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. } => {}
+            | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. }
+            | BlocklistAIHistoryEvent::ConversationUsageMetadataUpdated { .. }
+            | BlocklistAIHistoryEvent::LocalSharedSessionEstablished { .. } => {}
 
             // A server/agent id was assigned to the conversation (e.g. via
             // StreamInit). Copy-link resolution depends on it, so notify

@@ -1,4 +1,16 @@
+use warpui::App;
+
 use super::*;
+use crate::ai::agent_providers::AgentProviderSecrets;
+use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
+use crate::ai::mcp::TemplatableMCPServerManager;
+use crate::auth::{AuthManager, AuthStateProvider};
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::network::NetworkStatus;
+use crate::test_util::settings::initialize_settings_for_tests;
+use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::LaunchMode;
 
 // -- DisableReason::should_clear_preference tests --
 
@@ -260,6 +272,48 @@ fn custom_llm_display_name_falls_back_to_name_when_alias_missing() {
 }
 
 #[test]
+fn custom_endpoint_usage_display_label_resolves_alias_name_and_generic_fallback() {
+    let keys = ai::api_keys::ApiKeys {
+        custom_endpoints: vec![endpoint(
+            "ep",
+            "https://a.io",
+            "k",
+            vec![
+                model("raw-alias", Some("Alias"), "uuid-alias"),
+                model("raw-name", None, "uuid-name"),
+                model("raw~name", None, "uuid-tilde-name"),
+            ],
+        )],
+        ..Default::default()
+    };
+    let preferences = LLMPreferences {
+        models_by_feature: ModelsByFeature::default(),
+        last_update: None,
+        base_llm_for_terminal_view: HashMap::new(),
+        reasoning_effort_per_terminal: HashMap::new(),
+        last_used_reasoning: HashMap::new(),
+        custom_llms: build_custom_llm_infos(&keys),
+    };
+
+    assert_eq!(
+        preferences.custom_endpoint_usage_display_label("uuid-alias"),
+        "Alias"
+    );
+    assert_eq!(
+        preferences.custom_endpoint_usage_display_label("uuid-name"),
+        "raw-name"
+    );
+    assert_eq!(
+        preferences.custom_endpoint_usage_display_label("uuid-tilde-name"),
+        "raw~name"
+    );
+    assert_eq!(
+        preferences.custom_endpoint_usage_display_label("unknown"),
+        CUSTOM_ENDPOINT_USAGE_FALLBACK_LABEL
+    );
+}
+
+#[test]
 fn custom_llm_infos_skip_endpoints_with_empty_api_key() {
     let keys = ai::api_keys::ApiKeys {
         custom_endpoints: vec![
@@ -358,4 +412,64 @@ fn removing_endpoint_purges_all_its_models_from_custom_llms() {
     let infos = build_custom_llm_infos(&after);
     assert_eq!(infos.len(), 1);
     assert_eq!(infos[0].id.as_str(), "uuid-k1");
+}
+
+#[test]
+fn reconcile_preserves_custom_models_saved_on_execution_profile() {
+    App::test((), |mut app| async move {
+        let _custom_inference_flag = FeatureFlag::CustomInferenceEndpoints.override_enabled(true);
+
+        initialize_settings_for_tests(&mut app);
+        app.add_singleton_model(UpdateManager::mock);
+        app.add_singleton_model(ObjectStoreModel::mock);
+        app.add_singleton_model(|_| TemplatableMCPServerManager::default());
+        app.add_singleton_model(|ctx| {
+            AIExecutionProfilesModel::new(&LaunchMode::new_for_unit_test(), ctx)
+        });
+        app.add_singleton_model(AgentProviderSecrets::new);
+        app.add_singleton_model(|_| AuthStateProvider::new_for_test());
+        app.add_singleton_model(AuthManager::new_for_test);
+        app.add_singleton_model(|_| NetworkStatus::new());
+        app.add_singleton_model(UserWorkspaces::default_mock);
+
+        let profiles_model = AIExecutionProfilesModel::handle(&app);
+        let llm_preferences = app.add_singleton_model(LLMPreferences::new);
+
+        let custom_model_id = LLMId::from("custom-model-config-key");
+        ApiKeyManager::handle(&app).update(&mut app, |api_key_manager, ctx| {
+            api_key_manager.add_custom_endpoint(
+                "local".to_string(),
+                "https://example.com/v1".to_string(),
+                "test-key".to_string(),
+                vec![(
+                    "custom-model".to_string(),
+                    Some("Custom Model".to_string()),
+                    Some(custom_model_id.to_string()),
+                )],
+                ctx,
+            );
+        });
+
+        let default_profile_id =
+            profiles_model.read(&app, |profiles, _| profiles.default_profile_id());
+        profiles_model.update(&mut app, |profiles, ctx| {
+            profiles.set_base_model(default_profile_id, Some(custom_model_id.clone()), ctx);
+            profiles.set_coding_model(default_profile_id, Some(custom_model_id.clone()), ctx);
+            profiles.set_cli_agent_model(default_profile_id, Some(custom_model_id.clone()), ctx);
+        });
+
+        llm_preferences.update(&mut app, |preferences, ctx| {
+            preferences.update_feature_model_choices(Ok(ModelsByFeature::default()), ctx);
+        });
+
+        profiles_model.read(&app, |profiles, ctx| {
+            let profile = profiles.default_profile(ctx);
+            assert_eq!(profile.data().base_model.as_ref(), Some(&custom_model_id));
+            assert_eq!(profile.data().coding_model.as_ref(), Some(&custom_model_id));
+            assert_eq!(
+                profile.data().cli_agent_model.as_ref(),
+                Some(&custom_model_id)
+            );
+        });
+    });
 }

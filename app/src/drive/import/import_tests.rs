@@ -3,14 +3,12 @@ use std::env::current_dir;
 use warp_core::ui::appearance::Appearance;
 use warpui::App;
 
-use crate::{
-    cloud_object::model::persistence::ObjectStoreModel,
-    cloud_object::update_manager::UpdateManager, network::NetworkStatus,
-    workspaces::user_workspaces::UserWorkspaces, GlobalResourceHandles,
-    GlobalResourceHandlesProvider,
-};
-
 use super::expand_dirs;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::network::NetworkStatus;
+use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::{GlobalResourceHandles, GlobalResourceHandlesProvider};
 
 #[test]
 fn test_expand_directories() {

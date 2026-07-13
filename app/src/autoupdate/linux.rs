@@ -1,13 +1,12 @@
 use std::io::Write;
 use std::path::PathBuf;
 
+use super::release_assets_directory_url;
+use super::{DownloadProgress, DownloadReady, ProgressCallback, ReadyForRelaunch};
 use anyhow::{bail, Context as _, Result};
 use channel_versions::VersionInfo;
 use instant::Duration;
 use warp_core::channel::{Channel, ChannelState};
-
-use super::release_assets_directory_url;
-use super::{DownloadProgress, DownloadReady, ProgressCallback, ReadyForRelaunch};
 
 lazy_static::lazy_static! {
     /// Stores the path to the current executable.
@@ -220,6 +219,7 @@ mod appimage {
 
 mod package_manager {
     use super::*;
+    use crate::appearance::Appearance;
 
     pub(super) fn relaunch() -> Result<()> {
         let Ok(program) = CURRENT_EXE.as_ref() else {

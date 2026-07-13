@@ -9,18 +9,16 @@ use async_stream::stream;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use http::HeaderValue;
+pub use http::header::AUTHORIZATION;
 use http::header::HeaderName;
-pub use http::{HeaderMap, StatusCode, header::AUTHORIZATION};
+pub use http::{HeaderMap, StatusCode};
 use reqwest::IntoUrl;
 use reqwest_eventsource::RequestBuilderExt;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use warp_core::{
-    channel::{Channel, ChannelState},
-    execution_mode,
-    operating_system_info::OperatingSystemInfo,
-    report_error,
-};
+use warp_core::channel::{Channel, ChannelState};
+use warp_core::operating_system_info::OperatingSystemInfo;
+use warp_core::{execution_mode, report_error};
 
 pub mod proxy;
 pub use proxy::{ProxyConfig, ProxyMode, current_proxy_config, set_global_proxy_config};
@@ -331,6 +329,11 @@ impl Client {
     }
 
     pub async fn execute(&self, request: Request) -> reqwest::Result<Response> {
+        self.execute_inner(request).await
+    }
+
+    /// Core request execution logic shared by all platforms.
+    async fn execute_inner(&self, request: Request) -> reqwest::Result<Response> {
         let Request {
             wrapped: request,
             serialized_payload,
@@ -582,12 +585,14 @@ impl<'a> RequestBuilder<'a> {
     }
 }
 
-/// An error returned from `Response::error_for_status` that includes response headers.
-/// This allows callers to inspect headers (like X-Zap-Error-Code) when handling errors.
+/// An error returned from `Response::error_for_status` that includes response metadata.
+/// This allows callers to inspect headers (like X-Zap-Error-Code) and the response body when
+/// handling errors.
 #[derive(Debug)]
 pub struct ResponseError {
     pub source: reqwest::Error,
-    pub headers: HeaderMap,
+    pub headers: Box<HeaderMap>,
+    pub body: Option<String>,
 }
 
 impl std::fmt::Display for ResponseError {
@@ -634,7 +639,28 @@ impl Response {
         let headers = self.0.headers().clone();
         match self.0.error_for_status() {
             Ok(response) => Ok(Self(response)),
-            Err(source) => Err(ResponseError { source, headers }),
+            Err(source) => Err(ResponseError {
+                source,
+                headers: Box::new(headers),
+                body: None,
+            }),
+        }
+    }
+
+    /// Checks the response status and returns an error if it's not successful.
+    /// Unlike `error_for_status`, this also reads and preserves the response body on errors.
+    pub async fn error_for_status_with_body(self) -> Result<Self, ResponseError> {
+        let headers = self.0.headers().clone();
+        match self.0.error_for_status_ref() {
+            Ok(_) => Ok(self),
+            Err(source) => {
+                let body = self.text().await.ok();
+                Err(ResponseError {
+                    source,
+                    headers: Box::new(headers),
+                    body,
+                })
+            }
         }
     }
 
@@ -644,7 +670,11 @@ impl Response {
         let headers = self.0.headers().clone();
         match self.0.error_for_status_ref() {
             Ok(response) => Ok(response),
-            Err(source) => Err(ResponseError { source, headers }),
+            Err(source) => Err(ResponseError {
+                source,
+                headers: Box::new(headers),
+                body: None,
+            }),
         }
     }
 
@@ -674,7 +704,7 @@ impl<'c> oauth2::AsyncHttpClient<'c> for Client {
     type Future = Pin<Box<dyn Future<Output = Result<oauth2::HttpResponse, Self::Error>> + 'c>>;
     #[cfg(not(target_arch = "wasm32"))]
     type Future =
-        Pin<Box<dyn Future<Output = Result<oauth2::HttpResponse, Self::Error>> + Send + Sync + 'c>>;
+        Pin<Box<dyn Future<Output = Result<oauth2::HttpResponse, Self::Error>> + Send + 'c>>;
 
     fn call(&'c self, request: oauth2::HttpRequest) -> Self::Future {
         Box::pin(async move {

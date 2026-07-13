@@ -1,22 +1,20 @@
 mod helper;
 mod model_impl;
 
+use chrono::TimeDelta;
 pub use helper::AIBlockModelHelper;
 pub use model_impl::*;
 use warp_core::features::FeatureFlag;
+use warpui::{AppContext, ViewContext};
 
 use crate::terminal::shared_session::ParticipantId;
 
-use crate::ai::{
-    agent::{
-        conversation::AIConversationId, AIAgentExchangeId, AIAgentInput, AIAgentOutput,
-        CancellationReason, PassiveSuggestionTrigger, PassiveSuggestionTriggerType,
-        RenderableAIError, ServerOutputId, Shared,
-    },
-    llms::LLMId,
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::{
+    AIAgentExchangeId, AIAgentInput, AIAgentOutput, CancellationReason, PassiveSuggestionTrigger,
+    PassiveSuggestionTriggerType, RenderableAIError, ServerOutputId, Shared,
 };
-use chrono::TimeDelta;
-use warpui::{AppContext, ViewContext};
+use crate::ai::llms::LLMId;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PassiveRequestType {
@@ -223,18 +221,14 @@ pub trait AIBlockModel {
 pub mod testing {
     use warpui::{AppContext, ViewContext};
 
-    use crate::ai::{
-        agent::{
-            conversation::AIConversationId, AIAgentInput, AIAgentOutput, ServerOutputId, Shared,
-        },
-        blocklist::{
-            model::{AIRequestType, PassiveRequestType, PassiveSuggestionTriggerType},
-            AIBlock,
-        },
-        llms::LLMId,
-    };
-
     use super::{AIBlockModel, AIBlockOutputStatus, OutputStatusUpdateCallback};
+    use crate::ai::agent::conversation::AIConversationId;
+    use crate::ai::agent::{AIAgentInput, AIAgentOutput, ServerOutputId, Shared};
+    use crate::ai::blocklist::model::{
+        AIRequestType, PassiveRequestType, PassiveSuggestionTriggerType,
+    };
+    use crate::ai::blocklist::AIBlock;
+    use crate::ai::llms::LLMId;
 
     pub struct FakeAIBlockModel {
         input: Vec<AIAgentInput>,

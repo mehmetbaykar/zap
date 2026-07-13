@@ -2,8 +2,20 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ui_components::lightbox;
 use warp_util::path::LineAndColumnArg;
+use warpui::accessibility::AccessibilityVerbosity;
+use warpui::geometry::rect::RectF;
+use warpui::geometry::vector::Vector2F;
+use warpui::platform::Cursor;
+use warpui::{EntityId, WindowId};
 
+use super::global_actions::{ForkFromExchange, ForkedConversationDestination};
+use super::tab_settings::{
+    VerticalTabsCompactSubtitle, VerticalTabsDisplayGranularity, VerticalTabsPrimaryInfo,
+    VerticalTabsTabItemMode, VerticalTabsViewMode,
+};
+use super::view::{OnboardingTutorial, WorkspaceBanner};
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::AIAgentExchangeId;
@@ -26,21 +38,8 @@ use crate::terminal::CLIAgent;
 use crate::themes::theme::AnsiColorIdentifier;
 use crate::themes::theme_chooser::ThemeChooserMode;
 use crate::workflows::{WorkflowSelectionSource, WorkflowSource, WorkflowType};
+use crate::workspace::tab_group::TabGroupId;
 use crate::workspace::PaneViewLocator;
-
-use ui_components::lightbox;
-use warpui::accessibility::AccessibilityVerbosity;
-use warpui::geometry::rect::RectF;
-use warpui::geometry::vector::Vector2F;
-use warpui::platform::Cursor;
-use warpui::{EntityId, WindowId};
-
-use super::global_actions::{ForkFromExchange, ForkedConversationDestination};
-use super::tab_settings::{
-    VerticalTabsCompactSubtitle, VerticalTabsDisplayGranularity, VerticalTabsPrimaryInfo,
-    VerticalTabsTabItemMode, VerticalTabsViewMode,
-};
-use super::view::{OnboardingTutorial, WorkspaceBanner};
 
 /// This enum determines how the search query is initialized when opening command search.
 #[derive(Clone, Default, Debug)]
@@ -78,6 +77,27 @@ pub enum TabContextMenuAnchor {
     VerticalTabsKebab,
 }
 
+/// Describes how the new-session dropdown menu was opened so the renderer
+/// can pick the right anchor strategy.
+#[derive(Debug, Clone, Copy)]
+pub enum NewSessionMenuAnchor {
+    /// Menu was opened from the `+` add-tab button. When vertical tabs are
+    /// active, the renderer anchors below the button's save position;
+    /// otherwise the contained position is used directly.
+    AddTabButton(Vector2F),
+    /// Menu was opened by right-clicking the vertical tabs panel.
+    /// Always anchored at the contained pointer position.
+    Pointer(Vector2F),
+}
+
+impl NewSessionMenuAnchor {
+    pub fn position(&self) -> Vector2F {
+        match self {
+            Self::AddTabButton(position) | Self::Pointer(position) => *position,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum VerticalTabsPaneContextMenuTarget {
     ClickedPane(PaneViewLocator),
@@ -90,6 +110,12 @@ impl VerticalTabsPaneContextMenuTarget {
             Self::ClickedPane(locator) | Self::ActivePane(locator) => locator,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoCloudHandoffTrigger {
+    MacOsSleep,
+    Uri,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +167,10 @@ pub enum WorkspaceAction {
     CloseNonActiveTabs,
     CloseTabsRight(usize),
     CloseTabsRightActiveTab,
+    /// Close every tab that belongs to the given tab group.
+    CloseTabGroup(TabGroupId),
+    /// Toggle collapsed state for the given tab group.
+    ToggleTabGroupCollapsed(TabGroupId),
     AddDefaultTab,
     AddTerminalTab {
         hide_homepage: bool,
@@ -167,11 +197,11 @@ pub enum WorkspaceAction {
     /// Add a new tab running a local Docker sandbox via `sbx`.
     AddDockerSandboxTab,
     OpenNewSessionMenu {
-        position: Vector2F,
+        anchor: NewSessionMenuAnchor,
     },
     ToggleTabConfigsMenu,
     ToggleNewSessionMenu {
-        position: Vector2F,
+        anchor: NewSessionMenuAnchor,
     },
     SelectNewSessionMenuItem(NewSessionMenuItem),
     AutoupdateFailureLink,
@@ -684,6 +714,8 @@ impl WorkspaceAction {
             | CloseNonActiveTabs
             | CloseTabsRight(_)
             | CloseTabsRightActiveTab
+            | CloseTabGroup(_)
+            | ToggleTabGroupCollapsed(_)
             | ToggleTabColor { .. }
             | AddDefaultTab
             | AddTerminalTab { .. }

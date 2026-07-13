@@ -3,10 +3,9 @@ use serial_test::serial;
 use warpui::elements::Text;
 use warpui::fonts::FamilyId;
 
+use super::*;
 use crate::ai::agent::{AIAgentOutputMessage, AIAgentText, MessageId};
 use crate::terminal::model::secrets::{self, SecretLevel};
-
-use super::*;
 
 fn text_output(message_id: &str, sections: Vec<&str>) -> AIAgentOutput {
     AIAgentOutput {

@@ -1,15 +1,15 @@
-use crate::server::telemetry::TelemetryEvent;
-use anyhow::anyhow;
-use anyhow::{bail, Result};
+use std::fs::File;
+use std::io::Write as _;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+use std::{fs, io};
+
+use anyhow::{anyhow, bail, Result};
 use channel_versions::VersionInfo;
 use command::blocking::Command;
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
-use std::fs::File;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::{fs, io};
-use std::{io::Write as _, time::Duration};
 use tempfile::TempPath;
 use warp_core::channel::{Channel, ChannelState};
 use warpui::AppContext;
@@ -17,6 +17,7 @@ use warpui::AppContext;
 use super::{
     github, release_assets_directory_url, DownloadProgress, DownloadReady, ProgressCallback,
 };
+use crate::server::telemetry::TelemetryEvent;
 use crate::util::windows::install_dir;
 
 lazy_static! {
@@ -162,25 +163,45 @@ fn autoupdate_log_file() -> Result<PathBuf> {
     warp_logging::log_directory().map(|dir| dir.join(UPDATE_LOG_FILENAME))
 }
 
+fn parse_exit_code_after_marker(contents_lowercase: &[u8], failed_marker: &[u8]) -> Option<i32> {
+    const EXIT_CODE_MARKER: &[u8] = b"exit code: ";
+
+    let failed_pos = memchr::memmem::find(contents_lowercase, failed_marker)?;
+    let after_failed = &contents_lowercase[failed_pos..];
+    let marker_pos = memchr::memmem::find(after_failed, EXIT_CODE_MARKER)?;
+    let after_marker = &after_failed[marker_pos + EXIT_CODE_MARKER.len()..];
+    let sign_len = if after_marker.first() == Some(&b'-') {
+        1
+    } else {
+        0
+    };
+    let digit_len = after_marker[sign_len..]
+        .iter()
+        .take_while(|b| b.is_ascii_digit())
+        .count();
+    if digit_len == 0 {
+        return None;
+    }
+    std::str::from_utf8(&after_marker[..sign_len + digit_len])
+        .ok()?
+        .parse()
+        .ok()
+}
+
 /// Parses the taskkill exit code from an Inno Setup log containing a
 /// "force-kill failed for" line. Returns `None` if no such line is found or
 /// the exit code cannot be parsed.
 fn parse_forcekill_exit_code(contents_lowercase: &[u8]) -> Option<i32> {
     const FAILED_MARKER: &[u8] = b"force-kill failed for";
-    const EXIT_CODE_MARKER: &[u8] = b"exit code: ";
+    parse_exit_code_after_marker(contents_lowercase, FAILED_MARKER)
+}
 
-    let failed_pos = memchr::memmem::find(contents_lowercase, FAILED_MARKER)?;
-    let after_failed = &contents_lowercase[failed_pos..];
-    let marker_pos = memchr::memmem::find(after_failed, EXIT_CODE_MARKER)?;
-    let after_marker = &after_failed[marker_pos + EXIT_CODE_MARKER.len()..];
-    let digit_len = after_marker
-        .iter()
-        .take_while(|b| b.is_ascii_digit())
-        .count();
-    std::str::from_utf8(&after_marker[..digit_len])
-        .ok()?
-        .parse()
-        .ok()
+/// Parses the PowerShell exit code from an Inno Setup log containing a
+/// "minidump-server cleanup failed" line. Returns `None` if no such line is
+/// found or the exit code cannot be parsed.
+fn parse_minidump_cleanup_exit_code(contents_lowercase: &[u8]) -> Option<i32> {
+    const FAILED_MARKER: &[u8] = b"minidump-server cleanup failed";
+    parse_exit_code_after_marker(contents_lowercase, FAILED_MARKER)
 }
 
 /// Checks the autoupdate log file from a previous update attempt.
@@ -386,7 +407,7 @@ fn app_name_prefix(channel: Channel) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_forcekill_exit_code;
+    use super::{parse_forcekill_exit_code, parse_minidump_cleanup_exit_code};
 
     fn log(line: &str) -> Vec<u8> {
         line.to_ascii_lowercase().into_bytes()
@@ -430,9 +451,32 @@ mod tests {
         let contents = log("force-kill failed for dev.exe");
         assert_eq!(parse_forcekill_exit_code(&contents), None);
     }
+    #[test]
+    fn returns_none_when_exit_code_has_no_digits() {
+        // Malformed log line — marker present but no parseable integer.
+        let contents = log("force-kill failed for dev.exe (exit code: -)");
+        assert_eq!(parse_forcekill_exit_code(&contents), None);
+    }
+
+    #[test]
+    fn parses_signed_minidump_cleanup_exit_code() {
+        // PowerShell can report signed HRESULT values for cleanup failures.
+        let contents = log("minidump-server cleanup failed (exit code: -2147024891)");
+        assert_eq!(
+            parse_minidump_cleanup_exit_code(&contents),
+            Some(-2147024891)
+        );
+    }
+
+    #[test]
+    fn parses_unsigned_minidump_cleanup_exit_code() {
+        let contents = log("minidump-server cleanup failed (exit code: 5)");
+        assert_eq!(parse_minidump_cleanup_exit_code(&contents), Some(5));
+    }
 
     #[test]
     fn returns_none_for_empty_log() {
         assert_eq!(parse_forcekill_exit_code(b""), None);
+        assert_eq!(parse_minidump_cleanup_exit_code(b""), None);
     }
 }

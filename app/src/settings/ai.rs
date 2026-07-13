@@ -6,30 +6,30 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use cfg_if::cfg_if;
+use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
+use lazy_static::lazy_static;
+use regex::Regex;
+use serde::de::Deserializer;
+use serde::{Deserialize, Serialize};
+use settings::{
+    define_settings_group, RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud,
+};
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
+use warp_core::execution_mode::AppExecutionMode;
+use warp_core::features::FeatureFlag;
+use warpui::platform::keyboard::KeyCode;
+use warpui::platform::OperatingSystem;
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity, UpdateModel};
 
+use crate::ai::agent::conversation::AIConversation;
+use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::ai::request_usage_model::RequestLimitInfo;
 use crate::report_if_error;
 use crate::terminal::CLIAgent;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use cfg_if::cfg_if;
-use chrono::{DateTime, Utc};
-use lazy_static::lazy_static;
-use regex::Regex;
-use warpui::platform::OperatingSystem;
-use warpui::{
-    platform::keyboard::KeyCode, AppContext, Entity, ModelContext, SingletonEntity, UpdateModel,
-};
-
-use settings::{
-    define_settings_group, RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud,
-};
-use warp_core::execution_mode::AppExecutionMode;
-use warp_core::features::FeatureFlag;
-
-use serde::{de::Deserializer, Deserialize, Serialize};
-use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
 
 pub enum FocusedTerminalInfoEvent {
     TerminalInfoUpdated,
@@ -1649,6 +1649,7 @@ define_settings_group!(AISettings, settings: [
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
         private: false,
+        storage_key: "CanUseWarpCreditsWithByok",
         toml_path: "cloud_platform.third_party_api_keys.can_use_warp_credits_with_byok",
         description: "Whether Zap credits can be used even when providing your own API key.",
     }
@@ -1750,16 +1751,6 @@ define_settings_group!(AISettings, settings: [
     // We kept the same setting key so that users who already dismissed the callout on an
     // older client don't see it again.
     ftu_model_callout_dismissed: FtuModelCalloutDismissed {
-        type: bool,
-        default: false,
-        supported_platforms: SupportedPlatforms::ALL,
-        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
-        private: true,
-    }
-
-    // Tracks whether we've done the one-time auto-open of the conversation list for discoverability.
-    // Once set to true, the conversation list visibility will be restored from workspace state.
-    has_auto_opened_conversation_list: HasAutoOpenedConversationList {
         type: bool,
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
@@ -2045,6 +2036,16 @@ define_settings_group!(AISettings, settings: [
         sync_to_cloud: SyncToCloud::Never,
         private: true,
     }
+
+    auto_handoff_on_sleep_enabled: AutoHandoffOnSleepEnabled {
+        type: bool,
+        default: false,
+        supported_platforms: SupportedPlatforms::MAC,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        private: false,
+        toml_path: "agents.warp_agent.other.auto_handoff_on_sleep_enabled",
+        description: "Whether Warp automatically hands off local agent conversations to cloud when the computer is about to sleep.",
+    }
 ]);
 
 impl AISettings {
@@ -2197,6 +2198,13 @@ impl AISettings {
         *self.file_based_mcp_enabled
     }
 
+    // Zap: local-to-cloud AI conversation handoff (Warp cloud sync) has been removed; only the
+    // orchestration-enabled check survives, since `is_run_agents_permissions_editable` below
+    // still depends on it.
+    pub fn is_orchestration_enabled(&self, app: &warpui::AppContext) -> bool {
+        FeatureFlag::OrchestrationV2.is_enabled() && self.is_any_ai_enabled(app)
+    }
+
     /// Determines whether a quota reset banner should be displayed to the user.
     ///
     /// The banner should be shown if the most recent completed billing cycle had
@@ -2347,6 +2355,10 @@ impl AISettings {
     pub fn is_mcp_permission_editable(&self, app: &AppContext) -> bool {
         // TODO: Allow workspace overrides on MCP permissions.
         self.is_any_ai_enabled(app)
+    }
+
+    pub fn is_run_agents_permissions_editable(&self, app: &AppContext) -> bool {
+        self.is_orchestration_enabled(app)
     }
 
     pub fn show_code_suggestion_speedbump(&self, app: &AppContext) -> bool {
@@ -2613,6 +2625,12 @@ impl AISettings {
     }
 }
 
+fn is_orchestration_conversation(conversation: &AIConversation, app: &AppContext) -> bool {
+    conversation.has_parent_agent()
+        || !BlocklistAIHistoryModel::as_ref(app)
+            .child_conversation_ids_of(&conversation.id())
+            .is_empty()
+}
 /// Singleton model that caches compiled regexes for the `cli_agent_footer_enabled_commands`
 /// setting. Each entry pairs a compiled regex with the CLI agent it maps to.
 pub struct CompiledCommandsForCodingAgentToolbar {

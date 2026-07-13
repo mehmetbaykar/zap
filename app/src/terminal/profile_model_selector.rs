@@ -1,21 +1,22 @@
+use std::sync::Arc;
+
 use ai::api_keys::{ApiKeyManager, ApiKeyManagerEvent};
 use indexmap::IndexMap;
 use instant::{Duration, Instant};
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::vec2f;
-use std::sync::Arc;
+use warpui::elements::{
+    Border, ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
+    DropShadow, Empty, Expanded, Flex, Hoverable, MainAxisAlignment, MainAxisSize,
+    MouseStateHandle, OffsetPositioning, ParentAnchor, ParentElement as _, ParentOffsetBounds,
+    Percentage, PositionedElementAnchor, PositionedElementOffsetBounds, Radius, Rect, SavePosition,
+    Stack, Text, DEFAULT_UI_LINE_HEIGHT_RATIO,
+};
+use warpui::platform::Cursor;
+use warpui::text_layout::ClipConfig;
+use warpui::ui_components::components::UiComponent;
 use warpui::{
-    elements::{
-        Border, ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius,
-        CrossAxisAlignment, DropShadow, Empty, Expanded, Flex, Hoverable, MainAxisAlignment,
-        MainAxisSize, MouseStateHandle, OffsetPositioning, ParentAnchor, ParentElement as _,
-        ParentOffsetBounds, Percentage, PositionedElementAnchor, PositionedElementOffsetBounds,
-        Radius, Rect, SavePosition, Stack, Text, DEFAULT_UI_LINE_HEIGHT_RATIO,
-    },
-    platform::Cursor,
-    text_layout::ClipConfig,
-    ui_components::components::UiComponent,
     AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity as _, TypedActionView,
     View, ViewContext, ViewHandle,
 };
@@ -23,47 +24,41 @@ use warpui::{
 const SIDECAR_HORIZONTAL_GAP: f32 = 8.;
 const SIDECAR_POSITION_ID: &str = "model_sidecar_panel";
 
-use crate::{
-    ai::{
-        blocklist::{
-            prompt::PromptIconButtonTheme, BlocklistAIController, BlocklistAIControllerEvent,
-            BlocklistAIInputEvent, BlocklistAIInputModel,
-        },
-        execution_profiles::{
-            model_menu_items::{available_model_menu_items, has_reasoning_variants, is_auto},
-            profiles::{AIExecutionProfilesModel, AIExecutionProfilesModelEvent, ClientProfileId},
-        },
-        llms::{
-            dedupe_model_display_names, is_using_api_key_for_provider, LLMId, LLMInfo,
-            LLMPreferences, LLMPreferencesEvent, LLMSpec,
-        },
-    },
-    appearance::Appearance,
-    cloud_object::model::generic_string_model::StringModel,
-    context_chips::{
-        display_chip::{udi_font_size, udi_icon_size},
-        spacing,
-    },
-    menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields},
-    settings_view::SettingsSection,
-    terminal::view::ambient_agent::AmbientAgentViewModel,
-    terminal::{
-        input::{MenuPositioning, MenuPositioningProvider},
-        TerminalModel,
-    },
-    ui_components::icons::Icon,
-    view_components::{
-        action_button::{ActionButton, ActionButtonTheme, ButtonSize, SecondaryTheme},
-        FeaturePopup, NewFeaturePopupEvent, NewFeaturePopupLabel,
-    },
-    workspace::WorkspaceAction,
-};
+use warp_cli::agent::Harness;
+use warp_core::features::FeatureFlag;
+use warp_core::ui::color::{coloru_with_opacity, Opacity};
+use warp_core::ui::theme::color::internal_colors;
+use warp_core::ui::theme::Fill;
 
-use warp_core::ui::theme::{color::internal_colors, Fill};
-use warp_core::{
-    features::FeatureFlag,
-    ui::color::{coloru_with_opacity, Opacity},
+use crate::ai::blocklist::prompt::PromptIconButtonTheme;
+use crate::ai::blocklist::{
+    BlocklistAIController, BlocklistAIControllerEvent, BlocklistAIInputEvent, BlocklistAIInputModel,
 };
+use crate::ai::execution_profiles::model_menu_items::{
+    available_model_menu_items, has_reasoning_variants, is_auto,
+};
+use crate::ai::execution_profiles::profiles::{
+    AIExecutionProfilesModel, AIExecutionProfilesModelEvent, ClientProfileId,
+};
+use crate::ai::llms::{
+    dedupe_model_display_names, is_using_api_key_for_provider, LLMId, LLMInfo, LLMPreferences,
+    LLMPreferencesEvent, LLMSpec,
+};
+use crate::appearance::Appearance;
+use crate::cloud_object::model::generic_string_model::StringModel;
+use crate::context_chips::display_chip::{udi_font_size, udi_icon_size};
+use crate::context_chips::spacing;
+use crate::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields};
+use crate::settings_view::SettingsSection;
+use crate::terminal::input::{MenuPositioning, MenuPositioningProvider};
+use crate::terminal::view::ambient_agent::AmbientAgentViewModel;
+use crate::terminal::TerminalModel;
+use crate::ui_components::icons::Icon;
+use crate::view_components::action_button::{
+    ActionButton, ActionButtonTheme, ButtonSize, SecondaryTheme,
+};
+use crate::view_components::{FeaturePopup, NewFeaturePopupEvent, NewFeaturePopupLabel};
+use crate::workspace::WorkspaceAction;
 
 const MENU_WIDTH: f32 = 280.;
 const NEW_MODEL_CHOICES_POPUP_DELAY: Duration = Duration::from_millis(500);
@@ -81,6 +76,11 @@ const ICON_SPACING: f32 = 8.0;
 const MAX_PROFILE_NAME_WIDTH_SCALE_FACTOR: f32 = 10.0;
 
 const PROFILE_SELECTOR_POSITION_ID: &str = "profile_selector";
+
+const PROFILE_PICKER_TOOLTIP: &str = "Choose an AI execution profile";
+const MODEL_PICKER_TOOLTIP: &str = "Choose an agent model";
+const MODEL_REQUIRES_EDIT_ACCESS_TOOLTIP: &str = "Request edit access to change model";
+const HARNESS_DEFAULT_MODEL_LABEL: &str = "default";
 
 pub fn calculate_scaled_font_size(appearance: &warp_core::ui::appearance::Appearance) -> f32 {
     if FeatureFlag::AgentView.is_enabled() {
@@ -505,6 +505,20 @@ impl ProfileModelSelector {
             },
         );
 
+        if let Some(ref ambient_model) = ambient_agent_view_model {
+            ctx.subscribe_to_model(ambient_model, |me, _, event, ctx| {
+                use crate::terminal::view::ambient_agent::AmbientAgentViewModelEvent;
+                if matches!(
+                    event,
+                    AmbientAgentViewModelEvent::HarnessSelected
+                        | AmbientAgentViewModelEvent::HarnessCommandStarted
+                        | AmbientAgentViewModelEvent::SessionReady
+                ) {
+                    me.refresh_state(ctx);
+                }
+            });
+        }
+
         let manage_api_key_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new(crate::t!("common-manage"), SecondaryTheme)
                 .with_tooltip(crate::t!("terminal-manage-api-keys-tooltip"))
@@ -595,6 +609,30 @@ impl ProfileModelSelector {
         format!("{PROFILE_SELECTOR_POSITION_ID}_{llm_id}")
     }
 
+    /// Locked because a non-Oz cloud run (e.g. Claude Code, Codex) has been
+    /// spawned. The harness owns model selection, so changing the model
+    /// locally has no effect on the run. We lock silently in this case
+    /// because the harness selection itself communicates the lock.
+    fn is_locked_for_non_oz_run(&self, app: &AppContext) -> bool {
+        self.ambient_agent_view_model.as_ref().is_some_and(|m| {
+            let model = m.as_ref(app);
+            model.task_id().is_some()
+                && !matches!(model.selected_harness(), Harness::Oz | Harness::Unknown)
+        })
+    }
+
+    fn is_model_locked(&self, app: &AppContext) -> bool {
+        self.is_locked_for_non_oz_run(app)
+    }
+
+    /// True when a non-Oz harness is selected.
+    fn is_third_party_harness(&self, app: &AppContext) -> bool {
+        self.ambient_agent_view_model.as_ref().is_some_and(|m| {
+            let model = m.as_ref(app);
+            !matches!(model.selected_harness(), Harness::Oz | Harness::Unknown)
+        })
+    }
+
     fn refresh_state(&mut self, ctx: &mut ViewContext<Self>) {
         self.refresh_profile_menu(ctx);
         self.refresh_model_menu(ctx);
@@ -612,7 +650,9 @@ impl ProfileModelSelector {
             });
         }
 
-        let model_name = {
+        let model_name = if self.is_third_party_harness(ctx) {
+            HARNESS_DEFAULT_MODEL_LABEL.to_string()
+        } else {
             let llm_preferences = LLMPreferences::as_ref(ctx);
             let active_llm = if FeatureFlag::InlineMenuHeaders.is_enabled()
                 && self
@@ -633,8 +673,29 @@ impl ProfileModelSelector {
                 active_llm.display_name.clone()
             }
         };
+
+        // Non-Oz runs lock silently: the harness owns model selection, and the
+        // user already knows that, so no tooltip is shown.
+        let model_tooltip: Option<&str> = if self.is_locked_for_non_oz_run(ctx) {
+            None
+        } else {
+            Some(MODEL_PICKER_TOOLTIP)
+        };
+        let locked = self.is_model_locked(ctx);
         self.model_button.update(ctx, |button, ctx| {
             button.set_label(model_name, ctx);
+            button.set_disabled(locked, ctx);
+            match model_tooltip {
+                Some(t) => button.set_tooltip(Some(t), ctx),
+                None => button.clear_tooltip(ctx),
+            }
+        });
+        self.model_compact_button.update(ctx, |button, ctx| {
+            button.set_disabled(locked, ctx);
+            match model_tooltip {
+                Some(t) => button.set_tooltip(Some(t), ctx),
+                None => button.clear_tooltip(ctx),
+            }
         });
         ctx.notify();
     }
@@ -765,6 +826,13 @@ impl ProfileModelSelector {
     }
 
     fn refresh_model_menu(&mut self, ctx: &mut ViewContext<Self>) {
+        if self.is_third_party_harness(ctx) {
+            self.model_dropdown.update(ctx, |menu, ctx| {
+                menu.set_items(Vec::new(), ctx);
+            });
+            return;
+        }
+
         let llm_preferences = LLMPreferences::as_ref(ctx);
 
         let active_llm = llm_preferences.get_active_base_model(ctx, Some(self.terminal_view_id));
@@ -1411,16 +1479,16 @@ impl ProfileModelSelector {
                     )))
                     .finish();
 
-                let tooltip_text = "Choose an AI execution profile".to_owned();
-
-                let tooltip = appearance.ui_builder().tool_tip(tooltip_text);
+                let tooltip = appearance
+                    .ui_builder()
+                    .tool_tip(PROFILE_PICKER_TOOLTIP.to_owned());
                 let mut stack = Stack::new();
                 stack.add_child(button_with_hover);
-                stack.add_positioned_child(
+                stack.add_positioned_overlay_child(
                     tooltip.build().finish(),
                     OffsetPositioning::offset_from_parent(
                         vec2f(0., -10.),
-                        ParentOffsetBounds::Unbounded,
+                        ParentOffsetBounds::WindowByPosition,
                         ParentAnchor::TopLeft,
                         ChildAnchor::BottomLeft,
                     ),
@@ -1463,7 +1531,9 @@ impl ProfileModelSelector {
                 .is_agent_in_control_or_tagged_in();
         drop(terminal_model);
 
-        let model_display_name = if is_lrc {
+        let model_display_name = if self.is_third_party_harness(app) {
+            HARNESS_DEFAULT_MODEL_LABEL.to_string()
+        } else if is_lrc {
             llm_preferences
                 .get_active_cli_agent_model(app, Some(self.terminal_view_id))
                 .menu_display_name()
@@ -1543,8 +1613,12 @@ impl ProfileModelSelector {
         let button_with_save_position =
             SavePosition::new(button, "profile_model_selector_model_button").finish();
 
+        let is_locked_for_non_oz = self.is_locked_for_non_oz_run(app);
+        let is_locked = is_locked_for_non_oz;
+        let can_interact = has_edit_access && !is_locked;
+
         let hoverable = Hoverable::new(self.model_mouse_state.clone(), move |state| {
-            if state.is_hovered() {
+            if state.is_hovered() && can_interact {
                 let button_with_hover = Container::new(button_with_save_position)
                     .with_background(theme.surface_2())
                     .with_corner_radius(CornerRadius::with_right(Radius::Pixels(
@@ -1552,40 +1626,60 @@ impl ProfileModelSelector {
                     )))
                     .finish();
 
-                let tooltip_text = if !has_edit_access {
-                    "Request edit access to change model".to_owned()
-                } else {
-                    "Choose an agent model".to_owned()
-                };
-
-                let tooltip = appearance.ui_builder().tool_tip(tooltip_text);
+                let tooltip = appearance
+                    .ui_builder()
+                    .tool_tip(MODEL_PICKER_TOOLTIP.to_owned());
                 let mut stack = Stack::new();
                 stack.add_child(button_with_hover);
-                stack.add_positioned_child(
+                stack.add_positioned_overlay_child(
                     tooltip.build().finish(),
                     OffsetPositioning::offset_from_parent(
                         vec2f(0., -10.),
-                        ParentOffsetBounds::Unbounded,
+                        ParentOffsetBounds::WindowByPosition,
                         ParentAnchor::TopLeft,
                         ChildAnchor::BottomLeft,
                     ),
                 );
                 stack.finish()
+            } else if state.is_hovered() {
+                // Non-Oz runs lock silently — skip the tooltip entirely.
+                let tooltip_text: Option<&str> = if is_locked_for_non_oz {
+                    None
+                } else {
+                    Some(MODEL_REQUIRES_EDIT_ACCESS_TOOLTIP)
+                };
+
+                if let Some(text) = tooltip_text {
+                    let tooltip = appearance.ui_builder().tool_tip(text.to_owned());
+                    let mut stack = Stack::new();
+                    stack.add_child(button_with_save_position);
+                    stack.add_positioned_overlay_child(
+                        tooltip.build().finish(),
+                        OffsetPositioning::offset_from_parent(
+                            vec2f(0., -10.),
+                            ParentOffsetBounds::WindowByPosition,
+                            ParentAnchor::TopLeft,
+                            ChildAnchor::BottomLeft,
+                        ),
+                    );
+                    stack.finish()
+                } else {
+                    button_with_save_position
+                }
             } else {
                 button_with_save_position
             }
         });
 
-        // Only make clickable if the user can click to open the menu (i.e. has edit access)
-        if !has_edit_access {
-            hoverable.finish()
-        } else {
+        if can_interact {
             hoverable
                 .on_click(|ctx, _app, _position| {
                     ctx.dispatch_typed_action(ProfileModelSelectorAction::ToggleModelMenu);
                 })
                 .with_cursor(Cursor::PointingHand)
                 .finish()
+        } else {
+            hoverable.finish()
         }
     }
 
@@ -1914,7 +2008,12 @@ impl TypedActionView for ProfileModelSelector {
                 self.set_profile_menu_visibility(!self.is_profile_menu_open, ctx);
             }
             ProfileModelSelectorAction::ToggleModelMenu => {
-                if FeatureFlag::InlineMenuHeaders.is_enabled() {
+                if self.is_model_locked(ctx) {
+                    return;
+                }
+                if self.is_third_party_harness(ctx) {
+                    self.set_model_menu_visibility(!self.is_model_menu_open, ctx);
+                } else if FeatureFlag::InlineMenuHeaders.is_enabled() {
                     ctx.emit(ProfileModelSelectorEvent::ToggleInlineModelSelector);
                 } else {
                     self.set_model_menu_visibility(!self.is_model_menu_open, ctx);
@@ -1946,7 +2045,8 @@ impl View for ProfileModelSelector {
 
         // Only add profile button to compact layout if there are multiple profiles
         // and the user is not a viewer (we currently don't support profiles in shared sessions).
-        let should_show_profile_section = has_multiple_profiles && !is_viewer;
+        let is_ambient_agent = self.ambient_agent_view_model.is_some();
+        let should_show_profile_section = has_multiple_profiles && !is_viewer && !is_ambient_agent;
         if should_show_profile_section {
             let profile_button_with_save_position = SavePosition::new(
                 ChildView::new(&self.profile_compact_button).finish(),

@@ -1,29 +1,27 @@
-use super::{
-    FormattedTextElement, FrameMouseHandlers, HeadingFontSizeMultipliers, HighlightedHyperlink,
-    HyperlinkSupport, LaidOutTextFrame, SecretRange,
-};
-use crate::text::BlockHeaderSize;
-use crate::{
-    elements::{Point, SelectableElement, ZIndex},
-    fonts::FamilyId,
-    text_layout::TextFrame,
-};
-use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine};
-use pathfinder_color::ColorU;
-use pathfinder_geometry::{rect::RectF, vector::vec2f};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+
+use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine};
+use pathfinder_color::ColorU;
+use pathfinder_geometry::rect::RectF;
+use pathfinder_geometry::vector::vec2f;
 use string_offset::ByteOffset;
 
-use super::apply_secret_replacements;
-use crate::elements::{Element, PartialClickableElement};
+use super::{
+    apply_secret_replacements, FormattedTextElement, FrameMouseHandlers,
+    HeadingFontSizeMultipliers, HighlightedHyperlink, HyperlinkSupport, LaidOutTextFrame,
+    SecretRange,
+};
+use crate::elements::{Element, PartialClickableElement, Point, SelectableElement, ZIndex};
 use crate::event::DispatchedEvent;
+use crate::fonts::FamilyId;
 use crate::platform::WindowStyle;
 use crate::text::word_boundaries::WordBoundariesPolicy;
-use crate::text::{SelectionDirection, SelectionType};
+use crate::text::{BlockHeaderSize, SelectionDirection, SelectionType};
+use crate::text_layout::TextFrame;
 use crate::{App, AppContext, Entity, Event, Presenter, TypedActionView};
 
 #[test]

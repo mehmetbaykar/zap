@@ -1,12 +1,11 @@
 use core::fmt;
-use std::{
-    cell::Cell,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{core::view::AnyViewHandle, AnyView, EntityId, EntityIdMap};
+use crate::core::view::AnyViewHandle;
+use crate::{AnyView, EntityId, EntityIdMap};
 
 /// A unique identifier for a window.
 ///

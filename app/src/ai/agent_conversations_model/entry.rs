@@ -1,12 +1,3 @@
-use crate::ai::agent::api::ServerConversationToken;
-use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::ambient_agents::{AgentSource, AmbientAgentTask, AmbientAgentTaskId};
-use crate::ai::artifacts::Artifact;
-use crate::ai::blocklist::history_model::{AIConversationMetadata, BlocklistAIHistoryModel};
-use crate::ai::conversation_navigation::ConversationNavigationData;
-use crate::auth::{AuthStateProvider, UserUid};
-use crate::terminal::shared_session::protocol::SessionId;
-use crate::workspaces::user_profiles::UserProfiles;
 use chrono::{DateTime, Utc};
 use warp_cli::agent::Harness;
 use warp_core::features::FeatureFlag;
@@ -17,6 +8,17 @@ use super::{
     ConversationMetadata, CreatedOnFilter, CreatorFilter, EnvironmentFilter, HarnessFilter,
     OwnerFilter, SessionStatus, SourceFilter, StatusFilter,
 };
+use crate::ai::agent::api::ServerConversationToken;
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::ambient_agents::{AgentSource, AmbientAgentTask, AmbientAgentTaskId};
+use crate::ai::artifacts::Artifact;
+use crate::ai::blocklist::history_model::{AIConversationMetadata, BlocklistAIHistoryModel};
+use crate::ai::conversation_navigation::ConversationNavigationData;
+use crate::auth::{AuthStateProvider, UserUid};
+use crate::terminal::shared_session::protocol::SessionId;
+use crate::util::time_format::human_readable_precise_duration;
+use crate::workspace::RestoreConversationLayout;
+use crate::workspaces::user_profiles::UserProfiles;
 
 const SESSION_EXPIRATION_TIME: chrono::Duration = chrono::Duration::weeks(1);
 
@@ -248,6 +250,19 @@ impl AgentConversationEntry {
             HarnessFilter::Specific(harness) => self.display.harness == Some(*harness),
         }
     }
+
+    pub fn has_open_action(
+        &self,
+        restore_layout: Option<RestoreConversationLayout>,
+        app: &AppContext,
+    ) -> bool {
+        super::AgentConversationsModel::resolve_open_action(
+            AgentConversationNavigationSubject::Entry(self.id),
+            restore_layout,
+            app,
+        )
+        .is_some()
+    }
 }
 
 /// Returns the local conversation ID represented by the given task, if this task and a
@@ -316,14 +331,7 @@ fn task_session_status(task: &AmbientAgentTask) -> SessionStatus {
 }
 
 fn task_run_time(task: &AmbientAgentTask) -> Option<String> {
-    let Some(duration) = task.run_time() else {
-        return Some("Not started".to_string());
-    };
-    if duration.num_minutes() < 1 {
-        Some(format!("{} seconds", duration.num_seconds()))
-    } else {
-        Some(format!("{} minutes", duration.num_minutes()))
-    }
+    task.run_time().map(human_readable_precise_duration)
 }
 
 fn task_harness(task: &AmbientAgentTask) -> Option<Harness> {

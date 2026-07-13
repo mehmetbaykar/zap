@@ -74,7 +74,7 @@ fn test_read_skill_executor_success() {
         let action = AIAgentAction {
             id: AIAgentActionId::from("test-action-id".to_string()),
             action: AIAgentActionType::ReadSkill(ReadSkillRequest {
-                skill: SkillReference::Path(skill_path.clone()),
+                skill: SkillReference::Path(skill_path.clone().into()),
             }),
             task_id: TaskId::new("test-task-id".to_string()),
             requires_result: false,
@@ -113,7 +113,7 @@ fn test_read_skill_executor_file_not_found() {
         let action = AIAgentAction {
             id: AIAgentActionId::from("test-action-id".to_string()),
             action: AIAgentActionType::ReadSkill(ReadSkillRequest {
-                skill: SkillReference::Path(skill_path),
+                skill: SkillReference::Path(skill_path.into()),
             }),
             task_id: TaskId::new("test-task-id".to_string()),
             requires_result: false,
@@ -157,7 +157,7 @@ fn test_read_skill_executor_fallback_reads_disk_on_cache_miss() {
         let action = AIAgentAction {
             id: AIAgentActionId::from("fallback-action".to_string()),
             action: AIAgentActionType::ReadSkill(ReadSkillRequest {
-                skill: SkillReference::Path(skill_path.clone()),
+                skill: SkillReference::Path(skill_path.clone().into()),
             }),
             task_id: TaskId::new("fallback-task".to_string()),
             requires_result: false,
@@ -217,7 +217,7 @@ fn test_read_skill_executor_fallback_returns_error_when_file_missing() {
         let action = AIAgentAction {
             id: AIAgentActionId::from("missing-action".to_string()),
             action: AIAgentActionType::ReadSkill(ReadSkillRequest {
-                skill: SkillReference::Path(skill_path),
+                skill: SkillReference::Path(skill_path.into()),
             }),
             task_id: TaskId::new("missing-task".to_string()),
             requires_result: false,
@@ -277,7 +277,7 @@ fn test_read_skill_executor_resolves_by_name() {
         let action = AIAgentAction {
             id: AIAgentActionId::from("name-lookup-action".to_string()),
             action: AIAgentActionType::ReadSkill(ReadSkillRequest {
-                skill: SkillReference::Path(std::path::PathBuf::from("byop-named-skill")),
+                skill: SkillReference::Path(std::path::PathBuf::from("byop-named-skill").into()),
             }),
             task_id: TaskId::new("name-lookup-task".to_string()),
             requires_result: false,
@@ -314,7 +314,7 @@ fn test_read_skill_executor_rejects_unknown_name() {
         let action = AIAgentAction {
             id: AIAgentActionId::from("unknown-name-action".to_string()),
             action: AIAgentActionType::ReadSkill(ReadSkillRequest {
-                skill: SkillReference::Path(std::path::PathBuf::from("no-such-skill")),
+                skill: SkillReference::Path(std::path::PathBuf::from("no-such-skill").into()),
             }),
             task_id: TaskId::new("unknown-name-task".to_string()),
             requires_result: false,
@@ -356,7 +356,7 @@ fn test_read_skill_executor_rejects_non_skill_path_on_cache_miss() {
         let action = AIAgentAction {
             id: AIAgentActionId::from("non-skill-action".to_string()),
             action: AIAgentActionType::ReadSkill(ReadSkillRequest {
-                skill: SkillReference::Path(non_skill_path),
+                skill: SkillReference::Path(non_skill_path.into()),
             }),
             task_id: TaskId::new("non-skill-task".to_string()),
             requires_result: false,

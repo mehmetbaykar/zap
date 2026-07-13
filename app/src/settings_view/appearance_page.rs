@@ -1,42 +1,72 @@
+use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::rc::Rc;
+
+use ::settings::{Setting, SettingSection, ToggleableSetting};
+use enum_iterator::all;
+use warp_core::ui::theme::color::internal_colors;
+use warp_util::path::user_friendly_path;
+use warpui::elements::{
+    Align, Border, ChildView, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
+    Dismiss, Element, Empty, Fill, Flex, FormattedTextElement, Hoverable, MainAxisAlignment,
+    MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable, Text, Wrap,
+    DEFAULT_UI_LINE_HEIGHT_RATIO,
+};
+use warpui::fonts::{FamilyId, FontInfo, Weight};
+use warpui::keymap::{ContextPredicate, FixedBinding};
+use warpui::platform::{Cursor, FilePickerConfiguration, GraphicsBackend, SystemTheme};
+use warpui::rendering::ThinStrokes;
+use warpui::ui_components::button::ButtonVariant;
+use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
+use warpui::ui_components::radio_buttons::{
+    RadioButtonItem, RadioButtonLayout, RadioButtonStateHandle,
+};
+use warpui::ui_components::slider::SliderStateHandle;
+use warpui::ui_components::switch::SwitchStateHandle;
+use warpui::units::IntoPixels;
+use warpui::{
+    id, Action, AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, UpdateModel,
+    View, ViewContext, ViewHandle, WindowId,
+};
+
 use super::directory_color_add_picker::{DirectoryColorAddPicker, DirectoryColorAddPickerEvent};
 use super::settings_page::{
-    AdditionalInfo, Category, LocalOnlyIconState, MatchData, PageType, SettingsWidget,
+    build_reset_button, render_body_item, render_body_item_label, render_dropdown_item,
+    AdditionalInfo, Category, LocalOnlyIconState, MatchData, PageType, SettingsPageEvent,
+    SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, ToggleState, HEADER_PADDING,
 };
-use super::{flags, SettingsSection};
 use super::{
-    settings_page::{
-        build_reset_button, render_body_item, render_body_item_label, render_dropdown_item,
-        SettingsPageEvent, SettingsPageMeta, SettingsPageViewHandle, ToggleState, HEADER_PADDING,
-    },
-    SettingsAction,
+    flags, SettingActionPairContexts, SettingActionPairDescriptions, SettingsAction,
+    SettingsSection, ToggleSettingActionPair,
 };
-use super::{SettingActionPairContexts, SettingActionPairDescriptions, ToggleSettingActionPair};
 use crate::appearance::{Appearance, AppearanceEvent};
 use crate::channel::{Channel, ChannelState};
-use crate::context_chips::prompt::PromptEvent;
-use crate::context_chips::renderer::ChipDragState;
-use crate::context_chips::{
-    prompt::Prompt, renderer::Renderer as ContextChipRenderer, ChipAvailability,
-};
+use crate::context_chips::prompt::{Prompt, PromptEvent};
+use crate::context_chips::renderer::{ChipDragState, Renderer as ContextChipRenderer};
+use crate::context_chips::ChipAvailability;
 use crate::editor::{
-    EditOrigin, Event as EditorEvent, InteractionState, SingleLineEditorOptions, TextOptions,
+    EditOrigin, EditorView, Event as EditorEvent, InteractionState, SingleLineEditorOptions,
+    TextOptions,
 };
+use crate::features::FeatureFlag;
 use crate::gpu_state::{GPUState, GPUStateEvent};
 use crate::prompt::editor_modal::OpenSource as PromptEditorOpenSource;
-use crate::server::telemetry::InputUXChangeOrigin;
+use crate::server::telemetry::{InputUXChangeOrigin, TelemetryEvent};
+use crate::settings::app_icon::{AppIcon, AppIconSettings};
 use crate::settings::{
     active_theme_kind,
-    app_icon::{AppIcon, AppIconSettings},
     language::{Language, LanguageSettings},
     respect_system_theme, AIFontName, AppEditorSettings, CursorBlink, CursorBlinkEnabled,
-    EnforceMinimumContrast, FocusPaneOnHover, FontSettings, FontSettingsChangedEvent, InputBoxType,
-    InputModeSettings, InputModeState, MarkdownHeadingH1Scale, MarkdownHeadingH2Scale,
+    CursorDisplayType, EnforceMinimumContrast, FocusPaneOnHover, FontSettings,
+    FontSettingsChangedEvent, GPUSettings, InputBoxType, InputModeSettings, InputModeState,
+    InputSettings, InputSettingsChangedEvent, MarkdownHeadingH1Scale, MarkdownHeadingH2Scale,
     MarkdownHeadingH3Scale, MarkdownHeadingH4Scale, MarkdownHeadingH5Scale, MarkdownHeadingH6Scale,
     MonospaceFallbackFontName, MonospaceFontName, PaneSettings, ShouldDimInactivePanes,
-    ThemeSettings, UiFontName, UseSystemTheme, DEFAULT_MONOSPACE_FONT_NAME,
+    ThemeSettings, UiFontName, UseSystemTheme, UseThinStrokes, DEFAULT_MONOSPACE_FONT_NAME,
     MARKDOWN_HEADING_SCALE_MAX, MARKDOWN_HEADING_SCALE_MIN, UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN,
 };
-use crate::settings::{CursorDisplayType, GPUSettings, InputSettings, InputSettingsChangedEvent};
 use crate::terminal::block_list_viewport::InputMode;
 use crate::terminal::blockgrid_element::BlockGridElement;
 use crate::terminal::ligature_settings::{LigatureRenderingEnabled, LigatureSettings};
@@ -46,11 +76,17 @@ use crate::terminal::session_settings::SessionSettings;
 use crate::terminal::settings::{
     AltScreenPadding, AltScreenPaddingMode, Spacing, SpacingMode, TerminalSettings,
 };
-use crate::terminal::{BlockListSettings, ShowBlockDividers};
-use crate::terminal::{ShowJumpToBottomOfBlockButton, SizeInfo};
+use crate::terminal::{
+    BlockListSettings, ShowBlockDividers, ShowJumpToBottomOfBlockButton, SizeInfo,
+};
 use crate::themes::theme::{self, RespectSystemTheme, SelectedSystemThemes, ThemeKind, WarpTheme};
+use crate::themes::theme_chooser::ThemeChooserMode;
+use crate::ui_components::color_dot::{render_color_dot, TAB_COLOR_OPTIONS};
+use crate::ui_components::icons::Icon;
 use crate::user_config::WarpConfig;
 use crate::util::bindings;
+use crate::view_components::action_button::{ActionButton, ButtonSize, NakedTheme};
+use crate::view_components::{Dropdown, DropdownItem, FilterableDropdown};
 use crate::window_settings::{
     BackgroundBlurRadius, BackgroundBlurTexture, BackgroundOpacity, LeftPanelVisibilityAcrossTabs,
     OpenWindowsAtCustomSize, WindowSettings, WindowSettingsChangedEvent, ZoomLevel,
@@ -63,56 +99,7 @@ use crate::workspace::tab_settings::{
     UseVerticalTabs, WorkspaceDecorationVisibility,
 };
 use crate::workspace::WorkspaceAction;
-use crate::{editor::EditorView, themes::theme_chooser::ThemeChooserMode};
-use crate::{
-    features::FeatureFlag,
-    view_components::{Dropdown, DropdownItem, FilterableDropdown},
-};
-use crate::{report_error, report_if_error, themes};
-use crate::{send_telemetry_from_ctx, server::telemetry::TelemetryEvent};
-use ::settings::{Setting, SettingSection, ToggleableSetting};
-use enum_iterator::all;
-use std::borrow::Cow;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::rc::Rc;
-use warp_core::ui::theme::color::internal_colors;
-use warp_util::path::user_friendly_path;
-use warpui::elements::{
-    Clipped, Empty, FormattedTextElement, MainAxisAlignment, MainAxisSize, Text, Wrap,
-};
-use warpui::fonts::{FamilyId, FontInfo, Weight};
-use warpui::keymap::{ContextPredicate, FixedBinding};
-use warpui::platform::{Cursor, FilePickerConfiguration, GraphicsBackend};
-use warpui::ui_components::button::ButtonVariant;
-use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
-use warpui::ui_components::radio_buttons::{
-    RadioButtonItem, RadioButtonLayout, RadioButtonStateHandle,
-};
-use warpui::ui_components::slider::SliderStateHandle;
-use warpui::ui_components::switch::SwitchStateHandle;
-use warpui::units::IntoPixels;
-
-use warpui::id;
-use warpui::{
-    elements::{
-        Align, Border, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
-        Dismiss, Element, Fill, Flex, Hoverable, MouseStateHandle, ParentElement, Radius,
-        Shrinkable, DEFAULT_UI_LINE_HEIGHT_RATIO,
-    },
-    rendering::ThinStrokes,
-};
-use warpui::{platform::SystemTheme, Action};
-use warpui::{
-    AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, UpdateModel, View,
-    ViewContext, ViewHandle, WindowId,
-};
-
-use crate::settings::UseThinStrokes;
-use crate::ui_components::color_dot::{render_color_dot, TAB_COLOR_OPTIONS};
-use crate::ui_components::icons::Icon;
-use crate::view_components::action_button::{ActionButton, ButtonSize, NakedTheme};
+use crate::{report_error, report_if_error, send_telemetry_from_ctx, themes};
 
 const FONT_SIZE_INPUT_BOX_WIDTH: f32 = 80.;
 const NOTEBOOK_FONT_SIZE_INPUT_BOX_WIDTH: f32 = 50.;
@@ -276,6 +263,50 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
         context.to_owned(),
     )
     .with_group(bindings::BindingGroup::Settings.as_str())]);
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "open new windows with custom size",
+        builder(SettingsAction::AppearancePageToggle(
+            AppearancePageAction::ToggleOpenWindowsAtCustomSize,
+        )),
+        context,
+        flags::OPEN_WINDOWS_AT_CUSTOM_SIZE_FLAG,
+    ));
+
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "window blur acrylic texture",
+        builder(SettingsAction::AppearancePageToggle(
+            AppearancePageAction::ToggleBlurTexture,
+        )),
+        context,
+        flags::WINDOW_BLUR_TEXTURE_FLAG,
+    ));
+
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "tools panel visibility across tabs",
+        builder(SettingsAction::AppearancePageToggle(
+            AppearancePageAction::ToggleLeftPanelVisibility,
+        )),
+        context,
+        flags::LEFT_PANEL_VISIBILITY_ACROSS_TABS_FLAG,
+    ));
+
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "agent font matching terminal font",
+        builder(SettingsAction::AppearancePageToggle(
+            AppearancePageAction::ToggleMatchAIToTerminalFontFamily,
+        )),
+        context,
+        flags::MATCH_AI_FONT_TO_TERMINAL_FONT_FLAG,
+    ));
+
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "notebook font size matching terminal font size",
+        builder(SettingsAction::AppearancePageToggle(
+            AppearancePageAction::ToggleMatchNotebookToMonospaceFontSize,
+        )),
+        context,
+        flags::MATCH_NOTEBOOK_FONT_SIZE_TO_TERMINAL_FONT_SIZE_FLAG,
+    ));
 
     toggle_binding_pairs.push(
         ToggleSettingActionPair::new(
@@ -401,7 +432,15 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
                 AppearancePageAction::ToggleShowVerticalTabPanelInRestoredWindows,
             )),
             context,
-            flags::USE_VERTICAL_TABS_FLAG,
+            flags::SHOW_VERTICAL_TAB_PANEL_IN_RESTORED_WINDOWS_FLAG,
+        ));
+        toggle_binding_pairs.push(ToggleSettingActionPair::new(
+            "latest user prompt as conversation title in tab names",
+            builder(SettingsAction::AppearancePageToggle(
+                AppearancePageAction::ToggleUseLatestUserPromptAsConversationTitleInTabNames,
+            )),
+            context,
+            flags::USE_LATEST_USER_PROMPT_AS_CONVERSATION_TITLE_IN_TAB_NAMES_FLAG,
         ));
     }
 
@@ -415,6 +454,24 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
             flags::LIGATURE_RENDERING_CONTEXT_FLAG,
         ));
     }
+
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "preserve active tab color for new tabs",
+        builder(SettingsAction::AppearancePageToggle(
+            AppearancePageAction::TogglePreserveActiveTabColor,
+        )),
+        context,
+        flags::PRESERVE_ACTIVE_TAB_COLOR_FLAG,
+    ));
+
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "custom padding in alt-screen",
+        builder(SettingsAction::AppearancePageToggle(
+            AppearancePageAction::ToggleAltScreenPadding,
+        )),
+        context,
+        flags::ALT_SCREEN_PADDING_FLAG,
+    ));
 
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(toggle_binding_pairs, app);
 }
@@ -490,6 +547,7 @@ pub enum AppearancePageAction {
     OpenUrl(String),
     ToggleFocusPaneOnHover,
     ToggleInputMode,
+    ToggleAltScreenPadding,
     UpdateAltScreenPaddingMode(AltScreenPaddingMode),
     SetTabCloseButtonPosition(TabCloseButtonPosition),
     SetZoomLevel(u16),
@@ -669,6 +727,19 @@ impl TypedActionView for AppearanceSettingsPageView {
             }
             ToggleInputMode => {
                 self.toggle_input_mode(ctx);
+            }
+            ToggleAltScreenPadding => {
+                let new_mode = TerminalSettings::as_ref(ctx).alt_screen_padding.toggled();
+                TerminalSettings::handle(ctx).update(ctx, |terminal_settings, ctx| {
+                    report_if_error!(terminal_settings
+                        .alt_screen_padding
+                        .set_value(new_mode, ctx));
+                });
+                self.set_alt_screen_padding_editor_text(ctx);
+                send_telemetry_from_ctx!(
+                    TelemetryEvent::UpdateAltScreenPaddingMode { new_mode },
+                    ctx
+                );
             }
             UpdateAltScreenPaddingMode(new_mode) => {
                 TerminalSettings::handle(ctx).update(ctx, |terminal_settings, ctx| {
@@ -3419,16 +3490,11 @@ impl SettingsWidget for CustomAppIconWidget {
         #[allow(unused_mut)]
         let show_bundle_warning = {
             #[cfg(target_os = "macos")]
-            #[allow(deprecated)]
             {
-                use cocoa::base::id;
-                use objc::{class, msg_send, sel, sel_impl};
-                unsafe {
-                    let running_app: id =
-                        msg_send![class!(NSRunningApplication), currentApplication];
-                    let bundle_id: id = msg_send![running_app, bundleIdentifier];
-                    bundle_id.is_null()
-                }
+                use objc2_app_kit::NSRunningApplication;
+                NSRunningApplication::currentApplication()
+                    .bundleIdentifier()
+                    .is_none()
             }
             #[cfg(not(target_os = "macos"))]
             {

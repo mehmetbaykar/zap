@@ -1,21 +1,19 @@
 use pathfinder_geometry::vector::{vec2f, Vector2F};
-
 use warp_core::features::FeatureFlag;
+use warpui::clipboard::ClipboardContent;
+use warpui::elements::{
+    Align, AnchorPair, ChildAnchor, Clipped, ClippedScrollStateHandle, ClippedScrollable,
+    ConstrainedBox, Container, CrossAxisAlignment, DispatchEventResult, EventHandler, Fill, Flex,
+    MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning, OffsetType, ParentAnchor,
+    ParentElement, ParentOffsetBounds, PositioningAxis, SavePosition, ScrollbarWidth, Shrinkable,
+    Stack, XAxisAnchor, YAxisAnchor,
+};
+use warpui::keymap::EditableBinding;
+use warpui::platform::Cursor;
+use warpui::presenter::ChildView;
+use warpui::ui_components::components::UiComponent;
 use warpui::{
-    clipboard::ClipboardContent,
-    elements::{
-        Align, AnchorPair, ChildAnchor, Clipped, ClippedScrollStateHandle, ClippedScrollable,
-        ConstrainedBox, Container, CrossAxisAlignment, DispatchEventResult, EventHandler, Fill,
-        Flex, MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning, OffsetType,
-        ParentAnchor, ParentElement, ParentOffsetBounds, PositioningAxis, SavePosition,
-        ScrollbarWidth, Shrinkable, Stack, XAxisAnchor, YAxisAnchor,
-    },
-    id,
-    keymap::EditableBinding,
-    platform::Cursor,
-    presenter::ChildView,
-    ui_components::components::UiComponent,
-    AppContext, BlurContext, Element, Entity, FocusContext, ModelAsRef, ModelHandle,
+    id, AppContext, BlurContext, Element, Entity, FocusContext, ModelAsRef, ModelHandle,
     SingletonEntity, TypedActionView, View, ViewContext, ViewHandle, WindowId,
 };
 

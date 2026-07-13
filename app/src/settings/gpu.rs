@@ -1,4 +1,5 @@
-use settings::{macros::define_settings_group, SupportedPlatforms, SyncToCloud};
+use settings::macros::define_settings_group;
+use settings::{SupportedPlatforms, SyncToCloud};
 use warp_core::features::FeatureFlag;
 use warpui::platform::GraphicsBackend;
 

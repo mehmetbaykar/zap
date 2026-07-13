@@ -1,22 +1,21 @@
 //! Utility functions for working with skills.
 
-use super::{SkillDescriptor, SkillManager};
-use crate::ai::blocklist::view_util::render_provider_icon_button;
-use ai::skills::{
-    home_skills_path, provider_rank, ParsedSkill, SkillProvider, SKILL_PROVIDER_DEFINITIONS,
-};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::path::Path;
-use std::path::PathBuf;
+
+use ai::skills::{
+    provider_parent_directory_for_skills_root, provider_rank, ParsedSkill, SkillProvider,
+};
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::Icon;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::prelude::MouseStateHandle;
-use warpui::EventContext;
-use warpui::{AppContext, Element, SingletonEntity};
+use warpui::{AppContext, Element, EventContext, SingletonEntity};
 
-use crate::warp_managed_paths_watcher::warp_managed_skill_dirs;
+use super::{SkillDescriptor, SkillManager};
+use crate::ai::blocklist::view_util::render_provider_icon_button;
 
 /// Deduplicates skills by **name and owning directory**, keeping a single best representative per
 /// skill name within each directory.
@@ -44,10 +43,10 @@ use crate::warp_managed_paths_watcher::warp_managed_skill_dirs;
 /// reference remains the secondary key for stable sorting, ensuring the output order is reproducible.
 #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
 pub(crate) fn unique_skills(
-    skill_paths: &[(PathBuf, PathBuf)],
-    skills_by_path: &HashMap<PathBuf, ParsedSkill>,
+    skill_paths: &[(LocalOrRemotePath, LocalOrRemotePath)],
+    skills_by_path: &HashMap<LocalOrRemotePath, ParsedSkill>,
 ) -> Vec<SkillDescriptor> {
-    let mut name_map: HashMap<(String, PathBuf), SkillDescriptor> = HashMap::new();
+    let mut name_map: HashMap<(String, LocalOrRemotePath), SkillDescriptor> = HashMap::new();
 
     for (dir_path, path) in skill_paths {
         let Some(skill) = skills_by_path.get(path) else {
@@ -83,11 +82,11 @@ pub(crate) fn unique_skills(
 }
 
 /// Generates a literalized key for a `SkillReference` for sorting.
-/// `Path` uses `to_string_lossy` to avoid cross-platform boundary issues; `BundledSkillId`
+/// Uses `display_path` for `Path` references to avoid cross-platform boundary issues; `BundledSkillId`
 /// uses the id string directly; the two keys won't collide (a bundled id contains no path separator).
 fn skill_reference_key(reference: &ai::skills::SkillReference) -> String {
     match reference {
-        ai::skills::SkillReference::Path(p) => p.to_string_lossy().into_owned(),
+        ai::skills::SkillReference::Path(p) => p.display_path(),
         ai::skills::SkillReference::BundledSkillId(id) => id.clone(),
     }
 }
@@ -101,7 +100,9 @@ fn skill_reference_key(reference: &ai::skills::SkillReference) -> String {
 /// otherwise the skills section in the system prompt would disappear from the second round on.
 /// It is therefore simplified to return everything every round.
 pub fn list_skills(working_directory: Option<&Path>, app: &AppContext) -> Vec<SkillDescriptor> {
-    SkillManager::as_ref(app).get_skills_for_working_directory(working_directory, app)
+    let working_directory =
+        working_directory.map(|dir| LocalOrRemotePath::Local(dir.to_path_buf()));
+    SkillManager::as_ref(app).get_skills_for_working_directory(working_directory.as_ref(), app)
 }
 
 /// Renders an 'open skill' button for blocklist AI actions and the code diff view.
@@ -145,35 +146,17 @@ pub fn icon_override_for_skill_name(name: &str) -> Option<Icon> {
     }
 }
 
-pub fn skill_path_from_file_path(file_path: &Path) -> Option<PathBuf> {
-    for definition in SKILL_PROVIDER_DEFINITIONS.iter() {
-        let home_skill_dirs = if definition.provider == SkillProvider::Zap {
-            warp_managed_skill_dirs()
-        } else {
-            home_skills_path(definition.provider).into_iter().collect()
-        };
-        for home_skills_path in home_skill_dirs {
-            if let Ok(relative_path) = file_path.strip_prefix(&home_skills_path) {
-                let skill_name = relative_path.components().next()?;
-                return Some(home_skills_path.join(skill_name).join("SKILL.md"));
-            }
+pub fn skill_path_from_location(location: &LocalOrRemotePath) -> Option<LocalOrRemotePath> {
+    let mut current = Some(location.clone());
+    while let Some(candidate_skill_dir) = current {
+        if candidate_skill_dir
+            .parent()
+            .and_then(|provider_dir| provider_parent_directory_for_skills_root(&provider_dir))
+            .is_some()
+        {
+            return Some(candidate_skill_dir.join("SKILL.md"));
         }
-    }
-    let path_components: Vec<_> = file_path.components().collect();
-
-    for def in SKILL_PROVIDER_DEFINITIONS.iter() {
-        let skill_components: Vec<_> = def.skills_path.components().collect();
-
-        for (idx, window) in path_components.windows(skill_components.len()).enumerate() {
-            if window == skill_components.as_slice() {
-                let skill_dir = PathBuf::from_iter(
-                    file_path
-                        .components()
-                        .take(idx + skill_components.len() + 1),
-                );
-                return Some(skill_dir.join("SKILL.md"));
-            }
-        }
+        current = candidate_skill_dir.parent();
     }
     None
 }

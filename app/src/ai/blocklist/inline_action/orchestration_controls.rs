@@ -1,6 +1,6 @@
 //! Shared orchestration controls used by the plan-card
 //! `OrchestrationConfigBlockView` to edit the run-wide harness / model /
-//! execution-mode fields of an `OrchestrationConfig`.
+//! fields of an `OrchestrationConfig`.
 //!
 //! The generic parameter `A` is the parent view's typed action — this
 //! lets `OrchestrationConfigBlockView` (and, historically, the
@@ -8,18 +8,16 @@
 //! [`OrchestrationControlAction`] to provide the mapping from
 //! field-change events to their own action enum.
 //!
-//! Cloud-only data sources this module used to read from — the
-//! harness-availability service (per-harness model catalogs, managed
-//! auth secrets) and cloud agent settings/environments — were stripped
-//! from this fork. The pickers that depended on them (non-Oz model
-//! catalog, environment list, managed auth secrets) now degrade to a
-//! single default entry rather than being recreated.
+//! Cloud-only data sources and controls are intentionally absent from
+//! this fork. Orchestration here selects only a local harness and model.
+
+use std::collections::HashMap;
 
 use ai::agent::orchestration_config::{OrchestrationConfig, OrchestrationExecutionMode};
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::{vec2f, Vector2F};
-use std::collections::HashMap;
-use std::fmt::Debug;
+use warp_cli::agent::Harness;
+use warp_core::ui::theme::Fill;
 use warpui::elements::{
     ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex,
     Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Point, Radius,
@@ -34,29 +32,34 @@ use warpui::{
     SingletonEntity, SizeConstraint, View, ViewContext, ViewHandle,
 };
 
-use warp_cli::agent::Harness;
-use warp_core::channel::{Channel, ChannelState};
 use warp_core::features::FeatureFlag;
-use warp_core::ui::theme::Fill;
 
 use crate::ai::auth_secret_types::auth_secret_types_for_harness;
+use crate::ai::blocklist::inline_action::host_picker::HostPicker;
 use crate::ai::execution_profiles::model_menu_items::available_model_menu_items;
 use crate::ai::harness_display;
-use crate::ai::local_child_harnesses::{
-    local_child_harness_disabled_message, local_child_harness_is_enabled,
+use crate::ai::llms::LLMInfo;
+use crate::ai::local_harness_setup::{
+    local_harness_is_product_enabled, local_harness_product_disabled_message,
+    local_harness_setup_state, LocalHarnessSetupState,
 };
 use crate::appearance::Appearance;
 use crate::menu::{MenuItem, MenuItemFields};
 use crate::ui_components::blended_colors;
-use crate::view_components::dropdown::{Dropdown, DropdownAction, DropdownStyle};
+use crate::view_components::dropdown::{
+    Dropdown, DropdownAction, DropdownItemAction, DropdownStyle,
+};
 use crate::view_components::FilterableDropdown;
 use crate::LLMPreferences;
 
 // ── Shared constants ────────────────────────────────────────────────
 
+// Zap: `WARP_WORKER_HOST` used to come from the removed cloud
+// `connected_self_hosted_workers` module; inlined as a literal since it is only ever
+// used as a sentinel meaning "run locally" (see the `RunAgentsExecutionMode::Local`/
+// `OrchestrationExecutionMode::Local` mappings below).
 pub const ORCHESTRATION_WARP_WORKER_HOST: &str = "warp";
-pub const ORCHESTRATION_ENV_NONE_LABEL: &str = "(no environment)";
-
+pub const ORCHESTRATION_ENV_NONE_LABEL: &str = "Empty environment";
 pub const ORCHESTRATION_PICKER_HEIGHT: f32 = 36.;
 pub const ORCHESTRATION_PICKER_BORDER_WIDTH: f32 = 1.;
 pub const ORCHESTRATION_PICKER_FONT_SIZE: f32 = 14.;
@@ -64,27 +67,24 @@ pub const ORCHESTRATION_PICKER_RADIUS: f32 = 4.;
 pub const ORCHESTRATION_PICKER_MAX_WIDTH: f32 = 205.;
 
 const DEFAULT_MODEL_LABEL: &str = "Default model";
-
-/// Label shown in the auth secret picker when no secret is selected
-/// (the child agent will inherit credentials from its environment).
-const AUTH_SECRET_INHERIT_LABEL: &str = "Inherit key from environment";
-/// Label for the auth secret column.
+const ORCHESTRATION_SEGMENTED_CONTROL_PADDING: f32 = 4.;
+const ORCHESTRATION_SEGMENT_VERTICAL_PADDING: f32 = 4.;
+const AUTH_SECRET_INHERIT_LABEL: &str = "Skip (advanced)";
 pub const AUTH_SECRET_COLUMN_LABEL: &str = "API key";
-
+const AUTH_SECRET_CREATE_NEW_LABEL: &str = "New API key…";
 // ── Action trait ────────────────────────────────────────────────────
 
 /// Trait that both `RunAgentsCardViewAction` and
 /// `OrchestrationConfigBlockAction` implement so the shared picker
 /// creation and render helpers can produce the correct action variant.
-pub trait OrchestrationControlAction: Clone + Debug + Send + Sync + 'static {
+pub trait OrchestrationControlAction: DropdownItemAction + Clone {
     fn execution_mode_toggled(is_remote: bool) -> Self;
     fn model_changed(model_id: String) -> Self;
     fn harness_changed(harness_type: String) -> Self;
     fn environment_changed(environment_id: String) -> Self;
-    fn worker_host_changed(worker_host: String) -> Self;
-    /// Fires when the auth secret picker selects a managed secret.
-    /// `None` means "clear the selection / inherit from environment".
+    fn create_environment_requested() -> Self;
     fn auth_secret_changed(name: Option<String>) -> Self;
+    fn create_new_auth_secret_requested() -> Self;
 }
 
 // ── Shared edit state ───────────────────────────────────────────────
@@ -98,13 +98,6 @@ pub struct OrchestrationEditState {
     pub model_id: String,
     pub harness_type: String,
     pub execution_mode: OrchestrationExecutionMode,
-    /// Managed-secret name selected for the active harness, when the
-    /// harness is non-Oz and the execution mode is Cloud.
-    /// UI-session-only: this used to be persisted side-channel via
-    /// `CloudAgentSettings.last_selected_auth_secret` and propagated onto
-    /// the (now-removed) cloud dispatch request. Neither the cloud
-    /// settings store nor the dispatch mechanism exist in this fork
-    /// anymore, so the selection no longer survives past this view.
     pub auth_secret_name: Option<String>,
 }
 
@@ -113,7 +106,7 @@ impl OrchestrationEditState {
         let Some(harness) = Harness::parse_local_child_harness(&self.harness_type) else {
             return;
         };
-        if local_child_harness_disabled_message(harness).is_some() {
+        if local_harness_product_disabled_message(harness).is_some() {
             self.harness_type = "oz".to_string();
             self.model_id.clear();
         }
@@ -174,20 +167,20 @@ impl OrchestrationEditState {
 
     pub fn set_worker_host(&mut self, worker_host: String) {
         if let OrchestrationExecutionMode::Remote {
-            worker_host: wh, ..
+            worker_host: host, ..
         } = &mut self.execution_mode
         {
-            *wh = worker_host;
+            *host = worker_host;
         }
     }
 
     /// Returns `Some(reason)` if Accept / Apply must be disabled.
-    /// Hard blocks: OpenCode + Cloud, and temporarily disabled local Claude/Codex.
+    /// Hard blocks: OpenCode + Cloud, and product-disabled local harnesses.
     pub fn accept_disabled_reason(&self) -> Option<&'static str> {
         match &self.execution_mode {
             OrchestrationExecutionMode::Local => {
                 Harness::parse_local_child_harness(&self.harness_type)
-                    .and_then(local_child_harness_disabled_message)
+                    .and_then(local_harness_product_disabled_message)
             }
             OrchestrationExecutionMode::Remote { .. }
                 if self.harness_type.eq_ignore_ascii_case("opencode") =>
@@ -246,14 +239,10 @@ impl OrchestrationEditState {
 /// block. Generic over the action type `A`.
 #[derive(Clone)]
 pub struct OrchestrationPickerHandles<A: OrchestrationControlAction> {
-    pub model_picker: Option<ViewHandle<Dropdown<A>>>,
+    pub model_picker: Option<ViewHandle<FilterableDropdown<A>>>,
     pub harness_picker: Option<ViewHandle<Dropdown<A>>>,
     pub environment_picker: Option<ViewHandle<FilterableDropdown<A>>>,
-    pub host_picker: Option<ViewHandle<Dropdown<A>>>,
-    /// Picker for the managed auth secret used by non-Oz cloud children.
-    /// `None` when the picker hasn't been built yet (e.g. harness is Oz or
-    /// execution mode is Local), or when the harness has no supported
-    /// auth-secret types.
+    pub host_picker: Option<ViewHandle<HostPicker>>,
     pub auth_secret_picker: Option<ViewHandle<Dropdown<A>>>,
     pub local_toggle: MouseStateHandle,
     pub cloud_toggle: MouseStateHandle,
@@ -334,6 +323,7 @@ pub fn new_standard_picker_dropdown<A: OrchestrationControlAction, V: View>(
     ctx.add_typed_action_view(move |ctx_dropdown| {
         let mut dropdown = Dropdown::<A>::new(ctx_dropdown);
         dropdown.set_use_overlay_layer(false, ctx_dropdown);
+        dropdown.set_match_menu_width_to_top_bar(true, ctx_dropdown);
         dropdown.set_main_axis_size(MainAxisSize::Max, ctx_dropdown);
         dropdown.set_style(DropdownStyle::ActionButtonSecondary, ctx_dropdown);
         dropdown.set_top_bar_height(ORCHESTRATION_PICKER_HEIGHT, ctx_dropdown);
@@ -347,6 +337,36 @@ pub fn new_standard_picker_dropdown<A: OrchestrationControlAction, V: View>(
     })
 }
 
+/// Creates a searchable dropdown with the shared orchestration picker
+/// chrome (border, radius, background, font).
+pub fn new_standard_filterable_picker_dropdown<A: OrchestrationControlAction, V: View>(
+    styles: &UiComponentStyles,
+    ctx: &mut ViewContext<V>,
+) -> ViewHandle<FilterableDropdown<A>> {
+    let styles = *styles;
+    ctx.add_typed_action_view(move |ctx_dropdown| {
+        let mut dropdown = FilterableDropdown::<A>::new(ctx_dropdown);
+        dropdown.set_use_overlay_layer(false, ctx_dropdown);
+        dropdown.set_match_menu_width_to_top_bar(true, ctx_dropdown);
+        dropdown.set_main_axis_size(MainAxisSize::Max, ctx_dropdown);
+        dropdown.set_button_variant(ButtonVariant::Secondary);
+        dropdown.set_style(styles);
+        dropdown.set_top_bar_height(ORCHESTRATION_PICKER_HEIGHT, ctx_dropdown);
+        dropdown.set_top_bar_max_width(f32::INFINITY);
+        dropdown
+    })
+}
+
+/// Returns Warp base-model choices for orchestration.
+fn get_base_model_choices<'a>(
+    llm_prefs: &'a LLMPreferences,
+    app: &'a AppContext,
+    is_local: bool,
+) -> impl Iterator<Item = &'a LLMInfo> {
+    llm_prefs
+        .get_base_llm_choices_for_agent_mode(app)
+        .filter(move |llm| is_local || llm_prefs.custom_llm_info_for_id(&llm.id).is_none())
+}
 /// Populates the model picker based on the active harness.
 ///
 /// - **Oz / empty**: shows the Warp LLM catalog (existing behavior).
@@ -355,10 +375,10 @@ pub fn new_standard_picker_dropdown<A: OrchestrationControlAction, V: View>(
 ///   come from the (cloud-only) harness-availability service, which was
 ///   stripped from this fork.
 pub fn populate_model_picker_for_harness<A: OrchestrationControlAction, V: View>(
-    dropdown: &ViewHandle<Dropdown<A>>,
+    dropdown: &ViewHandle<FilterableDropdown<A>>,
     initial_model_id: &str,
     harness_type: &str,
-    _is_local: bool,
+    is_local: bool,
     ctx: &mut ViewContext<V>,
 ) {
     let initial_model_id = initial_model_id.to_string();
@@ -367,19 +387,31 @@ pub fn populate_model_picker_for_harness<A: OrchestrationControlAction, V: View>
         let harness = Harness::parse_orchestration_harness(&harness_type);
         match harness {
             Some(Harness::Oz) | None => {
-                // Oz / unset: current behavior — Warp LLM catalog.
+                // Oz / unset: Warp LLM catalog. Custom models excluded for
+                // cloud runs (not supported by remote workers).
+                // Order: auto models first, then custom models, then other models.
                 let llm_prefs = LLMPreferences::as_ref(ctx_dropdown);
-                let choices: Vec<_> = llm_prefs
-                    .get_base_llm_choices_for_agent_mode(ctx_dropdown)
+                let (auto_models, rest): (Vec<_>, Vec<_>) =
+                    get_base_model_choices(llm_prefs, ctx_dropdown, is_local)
+                        .partition(|llm| llm.id.as_str().starts_with("auto"));
+                let (custom_models, other_models): (Vec<_>, Vec<_>) = rest
+                    .into_iter()
+                    .partition(|llm| llm_prefs.custom_llm_info_for_id(&llm.id).is_some());
+                let ordered_choices: Vec<_> = auto_models
+                    .into_iter()
+                    .chain(custom_models)
+                    .chain(other_models)
                     .collect();
-                let selected_display_name = choices
+                let selected_display_name = ordered_choices
                     .iter()
                     .find(|llm| llm.id.to_string() == initial_model_id)
                     .map(|llm| llm.menu_display_name());
                 let items = available_model_menu_items(
-                    choices,
+                    ordered_choices,
                     move |llm| {
-                        DropdownAction::SelectActionAndClose(A::model_changed(llm.id.to_string()))
+                        DropdownAction::select_action_and_close(A::model_changed(
+                            llm.id.to_string(),
+                        ))
                     },
                     None,
                     None,
@@ -404,10 +436,10 @@ pub fn populate_model_picker_for_harness<A: OrchestrationControlAction, V: View>
 }
 
 /// Creates a "Default model" menu item that emits an empty model_id.
-fn default_model_menu_item<A: OrchestrationControlAction>() -> MenuItem<DropdownAction<A>> {
+fn default_model_menu_item<A: OrchestrationControlAction>() -> MenuItem<DropdownAction> {
     MenuItem::Item(
         MenuItemFields::new(DEFAULT_MODEL_LABEL).with_on_select_action(
-            DropdownAction::SelectActionAndClose(A::model_changed(String::new())),
+            DropdownAction::select_action_and_close(A::model_changed(String::new())),
         ),
     )
 }
@@ -418,15 +450,14 @@ fn default_model_menu_item<A: OrchestrationControlAction>() -> MenuItem<Dropdown
 pub fn is_model_in_filtered_choices<V: View>(
     model_id: &str,
     harness_type: &str,
-    _is_local: bool,
+    is_local: bool,
     ctx: &mut ViewContext<V>,
 ) -> bool {
     let harness = Harness::parse_orchestration_harness(harness_type);
     match harness {
         Some(Harness::Oz) | None => {
             let llm_prefs = LLMPreferences::as_ref(ctx);
-            llm_prefs
-                .get_base_llm_choices_for_agent_mode(ctx)
+            get_base_model_choices(llm_prefs, ctx, is_local)
                 .any(|llm| llm.id.to_string() == model_id)
         }
         // Non-Oz harnesses only ever offer the "Default model" (empty id)
@@ -457,8 +488,9 @@ pub fn first_filtered_model_id<V: View>(
 }
 
 fn should_show_harness_picker(state: &OrchestrationEditState) -> bool {
-    !matches!(state.execution_mode, OrchestrationExecutionMode::Local)
-        || FeatureFlag::LocalClaudeCodexChildHarnesses.is_enabled()
+    match state.execution_mode {
+        OrchestrationExecutionMode::Local | OrchestrationExecutionMode::Remote { .. } => true,
+    }
 }
 
 /// Populates the harness picker.
@@ -488,17 +520,21 @@ pub fn populate_harness_picker<A: OrchestrationControlAction, V: View>(
         // relative order within each group. When editing a local run,
         // disabled local-child harnesses are dropped entirely rather
         // than just grayed out.
-        let mut sorted: Vec<(Harness, bool)> = candidates
+        let mut sorted: Vec<(Harness, bool, LocalHarnessSetupState)> = candidates
             .into_iter()
             .filter_map(|harness| {
-                let enabled = local_child_harness_is_enabled(harness);
+                let local_setup_state = local_harness_setup_state(harness);
+                let enabled = harness == Harness::Oz
+                    || (FeatureFlag::LocalClaudeCodexChildHarnesses.is_enabled()
+                        && local_harness_is_product_enabled(harness)
+                        && local_setup_state.is_selectable());
                 if is_local && !enabled {
                     return None;
                 }
-                Some((harness, enabled))
+                Some((harness, enabled, local_setup_state))
             })
             .collect();
-        sorted.sort_by_key(|(_, enabled)| !enabled);
+        sorted.sort_by_key(|(_, enabled, _)| !enabled);
 
         // Empty string is the wire representation of Oz (see
         // `harness_save_key`); everything else parses normally.
@@ -508,10 +544,10 @@ pub fn populate_harness_picker<A: OrchestrationControlAction, V: View>(
             Harness::parse_orchestration_harness(&initial_harness)
         };
 
-        let mut items: Vec<MenuItem<DropdownAction<A>>> = Vec::new();
+        let mut items: Vec<MenuItem<DropdownAction>> = Vec::new();
         let mut selected_name: Option<String> = None;
 
-        for (harness, enabled) in sorted {
+        for (harness, enabled, local_setup_state) in sorted {
             let display = harness_display::display_name(harness);
             let mut fields =
                 MenuItemFields::new(display).with_icon(harness_display::icon_for(harness));
@@ -519,11 +555,17 @@ pub fn populate_harness_picker<A: OrchestrationControlAction, V: View>(
                 fields = fields.with_override_icon_color(Fill::from(color));
             }
             if enabled {
-                fields = fields.with_on_select_action(DropdownAction::SelectActionAndClose(
+                fields = fields.with_on_select_action(DropdownAction::select_action_and_close(
                     A::harness_changed(harness.to_string()),
                 ));
             } else {
                 fields = fields.with_disabled(true);
+                let tooltip = match local_setup_state {
+                    LocalHarnessSetupState::MissingHarness { tooltip } => tooltip,
+                    LocalHarnessSetupState::ProductDisabled { message } => message,
+                    LocalHarnessSetupState::Ready => "Disabled by feature settings",
+                };
+                fields = fields.with_tooltip(tooltip);
             }
             if selected_name.is_none() && Some(harness) == target_harness {
                 selected_name = Some(display.to_string());
@@ -537,74 +579,6 @@ pub fn populate_harness_picker<A: OrchestrationControlAction, V: View>(
     });
 }
 
-/// Creates the environment picker.
-///
-/// The cloud-only environment service (Warp-hosted sandbox environments)
-/// that used to populate this list was stripped from this fork, so the
-/// only entry ever available is "(no environment)".
-pub fn create_environment_picker<A: OrchestrationControlAction, V: View>(
-    _initial_env_id: &str,
-    styles: &UiComponentStyles,
-    ctx: &mut ViewContext<V>,
-) -> ViewHandle<FilterableDropdown<A>> {
-    let styles = *styles;
-    let dropdown_handle = ctx.add_typed_action_view(move |ctx_dropdown| {
-        let mut dropdown = FilterableDropdown::<A>::new(ctx_dropdown);
-        dropdown.set_use_overlay_layer(false, ctx_dropdown);
-        dropdown.set_main_axis_size(MainAxisSize::Max, ctx_dropdown);
-        dropdown.set_button_variant(ButtonVariant::Secondary);
-        dropdown.set_style(styles);
-        dropdown.set_top_bar_height(ORCHESTRATION_PICKER_HEIGHT, ctx_dropdown);
-        dropdown.set_top_bar_max_width(f32::INFINITY);
-        dropdown
-    });
-    dropdown_handle.update(ctx, |dropdown, ctx_dropdown| {
-        dropdown.set_menu_width(280.0, ctx_dropdown);
-        let items: Vec<MenuItem<DropdownAction<A>>> = vec![MenuItem::Item(
-            MenuItemFields::new(ORCHESTRATION_ENV_NONE_LABEL).with_on_select_action(
-                DropdownAction::SelectActionAndClose(A::environment_changed(String::new())),
-            ),
-        )];
-        dropdown.set_rich_items(items, ctx_dropdown);
-        dropdown.set_selected_by_name(ORCHESTRATION_ENV_NONE_LABEL, ctx_dropdown);
-    });
-    dropdown_handle
-}
-
-pub fn populate_host_picker<A: OrchestrationControlAction, V: View>(
-    dropdown: &ViewHandle<Dropdown<A>>,
-    initial_host: &str,
-    ctx: &mut ViewContext<V>,
-) {
-    let initial_host = if initial_host.is_empty() {
-        ORCHESTRATION_WARP_WORKER_HOST.to_string()
-    } else {
-        initial_host.to_string()
-    };
-    dropdown.update(ctx, |dropdown, ctx_dropdown| {
-        let hosts: &[&str] = if matches!(ChannelState::channel(), Channel::Local) {
-            &["warp", "local-dev"]
-        } else {
-            &["warp"]
-        };
-        let mut items: Vec<MenuItem<DropdownAction<A>>> = Vec::new();
-        let mut selected_idx = None;
-        for (idx, &host) in hosts.iter().enumerate() {
-            let fields = MenuItemFields::new(host).with_on_select_action(
-                DropdownAction::SelectActionAndClose(A::worker_host_changed(host.to_string())),
-            );
-            if host.eq_ignore_ascii_case(&initial_host) {
-                selected_idx = Some(idx);
-            }
-            items.push(MenuItem::Item(fields));
-        }
-        dropdown.set_rich_items(items, ctx_dropdown);
-        if let Some(idx) = selected_idx {
-            dropdown.set_selected_by_index(idx, ctx_dropdown);
-        }
-    });
-}
-
 /// Normalizes a harness_type string for use as a HashMap key in
 /// per-harness model memory. Empty string (the wire representation
 /// of Oz) is mapped to "oz" so saves and lookups are consistent.
@@ -614,6 +588,22 @@ pub fn harness_save_key(harness_type: &str) -> &str {
     } else {
         harness_type
     }
+}
+
+fn populate_host_picker<V: View>(
+    picker: &ViewHandle<HostPicker>,
+    initial_host: &str,
+    ctx: &mut ViewContext<V>,
+) {
+    let initial = if initial_host.trim().is_empty() {
+        ORCHESTRATION_WARP_WORKER_HOST.to_string()
+    } else {
+        initial_host.to_string()
+    };
+    picker.update(ctx, |picker, picker_ctx| {
+        picker.set_options(None, None, Vec::new(), picker_ctx);
+        picker.set_selected(&initial, picker_ctx);
+    });
 }
 
 // ── Default environment resolution ──────────────────────────────────
@@ -631,14 +621,9 @@ pub fn persist_environment_selection<V: View>(_environment_id: &str, _ctx: &mut 
 
 // ── Auth secret helpers ────────────────────────────────────────────
 
-/// Returns `true` when the orchestration UI should expose the auth
-/// secret picker for the given edit state. Currently gated on:
-/// - execution mode is `Remote` (Cloud), AND
-/// - harness is non-Oz, AND
-/// - the harness has at least one supported auth-secret type.
-///
-/// Local non-Oz children inherit auth from the user's shell environment,
-/// matching cloud-mode's `AuthSecretSelector` gating.
+/// Returns `true` when the auth secret picker should be visible: Cloud +
+/// non-Oz + a harness with at least one supported auth-secret type. Local
+/// non-Oz children inherit auth from the user's shell environment.
 pub fn should_show_auth_secret_picker(state: &OrchestrationEditState) -> bool {
     if !state.execution_mode.is_remote() {
         return false;
@@ -682,7 +667,7 @@ pub fn populate_auth_secret_picker_for_harness<A: OrchestrationControlAction, V:
     dropdown.update(ctx, |dropdown, ctx_dropdown| {
         let items = vec![MenuItem::Item(
             MenuItemFields::new(AUTH_SECRET_INHERIT_LABEL).with_on_select_action(
-                DropdownAction::SelectActionAndClose(A::auth_secret_changed(None)),
+                DropdownAction::select_action_and_close(A::auth_secret_changed(None)),
             ),
         )];
         dropdown.set_rich_items(items, ctx_dropdown);
@@ -698,10 +683,10 @@ pub fn populate_auth_secret_picker_for_harness<A: OrchestrationControlAction, V:
 /// picker, but that settings store was stripped along with the rest of
 /// the cloud stack, so the selection is UI-session-only now.
 ///
-/// Does NOT call `populate_auth_secret_picker_for_harness` or
-/// `sync_picker_selections` — the auth secret picker dispatched this
-/// action and must not be re-entered (would cause a `Circular view
-/// update` panic). The dropdown already shows the user's chosen value.
+/// Does NOT repopulate the picker — doing so from inside the action the
+/// picker just dispatched would re-enter the dropdown's view and trip
+/// warpui's circular-update guard. The dropdown already reflects the
+/// chosen value.
 pub fn apply_auth_secret_change<A: OrchestrationControlAction, V: View>(
     state: &mut OrchestrationEditState,
     _handles: &OrchestrationPickerHandles<A>,
@@ -713,17 +698,11 @@ pub fn apply_auth_secret_change<A: OrchestrationControlAction, V: View>(
 
 // ── Shared action helpers ───────────────────────────────────────────
 
-/// Handles a harness change for both card views: saves the current
-/// model for the old harness, restores a previously saved model for
-/// the new harness (if still valid), falls back to a caller-provided
-/// base model id or the first available model, and repopulates the
-/// model picker.
+/// Handles a harness change for both card views: saves/restores per-harness
+/// model selection, repopulates the model picker, and re-resolves the auth
+/// secret selection for the new harness.
 ///
-/// Also re-resolves the auth secret selection from settings for the
-/// new harness so the picker and edit state agree.
-///
-/// Does NOT call `sync_picker_selections` — the harness picker
-/// dispatched this action and must not be re-entered.
+/// Does NOT re-enter the harness picker that dispatched this action.
 pub fn apply_harness_change<A: OrchestrationControlAction, V: View>(
     state: &mut OrchestrationEditState,
     memory: &mut HashMap<String, String>,
@@ -800,8 +779,7 @@ pub fn apply_execution_mode_change<A: OrchestrationControlAction, V: View>(
     if let Some(handle) = &handles.harness_picker {
         populate_harness_picker(handle, &state.harness_type, is_local, ctx);
     }
-    // When switching to Cloud with no environment set, pre-fill with
-    // the user's last-selected or most recently used environment.
+    // Pre-fill environment with the last-selected one when switching to Cloud.
     if is_remote {
         if let OrchestrationExecutionMode::Remote { environment_id, .. } = &state.execution_mode {
             if environment_id.is_empty() {
@@ -827,6 +805,13 @@ pub fn apply_execution_mode_change<A: OrchestrationControlAction, V: View>(
             ctx,
         );
     }
+    if let Some(handle) = &handles.host_picker {
+        let initial_host = match &state.execution_mode {
+            OrchestrationExecutionMode::Remote { worker_host, .. } => worker_host.as_str(),
+            OrchestrationExecutionMode::Local => ORCHESTRATION_WARP_WORKER_HOST,
+        };
+        populate_host_picker(handle, initial_host, ctx);
+    }
     sync_picker_selections(state, handles, ctx);
 }
 
@@ -848,8 +833,7 @@ pub fn repopulate_all_pickers<A: OrchestrationControlAction, V: View>(
     if let Some(handle) = &handles.harness_picker {
         populate_harness_picker(handle, &state.harness_type, is_local, ctx);
     }
-    // Revalidate model_id: if the previously selected model is no longer
-    // in the catalog (e.g. server removed it), reset to default.
+    // Reset model if it disappeared from the harness's catalog.
     if !is_model_in_filtered_choices(&state.model_id, &state.harness_type, is_local, ctx) {
         if let Some(first_id) = first_filtered_model_id(&state.harness_type, ctx) {
             state.model_id = first_id;
@@ -864,6 +848,10 @@ pub fn repopulate_all_pickers<A: OrchestrationControlAction, V: View>(
             ctx,
         );
     }
+    // No cloud harness-availability service remains to validate a
+    // previously-selected managed secret against, or to re-seed a default
+    // from — `resolve_default_auth_secret_for_harness` always returns
+    // `None` now (see its doc comment).
     if let Some(handle) = &handles.auth_secret_picker {
         populate_auth_secret_picker_for_harness(
             handle,
@@ -871,6 +859,13 @@ pub fn repopulate_all_pickers<A: OrchestrationControlAction, V: View>(
             &state.harness_type,
             ctx,
         );
+    }
+    if let Some(handle) = &handles.host_picker {
+        let initial_host = match &state.execution_mode {
+            OrchestrationExecutionMode::Remote { worker_host, .. } => worker_host.as_str(),
+            OrchestrationExecutionMode::Local => ORCHESTRATION_WARP_WORKER_HOST,
+        };
+        populate_host_picker(handle, initial_host, ctx);
     }
     sync_picker_selections(state, handles, ctx);
 }
@@ -928,17 +923,22 @@ pub fn sync_picker_selections<A: OrchestrationControlAction, V: View>(
             OrchestrationExecutionMode::Remote { worker_host, .. } => worker_host.clone(),
             OrchestrationExecutionMode::Local => ORCHESTRATION_WARP_WORKER_HOST.to_string(),
         };
-        host_picker.update(ctx, |dropdown, ctx_dropdown| {
-            dropdown.set_selected_by_name(&worker_host, ctx_dropdown);
+        host_picker.update(ctx, |picker, picker_ctx| {
+            picker.set_selected(&worker_host, picker_ctx);
         });
     }
     if let Some(auth_secret_picker) = handles.auth_secret_picker.clone() {
-        let target = state.auth_secret_name.clone();
+        let selection = state.auth_secret_name.clone();
+        let supports_create_new = Harness::parse_orchestration_harness(&state.harness_type)
+            .filter(|h| *h != Harness::Oz)
+            .map(|h| !auth_secret_types_for_harness(h).is_empty())
+            .unwrap_or(false);
         auth_secret_picker.update(ctx, |dropdown, ctx_dropdown| {
-            let label = target
-                .as_deref()
-                .unwrap_or(AUTH_SECRET_INHERIT_LABEL)
-                .to_string();
+            let label = match &selection {
+                Some(name) => name.clone(),
+                None if supports_create_new => AUTH_SECRET_CREATE_NEW_LABEL.to_string(),
+                None => AUTH_SECRET_INHERIT_LABEL.to_string(),
+            };
             dropdown.set_selected_by_name(&label, ctx_dropdown);
         });
     }
@@ -1131,17 +1131,19 @@ pub fn render_mode_toggle<A: OrchestrationControlAction>(
         .with_child(Expanded::new(1.0, local_segment).finish())
         .finish();
     let segmented_control = Container::new(segments_row)
-        .with_padding_top(4.)
-        .with_padding_bottom(4.)
-        .with_padding_left(4.)
-        .with_padding_right(4.)
+        .with_padding_top(ORCHESTRATION_SEGMENTED_CONTROL_PADDING)
+        .with_padding_bottom(ORCHESTRATION_SEGMENTED_CONTROL_PADDING)
+        .with_padding_left(ORCHESTRATION_SEGMENTED_CONTROL_PADDING)
+        .with_padding_right(ORCHESTRATION_SEGMENTED_CONTROL_PADDING)
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.)))
         .with_background(segment_outer_bg)
         .finish();
+    let segmented_control =
+        ConstrainedBox::new(segmented_control).with_height(ORCHESTRATION_PICKER_HEIGHT);
     let segmented_control = if full_width {
-        segmented_control
+        segmented_control.finish()
     } else {
-        ConstrainedBox::new(segmented_control)
+        segmented_control
             .with_width(ORCHESTRATION_PICKER_MAX_WIDTH)
             .finish()
     };
@@ -1169,7 +1171,7 @@ fn render_segment_button<A: OrchestrationControlAction>(
     let theme = appearance.theme();
     let label_owned = label.to_string();
     let font_family = appearance.ui_font_family();
-    let font_size = appearance.monospace_font_size() + 1.;
+    let font_size = ORCHESTRATION_PICKER_FONT_SIZE;
     let active_text_color = blended_colors::text_main(theme, theme.surface_1());
     let inactive_text_color = blended_colors::text_disabled(theme, theme.surface_1());
     let segment_active_bg = active_bg_override
@@ -1184,7 +1186,7 @@ fn render_segment_button<A: OrchestrationControlAction>(
             .finish();
         let centered = warpui::elements::Align::new(text).finish();
         let mut container = Container::new(centered)
-            .with_vertical_padding(6.)
+            .with_vertical_padding(ORCHESTRATION_SEGMENT_VERTICAL_PADDING)
             .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)));
         if is_active {
             container = container.with_background(segment_active_bg);
@@ -1214,10 +1216,7 @@ pub fn render_picker_row_with_layout<A: OrchestrationControlAction>(
     appearance: &Appearance,
     vertical: bool,
 ) -> Box<dyn Element> {
-    let is_remote = state.execution_mode.is_remote();
     let show_harness_picker = should_show_harness_picker(state);
-
-    let show_auth_picker = should_show_auth_secret_picker(state);
 
     if vertical {
         let mut column = Flex::column()
@@ -1228,44 +1227,12 @@ pub fn render_picker_row_with_layout<A: OrchestrationControlAction>(
             col.add_child(render_picker_column(label, picker, appearance));
         };
 
-        // Plan-card ordering groups harness-scoped pickers (harness + API
-        // key) before host/environment/model so the API key sits directly
-        // under the harness selector and does not split the model picker
-        // from the "Primary model…" subtext that follows the picker row.
         if show_harness_picker {
             add(
                 &mut column,
                 "Agent harness",
                 handles
                     .harness_picker
-                    .as_ref()
-                    .map(|p| ChildView::new(p).finish()),
-            );
-        }
-        if show_auth_picker {
-            add(
-                &mut column,
-                AUTH_SECRET_COLUMN_LABEL,
-                handles
-                    .auth_secret_picker
-                    .as_ref()
-                    .map(|p| ChildView::new(p).finish()),
-            );
-        }
-        if is_remote {
-            add(
-                &mut column,
-                "Host",
-                handles
-                    .host_picker
-                    .as_ref()
-                    .map(|p| ChildView::new(p).finish()),
-            );
-            add(
-                &mut column,
-                "Environment",
-                handles
-                    .environment_picker
                     .as_ref()
                     .map(|p| ChildView::new(p).finish()),
             );
@@ -1301,24 +1268,6 @@ pub fn render_picker_row_with_layout<A: OrchestrationControlAction>(
                     .map(|p| ChildView::new(p).finish()),
             );
         }
-        if is_remote {
-            add_picker(
-                &mut row,
-                "Host",
-                handles
-                    .host_picker
-                    .as_ref()
-                    .map(|p| ChildView::new(p).finish()),
-            );
-            add_picker(
-                &mut row,
-                "Environment",
-                handles
-                    .environment_picker
-                    .as_ref()
-                    .map(|p| ChildView::new(p).finish()),
-            );
-        }
         add_picker(
             &mut row,
             "Base model",
@@ -1327,17 +1276,6 @@ pub fn render_picker_row_with_layout<A: OrchestrationControlAction>(
                 .as_ref()
                 .map(|p| ChildView::new(p).finish()),
         );
-        if show_auth_picker {
-            add_picker(
-                &mut row,
-                AUTH_SECRET_COLUMN_LABEL,
-                handles
-                    .auth_secret_picker
-                    .as_ref()
-                    .map(|p| ChildView::new(p).finish()),
-            );
-        }
-
         Container::new(row.finish()).with_margin_top(12.).finish()
     }
 }

@@ -1,25 +1,19 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::TryInto;
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::mpsc::SyncSender;
-use std::sync::{Mutex, Once, OnceLock};
-use std::{
-    collections::{HashMap, VecDeque},
-    convert::TryInto,
-    fs,
-    path::PathBuf,
-    sync::Arc,
-    thread,
-};
+use std::sync::{Arc, Mutex, Once, OnceLock};
+use std::{fs, thread};
 
 use ai::project_context::model::ProjectRulePath;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
+use diesel::connection::{DefaultLoadingMode, SimpleConnection};
+use diesel::result::Error;
+use diesel::sqlite::SqliteConnection;
 use diesel::{
-    connection::{DefaultLoadingMode, SimpleConnection},
-    result::Error,
-    sqlite::SqliteConnection,
     BelongingToDsl, BoolExpressionMethods, Connection, ExpressionMethods, GroupedBy,
     OptionalExtension, QueryDsl, RunQueryDsl, SelectableHelper,
 };
@@ -28,10 +22,12 @@ use instant::Instant;
 use itertools::Itertools;
 use libsqlite3_sys as sqlite3;
 use num_traits::FromPrimitive;
-use pathfinder_geometry::{rect::RectF, vector::Vector2F};
+use pathfinder_geometry::rect::RectF;
+use pathfinder_geometry::vector::Vector2F;
 use persistence::model::AMBIENT_AGENT_PANE_KIND;
 use uuid::Uuid;
 use warpui::platform::FullscreenState;
+use warpui::windowing::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
 use warpui::{AppContext, SingletonEntity};
 
 use super::agent::{delete_agent_conversations, upsert_agent_conversation};
@@ -47,9 +43,8 @@ use super::model::{
     EXECUTION_PROFILE_EDITOR_PANE_KIND, MCP_SERVER_PANE_KIND, NOTEBOOK_PANE_KIND,
     SETTINGS_PANE_KIND, TERMINAL_PANE_KIND, WELCOME_PANE_KIND, WORKFLOW_PANE_KIND,
 };
-use super::schema;
 use super::{
-    BlockCompleted, FinishedCommandMetadata, ModelEvent, PersistedData, PersistenceScope,
+    schema, BlockCompleted, FinishedCommandMetadata, ModelEvent, PersistedData, PersistenceScope,
     StartedCommandMetadata, WriterHandles,
 };
 use crate::ai::agent::conversation::AIConversationId;
@@ -63,9 +58,11 @@ use crate::ai::mcp::{
     MCPServerObject, MCPServerObjectModel, TemplatableMCPServer, TemplatableMCPServerInstallation,
 };
 use crate::app_state::{
-    AIFactPaneSnapshot, AmbientAgentPaneSnapshot, CodeReviewPaneSnapshot,
-    EnvVarCollectionPaneSnapshot, LeftPanelSnapshot, RightPanelSnapshot, SettingsPaneSnapshot,
-    WorkflowPaneSnapshot,
+    AIFactPaneSnapshot, AmbientAgentPaneSnapshot, AppState, BranchSnapshot, CodePaneSnapShot,
+    CodePaneTabSnapshot, CodeReviewPaneSnapshot, EnvVarCollectionPaneSnapshot, LeafContents,
+    LeafSnapshot, LeftPanelSnapshot, NotebookPaneSnapshot, PaneFlex, PaneNodeSnapshot,
+    RightPanelSnapshot, SettingsPaneSnapshot, SplitDirection, TabSnapshot, TerminalPaneSnapshot,
+    WindowSnapshot, WorkflowPaneSnapshot,
 };
 use crate::auth::AuthStateProvider;
 use crate::auth::PersistedCurrentUserInformation;
@@ -105,16 +102,8 @@ use crate::themes::theme::AnsiColorIdentifier;
 use crate::workflows::workflow_enum::{WorkflowEnumObject, WorkflowEnumObjectModel};
 use crate::workflows::{WorkflowId, WorkflowObject};
 use crate::workspaces::team::Team as TeamMetadata;
-use crate::workspaces::workspace::Workspace as WorkspaceMetadata;
-use crate::workspaces::workspace::WorkspaceUid;
-use crate::{
-    app_state::{
-        AppState, BranchSnapshot, CodePaneSnapShot, CodePaneTabSnapshot, LeafContents,
-        LeafSnapshot, NotebookPaneSnapshot, PaneFlex, PaneNodeSnapshot, SplitDirection,
-        TabSnapshot, TerminalPaneSnapshot, WindowSnapshot,
-    },
-    workspaces::user_profiles::UserProfileWithUID,
-};
+use crate::workspaces::user_profiles::{user_profile_from_persistence, UserProfileWithUID};
+use crate::workspaces::workspace::{Workspace as WorkspaceMetadata, WorkspaceUid};
 use crate::{
     cloud_object::{NumInFlightRequests, Revision, StoredObjectMetadata},
     notebooks::NotebookObjectModel,
@@ -296,7 +285,7 @@ fn take_prewarmed_db() -> Option<Result<SqliteConnection>> {
 pub fn initialize(
     ctx: &mut AppContext,
     scope: PersistenceScope,
-) -> (Option<PersistedData>, Option<WriterHandles>) {
+) -> (Option<Box<PersistedData>>, Option<WriterHandles>) {
     unsafe {
         // Set up logging before any SQLite calls.
         init_logging();
@@ -307,26 +296,13 @@ pub fn initialize(
     // synchronous path (original behavior) for other scopes or when prewarming
     // was never started.
     let init_result = match &scope {
-        PersistenceScope::App => {
-            take_prewarmed_db().unwrap_or_else(|| init_db(&scope))
-        }
+        PersistenceScope::App => take_prewarmed_db().unwrap_or_else(|| init_db(&scope)),
         _ => init_db(&scope),
     };
 
     match init_result {
         Ok(mut conn) => {
-            let user_uid = AuthStateProvider::as_ref(ctx).get().user_id();
-            let app_state = match read_sqlite_data(&mut conn, user_uid) {
-                Ok(app_state) => Some(app_state),
-                Err(err) => {
-                    send_telemetry_from_app_ctx!(
-                        TelemetryEvent::DatabaseReadError(err.to_string()),
-                        ctx
-                    );
-                    report_error!(anyhow::Error::new(err).context("Failed to read app state"));
-                    None
-                }
-            };
+            let persisted_data = read_persisted_data(&mut conn, ctx);
 
             let writer_handles = match start_writer(conn, database_path.clone()) {
                 Ok(writer_handles) => Some(writer_handles),
@@ -339,7 +315,7 @@ pub fn initialize(
                     None
                 }
             };
-            (app_state, writer_handles)
+            (persisted_data, writer_handles)
         }
         Err(err) => {
             send_telemetry_from_app_ctx!(
@@ -348,6 +324,21 @@ pub fn initialize(
             );
             report_db_error("initialization", err, &database_path);
             (None, None)
+        }
+    }
+}
+
+fn read_persisted_data(
+    conn: &mut SqliteConnection,
+    ctx: &mut AppContext,
+) -> Option<Box<PersistedData>> {
+    let user_uid = AuthStateProvider::as_ref(ctx).get().user_id();
+    match read_sqlite_data(conn, user_uid) {
+        Ok(app_state) => Some(Box::new(app_state)),
+        Err(err) => {
+            send_telemetry_from_app_ctx!(TelemetryEvent::DatabaseReadError(err.to_string()), ctx);
+            report_error!(anyhow::Error::new(err).context("Failed to read persisted data"));
+            None
         }
     }
 }
@@ -396,8 +387,7 @@ fn establish_connection(database_url: &str, read_only: bool) -> Result<SqliteCon
 /// function is running.
 unsafe fn init_logging() {
     use std::ffi::{c_char, c_int, c_void, CStr};
-    use std::panic;
-    use std::ptr;
+    use std::{panic, ptr};
 
     extern "C-unwind" fn log_callback(_data: *mut c_void, err_code: c_int, msg: *const c_char) {
         // `err_code` is an extended error code (https://www.sqlite.org/rescode.html#primary_result_codes_versus_extended_result_codes).
@@ -1134,14 +1124,21 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
 
             // In the database each individual field is nullable but in practice these
             // fields are either all null or all non-null as they together represent
-            // the stored window bound.
+            // the stored window bound. Bounds smaller than the platform minimum
+            // window size are treated as missing so that we fall back to default
+            // geometry on restore instead of replaying a corrupt size (see GH#10083).
             let (window_width, window_height, origin_x, origin_y) = match window.bounds {
-                Some(rect) => (
-                    Some(rect.size().x()),
-                    Some(rect.size().y()),
-                    Some(rect.origin().x()),
-                    Some(rect.origin().y()),
-                ),
+                Some(rect)
+                    if rect.size().x() >= MIN_WINDOW_WIDTH
+                        && rect.size().y() >= MIN_WINDOW_HEIGHT =>
+                {
+                    (
+                        Some(rect.size().x()),
+                        Some(rect.size().y()),
+                        Some(rect.origin().x()),
+                        Some(rect.origin().y()),
+                    )
+                }
                 _ => (None, None, None, None),
             };
 
@@ -1825,7 +1822,9 @@ fn get_all_mcp_server_installations(
 
     let improper_rows = rows_len - result.len();
     if improper_rows > 0 {
-        log::warn!("Skipping {improper_rows} rows from mcp_server_installations table due to malformation.");
+        log::warn!(
+            "Skipping {improper_rows} rows from mcp_server_installations table due to malformation."
+        );
     }
 
     Ok(result)
@@ -2871,13 +2870,18 @@ fn read_sqlite_data(
                 FullscreenState::from_i32(window.fullscreen_state).unwrap_or_default();
 
             // The origin and size of the bound should be all null or all non-null.
+            // Reject bounds smaller than the platform minimum window size so users
+            // with an already-corrupted warp.sqlite (see GH#10083) restore to
+            // default geometry instead of a sliver.
             let bounds = match (
                 window.window_width,
                 window.window_height,
                 window.origin_x,
                 window.origin_y,
             ) {
-                (Some(mut width), Some(mut height), Some(x), Some(y)) => {
+                (Some(mut width), Some(mut height), Some(x), Some(y))
+                    if width >= MIN_WINDOW_WIDTH && height >= MIN_WINDOW_HEIGHT =>
+                {
                     // When fullscreen or maximized, the `inner_size` we snapshotted will be the
                     // size of the full screen. This will cause problems with winit. When you set
                     // maximized/fullscreen, setting the inner_size will by the size the window
@@ -3297,7 +3301,7 @@ fn read_sqlite_data(
     let user_profiles = schema::user_profiles::dsl::user_profiles
         .load_iter::<model::UserProfile, DefaultLoadingMode>(conn)?
         .filter_map(|user_profile| user_profile.ok())
-        .map(UserProfileWithUID::from)
+        .map(user_profile_from_persistence)
         .collect();
 
     let object_actions: Vec<ObjectAction> = schema::object_actions::dsl::object_actions
@@ -3692,42 +3696,42 @@ fn load_active_mcp_servers(conn: &mut SqliteConnection) -> Result<Vec<uuid::Uuid
 
 /// Converts the ObjectAction type into a uniform type that can be inserted into
 /// the sqlite table.
-impl From<ObjectAction> for model::NewPersistedObjectAction {
-    fn from(action: ObjectAction) -> Self {
-        match action.action_subtype {
-            ObjectActionSubtype::SingleAction {
-                timestamp,
-                data,
-                pending,
-                processed_at_timestamp,
-            } => Self {
-                hashed_object_id: action.hashed_sqlite_id,
-                timestamp: Some(timestamp.naive_utc()),
-                action: action.action_type.to_string(),
-                data,
-                count: None,
-                oldest_timestamp: None,
-                latest_timestamp: None,
-                pending: Some(pending),
-                processed_at_timestamp: processed_at_timestamp.map(|t| t.naive_utc()),
-            },
-            ObjectActionSubtype::BundledActions {
-                count,
-                oldest_timestamp,
-                latest_timestamp,
-                latest_processed_at_timestamp,
-            } => Self {
-                hashed_object_id: action.hashed_sqlite_id,
-                timestamp: None,
-                action: action.action_type.to_string(),
-                data: None,
-                count: Some(count),
-                oldest_timestamp: Some(oldest_timestamp.naive_utc()),
-                latest_timestamp: Some(latest_timestamp.naive_utc()),
-                pending: None,
-                processed_at_timestamp: Some(latest_processed_at_timestamp.naive_utc()),
-            },
-        }
+fn new_persisted_object_action_from_object_action(
+    action: ObjectAction,
+) -> model::NewPersistedObjectAction {
+    match action.action_subtype {
+        ObjectActionSubtype::SingleAction {
+            timestamp,
+            data,
+            pending,
+            processed_at_timestamp,
+        } => model::NewPersistedObjectAction {
+            hashed_object_id: action.hashed_sqlite_id,
+            timestamp: Some(timestamp.naive_utc()),
+            action: action.action_type.to_string(),
+            data,
+            count: None,
+            oldest_timestamp: None,
+            latest_timestamp: None,
+            pending: Some(pending),
+            processed_at_timestamp: processed_at_timestamp.map(|t| t.naive_utc()),
+        },
+        ObjectActionSubtype::BundledActions {
+            count,
+            oldest_timestamp,
+            latest_timestamp,
+            latest_processed_at_timestamp,
+        } => model::NewPersistedObjectAction {
+            hashed_object_id: action.hashed_sqlite_id,
+            timestamp: None,
+            action: action.action_type.to_string(),
+            data: None,
+            count: Some(count),
+            oldest_timestamp: Some(oldest_timestamp.naive_utc()),
+            latest_timestamp: Some(latest_timestamp.naive_utc()),
+            pending: None,
+            processed_at_timestamp: Some(latest_processed_at_timestamp.naive_utc()),
+        },
     }
 }
 
@@ -3735,7 +3739,7 @@ fn insert_object_action(
     conn: &mut SqliteConnection,
     object_action: ObjectAction,
 ) -> Result<(), Error> {
-    let action: NewPersistedObjectAction = object_action.into();
+    let action = new_persisted_object_action_from_object_action(object_action);
     conn.transaction::<(), Error, _>(|conn| {
         diesel::insert_into(schema::object_actions::dsl::object_actions)
             .values(action)
@@ -3753,8 +3757,10 @@ fn sync_object_actions(
     let ids_to_delete: HashSet<String> =
         HashSet::from_iter(actions_to_sync.iter().map(|a| a.hashed_sqlite_id.clone()));
     // Insert the new ones
-    let new_actions: Vec<NewPersistedObjectAction> =
-        actions_to_sync.iter().map(|a| a.clone().into()).collect();
+    let new_actions: Vec<NewPersistedObjectAction> = actions_to_sync
+        .iter()
+        .map(|a| new_persisted_object_action_from_object_action(a.clone()))
+        .collect();
     conn.transaction::<(), Error, _>(|conn| {
         // Erase all the actions that currently have this object ID
         for hashed_sqlite_id in ids_to_delete {

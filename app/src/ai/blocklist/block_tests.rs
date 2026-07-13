@@ -21,6 +21,23 @@ fn reasoning_auto_collapses_when_user_has_not_manually_toggled() {
 }
 
 #[test]
+fn collapsed_initializer_starts_collapsed() {
+    let state = CollapsibleElementState::collapsed();
+
+    assert!(matches!(
+        state.expansion_state,
+        CollapsibleExpansionState::Collapsed
+    ));
+}
+
+// Zap: `orchestration_start_agent_keeps_expanded_default` (upstream) constructed
+// `AIAgentActionType::StartAgent` via the removed RunAgents proto cluster's
+// `StartAgentVersion`/`StartAgentExecutionMode::local_harness(..)`, neither of which
+// exist in this fork's pinned `warp_multi_agent_api` (see comment further down this
+// file). Dropped along with that cluster; `StartAgent`'s collapsible-state-stays-expanded
+// behavior is still exercised indirectly via `AIBlockModel`/orchestration UI tests.
+
+#[test]
 fn always_show_thinking_stays_expanded_after_finish() {
     App::test((), |mut app| async move {
         initialize_settings_for_tests(&mut app);

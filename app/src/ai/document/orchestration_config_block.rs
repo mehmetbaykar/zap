@@ -1,6 +1,6 @@
 //! Inline config block rendered on plan cards when the conversation has
 //! an active `OrchestrationConfigSnapshot`. Shows a "Use orchestration"
-//! toggle, Cloud/Local picker, and run-wide config dropdowns.
+//! toggle and local harness/model dropdowns.
 
 use ai::agent::orchestration_config::{OrchestrationConfigStatus, OrchestrationExecutionMode};
 use pathfinder_color::ColorU;
@@ -72,7 +72,7 @@ const BASE_MODEL_HELPER: &str = "The primary model all agents will use.";
 
 // ── Action type ─────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum OrchestrationConfigBlockAction {
     ToggleApproval,
     ToggleDetails,
@@ -80,8 +80,9 @@ pub enum OrchestrationConfigBlockAction {
     ModelChanged { model_id: String },
     HarnessChanged { harness_type: String },
     EnvironmentChanged { environment_id: String },
-    WorkerHostChanged { worker_host: String },
+    CreateEnvironmentRequested,
     AuthSecretChanged { auth_secret_name: Option<String> },
+    CreateNewAuthSecretRequested,
 }
 
 impl OrchestrationControlAction for OrchestrationConfigBlockAction {
@@ -97,11 +98,14 @@ impl OrchestrationControlAction for OrchestrationConfigBlockAction {
     fn environment_changed(environment_id: String) -> Self {
         Self::EnvironmentChanged { environment_id }
     }
-    fn worker_host_changed(worker_host: String) -> Self {
-        Self::WorkerHostChanged { worker_host }
+    fn create_environment_requested() -> Self {
+        Self::CreateEnvironmentRequested
     }
     fn auth_secret_changed(auth_secret_name: Option<String>) -> Self {
         Self::AuthSecretChanged { auth_secret_name }
+    }
+    fn create_new_auth_secret_requested() -> Self {
+        Self::CreateNewAuthSecretRequested
     }
 }
 
@@ -160,6 +164,7 @@ impl OrchestrationConfigBlockView {
             move |me, _, event, ctx| {
                 if let BlocklistAIHistoryEvent::OrchestrationConfigUpdated {
                     conversation_id: cid,
+                    ..
                 } = event
                 {
                     if *cid == me.conversation_id {
@@ -176,12 +181,11 @@ impl OrchestrationConfigBlockView {
         ctx.subscribe_to_model(&LLMPreferences::handle(ctx), |me, _, event, ctx| {
             if let LLMPreferencesEvent::UpdatedAvailableLLMs = event {
                 if let Some(handle) = &me.pickers.model_picker {
-                    let is_local = !me.edit_state.execution_mode.is_remote();
                     oc::populate_model_picker_for_harness(
                         handle,
                         &me.edit_state.model_id,
                         &me.edit_state.harness_type,
-                        is_local,
+                        true,
                         ctx,
                     );
                 }
@@ -230,6 +234,8 @@ impl OrchestrationConfigBlockView {
             return;
         }
 
+        self.edit_state.toggle_execution_mode_to_remote(false);
+
         let appearance = Appearance::as_ref(ctx);
         let (styles, colors) = oc::picker_styles(appearance);
 
@@ -244,87 +250,21 @@ impl OrchestrationConfigBlockView {
         } else {
             self.edit_state.model_id.clone()
         };
-        let is_local = !self.edit_state.execution_mode.is_remote();
-        let model_handle = oc::new_standard_picker_dropdown(&colors, ctx);
+        let model_handle = oc::new_standard_filterable_picker_dropdown(&styles, ctx);
         model_handle.update(ctx, |d, c| d.set_use_overlay_layer(true, c));
         oc::populate_model_picker_for_harness(
             &model_handle,
             &display_model_id,
             &self.edit_state.harness_type,
-            is_local,
+            true,
             ctx,
         );
         self.pickers.model_picker = Some(model_handle);
 
         let harness_handle = oc::new_standard_picker_dropdown(&colors, ctx);
         harness_handle.update(ctx, |d, c| d.set_use_overlay_layer(true, c));
-        oc::populate_harness_picker(
-            &harness_handle,
-            &self.edit_state.harness_type,
-            is_local,
-            ctx,
-        );
+        oc::populate_harness_picker(&harness_handle, &self.edit_state.harness_type, true, ctx);
         self.pickers.harness_picker = Some(harness_handle);
-
-        // When restoring a Remote config with empty host or
-        // environment, fill defaults so the pickers aren't blank.
-        // If the config is approved, persist the defaults so the
-        // stored config used by auto-launch has concrete values.
-        let (needs_host, needs_env) = match &self.edit_state.execution_mode {
-            OrchestrationExecutionMode::Remote {
-                worker_host,
-                environment_id,
-                ..
-            } => (worker_host.is_empty(), environment_id.is_empty()),
-            OrchestrationExecutionMode::Local => (false, false),
-        };
-        let mut filled_defaults = false;
-        if needs_host {
-            self.edit_state
-                .set_worker_host(oc::ORCHESTRATION_WARP_WORKER_HOST.to_string());
-            filled_defaults = true;
-        }
-        if needs_env {
-            if let Some(default_env) = oc::resolve_default_environment_id(ctx) {
-                self.edit_state.set_environment_id(default_env);
-                filled_defaults = true;
-            }
-        }
-        if filled_defaults && self.is_approved {
-            self.apply_field_change(ctx);
-        }
-        let initial_env = match &self.edit_state.execution_mode {
-            OrchestrationExecutionMode::Remote { environment_id, .. } => environment_id.as_str(),
-            OrchestrationExecutionMode::Local => "",
-        };
-        let env_handle = oc::create_environment_picker(initial_env, &styles, ctx);
-        env_handle.update(ctx, |d, c| d.set_use_overlay_layer(true, c));
-        self.pickers.environment_picker = Some(env_handle);
-
-        let initial_host = match &self.edit_state.execution_mode {
-            OrchestrationExecutionMode::Remote { worker_host, .. } => worker_host.as_str(),
-            OrchestrationExecutionMode::Local => oc::ORCHESTRATION_WARP_WORKER_HOST,
-        };
-        let host_handle = oc::new_standard_picker_dropdown(&colors, ctx);
-        host_handle.update(ctx, |d, c| d.set_use_overlay_layer(true, c));
-        oc::populate_host_picker(&host_handle, initial_host, ctx);
-        self.pickers.host_picker = Some(host_handle);
-
-        // Seed the auth secret from persisted per-harness settings before
-        // building the picker so the dropdown shows the last selection.
-        if self.edit_state.auth_secret_name.is_none() {
-            self.edit_state.auth_secret_name =
-                oc::resolve_default_auth_secret_for_harness(&self.edit_state.harness_type, ctx);
-        }
-        let auth_secret_handle = oc::new_standard_picker_dropdown(&colors, ctx);
-        auth_secret_handle.update(ctx, |d, c| d.set_use_overlay_layer(true, c));
-        oc::populate_auth_secret_picker_for_harness(
-            &auth_secret_handle,
-            self.edit_state.auth_secret_name.as_deref(),
-            &self.edit_state.harness_type,
-            ctx,
-        );
-        self.pickers.auth_secret_picker = Some(auth_secret_handle);
 
         self.pickers_initialized = true;
         oc::sync_picker_selections(&self.edit_state, &self.pickers, ctx);
@@ -454,21 +394,6 @@ impl View for OrchestrationConfigBlockView {
 
             // Expanded controls
             if self.details_expanded {
-                // Cloud / Local mode toggle (full width)
-                let active_seg_bg =
-                    warp_core::ui::theme::color::internal_colors::accent_overlay_2(theme);
-                column.add_child(
-                    Container::new(oc::render_mode_toggle(
-                        self.edit_state.execution_mode.is_remote(),
-                        &self.pickers,
-                        appearance,
-                        Some(active_seg_bg),
-                        true,
-                    ))
-                    .with_margin_top(12.)
-                    .finish(),
-                );
-
                 // Pickers stacked vertically
                 column.add_child(oc::render_picker_row_with_layout(
                     &self.edit_state,
@@ -492,14 +417,6 @@ impl View for OrchestrationConfigBlockView {
                     column.add_child(oc::render_validation_error(
                         reason,
                         theme.ui_error_color(),
-                        appearance,
-                    ));
-                } else if let Some(message) =
-                    oc::empty_env_recommendation_message(&self.edit_state.execution_mode, app)
-                {
-                    column.add_child(oc::render_validation_error(
-                        message,
-                        theme.ui_warning_color(),
                         appearance,
                     ));
                 }
@@ -582,11 +499,8 @@ impl TypedActionView for OrchestrationConfigBlockView {
                 self.apply_field_change(ctx);
                 ctx.notify();
             }
-            OrchestrationConfigBlockAction::WorkerHostChanged { worker_host } => {
-                self.edit_state.set_worker_host(worker_host.clone());
-                self.apply_field_change(ctx);
-                ctx.notify();
-            }
+            OrchestrationConfigBlockAction::CreateEnvironmentRequested
+            | OrchestrationConfigBlockAction::CreateNewAuthSecretRequested => {}
             OrchestrationConfigBlockAction::AuthSecretChanged { auth_secret_name } => {
                 // No `apply_field_change` here: managed secrets are user-scoped
                 // (not plan-scoped), so they are persisted side-channel via

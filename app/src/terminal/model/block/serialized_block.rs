@@ -1,5 +1,11 @@
 use std::collections::HashSet;
 
+use chrono::{DateTime, Local, TimeZone as _};
+use serde::{Deserialize, Serialize};
+use serde_bytes_repr::{ByteFmtDeserializer, ByteFmtSerializer};
+use warp_core::command::ExitCode;
+
+use super::AgentInteractionMetadata;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::AIAgentActionId;
@@ -12,12 +18,6 @@ use crate::terminal::model::session::SessionId;
 use crate::terminal::model::BlockId;
 use crate::terminal::ShellHost;
 use crate::util::extensions::TrimStringExt;
-use chrono::{DateTime, Local, TimeZone as _};
-use serde::{Deserialize, Serialize};
-use serde_bytes_repr::{ByteFmtDeserializer, ByteFmtSerializer};
-use warp_core::command::ExitCode;
-
-use super::AgentInteractionMetadata;
 
 /// Serialization-stable representation of [`AgentViewVisibility`].
 ///
@@ -121,7 +121,10 @@ pub struct SerializedAIMetadata {
 
     /// `true` if this block should be hidden from the user (as is the case with AI-requested
     /// commands, for example).
-    #[serde(default = "default_as_true", skip_serializing_if = "skip_hide_when_true")]
+    #[serde(
+        default = "default_as_true",
+        skip_serializing_if = "skip_hide_when_true"
+    )]
     should_hide_block: bool,
 }
 

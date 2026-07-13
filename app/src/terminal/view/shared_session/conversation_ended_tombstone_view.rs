@@ -128,6 +128,7 @@ impl TombstoneDisplayData {
             self.source = Some(source.display_name().to_string());
         }
         if let Some(config) = &task.agent_config_snapshot {
+            // FIXME: this can be the orchestrator agent name, not a skill.
             self.skill_name = config.name.clone();
             // Default to Oz when the snapshot exists but has no explicit harness.
             self.harness = Some(
@@ -179,6 +180,7 @@ pub struct ConversationEndedTombstoneView {
 }
 
 impl ConversationEndedTombstoneView {
+    #[cfg_attr(target_family = "wasm", allow(unused_variables))]
     pub fn new(
         ctx: &mut ViewContext<Self>,
         terminal_view_id: EntityId,
@@ -207,32 +209,36 @@ impl ConversationEndedTombstoneView {
             ctx.add_typed_action_view(|ctx| ArtifactButtonsRow::new(&display_data.artifacts, ctx));
 
         #[cfg(not(target_family = "wasm"))]
-        let continue_locally_button = conversation_id.filter(|_| !display_data.hide_continue_actions).map(|conv_id| {
-            ctx.add_typed_action_view(move |_| {
-                ActionButton::new(crate::t!("terminal-continue-locally"), PrimaryTheme)
-                    .with_tooltip(crate::t!("terminal-fork-conversation-locally-tooltip"))
-                    .on_click(move |ctx| {
-                        ctx.dispatch_typed_action(
-                            ConversationEndedTombstoneAction::ContinueLocally(conv_id),
-                        );
-                    })
-            })
-        });
+        let continue_locally_button = conversation_id
+            .filter(|_| !display_data.hide_continue_actions)
+            .map(|conv_id| {
+                ctx.add_typed_action_view(move |_| {
+                    ActionButton::new(crate::t!("terminal-continue-locally"), PrimaryTheme)
+                        .with_tooltip(crate::t!("terminal-fork-conversation-locally-tooltip"))
+                        .on_click(move |ctx| {
+                            ctx.dispatch_typed_action(
+                                ConversationEndedTombstoneAction::ContinueLocally(conv_id),
+                            );
+                        })
+                })
+            });
 
         // In wasm, continuing locally is impossible so we instead
         // offer to open the conversation in warp (where you can continue locally).
         #[cfg(target_family = "wasm")]
-        let open_in_warp_button = conversation_id.filter(|_| !display_data.hide_continue_actions).map(|conv_id| {
-            ctx.add_typed_action_view(move |_| {
-                ActionButton::new(crate::t!("terminal-open-in-warp"), PrimaryTheme)
-                    .with_tooltip(crate::t!("terminal-open-conversation-in-warp-tooltip"))
-                    .on_click(move |ctx| {
-                        ctx.dispatch_typed_action(ConversationEndedTombstoneAction::OpenInWarp(
-                            conv_id,
-                        ));
-                    })
-            })
-        });
+        let open_in_warp_button = conversation_id
+            .filter(|_| !display_data.hide_continue_actions)
+            .map(|conv_id| {
+                ctx.add_typed_action_view(move |_| {
+                    ActionButton::new(crate::t!("terminal-open-in-warp"), PrimaryTheme)
+                        .with_tooltip(crate::t!("terminal-open-conversation-in-warp-tooltip"))
+                        .on_click(move |ctx| {
+                            ctx.dispatch_typed_action(
+                                ConversationEndedTombstoneAction::OpenInWarp(conv_id),
+                            );
+                        })
+                })
+            });
 
         let view = Self {
             display_data,

@@ -32,7 +32,8 @@ pub(super) mod welcome_pane;
 pub(crate) mod welcome_view;
 pub mod workflow_pane;
 
-use std::{any::Any, fmt::Display};
+use std::any::Any;
+use std::fmt::Display;
 
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::pane::get_started_view::GetStartedView;
@@ -56,21 +57,16 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
-use warp_util::remote_path::RemotePath;
+use warp_util::{local_or_remote_path::LocalOrRemotePath, remote_path::RemotePath};
+use warpui::elements::{DispatchEventResult, EventHandler, MouseInBehavior};
+use warpui::presenter::ChildView;
 use warpui::{
-    elements::{DispatchEventResult, EventHandler, MouseInBehavior},
-    presenter::ChildView,
     Action, AppContext, Element, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity,
     View, ViewContext, ViewHandle, WeakModelHandle,
 };
-
-pub use self::view::PaneHeaderAction;
-pub use self::view::PaneHeaderCustomAction;
-pub use self::view::PaneView;
-pub use self::view::PaneViewEvent;
-
 use welcome_view::WelcomeView;
 
+pub use self::view::{PaneHeaderAction, PaneHeaderCustomAction, PaneView, PaneViewEvent};
 use super::{ActivationReason, LeafContents, PaneGroup, PaneGroupAction};
 
 pub(super) fn init(app: &mut AppContext) {
@@ -842,8 +838,8 @@ impl PaneConfiguration {
         ctx.emit(PaneConfigurationEvent::HeaderContentChanged);
     }
 
-    // Zap Phase 2a: `set_shareable_object` / `toggle_sharing_dialog` removed
-    // along with the pane-header sharing UI.
+    // Zap Phase 2a: `set_shareable_object` / `toggle_sharing_dialog` / `open_sharing_qr_code`
+    // removed along with the pane-header sharing UI.
 
     /// Notifies that the header content has changed and the pane header should re-render.
     /// Use this when the backing view's state has changed in a way that affects the header
@@ -1116,7 +1112,7 @@ pub enum PaneEvent {
     ClearHoveredTabIndex,
     #[cfg(feature = "local_fs")]
     ReplaceWithCodePane {
-        path: std::path::PathBuf,
+        path: LocalOrRemotePath,
         source: Option<crate::code::editor_management::CodeSource>,
     },
     #[cfg(feature = "local_fs")]

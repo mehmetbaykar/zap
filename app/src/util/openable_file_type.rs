@@ -1,13 +1,15 @@
 //! File type detection utilities for determining if files can be opened in Zap.
 
-#[cfg(feature = "local_fs")]
-use crate::util::file::external_editor::{settings::EditorChoice, Editor, EditorSettings};
-use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+use serde::{Deserialize, Serialize};
 use warp_core::features::FeatureFlag;
 pub use warp_util::file_type::{
     is_binary_file, is_file_content_binary, is_jupyter_notebook_file, is_markdown_file,
 };
+
+#[cfg(feature = "local_fs")]
+use crate::util::file::external_editor::{settings::EditorChoice, Editor, EditorSettings};
 
 #[derive(
     Debug,
@@ -64,8 +66,7 @@ pub enum FileTarget {
 /// Checks if a file is a code file with language support.
 #[cfg(feature = "local_fs")]
 pub fn is_supported_code_file(path: impl AsRef<Path>) -> bool {
-    let path = path.as_ref();
-    languages::language_by_filename(path).is_some()
+    languages::language_by_local_filename(path.as_ref()).is_some()
 }
 
 #[cfg(not(feature = "local_fs"))]
@@ -271,10 +272,12 @@ pub fn resolve_file_target_with_editor_choice(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::Path;
+
     #[cfg(feature = "local_fs")]
     use settings::Setting as _;
-    use std::path::Path;
+
+    use super::*;
 
     #[test]
     fn test_binary_files_not_openable() {

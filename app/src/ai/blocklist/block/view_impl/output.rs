@@ -11,17 +11,20 @@ use crate::ai::agent::{
 use crate::util::truncation::truncate_from_end;
 use ai::agent::file_locations::group_file_contexts_for_display;
 
+use crate::ai::agent_conversations_model::AgentConversationsModel;
+use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::blocklist::block::view_impl::common::{
     MaybeShimmeringText, BLOCKED_ACTION_MESSAGE_FOR_GREP_OR_FILE_GLOB,
     BLOCKED_ACTION_MESSAGE_FOR_READING_FILES,
 };
+use crate::ai::blocklist::block::ImportedCommentGroup;
 use crate::ai::blocklist::inline_action::aws_bedrock_credentials_error::AwsBedrockCredentialsErrorView;
 use crate::ai::blocklist::inline_action::create_or_edit_document::CreateOrEditDocumentAction;
 use crate::ai::blocklist::secret_redaction::SecretRedactionState;
 use crate::ai::blocklist::view_util::format_credits;
 use crate::ai::skills::SkillOpenOrigin;
 use crate::ai::skills::{
-    icon_override_for_skill_name, render_skill_button, skill_path_from_file_path,
+    icon_override_for_skill_name, render_skill_button, skill_path_from_location,
 };
 
 use crate::code::editor_management::CodeSource;
@@ -32,27 +35,29 @@ use crate::view_components::compactible_action_button::{
 use crate::AIAgentTodoList;
 
 #[allow(unused_imports)]
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
+use std::rc::Rc;
+use std::sync::Arc;
 
 use ai::agent::action::SuggestPromptRequest;
 use ai::skills::SkillReference;
+use indexmap::IndexMap;
+use itertools::Itertools;
+use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine};
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::vec2f;
+use std::{cmp::Ordering, collections::HashMap};
 use warp_core::ui::theme::color::internal_colors;
-#[allow(unused_imports)]
-use warp_util::path::{common_path, CleanPathResult};
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::elements::new_scrollable::SingleAxisConfig;
 use warpui::elements::{
-    ChildAnchor, NewScrollable, OffsetPositioning, ParentAnchor, ParentOffsetBounds, Stack,
+    Align, Border, ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius,
+    CrossAxisAlignment, Empty, Expanded, Fill, Flex, FormattedTextElement, Hoverable,
+    MainAxisAlignment, MainAxisSize, NewScrollable, OffsetPositioning, ParentAnchor, ParentElement,
+    ParentOffsetBounds, Radius, Shrinkable, Stack, Text, Wrap,
 };
-use warpui::EntityId;
 
-use crate::ai::blocklist::block::{
-    CollapsibleElementState, CollapsibleExpansionState, FinishReason, ImportedCommentGroup,
-};
-use indexmap::IndexMap;
-use std::{cmp::Ordering, collections::HashMap, rc::Rc, sync::Arc};
-
+use crate::ai::blocklist::block::FinishReason;
 use crate::util::link_detection::{add_link_detection_mouse_interactions, DetectedLinksState};
 use crate::{
     ai::{
@@ -68,8 +73,8 @@ use crate::{
             block::{
                 model::{AIBlockModel, AIBlockModelHelper, AIBlockOutputStatus},
                 AIBlock, AIBlockAction, AIBlockStateHandles, ActionButtons,
-                AutonomySettingSpeedbump, EmbeddedCodeEditorView, RequestedEdit, TextLocation,
-                TodoListElementState,
+                AutonomySettingSpeedbump, CollapsibleElementState, CollapsibleExpansionState,
+                EmbeddedCodeEditorView, RequestedEdit, TextLocation, TodoListElementState,
             },
             history_model::BlocklistAIHistoryModel,
             inline_action::{
@@ -103,8 +108,6 @@ use crate::{
     workspaces::user_workspaces::UserWorkspaces,
     FeatureFlag,
 };
-use itertools::Itertools;
-use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine};
 use warp_core::channel::ChannelState;
 
 use super::common::{
@@ -121,16 +124,13 @@ use super::{
     render_citation_chips, todos::render_completed_todo_items, WithContentItemSpacing,
     CONTENT_ITEM_VERTICAL_MARGIN,
 };
+use crate::terminal::model::session::active_session::ActiveSession;
+use crate::workspace::WorkspaceAction;
 use warpui::{
-    elements::{
-        Align, Border, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
-        Empty, Expanded, Fill, Flex, FormattedTextElement, Hoverable, MainAxisAlignment,
-        MainAxisSize, ParentElement, Radius, Shrinkable, Text, Wrap,
-    },
     keymap::Keystroke,
     platform::{Cursor, OperatingSystem},
     ui_components::components::{Coords, UiComponent, UiComponentStyles},
-    Action, AppContext, Element, ModelHandle, SingletonEntity, View, ViewHandle,
+    Action, AppContext, Element, EntityId, ModelHandle, SingletonEntity, View, ViewHandle,
 };
 
 /// Data required to render the AI block output component.
@@ -140,6 +140,7 @@ pub(crate) struct Props<'a> {
     pub(super) state_handles: &'a AIBlockStateHandles,
     pub(super) action_buttons: &'a HashMap<AIAgentActionId, ActionButtons>,
     pub(crate) action_model: &'a ModelHandle<BlocklistAIActionModel>,
+    pub(crate) active_session: &'a ModelHandle<ActiveSession>,
     pub(super) editor_views: &'a [EmbeddedCodeEditorView],
     pub(super) current_working_directory: Option<&'a String>,
     pub(super) shell_launch_data: Option<&'a ShellLaunchData>,
@@ -510,12 +511,23 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                                         .collect_vec(),
                                 };
 
-                                let file_paths: Vec<_> = files.iter().map(|f| &f.name).collect();
-                                let skill = common_path(&file_paths)
-                                    .and_then(|common| skill_path_from_file_path(&common))
-                                    .and_then(|skill_path| {
-                                        SkillManager::as_ref(app).skill_by_path(&skill_path)
-                                    });
+                                let file_locations = files
+                                    .iter()
+                                    .map(|file| {
+                                        let path = shell_native_absolute_path(
+                                            &file.name,
+                                            props.shell_launch_data,
+                                            props.current_working_directory,
+                                        );
+                                        props
+                                            .active_session
+                                            .as_ref(app)
+                                            .location_for_path(&path, app)
+                                    })
+                                    .collect::<Option<Vec<_>>>();
+                                let skill = file_locations.and_then(|file_locations| {
+                                    parsed_skill_for_common_locations(file_locations, app)
+                                });
                                 output_items.add_child(render_read_files(
                                     props,
                                     id,
@@ -865,6 +877,7 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                                 SubagentType::ConversationSearch {
                                     ref query,
                                     ref conversation_id,
+                                    ref agent_run_id,
                                 },
                             task_id: subagent_task_id,
                         }) => {
@@ -893,13 +906,12 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                                 icons::yellow_running_icon(appearance)
                             };
 
-                            // Resolve which conversation is being searched. If
-                            // conversation_id is set and differs from the current
-                            // conversation, try to resolve a display name from
-                            // the history model; otherwise label it "this
-                            // conversation".
-                            let conversation_label =
-                                conversation_id.as_ref().and_then(|target_id| {
+                            // Resolve which conversation is being searched. Conversation IDs use
+                            // conversation history titles; agent run IDs use ambient task titles
+                            // once fetched. If neither target exists, label it "this conversation".
+                            let target_label = conversation_id
+                                .as_ref()
+                                .and_then(|target_id| {
                                     let history = BlocklistAIHistoryModel::as_ref(app);
                                     let token = ServerConversationToken::new(target_id.clone());
                                     let local_id =
@@ -917,7 +929,25 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                                     let title = target_conversation
                                         .and_then(|c| c.title())
                                         .map(|q| truncate_from_end(&q, 40));
-                                    Some(title.unwrap_or_else(|| target_id.clone()))
+                                    Some((
+                                        "conversation",
+                                        title.unwrap_or_else(|| target_id.clone()),
+                                    ))
+                                })
+                                .or_else(|| {
+                                    let target_id = agent_run_id.as_ref()?;
+                                    let title = target_id
+                                        .parse::<AmbientAgentTaskId>()
+                                        .ok()
+                                        .and_then(|task_id| {
+                                            AgentConversationsModel::as_ref(app)
+                                                .get_task_data(&task_id)
+                                        })
+                                        .map(|task| truncate_from_end(&task.title, 40));
+                                    Some((
+                                        "agent run",
+                                        title.unwrap_or_else(|| truncate_from_end(target_id, 40)),
+                                    ))
                                 });
 
                             let done = is_finished || is_cancelled;
@@ -925,10 +955,11 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
 
                             let mut fragments: Vec<FormattedTextFragment> =
                                 vec![FormattedTextFragment::plain_text(format!("{verb} "))];
-                            match &conversation_label {
-                                Some(name) => {
-                                    fragments
-                                        .push(FormattedTextFragment::plain_text("conversation "));
+                            match &target_label {
+                                Some((target_kind, name)) => {
+                                    fragments.push(FormattedTextFragment::plain_text(format!(
+                                        "{target_kind} "
+                                    )));
                                     fragments.push(FormattedTextFragment::weighted(
                                         name.as_str(),
                                         Some(markdown_parser::weight::CustomWeight::Bold),
@@ -1381,27 +1412,29 @@ fn render_read_skill(
     // Renders the 'open skill' button for known, non-bundled skills.
     if let Some(skill) = skill {
         if !skill.is_bundled() {
-            let source = CodeSource::Skill {
-                reference: skill_reference.clone(),
-                path: skill.path.clone(),
-                origin: SkillOpenOrigin::ReadSkill,
-            };
+            if let Some(path) = skill.path.to_local_path() {
+                let source = CodeSource::Skill {
+                    reference: skill_reference.clone(),
+                    path: path.to_path_buf(),
+                    origin: SkillOpenOrigin::ReadSkill,
+                };
 
-            let skill_icon_override = icon_override_for_skill_name(&skill.name);
-            let open_button = render_skill_button(
-                "Open skill",
-                props.state_handles.open_skill_button_handle.clone(),
-                appearance,
-                skill.provider,
-                skill_icon_override,
-                move |ctx| {
-                    ctx.dispatch_typed_action(AIBlockAction::OpenCodeInWarp {
-                        source: source.clone(),
-                    });
-                },
-            );
+                let skill_icon_override = icon_override_for_skill_name(&skill.name);
+                let open_button = render_skill_button(
+                    "Open skill",
+                    props.state_handles.open_skill_button_handle.clone(),
+                    appearance,
+                    skill.provider,
+                    skill_icon_override,
+                    move |ctx| {
+                        ctx.dispatch_typed_action(AIBlockAction::OpenCodeInWarp {
+                            source: source.clone(),
+                        });
+                    },
+                );
 
-            renderable_action = renderable_action.with_action_button(open_button);
+                renderable_action = renderable_action.with_action_button(open_button);
+            }
         }
     }
 
@@ -1483,12 +1516,15 @@ fn render_read_files(
 
     // Renders the 'open skill' button if all files belong to the same skill directory.
     if let Some(skill) = parsed_skill {
+        let Some(path) = skill.path.to_local_path() else {
+            return renderable_action.render(app).finish();
+        };
         let reference = SkillManager::handle(app)
             .as_ref(app)
             .reference_for_skill_path(&skill.path);
         let source = CodeSource::Skill {
             reference,
-            path: skill.path.clone(),
+            path: path.to_path_buf(),
             origin: SkillOpenOrigin::ReadFiles,
         };
         let skill_icon_override = icon_override_for_skill_name(&skill.name);
@@ -1508,6 +1544,22 @@ fn render_read_files(
     }
 
     renderable_action.render(app).finish()
+}
+
+fn parsed_skill_for_common_locations(
+    file_locations: impl IntoIterator<Item = LocalOrRemotePath>,
+    app: &AppContext,
+) -> Option<&ai::skills::ParsedSkill> {
+    let skill_paths = file_locations
+        .into_iter()
+        .map(|location| skill_path_from_location(&location))
+        .collect::<Option<Vec<_>>>()?;
+    let first_skill_path = skill_paths.first()?;
+    skill_paths
+        .iter()
+        .all(|skill_path| skill_path == first_skill_path)
+        .then(|| SkillManager::as_ref(app).skill_by_path(first_skill_path))
+        .flatten()
 }
 
 fn maybe_render_edit_document(

@@ -1,6 +1,9 @@
 use futures::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use warp_core::SessionId;
+use warpui::r#async::executor;
 
+use super::*;
 use crate::proto::{
     client_message, get_fragment_metadata_from_hash_response, read_file_chunk_response,
     resolve_path_response, run_command_response, server_message, write_file_chunk_response,
@@ -13,10 +16,6 @@ use crate::proto::{
     WriteFileChunkResponse, WriteFileChunkSuccess,
 };
 use crate::protocol;
-use warp_core::SessionId;
-use warpui::r#async::executor;
-
-use super::*;
 
 /// Generic mock server: loops reading ClientMessages and responds using the
 /// provided closure. Exits cleanly on EOF.
@@ -240,6 +239,53 @@ async fn get_fragment_metadata_from_hash_round_trip() {
     assert_eq!(response.missing_hashes[0].content_hash, "missing-hash");
 }
 
+#[tokio::test]
+async fn resync_codebase_round_trip() {
+    let (client, _disconnect_rx, _executor) = setup_mock_client(|msg| {
+        match &msg.message {
+            Some(client_message::Message::ResyncCodebase(request)) => {
+                assert_eq!(request.repo_path, "/repo");
+                assert_eq!(request.auth_token, "auth-token");
+                assert_eq!(request.mode, CodebaseResyncMode::Full as i32);
+            }
+            other => panic!("Expected ResyncCodebase, got {other:?}"),
+        }
+        server_message::Message::CodebaseIndexStatusUpdated(CodebaseIndexStatusUpdated {
+            status: Some(not_enabled_codebase_status("/repo")),
+        })
+    });
+
+    let status = client
+        .resync_codebase("/repo".to_string(), "auth-token".to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(status.repo_path, "/repo");
+}
+
+#[tokio::test]
+async fn trigger_codebase_incremental_sync_round_trip() {
+    let (client, _disconnect_rx, _executor) = setup_mock_client(|msg| {
+        match &msg.message {
+            Some(client_message::Message::ResyncCodebase(request)) => {
+                assert_eq!(request.repo_path, "/repo");
+                assert_eq!(request.auth_token, "auth-token");
+                assert_eq!(request.mode, CodebaseResyncMode::Incremental as i32);
+            }
+            other => panic!("Expected incremental ResyncCodebase, got {other:?}"),
+        }
+        server_message::Message::CodebaseIndexStatusUpdated(CodebaseIndexStatusUpdated {
+            status: Some(not_enabled_codebase_status("/repo")),
+        })
+    });
+
+    let status = client
+        .trigger_codebase_incremental_sync("/repo".to_string(), "auth-token".to_string())
+        .await
+        .unwrap();
+
+    assert_eq!(status.repo_path, "/repo");
+}
 #[tokio::test]
 async fn get_fragment_metadata_from_hash_error_maps_to_typed_client_error() {
     let (client, _disconnect_rx, _executor) = setup_mock_client(|msg| {

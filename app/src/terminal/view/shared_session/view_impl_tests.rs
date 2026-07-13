@@ -398,7 +398,3 @@ fn test_on_session_share_ended_restores_size_after_viewer_driven_resize() {
         });
     })
 }
-
-
-
-

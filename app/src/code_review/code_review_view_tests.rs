@@ -17,6 +17,7 @@ use crate::pane_group::WorkingDirectoriesModel;
 use crate::settings_view::keybindings::KeybindingChangedNotifier;
 use crate::terminal::local_shell::LocalShellState;
 use crate::test_util::settings::initialize_settings_for_tests;
+use crate::util::git::BranchEntry;
 use crate::vim_registers::VimRegisters;
 use crate::workspace::sync_inputs::SyncedInputState;
 use crate::workspace::ActiveSession;
@@ -32,6 +33,7 @@ use warp_core::ui::appearance::Appearance;
 use warp_editor::content::buffer::InitialBufferState;
 use warp_editor::render::element::VerticalExpansionBehavior;
 use warp_editor::render::model::LineCount;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::elements::{Empty, MouseStateHandle};
 use warpui::platform::WindowStyle;
 use warpui::{App, ViewHandle};
@@ -138,11 +140,12 @@ fn create_line_comment(
     comment_content: &str,
 ) -> AttachedReviewComment {
     let line_count = LineCount::from(line_number);
+    let file_path: PathBuf = file_path.into();
     AttachedReviewComment {
         id: CommentId::new(),
         content: comment_content.to_string(),
         target: AttachedReviewCommentTarget::Line {
-            absolute_file_path: file_path.into(),
+            absolute_file_path: LocalOrRemotePath::from(file_path),
             line: EditorLineLocation::Current {
                 line_number: line_count,
                 line_range: line_count..LineCount::from(line_number + 1),
@@ -166,11 +169,12 @@ fn create_file_comment(
     file_path: impl Into<PathBuf>,
     comment_content: &str,
 ) -> AttachedReviewComment {
+    let file_path: PathBuf = file_path.into();
     AttachedReviewComment {
         id: CommentId::new(),
         content: comment_content.to_string(),
         target: AttachedReviewCommentTarget::File {
-            absolute_file_path: file_path.into(),
+            absolute_file_path: LocalOrRemotePath::from(file_path),
         },
         last_update_time: Local::now(),
         base: None,
@@ -223,7 +227,7 @@ use crate::view_components::action_button::{ActionButton, NakedTheme};
 
 /// Test context that holds all common test state
 struct TestContext {
-    repo_path: PathBuf,
+    repo_path: LocalOrRemotePath,
     #[allow(dead_code)]
     window_id: warpui::WindowId,
     state: LoadedState,
@@ -236,7 +240,7 @@ impl TestContext {
         initialize_test_app(app);
 
         let editor = create_editor_with_content(app, editor_content);
-        let repo_path = PathBuf::from("/repo");
+        let repo_path = LocalOrRemotePath::from(PathBuf::from("/repo"));
 
         let (window_id, _) = app.add_window(WindowStyle::NotStealFocus, |_| TestView);
         let state = create_loaded_state_with_editors(app, window_id, vec![(file_path, editor)]);
@@ -246,7 +250,7 @@ impl TestContext {
         let working_directories_model = app.add_model(|_| WorkingDirectoriesModel::new());
         let code_review_comment_batch =
             working_directories_model.update(app, |working_directories, ctx| {
-                working_directories.get_or_create_code_review_comments(repo_path.as_path(), ctx)
+                working_directories.get_or_create_code_review_comments(&repo_path, ctx)
             });
 
         let code_review_view = app.add_view(window_id, |ctx| {
@@ -278,6 +282,7 @@ fn create_loaded_state_with_editors(
     let file_states = file_editors
         .into_iter()
         .map(|(file_path, editor)| {
+            let relative_file_path = file_path.to_string_lossy().into_owned();
             let chevron_button = app.add_view(window_id, |_| ActionButton::new("", NakedTheme));
             let open_in_tab_button = app.add_view(window_id, |_| ActionButton::new("", NakedTheme));
             let discard_button = app.add_view(window_id, |_| ActionButton::new("", NakedTheme));
@@ -286,7 +291,7 @@ fn create_loaded_state_with_editors(
 
             let state = FileState {
                 file_diff: FileDiff {
-                    file_path: file_path.clone(),
+                    file_path: relative_file_path.clone(),
                     status: GitFileStatus::Modified,
                     hunks: Arc::new(vec![]),
                     is_binary: false,
@@ -305,7 +310,7 @@ fn create_loaded_state_with_editors(
                 add_context_button,
                 copy_path_button,
             };
-            (file_path, state)
+            (relative_file_path, state)
         })
         .collect();
 
@@ -384,8 +389,13 @@ fn test_relocate_comments_file_comment_passes_through() {
         let file_path = PathBuf::from("test.txt");
         let ctx = TestContext::new(&mut app, file_path.clone(), "line 1\nline 2\nline 3");
 
-        let file_comment =
-            create_file_comment(ctx.repo_path.join(&file_path), "This is a file comment");
+        let file_comment = create_file_comment(
+            ctx.repo_path
+                .to_local_path()
+                .expect("test repository should be local")
+                .join(&file_path),
+            "This is a file comment",
+        );
         let original_id = file_comment.id;
 
         ctx.code_review_view.update(&mut app, |_view, view_ctx| {
@@ -465,7 +475,13 @@ fn test_relocate_comments_multiple_comment_types() {
         let ctx = TestContext::new(&mut app, file_path.clone(), "line 1\nline 2\nline 3");
 
         let general_comment = create_general_comment("General comment");
-        let file_comment = create_file_comment(ctx.repo_path.join(&file_path), "File comment");
+        let file_comment = create_file_comment(
+            ctx.repo_path
+                .to_local_path()
+                .expect("test repository should be local")
+                .join(&file_path),
+            "File comment",
+        );
         let line_comment = create_line_comment("/repo/test.txt", 1, "line 1", "Line comment");
 
         let general_id = general_comment.id;
@@ -546,7 +562,7 @@ fn test_relocate_comments_line_comment_with_absolute_path() {
 
 #[test]
 fn test_attach_pending_imported_comment_formats_body_and_uses_absolute_path() {
-    let repo_path = PathBuf::from("/repo");
+    let repo_path = LocalOrRemotePath::from(PathBuf::from("/repo"));
 
     let pending = make_pending_comment(
         "1",
@@ -568,7 +584,7 @@ fn test_attach_pending_imported_comment_formats_body_and_uses_absolute_path() {
         },
     );
 
-    let attached = attach_pending_imported_comments(vec![pending], repo_path.as_path());
+    let attached = attach_pending_imported_comments(vec![pending], &repo_path);
 
     assert_eq!(attached.len(), 1);
     assert_eq!(attached[0].content, "**@alice**:\nHello world");
@@ -594,7 +610,7 @@ fn test_attach_pending_imported_comment_formats_body_and_uses_absolute_path() {
 
 #[test]
 fn test_attach_pending_imported_thread_flattens_depth_first_sorted_by_timestamp() {
-    let repo_path = PathBuf::from("/repo");
+    let repo_path = LocalOrRemotePath::from(PathBuf::from("/repo"));
 
     let root = make_pending_comment(
         "1",
@@ -650,7 +666,7 @@ fn test_attach_pending_imported_thread_flattens_depth_first_sorted_by_timestamp(
 
     let attached = attach_pending_imported_comments(
         vec![reply_late, root, reply_nested, reply_early],
-        repo_path.as_path(),
+        &repo_path,
     );
 
     assert_eq!(attached.len(), 1);
@@ -771,9 +787,18 @@ fn test_setup_dropdown_with_branches_includes_all_items() {
         let target_count = ctx.code_review_view.update(&mut app, |view, view_ctx| {
             if let Some(repo) = view.active_repo.as_mut() {
                 repo.available_branches = vec![
-                    ("main".to_string(), true),
-                    ("feature-1".to_string(), false),
-                    ("feature-2".to_string(), false),
+                    BranchEntry {
+                        name: "main".to_string(),
+                        is_main: true,
+                    },
+                    BranchEntry {
+                        name: "feature-1".to_string(),
+                        is_main: false,
+                    },
+                    BranchEntry {
+                        name: "feature-2".to_string(),
+                        is_main: false,
+                    },
                 ];
             }
             view.build_diff_targets(view_ctx).len()
@@ -828,8 +853,16 @@ fn test_on_close_then_on_open_reinitializes_repo_state() {
         // Populate branches to simulate a working state
         let target_count_before = ctx.code_review_view.update(&mut app, |view, view_ctx| {
             if let Some(repo) = view.active_repo.as_mut() {
-                repo.available_branches =
-                    vec![("main".to_string(), true), ("feature-1".to_string(), false)];
+                repo.available_branches = vec![
+                    BranchEntry {
+                        name: "main".to_string(),
+                        is_main: true,
+                    },
+                    BranchEntry {
+                        name: "feature-1".to_string(),
+                        is_main: false,
+                    },
+                ];
             }
             view.build_diff_targets(view_ctx).len()
         });

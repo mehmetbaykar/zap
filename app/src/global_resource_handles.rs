@@ -1,9 +1,11 @@
+use std::sync::mpsc::SyncSender;
+
+use warpui::{Entity, ModelHandle, SingletonEntity};
+
 use crate::{
     banner::BannerState, persistence::ModelEvent, resource_center::TipsCompleted,
     settings::SettingsFileError,
 };
-use std::sync::mpsc::SyncSender;
-use warpui::{Entity, ModelHandle, SingletonEntity};
 
 /// Interfaces that allow us to interact with global resources owned by the main
 /// thread that exist throughout the app including Model handles, channel senders,

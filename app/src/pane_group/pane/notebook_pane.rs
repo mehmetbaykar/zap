@@ -1,7 +1,7 @@
-use anyhow::Context;
 use std::sync::Arc;
-use url::Url;
 
+use anyhow::Context;
+use url::Url;
 use warpui::{AppContext, ModelHandle, SingletonEntity, ViewContext, ViewHandle};
 
 use crate::{
