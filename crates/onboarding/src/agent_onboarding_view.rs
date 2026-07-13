@@ -1,16 +1,29 @@
 use ai::LLMId;
-use pathfinder_geometry::vector::vec2f;
-use ui_components::{button, Component as _, Options as _};
 use warp_core::features::FeatureFlag;
 use warp_core::send_telemetry_from_ctx;
-use warp_core::ui::appearance::Appearance;
-use warp_core::ui::theme::WarpTheme;
 use warpui_core::assets::asset_cache::AssetSource;
-use warpui_core::elements::{
-    CacheOption, ChildAnchor, Container, Empty, Image, OffsetPositioning, ParentAnchor,
-    ParentElement, ParentOffsetBounds, Rect, Shrinkable, Stack,
-};
 use warpui_core::image_cache::ImageType;
+
+use crate::components::feature_optout_dialog::{render_feature_optout_dialog, FeatureOptOutDialog};
+use crate::model::{OnboardingStateEvent, OnboardingStateModel, OnboardingStep, SelectedSettings};
+use crate::slides::{
+    AgentSlide, AiAccessSlide, AiAccessSlideEvent, AiSetupSlide, CustomizeUISlide, IntentionSlide,
+    IntroSlide, OnboardingModelInfo, OnboardingSlide, ProjectSlide, ThemePickerSlide,
+    ThemePickerSlideEvent, ThirdPartySlide,
+};
+use crate::telemetry::OnboardingEvent;
+use crate::AI_FEATURES;
+
+use pathfinder_color::ColorU;
+use pathfinder_geometry::vector::vec2f;
+use ui_components::{button, Component as _, Options as _};
+use warp_core::ui::appearance::Appearance;
+use warp_core::ui::theme::{Fill, WarpTheme};
+use warp_core::ui::Icon;
+use warpui_core::elements::{
+    Align, CacheOption, ChildAnchor, Container, Dismiss, Empty, Image, OffsetPositioning,
+    ParentAnchor, ParentElement, ParentOffsetBounds, Rect, Shrinkable, Stack,
+};
 use warpui_core::keymap::macros::*;
 use warpui_core::keymap::{FixedBinding, Keystroke};
 use warpui_core::presenter::ChildView;
@@ -19,20 +32,14 @@ use warpui_core::{
     ViewContext, ViewHandle,
 };
 
-use crate::localization::localized;
-use crate::model::{OnboardingStateEvent, OnboardingStateModel, OnboardingStep, SelectedSettings};
-use crate::slides::{
-    AgentSlide, CustomizeUISlide, IntentionSlide, IntroSlide, OnboardingModelInfo, OnboardingSlide,
-    ProjectSlide, ThemePickerSlide, ThemePickerSlideEvent, ThirdPartySlide,
-};
-use crate::telemetry::OnboardingEvent;
-
 #[derive(Clone, Debug)]
 pub enum AgentOnboardingEvent {
     ThemeSelected { theme_name: String },
     SyncWithOsToggled { enabled: bool },
     OnboardingCompleted(SelectedSettings),
     OnboardingSkipped,
+    AddApiKeyRequested,
+    AddCustomEndpointRequested,
 }
 
 pub struct AgentOnboardingView {
@@ -40,12 +47,17 @@ pub struct AgentOnboardingView {
     intro_slide: ViewHandle<IntroSlide>,
     theme_picker_slide: ViewHandle<ThemePickerSlide>,
     intention_slide: ViewHandle<IntentionSlide>,
+    ai_setup_slide: ViewHandle<AiSetupSlide>,
     customize_slide: ViewHandle<CustomizeUISlide>,
     agent_slide: ViewHandle<AgentSlide>,
+    ai_access_slide: ViewHandle<AiAccessSlide>,
     third_party_slide: ViewHandle<ThirdPartySlide>,
     project_slide: ViewHandle<ProjectSlide>,
     skippable: bool,
     close_button: button::Button,
+    no_ai_confirm_button: button::Button,
+    no_ai_cancel_button: button::Button,
+    no_ai_close_button: button::Button,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -58,6 +70,9 @@ pub enum AgentOnboardingAction {
     EnterKey,
     CmdOrCtrlEnterKey,
     Escape,
+    NoAiConfirm,
+    NoAiCancel,
+    NoAiDismiss,
 }
 
 fn dispatch_onboarding_action_to_slide<V: OnboardingSlide>(
@@ -74,6 +89,10 @@ fn dispatch_onboarding_action_to_slide<V: OnboardingSlide>(
         AgentOnboardingAction::EnterKey => slide.on_enter(ctx),
         AgentOnboardingAction::CmdOrCtrlEnterKey => slide.on_cmd_or_ctrl_enter(ctx),
         AgentOnboardingAction::Escape => slide.on_escape(ctx),
+        // Parent-level actions are handled by the parent view, never routed to a slide.
+        AgentOnboardingAction::NoAiConfirm
+        | AgentOnboardingAction::NoAiCancel
+        | AgentOnboardingAction::NoAiDismiss => {}
     }
 }
 
@@ -85,17 +104,11 @@ impl AgentOnboardingView {
         skippable: bool,
         models: Vec<OnboardingModelInfo>,
         default_model_id: LLMId,
-        workspace_enforces_autonomy: bool,
         agent_modality_enabled: bool,
         ctx: &mut ViewContext<Self>,
     ) -> Self {
         let onboarding_state = ctx.add_model(|_| {
-            OnboardingStateModel::new(
-                models,
-                default_model_id,
-                workspace_enforces_autonomy,
-                agent_modality_enabled,
-            )
+            OnboardingStateModel::new(models, default_model_id, agent_modality_enabled)
         });
         ctx.subscribe_to_model(&onboarding_state, |me, _model, event, ctx| {
             // Re-render when slide selection changes.
@@ -104,8 +117,14 @@ impl AgentOnboardingView {
             }
             ctx.notify();
 
-            if let OnboardingStateEvent::Completed = event {
-                me.handle_onboarding_completed(ctx);
+            match event {
+                OnboardingStateEvent::Completed => {
+                    me.handle_onboarding_completed(ctx);
+                }
+                OnboardingStateEvent::ModelsUpdated
+                | OnboardingStateEvent::SelectedSlideChanged
+                | OnboardingStateEvent::IntentionChanged
+                | OnboardingStateEvent::NoAiConfirmationChanged => {}
             }
         });
 
@@ -127,10 +146,16 @@ impl AgentOnboardingView {
             ctx.add_typed_action_view(move |_| IntentionSlide::new(onboarding_state))
         };
 
+        let ai_setup_slide = {
+            let onboarding_state = onboarding_state.clone();
+            ctx.add_typed_action_view(move |_| AiSetupSlide::new(onboarding_state))
+        };
+
         let customize_slide = {
             let onboarding_state = onboarding_state.clone();
             ctx.add_typed_action_view(move |ctx| CustomizeUISlide::new(onboarding_state, ctx))
         };
+
         ctx.subscribe_to_view(&theme_picker_slide, |me, _view, event, ctx| {
             me.handle_theme_picker_slide_event(event, ctx);
         });
@@ -139,6 +164,20 @@ impl AgentOnboardingView {
             let onboarding_state = onboarding_state.clone();
             ctx.add_typed_action_view(move |ctx| AgentSlide::new(onboarding_state, ctx))
         };
+
+        let ai_access_slide = {
+            let onboarding_state = onboarding_state.clone();
+            ctx.add_typed_action_view(move |_| AiAccessSlide::new(onboarding_state))
+        };
+
+        ctx.subscribe_to_view(&ai_access_slide, |_me, _view, event, ctx| match event {
+            AiAccessSlideEvent::AddApiKeyRequested => {
+                ctx.emit(AgentOnboardingEvent::AddApiKeyRequested);
+            }
+            AiAccessSlideEvent::AddCustomEndpointRequested => {
+                ctx.emit(AgentOnboardingEvent::AddCustomEndpointRequested);
+            }
+        });
 
         let third_party_slide = {
             let onboarding_state = onboarding_state.clone();
@@ -155,12 +194,17 @@ impl AgentOnboardingView {
             intro_slide,
             theme_picker_slide,
             intention_slide,
+            ai_setup_slide,
             customize_slide,
             agent_slide,
+            ai_access_slide,
             third_party_slide,
             project_slide,
             skippable,
             close_button: button::Button::default(),
+            no_ai_confirm_button: button::Button::default(),
+            no_ai_cancel_button: button::Button::default(),
+            no_ai_close_button: button::Button::default(),
         }
     }
 
@@ -177,11 +221,18 @@ impl AgentOnboardingView {
         ctx.notify();
     }
 
-    pub fn set_workspace_enforces_autonomy(&mut self, value: bool, ctx: &mut ViewContext<Self>) {
-        self.onboarding_state.update(ctx, |state, ctx| {
-            state.set_workspace_enforces_autonomy(value, ctx);
+    /// Updates how many BYOK provider keys and custom endpoints the user has
+    /// configured. This drives the AI-access slide's "connected" status line and
+    /// gates "Next" on the bring-your-own path.
+    pub fn set_byok_status(
+        &mut self,
+        key_count: usize,
+        endpoint_count: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.ai_access_slide.update(ctx, |slide, ctx| {
+            slide.set_byok_status(key_count, endpoint_count, ctx);
         });
-        ctx.notify();
     }
 
     /// The current `use_vertical_tabs` value on the onboarding UI customization.
@@ -225,6 +276,12 @@ impl AgentOnboardingView {
         for path in IntentionSlide::VISUAL_IMAGE_PATHS {
             asset_cache.load_asset::<ImageType>(AssetSource::Bundled { path });
         }
+        for path in AiSetupSlide::VISUAL_IMAGE_PATHS {
+            asset_cache.load_asset::<ImageType>(AssetSource::Bundled { path });
+        }
+        for path in AiAccessSlide::VISUAL_IMAGE_PATHS {
+            asset_cache.load_asset::<ImageType>(AssetSource::Bundled { path });
+        }
         for path in CustomizeUISlide::VISUAL_IMAGE_PATHS {
             asset_cache.load_asset::<ImageType>(AssetSource::Bundled { path });
         }
@@ -236,6 +293,67 @@ impl AgentOnboardingView {
         }
         // Agent slide reuses customize_vertical_tabs / customize_horizontal_tabs
         // which are already in CustomizeUISlide::VISUAL_IMAGE_PATHS.
+    }
+
+    fn render_no_ai_dialog(&self, appearance: &Appearance) -> Box<dyn Element> {
+        let escape = Keystroke::parse("escape").unwrap_or_default();
+        let close_button = self.no_ai_close_button.render(
+            appearance,
+            button::Params {
+                content: button::Content::Icon(Icon::X),
+                theme: &button::themes::Naked,
+                options: button::Options {
+                    keystroke: Some(escape),
+                    on_click: Some(Box::new(|ctx, _app, _pos| {
+                        ctx.dispatch_typed_action(AgentOnboardingAction::NoAiDismiss);
+                    })),
+                    ..button::Options::default(appearance)
+                },
+            },
+        );
+
+        let cancel_button = self.no_ai_cancel_button.render(
+            appearance,
+            button::Params {
+                content: button::Content::Label("Give me AI features".into()),
+                theme: &button::themes::Naked,
+                options: button::Options {
+                    on_click: Some(Box::new(|ctx, _app, _pos| {
+                        ctx.dispatch_typed_action(AgentOnboardingAction::NoAiCancel);
+                    })),
+                    ..button::Options::default(appearance)
+                },
+            },
+        );
+
+        let enter = Keystroke::parse("enter").unwrap_or_default();
+        let confirm_button = self.no_ai_confirm_button.render(
+            appearance,
+            button::Params {
+                content: button::Content::Label("I don't want AI".into()),
+                theme: &button::themes::Primary,
+                options: button::Options {
+                    keystroke: Some(enter),
+                    on_click: Some(Box::new(|ctx, _app, _pos| {
+                        ctx.dispatch_typed_action(AgentOnboardingAction::NoAiConfirm);
+                    })),
+                    ..button::Options::default(appearance)
+                },
+            },
+        );
+
+        render_feature_optout_dialog(
+            appearance,
+            FeatureOptOutDialog {
+                title: "Are you sure you don't want AI?",
+                body: "Zap is better with AI. By continuing, you won't have access to any of the \
+                       following features:",
+                features: AI_FEATURES,
+                close_button,
+                cancel_button,
+                confirm_button,
+            },
+        )
     }
 
     fn handle_onboarding_completed(&mut self, ctx: &mut ViewContext<Self>) {
@@ -308,8 +426,10 @@ impl View for AgentOnboardingView {
             OnboardingStep::Intro => ChildView::new(&self.intro_slide).finish(),
             OnboardingStep::ThemePicker => ChildView::new(&self.theme_picker_slide).finish(),
             OnboardingStep::Intention => ChildView::new(&self.intention_slide).finish(),
+            OnboardingStep::AiSetup => ChildView::new(&self.ai_setup_slide).finish(),
             OnboardingStep::Customize => ChildView::new(&self.customize_slide).finish(),
             OnboardingStep::Agent => ChildView::new(&self.agent_slide).finish(),
+            OnboardingStep::AiAccess => ChildView::new(&self.ai_access_slide).finish(),
             OnboardingStep::ThirdParty => ChildView::new(&self.third_party_slide).finish(),
             OnboardingStep::Project => ChildView::new(&self.project_slide).finish(),
         };
@@ -322,7 +442,7 @@ impl View for AgentOnboardingView {
             let close_button = self.close_button.render(
                 appearance,
                 button::Params {
-                    content: button::Content::Label(localized("common-skip", "Skip").into()),
+                    content: button::Content::Label("Skip".into()),
                     theme: &button::themes::Naked,
                     options: button::Options {
                         size: button::Size::Small,
@@ -346,6 +466,27 @@ impl View for AgentOnboardingView {
             );
         }
 
+        if self
+            .onboarding_state
+            .as_ref(app)
+            .no_ai_confirmation()
+            .is_some()
+        {
+            let dialog = self.render_no_ai_dialog(appearance);
+            stack.add_child(
+                Rect::new()
+                    .with_background(Fill::Solid(ColorU::black()).with_opacity(60))
+                    .finish(),
+            );
+            stack.add_child(
+                Dismiss::new(Align::new(dialog).finish())
+                    .on_dismiss(|ctx, _app| {
+                        ctx.dispatch_typed_action(AgentOnboardingAction::NoAiDismiss);
+                    })
+                    .finish(),
+            );
+        }
+
         stack.finish()
     }
 }
@@ -354,6 +495,30 @@ impl TypedActionView for AgentOnboardingView {
     type Action = AgentOnboardingAction;
 
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
+        if self
+            .onboarding_state
+            .as_ref(ctx)
+            .no_ai_confirmation()
+            .is_some()
+        {
+            match action {
+                AgentOnboardingAction::NoAiConfirm | AgentOnboardingAction::EnterKey => {
+                    self.onboarding_state
+                        .update(ctx, |model, ctx| model.confirm_no_ai(ctx));
+                }
+                AgentOnboardingAction::NoAiCancel => {
+                    self.onboarding_state
+                        .update(ctx, |model, ctx| model.cancel_no_ai(ctx));
+                }
+                AgentOnboardingAction::NoAiDismiss | AgentOnboardingAction::Escape => {
+                    self.onboarding_state
+                        .update(ctx, |model, ctx| model.dismiss_no_ai(ctx));
+                }
+                _ => {}
+            }
+            return;
+        }
+
         if matches!(action, AgentOnboardingAction::Escape) && self.skippable {
             ctx.emit(AgentOnboardingEvent::OnboardingSkipped);
             return;
@@ -371,10 +536,16 @@ impl TypedActionView for AgentOnboardingView {
             OnboardingStep::Intention => self.intention_slide.update(ctx, |slide, ctx| {
                 dispatch_onboarding_action_to_slide(slide, *action, ctx)
             }),
+            OnboardingStep::AiSetup => self.ai_setup_slide.update(ctx, |slide, ctx| {
+                dispatch_onboarding_action_to_slide(slide, *action, ctx)
+            }),
             OnboardingStep::Customize => self.customize_slide.update(ctx, |slide, ctx| {
                 dispatch_onboarding_action_to_slide(slide, *action, ctx)
             }),
             OnboardingStep::Agent => self.agent_slide.update(ctx, |slide, ctx| {
+                dispatch_onboarding_action_to_slide(slide, *action, ctx)
+            }),
+            OnboardingStep::AiAccess => self.ai_access_slide.update(ctx, |slide, ctx| {
                 dispatch_onboarding_action_to_slide(slide, *action, ctx)
             }),
             OnboardingStep::ThirdParty => self.third_party_slide.update(ctx, |slide, ctx| {

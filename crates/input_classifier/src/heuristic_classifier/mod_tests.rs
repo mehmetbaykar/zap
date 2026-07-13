@@ -3,8 +3,8 @@ use warp_completer::util::parse_current_commands_and_tokens;
 use warp_completer::{ParsedTokenData, ParsedTokensSnapshot};
 
 use super::*;
-use crate::test_utils::CompletionContext;
 use crate::Context;
+use crate::test_utils::CompletionContext;
 
 async fn mock_parsed_input_token(buffer_text: String) -> ParsedTokensSnapshot {
     warp_features::mark_initialized();

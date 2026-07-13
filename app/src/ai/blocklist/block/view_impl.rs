@@ -1147,6 +1147,7 @@ impl View for AIBlock {
                     .is_latest_visible_exchange_in_root_task(app)
                     && self.has_imported_comments_in_current_thread(app),
                 ask_user_question_view: self.ask_user_question_view.as_ref(),
+                run_agents_card_views: &self.run_agents_card_views,
             },
             app,
         ));

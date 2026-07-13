@@ -69,7 +69,7 @@ mod ai_page;
 mod appearance_page;
 mod cloud_sync_page;
 mod code_page;
-mod custom_inference_modal;
+pub(crate) mod custom_inference_modal;
 mod directory_color_add_picker;
 mod execution_profile_view;
 mod features;
@@ -504,6 +504,9 @@ pub mod flags {
         "Orchestration_Message_Display_AlwaysCollapse";
     pub const PROMPT_SUBMISSION_INTERRUPT: &str = "Prompt_Submission_Interrupt";
     pub const PROMPT_SUBMISSION_QUEUE: &str = "Prompt_Submission_Queue";
+    pub const LRC_SUBMISSION_SEND_IMMEDIATELY: &str = "LRC_Submission_Send_Immediately";
+    pub const LRC_SUBMISSION_QUEUE_UNTIL_COMMAND_COMPLETES: &str =
+        "LRC_Submission_Queue_Until_Command_Completes";
     pub const SHOW_TERMINAL_INPUT_MESSAGE_LINE_FLAG: &str = "Show_Terminal_Input_Message_Line";
     pub const PRESERVE_INPUT_FOCUS_ON_BLOCK_SELECTION_FLAG: &str =
         "Preserve_Input_Focus_On_Block_Selection";
@@ -580,6 +583,7 @@ pub mod flags {
     pub const SHOW_CONVERSATION_HISTORY: &str = "ShowConversationHistory";
     pub const SHOW_PROJECT_EXPLORER: &str = "ShowProjectExplorer";
     pub const SHOW_GLOBAL_SEARCH: &str = "ShowGlobalSearch";
+    pub const SHOW_HIDDEN_FILES: &str = "ShowHiddenFiles";
 }
 
 pub fn init_actions_from_parent_view<T: Action + Clone>(

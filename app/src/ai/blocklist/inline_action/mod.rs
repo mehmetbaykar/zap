@@ -11,6 +11,7 @@ pub(crate) mod requested_action;
 pub(crate) mod requested_command;
 pub(crate) mod requested_command_attribution;
 pub(crate) mod requested_script;
+pub(crate) mod run_agents_card_view;
 pub(crate) mod search_results_common;
 pub(crate) mod suggested_unit_tests;
 pub(crate) mod tool_card;

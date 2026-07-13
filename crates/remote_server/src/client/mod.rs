@@ -17,11 +17,12 @@ use crate::proto::{
     host_scoped_request, notification, read_file_chunk_response, server_message,
     session_scoped_request, Abort, BufferEdit, BundledSkillProto, ClientMessage, CloseBuffer,
     CreateDirectory, CreateDirectoryResponse, DeleteFile, DiffMode, DiffStateFileDelta,
-    DiffStateMetadataUpdate, DiffStateSnapshot, ErrorCode, Initialize, InitializeResponse,
-    ListDirectory, ListDirectoryResponse, LoadRepoMetadataDirectoryResponse,
-    NavigatedToDirectoryResponse, ReadFileChunk, ReadFileChunkResponse, ResolvePath,
-    ResolvePathResponse, RunCommandRequest, RunCommandResponse, SaveBuffer, SaveBufferResponse,
-    ServerMessage, SessionBootstrapped, TextEdit, UnsubscribeDiffState, WriteFileChunk,
+    DiffStateMetadataUpdate, DiffStateSnapshot, ErrorCode, GitStatusMetadata, Initialize,
+    InitializeResponse, ListDirectory, ListDirectoryResponse, LoadRepoMetadataDirectoryResponse,
+    NavigatedToDirectoryResponse, PrInfo, ReadFileChunk, ReadFileChunkResponse, RepositoryInfo,
+    ResolvePath, ResolvePathResponse, RunCommandRequest, RunCommandResponse, SaveBuffer,
+    SaveBufferResponse, ServerMessage, SessionBootstrapped, TextEdit, UnsubscribeDiffState,
+    UpdateGitHubPrInfo, UpdateGitHubRepoInfo, UpdateGitStatus, WriteFileChunk,
     WriteFileChunkResponse,
 };
 use crate::repo_metadata_proto::{proto_snapshot_to_update, proto_to_repo_metadata_update};
@@ -132,6 +133,22 @@ pub enum ClientEvent {
     },
     /// The daemon pushed its pre-parsed bundled skill catalog.
     BundledSkillsSnapshotReceived { skills: Vec<BundledSkillProto> },
+    /// An aggregate git status push (branch + diff stats) was pushed by the
+    /// server for the tab / prompt chips.
+    GitStatusPushReceived {
+        repo_path: StandardizedPath,
+        metadata: GitStatusMetadata,
+    },
+    /// PR info for the current branch was pushed by the server for the PR chip.
+    GitHubPrInfoPushReceived {
+        repo_path: StandardizedPath,
+        pr_info: Option<PrInfo>,
+    },
+    /// Repository name/owner info was pushed by the server for repository chips.
+    GitHubRepositoryInfoPushReceived {
+        repo_path: StandardizedPath,
+        repository_info: Option<RepositoryInfo>,
+    },
 }
 
 /// Client for communicating with a `remote_server` process over the remote server protocol.
@@ -753,6 +770,46 @@ impl RemoteServerClient {
                     skills: snapshot.skills,
                 })
             }
+            server_message::Message::GitStatusPush(push) => {
+                let Some(repo_path) = StandardizedPath::try_new(&push.repo_path).ok() else {
+                    log::warn!("GitStatusPush: invalid repo_path: {}", push.repo_path);
+                    return None;
+                };
+                let Some(metadata) = push.metadata else {
+                    log::warn!(
+                        "GitStatusPush: missing metadata for repo_path: {}",
+                        push.repo_path
+                    );
+                    return None;
+                };
+                Some(ClientEvent::GitStatusPushReceived {
+                    repo_path,
+                    metadata,
+                })
+            }
+            server_message::Message::GithubPrInfoPush(push) => {
+                let Some(repo_path) = StandardizedPath::try_new(&push.repo_path).ok() else {
+                    log::warn!("GitHubPrInfoPush: invalid repo_path: {}", push.repo_path);
+                    return None;
+                };
+                Some(ClientEvent::GitHubPrInfoPushReceived {
+                    repo_path,
+                    pr_info: push.pr_info,
+                })
+            }
+            server_message::Message::GithubRepositoryInfoPush(push) => {
+                let Some(repo_path) = StandardizedPath::try_new(&push.repo_path).ok() else {
+                    log::warn!(
+                        "GitHubRepositoryInfoPush: invalid repo_path: {}",
+                        push.repo_path
+                    );
+                    return None;
+                };
+                Some(ClientEvent::GitHubRepositoryInfoPushReceived {
+                    repo_path,
+                    repository_info: push.repository_info,
+                })
+            }
             other => {
                 safe_warn!(
                     safe: ("Unhandled push message variant"),
@@ -774,7 +831,39 @@ impl RemoteServerClient {
         self.send_notification(msg);
     }
 
-    /// Sends a `RunCommand` request
+    /// Sends an `UpdateGitStatus` notification (fire-and-forget).
+    pub fn update_git_status(&self, repo_path: &StandardizedPath) {
+        let msg =
+            ClientMessage::notification(notification::Message::UpdateGitStatus(UpdateGitStatus {
+                repo_path: repo_path.to_string(),
+            }));
+        self.send_notification(msg);
+    }
+
+    /// Sends an `UpdateGitHubPrInfo` notification (fire-and-forget). The daemon
+    /// refreshes PR info and broadcasts the result as a `GitHubPrInfoPush`.
+    pub fn update_github_pr_info(&self, repo_path: &StandardizedPath) {
+        let msg = ClientMessage::notification(notification::Message::UpdateGithubPrInfo(
+            UpdateGitHubPrInfo {
+                repo_path: repo_path.to_string(),
+            },
+        ));
+        self.send_notification(msg);
+    }
+
+    /// Sends an `UpdateGitHubRepoInfo` notification (fire-and-forget). The
+    /// daemon refreshes repository info and broadcasts the result as a
+    /// `GitHubRepositoryInfoPush`.
+    pub fn update_github_repo_info(&self, repo_path: &StandardizedPath) {
+        let msg = ClientMessage::notification(notification::Message::UpdateGithubRepoInfo(
+            UpdateGitHubRepoInfo {
+                repo_path: repo_path.to_string(),
+            },
+        ));
+        self.send_notification(msg);
+    }
+
+    /// Sends a `RunCommand` request.
     pub async fn run_command(
         &self,
         session_id: SessionId,

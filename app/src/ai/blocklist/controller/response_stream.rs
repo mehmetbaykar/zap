@@ -254,6 +254,26 @@ pub struct ResponseStream {
 }
 
 impl ResponseStream {
+    #[cfg(test)]
+    pub fn new_for_test(id: ResponseStreamId) -> Self {
+        let (cancellation_tx, _cancellation_rx) = oneshot::channel();
+        Self {
+            id,
+            params: api::RequestParams::new_for_test(Vec::new(), Vec::new()),
+            retry_count: 0,
+            start_time: Local::now(),
+            time_to_latest_event: TimeDelta::seconds(0),
+            cancellation_tx: Some(cancellation_tx),
+            original_error: None,
+            has_received_client_actions: false,
+            ai_identifiers: AIIdentifiers::default(),
+            can_attempt_resume_on_error: false,
+            pending_title_generation: None,
+            should_resume_conversation_after_stream_finished: false,
+            current_request_id: Some(Uuid::new_v4()),
+        }
+    }
+
     pub fn new(
         params: api::RequestParams,
         ai_identifiers: AIIdentifiers,
@@ -267,7 +287,8 @@ impl ResponseStream {
         let params_clone = params.clone();
         // BYOP path: if the selected base model is an LLMId encoded by a user-defined provider,
         // extract (provider, api_key, model_id, root_task_id) from ctx before spawning and go
-        // through custom chat completions. Otherwise use warp's own multi-agent endpoint (the original path).
+        // through custom chat completions. Otherwise return the local BYOP-required error below;
+        // Zap has no hosted-agent fallback.
         let byop_dispatch = byop_dispatch_info(&params, &ai_identifiers, ctx);
         let pending_title_generation = byop_dispatch
             .as_ref()

@@ -49,6 +49,7 @@ message HostScopedRequest {
     CreateDirectory create_directory = 23;
     ReadFileChunk read_file_chunk = 24;
     WriteFileChunk write_file_chunk = 25;
+    RipgrepSearchRequest ripgrep_search = 26;
   }
 }
 
@@ -78,6 +79,9 @@ message Notification {
     BufferEdit buffer_edit = 5;
     CloseBuffer close_buffer = 6;
     UnsubscribeDiffState unsubscribe_diff_state = 7;
+    UpdateGitStatus update_git_status = 8;
+    UpdateGitHubPrInfo update_github_pr_info = 9;
+    UpdateGitHubRepoInfo update_github_repo_info = 10;
   }
 }
 // Top-level envelope for all server → client messages.
@@ -121,6 +125,10 @@ message ServerMessage {
     CreateDirectoryResponse create_directory_response = 36;
     ReadFileChunkResponse read_file_chunk_response = 37;
     WriteFileChunkResponse write_file_chunk_response = 38;
+    GitStatusPush git_status_push = 39;
+    GitHubPrInfoPush github_pr_info_push = 40;
+    GitHubRepositoryInfoPush github_repository_info_push = 41;
+    RipgrepSearchResponse ripgrep_search_response = 42;
   }
 }
 
@@ -398,6 +406,56 @@ message FileContextProto {
   optional uint32 line_range_end = 5;
   optional uint64 last_modified_epoch_millis = 6;
   uint32 line_count = 7;
+}
+
+// ── Ripgrep search (global search) ────────────────────────────────
+
+// Client → server: run a ripgrep search over the given root directories
+// on the host. Used by global search for remote sessions.
+message RipgrepSearchRequest {
+  // Regex pattern. Already escaped client-side for literal (non-regex)
+  // searches, matching local global search behavior.
+  string pattern = 1;
+  // Absolute directories on the host to search.
+  repeated string roots = 2;
+  bool ignore_case = 3;
+  bool multiline = 4;
+  // Maximum number of matched lines to return. The server also applies its
+  // own match and approximate payload caps.
+  uint32 max_matches = 5;
+}
+
+// Server → client: result of a RipgrepSearchRequest.
+message RipgrepSearchResponse {
+  oneof result {
+    RipgrepSearchSuccess success = 1;
+    RipgrepSearchError error = 2;
+  }
+}
+
+message RipgrepSearchSuccess {
+  repeated RipgrepSearchMatch matches = 1;
+  // True when the search stopped early because the match cap was reached.
+  bool capped = 2;
+}
+
+message RipgrepSearchError {
+  string message = 1;
+}
+
+// A single matched line in a file. A line may contain multiple submatches;
+// the client expands them into per-submatch result rows.
+message RipgrepSearchMatch {
+  string file_path = 1;
+  uint32 line_number = 2;
+  string line_text = 3;
+  repeated RipgrepSearchSubmatch submatches = 4;
+}
+
+// Byte offsets into `line_text` for one submatch (end exclusive).
+message RipgrepSearchSubmatch {
+  uint64 byte_start = 1;
+  uint64 byte_end = 2;
 }
 
 // ── Remote codebase indexing status ───────────────────────────────

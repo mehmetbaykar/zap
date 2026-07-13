@@ -107,7 +107,9 @@ use crate::ai::blocklist::block::status_bar::BlocklistAIStatusBarEvent;
 use crate::ai::blocklist::usage::conversation_usage_view::{
     ConversationUsageInfo, ConversationUsageView, DisplayMode, TimingInfo,
 };
-use crate::ai::blocklist::{block_context_from_terminal_model, SlashCommandRequest};
+use crate::ai::blocklist::{
+    block_context_from_terminal_model, is_lrc_auto_queue_active, SlashCommandRequest,
+};
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel, AIDocumentVersion};
 use crate::ai::loading::shimmering_warp_loading_text;
 #[cfg(feature = "local_fs")]
@@ -1764,6 +1766,12 @@ pub enum Event {
     PendingCommandCompleted,
     SessionBootstrapped,
     ShellSpawned(ShellType),
+    /// Emitted when the PTY failed to spawn. Carries a human-readable reason
+    /// string (not secret values) so the terminal driver can surface a
+    /// specific error without waiting for the full bootstrap timeout.
+    PtySpawnFailed {
+        reason: String,
+    },
 
     /// This terminal pane has initiated a file upload to a remote host.
     CopyFileToRemote {
@@ -2705,17 +2713,14 @@ pub struct TerminalView {
     agent_todos_popup: ViewHandle<AgentTodosPopupView>,
 
     /// Per-repo git status model for the current repository, if any.
-    #[cfg(feature = "local_fs")]
     git_repo_status: Option<ModelHandle<GitRepoStatusModel>>,
 
     /// Per-repo GitHub-info model for the current repository, if any.
-    #[cfg(feature = "local_fs")]
     github_repo_model: Option<ModelHandle<GitHubRepoModel>>,
 
     /// Deferred code review open request, stashed when [`GitDeltaPreference::OnlyDirty`] is
     /// requested but git status metadata has not loaded yet. Consumed in
     /// [`Self::handle_git_repo_status_event`].
-    #[cfg(feature = "local_fs")]
     deferred_code_review_open: Option<DeferredCodeReviewOpen>,
 
     /// A list of callbacks to run on the next [`ModelEvent::AfterBlockCompleted`] received.
@@ -2810,7 +2815,6 @@ pub struct TerminalView {
 /// Parameters stashed when a code review pane open is requested with
 /// [`GitDeltaPreference::OnlyDirty`] but git status metadata is not yet available.
 /// Consumed once the per-repo [`GitRepoStatusModel`] delivers its first update.
-#[cfg(feature = "local_fs")]
 struct DeferredCodeReviewOpen {
     git_delta_preference: GitDeltaPreference,
     focus_new_pane: bool,
@@ -4213,11 +4217,8 @@ impl TerminalView {
             model_events_handle,
             is_todo_popup_visible: false,
             agent_todos_popup,
-            #[cfg(feature = "local_fs")]
             git_repo_status: None,
-            #[cfg(feature = "local_fs")]
             github_repo_model: None,
-            #[cfg(feature = "local_fs")]
             deferred_code_review_open: None,
             block_completed_callbacks: Default::default(),
             conversation_completed_callbacks: Default::default(),
@@ -4510,7 +4511,10 @@ impl TerminalView {
                     | RemoteServerManagerEvent::GitPushResponse { .. }
                     | RemoteServerManagerEvent::CreatePrResponse { .. }
                     | RemoteServerManagerEvent::GetPrInfoResponse { .. }
-                    | RemoteServerManagerEvent::GetCommittedBranchFilesResponse { .. } => {}
+                    | RemoteServerManagerEvent::GetCommittedBranchFilesResponse { .. }
+                    | RemoteServerManagerEvent::GitStatusPushReceived { .. }
+                    | RemoteServerManagerEvent::GitHubPrInfoPushReceived { .. }
+                    | RemoteServerManagerEvent::GitHubRepositoryInfoPushReceived { .. } => {}
                 }
             });
         }
@@ -4635,9 +4639,24 @@ impl TerminalView {
             .push(Box::new(callback));
     }
 
+    /// Handles `conversation_id`'s turn finishing with `finish_reason`: fires
+    /// the pane-level finished callbacks and drains the conversation's queued
+    /// prompts.
     fn handle_finished_conversation(
         &mut self,
         conversation_id: AIConversationId,
+        finish_reason: FinishReason,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.fire_conversation_finished_callbacks(finish_reason, ctx);
+        self.drain_queued_prompts(conversation_id, finish_reason, ctx);
+    }
+
+    /// Fires the pane-level one-shot callbacks registered via
+    /// [`Self::on_next_conversation_finished`], plus the queued-prompt
+    /// callback if one is armed.
+    fn fire_conversation_finished_callbacks(
+        &mut self,
         finish_reason: FinishReason,
         ctx: &mut ViewContext<Self>,
     ) {
@@ -4652,7 +4671,6 @@ impl TerminalView {
         if let Some(callback) = queued_prompt {
             callback(self, finish_reason, ctx);
         }
-        self.drain_queued_prompts(conversation_id, finish_reason, ctx);
     }
 
     /// Advances the queued-prompts queue after a dispatched queued command's block completes.
@@ -4696,7 +4714,6 @@ impl TerminalView {
             .is_some()
     }
 
-    #[cfg(feature = "local_fs")]
     fn handle_git_repo_status_event(&mut self, ctx: &mut ViewContext<Self>) {
         if let Some(deferred) = self.deferred_code_review_open.take() {
             self.toggle_code_review_pane(
@@ -4716,7 +4733,6 @@ impl TerminalView {
     /// repo path. Use this when unsubscribing because the subscription is no
     /// longer needed (e.g. the git chip was removed) but the user is still in
     /// the same repository.
-    #[cfg(feature = "local_fs")]
     fn clear_git_repo_status_subscription(&mut self, ctx: &mut ViewContext<Self>) {
         let git_repo_status = self.git_repo_status.take();
         if let Some(handle) = &git_repo_status {
@@ -4734,7 +4750,6 @@ impl TerminalView {
         });
     }
 
-    #[cfg(feature = "local_fs")]
     fn clear_github_repo_model(&mut self, ctx: &mut ViewContext<Self>) {
         let Some(handle) = self.github_repo_model.take() else {
             return;
@@ -4760,7 +4775,6 @@ impl TerminalView {
 
     /// Fully clear the per-repo git status handle, including the input's repo
     /// path. Use this when navigating out of a git repository.
-    #[cfg(feature = "local_fs")]
     fn clear_git_repo_status(&mut self, ctx: &mut ViewContext<Self>) {
         self.clear_git_repo_status_subscription(ctx);
         self.input.update(ctx, |input, ctx| {
@@ -4769,14 +4783,12 @@ impl TerminalView {
     }
 
     /// Helper to read metadata from the per-repo sub-model.
-    #[cfg(feature = "local_fs")]
     fn git_status_metadata<'a>(&'a self, ctx: &'a AppContext) -> Option<&'a GitStatusMetadata> {
         self.git_repo_status
             .as_ref()
             .and_then(|h| h.as_ref(ctx).metadata(ctx))
     }
 
-    #[cfg(feature = "local_fs")]
     fn uses_git_status_chips(chips: Vec<ContextChipKind>) -> bool {
         chips.iter().any(|chip| {
             matches!(
@@ -4789,7 +4801,6 @@ impl TerminalView {
     }
 
     /// Returns whether visible prompt/footer chips need git status updates.
-    #[cfg(feature = "local_fs")]
     fn needs_git_status_for_chip_ui(&self, ctx: &AppContext) -> bool {
         // Agent view: subscribe when the configured agent footer includes
         // a git-status-backed chip or PR info.
@@ -4823,20 +4834,16 @@ impl TerminalView {
         is_using_warp_prompt && Self::uses_git_status_chips(Prompt::as_ref(ctx).chip_kinds())
     }
 
-    #[cfg(feature = "local_fs")]
     fn needs_git_status_for_agent_context(&self, ctx: &AppContext) -> bool {
-        self.current_local_repo_path().is_some()
-            && self.ai_input_model.as_ref(ctx).is_ai_input_enabled()
+        self.current_repo_path.is_some() && self.ai_input_model.as_ref(ctx).is_ai_input_enabled()
     }
 
     /// Returns whether this terminal view should subscribe to git status updates.
-    #[cfg(feature = "local_fs")]
     fn should_subscribe_to_git_status(&self, ctx: &AppContext) -> bool {
         self.needs_git_status_for_chip_ui(ctx) || self.needs_git_status_for_agent_context(ctx)
     }
 
     /// Whether the terminal's prompt/footer chips need PR info.
-    #[cfg(feature = "local_fs")]
     fn needs_pr_info_for_chip_ui(&self, ctx: &AppContext) -> bool {
         if self.agent_view_controller.as_ref(ctx).is_active() {
             return SessionSettings::as_ref(ctx)
@@ -4862,19 +4869,15 @@ impl TerminalView {
                     .contains(&ContextChipKind::GithubPullRequest))
     }
 
-    #[cfg(feature = "local_fs")]
     fn needs_pr_info_for_agent_context(&self, ctx: &AppContext) -> bool {
-        self.current_local_repo_path().is_some()
-            && self.ai_input_model.as_ref(ctx).is_ai_input_enabled()
+        self.current_repo_path.is_some() && self.ai_input_model.as_ref(ctx).is_ai_input_enabled()
     }
 
     /// Whether this terminal needs PR info from the git status model.
-    #[cfg(feature = "local_fs")]
     fn needs_pr_info(&self, ctx: &AppContext) -> bool {
         self.needs_pr_info_for_chip_ui(ctx) || self.needs_pr_info_for_agent_context(ctx)
     }
 
-    #[cfg(feature = "local_fs")]
     fn should_retry_default_pr_chip_validation(ctx: &AppContext) -> bool {
         let settings = SessionSettings::as_ref(ctx);
         FeatureFlag::GithubPrPromptChip.is_enabled()
@@ -4884,16 +4887,17 @@ impl TerminalView {
 
     /// Re-evaluate whether the terminal needs a PR-info subscription, and
     /// acquire or drop the handle accordingly.
-    #[cfg(feature = "local_fs")]
     fn sync_pr_info_subscription(&mut self, ctx: &mut ViewContext<Self>) {
         let needs_pr_info = self.needs_pr_info(ctx);
         if needs_pr_info && self.github_repo_model.is_none() {
-            let Some(repo_path) = self.current_local_repo_path().map(Path::to_path_buf) else {
+            // Acquire a GitHub-info handle for the current repo. The factory
+            // dispatches on the `LocalOrRemotePath` to a local `gh`-driven model
+            // or a remote push receiver, both wired up identically.
+            let Some(repo) = self.current_repo_path.clone() else {
                 return;
             };
-            let result = GitRepoModels::handle(ctx).update(ctx, |model, ctx| {
-                model.subscribe_github_repo(&repo_path, ctx)
-            });
+            let result = GitRepoModels::handle(ctx)
+                .update(ctx, |model, ctx| model.subscribe_github_repo(&repo, ctx));
             match result {
                 Ok(handle) => {
                     let weak_for_prompt = handle.downgrade();
@@ -4941,49 +4945,56 @@ impl TerminalView {
         });
     }
 
-    /// No-op when the `local_fs` feature is disabled – git status is not
-    /// available so there is nothing to subscribe to.
-    #[cfg(not(feature = "local_fs"))]
-    fn update_git_status_subscription(&mut self, _ctx: &mut ViewContext<Self>) {}
-
     /// Re-evaluate whether this terminal view should be subscribed to git
     /// status updates and subscribe/unsubscribe accordingly.
-    #[cfg(feature = "local_fs")]
     fn update_git_status_subscription(&mut self, ctx: &mut ViewContext<Self>) {
         let should_subscribe = self.should_subscribe_to_git_status(ctx);
-        if should_subscribe {
-            // Subscribe if we have a repo path but no active subscription.
+        if !should_subscribe {
             if self.git_repo_status.is_some() {
-                self.sync_pr_info_subscription(ctx);
-            } else if let Some(repo_path) = self.current_local_repo_path().map(Path::to_path_buf) {
-                let result = GitRepoModels::handle(ctx)
-                    .update(ctx, |model, ctx| model.subscribe(&repo_path, ctx));
-                match result {
-                    Ok(handle) => {
-                        ctx.subscribe_to_model(&handle, |me, _, _, ctx| {
-                            me.handle_git_repo_status_event(ctx);
-                        });
-                        let weak_for_prompt = handle.downgrade();
-                        self.git_repo_status = Some(handle);
-                        self.current_prompt.update(ctx, |prompt_type, ctx| {
-                            if let PromptType::Dynamic { prompt } = prompt_type {
-                                prompt.update(ctx, |current_prompt, ctx| {
-                                    current_prompt.set_git_repo_status(Some(weak_for_prompt), ctx);
-                                });
-                            }
-                        });
-                        // Acquire a GitHub-info handle if the terminal's
-                        // prompt/footer chips or agent context need PR or
-                        // repository info.
-                        self.sync_pr_info_subscription(ctx);
-                    }
-                    Err(err) => {
-                        log::warn!("GitRepoModels subscribe failed: {err}");
-                    }
-                }
+                self.clear_git_repo_status_subscription(ctx);
             }
-        } else if self.git_repo_status.is_some() {
-            self.clear_git_repo_status_subscription(ctx);
+            return;
+        }
+
+        // Already subscribed — keep the PR-info (GitHub) subscription in sync.
+        if self.git_repo_status.is_some() {
+            self.sync_pr_info_subscription(ctx);
+            return;
+        }
+
+        // No active subscription: create one for the current repo. The factory
+        // dispatches on the `LocalOrRemotePath` to a local watcher-backed model
+        // or a remote push receiver, both wired up identically.
+        let Some(repo) = self.current_repo_path.clone() else {
+            return;
+        };
+        let result =
+            GitRepoModels::handle(ctx).update(ctx, |model, ctx| model.subscribe(&repo, ctx));
+        match result {
+            Ok(handle) => {
+                // Wire the freshly-obtained per-repo `GitRepoStatusModel` handle
+                // (local or remote) into this view: subscribe for events, feed
+                // the prompt, store the handle, and sync the PR-info consumer slot.
+                ctx.subscribe_to_model(&handle, |me, _, _, ctx| {
+                    me.handle_git_repo_status_event(ctx);
+                });
+                let weak_for_prompt = handle.downgrade();
+                self.git_repo_status = Some(handle);
+                self.current_prompt.update(ctx, |prompt_type, ctx| {
+                    if let PromptType::Dynamic { prompt } = prompt_type {
+                        prompt.update(ctx, |current_prompt, ctx| {
+                            current_prompt.set_git_repo_status(Some(weak_for_prompt), ctx);
+                        });
+                    }
+                });
+                // Acquire a GitHub-info handle if the terminal's prompt/footer
+                // chips or agent context need PR or repository info. The AI
+                // context model reads PR / repository info from that GitHub-info
+                // handle, so it is wired up by `sync_pr_info_subscription` rather
+                // than here.
+                self.sync_pr_info_subscription(ctx);
+            }
+            Err(err) => log::warn!("GitRepoModels subscribe failed: {err}"),
         }
     }
 
@@ -5010,13 +5021,11 @@ impl TerminalView {
             // handing off to it — not the end of the overall turn. Defer
             // conversation-finished side effects (e.g. firing a queued `/queue`
             // prompt) until the entire turn is actually done.
-            let has_active_subagent = || {
-                BlocklistAIHistoryModel::as_ref(ctx)
-                    .conversation(conversation_id)
-                    .is_some_and(|c| c.has_active_subagent())
-            };
+            let has_active_subagent = BlocklistAIHistoryModel::as_ref(ctx)
+                .conversation(conversation_id)
+                .is_some_and(|c| c.has_active_subagent());
 
-            let mut finish_reason: Option<FinishReason> = None;
+            let mut pane_finish_reason: Option<FinishReason> = None;
             if let Some(active_ai_block) = self.active_ai_block(ctx) {
                 // A new exchange is already active, so callbacks for the
                 // just-finished exchange will be skipped. Clear any pending
@@ -5033,14 +5042,28 @@ impl TerminalView {
                 if self.pending_user_query_view_id.is_some() && !is_same_conversation {
                     self.remove_pending_user_query_block(ctx);
                 }
-            } else if !has_active_subagent() {
+            } else if !has_active_subagent {
                 if let Some(last_ai_block) = self.last_ai_block() {
-                    finish_reason = last_ai_block.as_ref(ctx).finish_reason();
+                    pane_finish_reason = last_ai_block.as_ref(ctx).finish_reason();
                 }
             }
 
-            if let Some(reason) = finish_reason {
-                self.handle_finished_conversation(*conversation_id, reason, ctx);
+            // Pane-scoped: the one-shot conversation-finished callbacks fire
+            // when the pane's most recent block is done.
+            if let Some(reason) = pane_finish_reason {
+                self.fire_conversation_finished_callbacks(reason, ctx);
+            }
+
+            // Conversation-scoped: drain this conversation's queued prompts
+            // keyed off its own most recent block. The pane-global lookup
+            // above can observe a sibling conversation's block instead
+            // (orchestration panes host the lead and local child conversations
+            // in one view), so it can't drive the drain decision or supply the
+            // finish reason.
+            if !has_active_subagent {
+                if let Some(reason) = self.finish_reason_for_conversation(*conversation_id, ctx) {
+                    self.drain_queued_prompts(*conversation_id, reason, ctx);
+                }
             }
 
             // If the most recent action in the current interaction turn created or updated a plan
@@ -5283,6 +5306,50 @@ impl TerminalView {
         }
     }
 
+    /// Sends the leading prompts that were auto-queued during an agent-requested long-running
+    /// command ([`QueuedQueryOrigin::LrcAutoQueue`]) to the agent, in queue order. Invoked when the
+    /// command finishes — these rows were queued "until the command finishes", unlike other queued
+    /// rows, which wait for the end of the full response.
+    pub(crate) fn send_lrc_queued_prompts(
+        &mut self,
+        conversation_id: AIConversationId,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let editing_front_lrc_row = QueuedQueryModel::as_ref(ctx)
+            .editing_row(conversation_id)
+            .is_some_and(|query_id| {
+                QueuedQueryModel::as_ref(ctx)
+                    .queue(conversation_id)
+                    .first()
+                    .is_some_and(|row| {
+                        row.id() == query_id && row.origin() == QueuedQueryOrigin::LrcAutoQueue
+                    })
+            });
+        if editing_front_lrc_row {
+            let queued_prompts_panel = self.input.as_ref(ctx).queued_prompts_panel().cloned();
+            let Some(queued_prompts_panel) = queued_prompts_panel else {
+                return;
+            };
+            queued_prompts_panel.update(ctx, |panel, ctx| {
+                panel.commit_edit(ctx);
+            });
+        }
+
+        let rows: Vec<(QueuedQueryId, String)> = QueuedQueryModel::as_ref(ctx)
+            .queue(conversation_id)
+            .iter()
+            .take_while(|row| row.origin() == QueuedQueryOrigin::LrcAutoQueue)
+            .map(|row| (row.id(), row.text().to_owned()))
+            .collect();
+        for (query_id, text) in rows {
+            self.input.update(ctx, |input, ctx| {
+                input.submit_queued_prompt_for_active_pane(text, conversation_id, query_id, ctx);
+            });
+            QueuedQueryModel::handle(ctx).update(ctx, |model, ctx| {
+                model.remove_fired_row(conversation_id, query_id, ctx);
+            });
+        }
+    }
     fn handle_legacy_passive_suggestions_event(
         &mut self,
         _: ModelHandle<LegacyPassiveSuggestionsModel>,
@@ -5343,17 +5410,19 @@ impl TerminalView {
     }
 
     pub fn attach_path_as_context(&mut self, path: &Path, ctx: &mut ViewContext<Self>) {
-        // If a CLI agent is running, write the path directly to the PTY.
-        if self.active_cli_agent(ctx).is_some() {
-            let content = path.to_string_lossy().to_string();
-            self.write_to_pty(content.into_bytes(), ctx);
-            self.focus_terminal(ctx);
+        let content = path.to_string_lossy().to_string();
+
+        // If a CLI agent is running, route the context to rich input when it is
+        // open, otherwise fall back to writing directly to the PTY.
+        if self
+            .try_send_text_to_cli_agent_or_rich_input(content.clone(), ctx)
+            .is_some()
+        {
             return;
         }
 
         self.input.update(ctx, |input, ctx| {
-            let content = path.to_string_lossy();
-            input.append_to_buffer(content.as_ref(), ctx);
+            input.append_to_buffer(content.as_str(), ctx);
             ctx.notify();
         });
     }
@@ -5902,14 +5971,21 @@ impl TerminalView {
 
                 if FeatureFlag::QueuedPromptsV2.is_enabled()
                     && self.is_ambient_agent_session(ctx)
-                    && previous_status
-                        .is_some_and(|status| status.is_in_progress() || status.is_blocked())
+                    && previous_status.is_some_and(|status| {
+                        status.is_in_progress()
+                            || status.is_transient_error()
+                            || status.is_blocked()
+                    })
                 {
                     let finish_reason = match new_status {
                         ConversationStatus::Success => Some(FinishReason::Complete),
                         ConversationStatus::Error => Some(FinishReason::Error),
                         ConversationStatus::Cancelled => Some(FinishReason::Cancelled),
-                        ConversationStatus::InProgress | ConversationStatus::Blocked { .. } => None,
+                        // TransientError is non-terminal: an automatic recovery is pending.
+                        ConversationStatus::InProgress
+                        | ConversationStatus::TransientError
+                        | ConversationStatus::Blocked { .. }
+                        | ConversationStatus::WaitingForEvents => None,
                     };
                     if let Some(finish_reason) = finish_reason {
                         self.handle_finished_conversation(*conversation_id, finish_reason, ctx);
@@ -6317,6 +6393,16 @@ impl TerminalView {
                             ctx,
                         );
                     }
+                }
+
+                // The command ended — drop any LRC-scoped auto-queue override so the
+                // conversation reverts to its pre-command queue state, then deliver the
+                // prompts that were queued "until the command finishes".
+                if let Some(conversation_id) = conversation_id {
+                    QueuedQueryModel::handle(ctx).update(ctx, |model, ctx| {
+                        model.clear_queue_next_lrc_prompt_override(*conversation_id, ctx);
+                    });
+                    self.send_lrc_queued_prompts(*conversation_id, ctx);
                 }
 
                 if FeatureFlag::AgentView.is_enabled() {
@@ -7277,6 +7363,14 @@ impl TerminalView {
                         title: title.clone(),
                         description: error_message.clone(),
                     }),
+                    FinishedAIAgentOutput::Error {
+                        error: error @ RenderableAIError::TransientNetworkError { .. },
+                        ..
+                    } => Some(AIBlockNotificationSummary {
+                        success: false,
+                        title: title.clone(),
+                        description: error.to_string(),
+                    }),
                     _ => Some(AIBlockNotificationSummary {
                         success: false,
                         title,
@@ -8156,13 +8250,7 @@ impl TerminalView {
         } else if active_block_state.is_long_running {
             // A second Ctrl+C after Stop takeover should cancel both the command and conversation.
             if let Some(conversation_id) = active_block_state.conversation_id_to_stop {
-                self.ai_controller.update(ctx, |controller, ctx| {
-                    controller.cancel_conversation_progress(
-                        conversation_id,
-                        CancellationReason::ManuallyCancelled,
-                        ctx,
-                    );
-                });
+                self.stop_local_agent_conversation(conversation_id, ctx);
             } else {
                 self.user_write_ctrl_c_to_pty(ctx);
             }
@@ -10642,6 +10730,17 @@ impl TerminalView {
                                     ctx.emit(Event::Pane(PaneEvent::RemoteRepoNavigated {
                                         remote_path: remote_path.clone(),
                                     }));
+
+                                    // Wire up the remote git-status chips when the
+                                    // remote repo changed (mirrors the local branch).
+                                    let changed = !matches!(
+                                        old_repo_path.as_ref(),
+                                        Some(LocalOrRemotePath::Remote(rp)) if rp == remote_path
+                                    );
+                                    if changed {
+                                        me.clear_git_repo_status_subscription(ctx);
+                                        me.update_git_status_subscription(ctx);
+                                    }
                                 }
                                 Some(LocalOrRemotePath::Local(repo_path)) => {
                                     #[cfg(feature = "local_fs")]
@@ -10699,7 +10798,6 @@ impl TerminalView {
                                     let _ = repo_path;
                                 }
                                 None => {
-                                    #[cfg(feature = "local_fs")]
                                     me.clear_git_repo_status(ctx);
                                     ctx.notify();
                                 }
@@ -14723,6 +14821,10 @@ impl TerminalView {
         ctx: &mut ViewContext<Self>,
     ) {
         self.pty_spawn_failed = true;
+        // Emit before the banner so the terminal driver can cancel its
+        // bootstrap wait immediately, without waiting for the 60 s timeout.
+        let reason = format!("{pty_spawn_error:#}");
+        ctx.emit(Event::PtySpawnFailed { reason });
         self.insert_shell_process_terminated_banner(
             shell_terminated_banner::TerminationType::PtySpawnFailure { pty_spawn_error },
             ctx,
@@ -17940,31 +18042,72 @@ impl TerminalView {
             true
         } else {
             // Otherwise, there are some visible blocks and we need to clear stuff.
-            let active_block_is_long_running = self
-                .model
-                .lock()
-                .block_list()
-                .active_block()
-                .is_active_and_long_running();
-            let is_agent_monitoring = self
-                .model
-                .lock()
-                .block_list()
-                .active_block()
-                .is_agent_monitoring();
+            let (is_long_running, is_agent_monitoring, is_agent_driving_command) = {
+                let model = self.model.lock();
+                let active_block = model.block_list().active_block();
+                (
+                    active_block.is_active_and_long_running(),
+                    active_block.is_agent_monitoring(),
+                    active_block.is_agent_driving_command(),
+                )
+            };
 
             // If there isn't an active long running block, then "clear buffer" just starts a new convo.
-            if !active_block_is_long_running {
+            if !is_long_running {
+                // Cancel any in-progress work in the conversation being left.
+                if let Some(conversation_id) = self
+                    .agent_view_controller
+                    .as_ref(ctx)
+                    .agent_view_state()
+                    .active_conversation_id()
+                {
+                    let is_in_progress = BlocklistAIHistoryModel::as_ref(ctx)
+                        .conversation(&conversation_id)
+                        .is_some_and(|conversation| conversation.status().is_in_progress());
+                    if is_in_progress {
+                        self.ai_controller.update(ctx, |controller, ctx| {
+                            controller.cancel_conversation_progress(
+                                conversation_id,
+                                CancellationReason::ManuallyCancelled,
+                                ctx,
+                            );
+                        });
+                    }
+                }
                 self.enter_agent_view_for_new_conversation(
                     None,
                     AgentViewEntryOrigin::ClearBuffer,
                     ctx,
                 );
                 true
-            } else if is_agent_monitoring {
+            } else if is_agent_monitoring || is_agent_driving_command {
                 // Otherwise, if the agent is monitoring this long-running block,
                 // then clear just that block and leave the rest of the blocklist in tact.
                 self.model.lock().clear_screen(ClearMode::ActiveBlock);
+                // In the agent-driving-but-not-monitoring state the terminal block is hidden. Make
+                // it visible and expand the header immediately so the user sees the cleared state
+                // right away, rather than waiting for the auto-expand timer (~3 s).
+                if is_agent_driving_command && !is_agent_monitoring {
+                    let requested_command_action_id = self
+                        .model
+                        .lock()
+                        .block_list()
+                        .active_block()
+                        .requested_command_action_id()
+                        .cloned();
+                    if let Some(action_id) = &requested_command_action_id {
+                        self.model
+                            .lock()
+                            .block_list_mut()
+                            .set_visibility_of_block_for_ai_action(action_id, true);
+                        if let Some(ai_block_handle) = self.active_ai_block(ctx).cloned() {
+                            ai_block_handle.update(ctx, |ai_block, ctx| {
+                                ai_block.expand_requested_command_view(action_id, ctx);
+                            });
+                        }
+                        self.redetermine_terminal_focus(ctx);
+                    }
+                }
                 self.find_model.update(ctx, |find_model, ctx| {
                     find_model.clear_matches(ctx);
                 });
@@ -17998,8 +18141,14 @@ impl TerminalView {
             .block_list()
             .active_block()
             .is_agent_monitoring();
+        let is_agent_driving_command = self
+            .model
+            .lock()
+            .block_list()
+            .active_block()
+            .is_agent_driving_command();
 
-        if is_agent_monitoring {
+        if is_agent_monitoring || is_agent_driving_command {
             return;
         }
 
@@ -19678,6 +19827,31 @@ impl TerminalView {
         })
     }
 
+    /// Returns the finish reason of the most recent AI block belonging to
+    /// `conversation_id`, or `None` when the conversation has no AI blocks in
+    /// this view or its most recent block is still in flight.
+    fn finish_reason_for_conversation(
+        &self,
+        conversation_id: AIConversationId,
+        ctx: &AppContext,
+    ) -> Option<FinishReason> {
+        self.ai_block_metadata_for_current_thread(&conversation_id, ctx)
+            .next()
+            .and_then(|ai_metadata| ai_metadata.ai_block_handle.as_ref(ctx).finish_reason())
+    }
+
+    fn ai_block_for_exchange(
+        &self,
+        exchange_id: &AIAgentExchangeId,
+    ) -> Option<&ViewHandle<AIBlock>> {
+        self.rich_content_views.iter().find_map(|rich_content| {
+            let ai_metadata = rich_content.ai_block_metadata()?;
+            if ai_metadata.exchange_id == *exchange_id {
+                return Some(&ai_metadata.ai_block_handle);
+            }
+            None
+        })
+    }
     fn ai_block_handle_by_view_id(&self, view_id: EntityId) -> Option<&ViewHandle<AIBlock>> {
         self.rich_content_views.iter().find_map(|rich_content| {
             let ai_metadata = rich_content.ai_block_metadata()?;
@@ -21548,6 +21722,30 @@ impl TerminalView {
         output: String,
         ctx: &mut ViewContext<Self>,
     ) -> ViewHandle<AIBlock> {
+        self.insert_dummy_ai_block_internal(query, Some(output), ctx)
+    }
+
+    /// Inserts a dummy AI block that is still streaming (unfinished), for tests
+    /// that need an in-flight block in the pane.
+    #[cfg(any(test, feature = "integration_tests"))]
+    pub fn insert_dummy_streaming_ai_block(
+        &mut self,
+        query: String,
+        ctx: &mut ViewContext<Self>,
+    ) -> ViewHandle<AIBlock> {
+        self.insert_dummy_ai_block_internal(query, None, ctx)
+    }
+
+    /// Shared body for the dummy AI block insertion helpers. Creates a fresh
+    /// conversation for the block; a `None` output models a block that is
+    /// still streaming (unfinished).
+    #[cfg(any(test, feature = "integration_tests"))]
+    fn insert_dummy_ai_block_internal(
+        &mut self,
+        query: String,
+        output: Option<String>,
+        ctx: &mut ViewContext<Self>,
+    ) -> ViewHandle<AIBlock> {
         use rand::distributions::{Alphanumeric, DistString};
 
         use crate::ai::agent::{
@@ -21571,7 +21769,7 @@ impl TerminalView {
             intended_agent: None,
         }];
 
-        let output = AIAgentOutput {
+        let output = output.map(|output| AIAgentOutput {
             messages: vec![AIAgentOutputMessage::text(
                 MessageId::new("fake-id".to_owned()),
                 AIAgentText {
@@ -21585,7 +21783,7 @@ impl TerminalView {
                 Alphanumeric.sample_string(&mut rand::thread_rng(), 24)
             ))),
             ..Default::default()
-        };
+        });
 
         // Create a real conversation in the history model for this dummy block so it renders.
         let terminal_view_id = ctx.view_id();
@@ -21599,7 +21797,10 @@ impl TerminalView {
         });
         let conversation_id = new_conversation_id.expect("conversation created for dummy AI block");
 
-        let ai_block_model = Rc::new(FakeAIBlockModel::new(inputs, output));
+        let ai_block_model = Rc::new(match output {
+            Some(output) => FakeAIBlockModel::new(inputs, output),
+            None => FakeAIBlockModel::new_streaming(inputs),
+        });
         let ai_block = ctx.add_typed_action_view(|ctx| {
             AIBlock::new(
                 ai_block_model,
@@ -25597,8 +25798,22 @@ impl TypedActionView for TerminalView {
                 else {
                     return;
                 };
+                // While LRC auto-queue is active, the toggle is scoped to that command so the
+                // conversation reverts to its pre-command queue state once the command ends.
+                let lrc_auto_queue_active = {
+                    let terminal_model = self.model.lock();
+                    is_lrc_auto_queue_active(
+                        terminal_model.block_list().active_block(),
+                        conversation_id,
+                        ctx,
+                    )
+                };
                 QueuedQueryModel::handle(ctx).update(ctx, |model, ctx| {
-                    model.toggle_queue_next_prompt(conversation_id, ctx);
+                    if lrc_auto_queue_active {
+                        model.toggle_queue_next_prompt_during_lrc(conversation_id, ctx);
+                    } else {
+                        model.toggle_queue_next_prompt(conversation_id, ctx);
+                    }
                 });
                 ctx.notify();
             }

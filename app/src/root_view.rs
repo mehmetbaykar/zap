@@ -1,6 +1,7 @@
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::blocklist::SerializedBlockListItem;
 use crate::appearance::Appearance;
+use crate::auth::provider_keys_modal::{ProviderKeysModalEvent, ProviderKeysModalView};
 use crate::auth::AuthOverrideWarningModalVariant;
 use crate::auth::AuthState;
 use crate::auth::AuthStateProvider;
@@ -16,9 +17,11 @@ use crate::experiments::{BlockOnboarding, Experiment};
 use crate::interval_timer::IntervalTimer;
 use crate::launch_configs::launch_config;
 use crate::linear::LinearIssueWork;
+use crate::modal::{Modal, ModalEvent};
 use crate::notebooks::manager::NotebookSource;
 use crate::settings::apply_onboarding_settings;
 use crate::settings::AISettings;
+use ai::api_keys::{ApiKeyManager, ApiKeyManagerEvent};
 use onboarding::{AgentOnboardingEvent, AgentOnboardingView, OnboardingIntention};
 
 use crate::auth::UserAuthenticationError;
@@ -28,6 +31,7 @@ use crate::server::ids::SyncId;
 use crate::server::telemetry::LaunchConfigUiLocation;
 use crate::settings::QuakeModeSettings;
 use crate::settings::ThemeSettings;
+use crate::settings_view::custom_inference_modal::{CustomEndpointModal, CustomEndpointModalEvent};
 use crate::settings_view::flags;
 use crate::settings_view::mcp_servers_page::MCPServersSettingsPage;
 use crate::settings_view::SettingsSection;
@@ -45,7 +49,6 @@ use crate::view_components::DismissibleToast;
 use crate::window_settings::WindowSettings;
 use crate::workspace::hoa_onboarding::mark_hoa_onboarding_completed;
 use crate::workspace::WorkspaceAction;
-use crate::workspaces::user_workspaces::{UserWorkspaces, UserWorkspacesEvent};
 use crate::{
     app_state::{AppState, PaneUuid, WindowSnapshot},
     autoupdate::{RequestType, UpdateReady},
@@ -77,11 +80,12 @@ use std::sync::Arc;
 use std::{collections::HashMap, path::PathBuf};
 use warp_core::context_flag::ContextFlag;
 use warp_core::user_preferences::GetUserPreferences as _;
-use warpui::keymap::{EditableBinding, FixedBinding};
+use warpui::keymap::{EditableBinding, FixedBinding, Keystroke};
+use warpui::ui_components::components::UiComponentStyles;
 use warpui::windowing::WindowManager;
 
 use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
-use crate::ai::onboarding::{apply_free_tier_default_model_override, build_onboarding_models};
+use crate::ai::onboarding::build_onboarding_models;
 
 use warpui::elements::{
     Border, ChildAnchor, OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Stack,
@@ -1477,6 +1481,10 @@ pub struct RootView {
     window_id: WindowId,
     /// Stores the tutorial from onboarding until the workspace is ready.
     pending_tutorial: Option<OnboardingTutorial>,
+    /// Accountless provider-key modal shown from onboarding.
+    add_api_key_modal: Option<ViewHandle<ProviderKeysModalView>>,
+    /// Accountless custom-endpoint modal shown from onboarding.
+    add_custom_endpoint_modal: Option<ViewHandle<Modal<CustomEndpointModal>>>,
 }
 
 impl RootView {
@@ -1485,6 +1493,7 @@ impl RootView {
         workspace_setting: NewWorkspaceSource,
         ctx: &mut ViewContext<Self>,
     ) -> Self {
+        #[cfg(target_family = "wasm")]
         let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
 
         ctx.subscribe_to_model(&AuthManager::handle(ctx), |me, _, event, ctx| {
@@ -1514,40 +1523,29 @@ impl RootView {
             workspace_setting,
         };
 
-        // Decentralized branch: `is_logged_in` is always true in local mode; the original structure
-        // is kept to preserve the compile-time reachability of other branches like wasm/onboarding,
-        // and the unneeded sub-branches never trigger.
+        #[cfg(target_family = "wasm")]
         let auth_onboarding_state = if auth_state.is_logged_in() {
             AuthOnboardingState::Terminal(workspace_args.create_workspace(ctx))
         } else {
-            cfg_if! {
-                if #[cfg(target_family = "wasm")] {
-                    AuthOnboardingState::WebImport(AuthOnboardingTarget::Workspace(workspace_args.into()))
-                } else {
-                    // When ZapNewSettingsModes is enabled, show onboarding before login for
-                    // users who haven't completed it yet (tracked via a local UserPreferences key).
-                    let has_completed_local_onboarding = FeatureFlag::ZapNewSettingsModes.is_enabled()
-                        && has_completed_local_onboarding(ctx);
-                    let should_show_pre_login_onboarding = FeatureFlag::ZapNewSettingsModes.is_enabled()
-                        && FeatureFlag::AgentOnboarding.is_enabled()
-                        && !has_completed_local_onboarding;
-                    if FeatureFlag::ForceLogin.is_enabled() {
-                        // ForceLogin is true for Preview
-                        AuthOnboardingState::Auth(workspace_args.into())
-                    } else if should_show_pre_login_onboarding {
-                        let workspace_args_box: Box<WorkspaceArgs> = workspace_args.into();
-                        let onboarding_view = Self::create_agent_onboarding_view(ctx);
-                        onboarding_view.update(ctx, |view, ctx| {
-                            view.start_onboarding(ctx);
-                        });
-                        AuthOnboardingState::Onboarding {
-                            onboarding_view,
-                            target: AuthOnboardingTarget::Workspace(workspace_args_box),
-                        }
-                    } else {
-                        AuthOnboardingState::Terminal(workspace_args.create_workspace(ctx))
-                    }
+            AuthOnboardingState::WebImport(AuthOnboardingTarget::Workspace(workspace_args.into()))
+        };
+        #[cfg(not(target_family = "wasm"))]
+        let auth_onboarding_state = {
+            let should_show_local_onboarding = FeatureFlag::ZapNewSettingsModes.is_enabled()
+                && FeatureFlag::AgentOnboarding.is_enabled()
+                && !has_completed_local_onboarding(ctx);
+            if should_show_local_onboarding {
+                let workspace_args_box: Box<WorkspaceArgs> = workspace_args.into();
+                let onboarding_view = Self::create_agent_onboarding_view(ctx);
+                onboarding_view.update(ctx, |view, ctx| {
+                    view.start_onboarding(ctx);
+                });
+                AuthOnboardingState::Onboarding {
+                    onboarding_view,
+                    target: AuthOnboardingTarget::Workspace(workspace_args_box),
                 }
+            } else {
+                AuthOnboardingState::Terminal(workspace_args.create_workspace(ctx))
             }
         };
 
@@ -1572,6 +1570,8 @@ impl RootView {
             mouse_states: Default::default(),
             window_id: ctx.window_id(),
             pending_tutorial: None,
+            add_api_key_modal: None,
+            add_custom_endpoint_modal: None,
         };
 
         match &root_view.auth_onboarding_state {
@@ -1754,21 +1754,13 @@ impl RootView {
 
         let themes = onboarding_theme_picker_themes();
         let onboarding_view = ctx.add_typed_action_view(move |ctx| {
-            let (mut models, default_model_id) =
-                build_onboarding_models(LLMPreferences::as_ref(ctx));
-            let default_model_id =
-                apply_free_tier_default_model_override(&mut models, default_model_id, ctx);
-
-            let workspace_enforces_autonomy = UserWorkspaces::as_ref(ctx)
-                .ai_autonomy_settings()
-                .has_any_overrides();
+            let (models, default_model_id) = build_onboarding_models(LLMPreferences::as_ref(ctx));
 
             AgentOnboardingView::new(
                 themes.clone(),
                 false, // Always use unskippable onboarding.
                 models,
                 default_model_id,
-                workspace_enforces_autonomy,
                 FeatureFlag::AgentView.is_enabled(),
                 ctx,
             )
@@ -1779,10 +1771,8 @@ impl RootView {
             &LLMPreferences::handle(ctx),
             move |_, llm_preferences, event, ctx| match event {
                 LLMPreferencesEvent::UpdatedAvailableLLMs => {
-                    let (mut models, default_model_id) =
+                    let (models, default_model_id) =
                         build_onboarding_models(llm_preferences.as_ref(ctx));
-                    let default_model_id =
-                        apply_free_tier_default_model_override(&mut models, default_model_id, ctx);
                     onboarding_view_clone.update(ctx, |onboarding_view, ctx| {
                         onboarding_view.set_onboarding_models(models, default_model_id, ctx);
                     })
@@ -1794,38 +1784,22 @@ impl RootView {
             },
         );
 
-        // Subscribe to workspace changes to update local autonomy enforcement state.
-        let onboarding_view_for_workspaces = onboarding_view.clone();
+        let keys = ApiKeyManager::as_ref(ctx).keys().clone();
+        onboarding_view.update(ctx, |view, ctx| {
+            view.set_byok_status(keys.provider_key_count(), keys.custom_endpoints.len(), ctx);
+        });
+        let onboarding_view_for_keys = onboarding_view.clone();
         ctx.subscribe_to_model(
-            &UserWorkspaces::handle(ctx),
-            move |_, user_workspaces, event, ctx| match event {
-                UserWorkspacesEvent::UpdateWorkspaceSettingsSuccess => {
-                    let workspace_enforces_autonomy = user_workspaces
-                        .as_ref(ctx)
-                        .ai_autonomy_settings()
-                        .has_any_overrides();
-                    onboarding_view_for_workspaces.update(ctx, |onboarding_view, ctx| {
-                        onboarding_view
-                            .set_workspace_enforces_autonomy(workspace_enforces_autonomy, ctx);
-                    });
-                }
-                UserWorkspacesEvent::TeamsChanged => {
-                    ctx.notify();
-                }
-                _ => {}
-            },
-        );
-
-        ctx.subscribe_to_model(
-            &AuthManager::handle(ctx),
-            move |_, _auth_manager, event, ctx| {
-                if matches!(
-                    event,
-                    AuthManagerEvent::AuthComplete | AuthManagerEvent::SkippedLogin
-                ) && matches!(event, AuthManagerEvent::AuthComplete)
-                {
-                    LLMPreferences::handle(ctx).update(ctx, |prefs, ctx| {
-                        prefs.refresh_available_models(ctx);
+            &ApiKeyManager::handle(ctx),
+            move |_, api_key_manager, event, ctx| {
+                if matches!(event, ApiKeyManagerEvent::KeysUpdated) {
+                    let keys = api_key_manager.as_ref(ctx).keys().clone();
+                    onboarding_view_for_keys.update(ctx, |view, ctx| {
+                        view.set_byok_status(
+                            keys.provider_key_count(),
+                            keys.custom_endpoints.len(),
+                            ctx,
+                        );
                     });
                 }
             },
@@ -1937,6 +1911,136 @@ impl RootView {
                 self.auth_onboarding_state = AuthOnboardingState::Terminal(workspace);
                 ctx.emit(RootViewEvent::AuthOnboardingStateChanged);
                 self.start_autoupdate_polling(ctx);
+                ctx.notify();
+            }
+            AgentOnboardingEvent::AddApiKeyRequested => {
+                let existing = ApiKeyManager::as_ref(ctx).keys();
+                let (openai, anthropic, google) = (
+                    existing.openai.clone(),
+                    existing.anthropic.clone(),
+                    existing.google.clone(),
+                );
+                let modal = ctx.add_typed_action_view(move |ctx| {
+                    ProviderKeysModalView::new(openai, anthropic, google, ctx)
+                });
+                ctx.subscribe_to_view(&modal, |me, _, event, ctx| match event {
+                    ProviderKeysModalEvent::Cancelled => {
+                        me.add_api_key_modal = None;
+                        me.focus(ctx);
+                        ctx.notify();
+                    }
+                    ProviderKeysModalEvent::Save {
+                        openai,
+                        anthropic,
+                        google,
+                    } => {
+                        let (openai, anthropic, google) =
+                            (openai.clone(), anthropic.clone(), google.clone());
+                        ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
+                            manager.set_openai_key(openai, ctx);
+                            manager.set_anthropic_key(anthropic, ctx);
+                            manager.set_google_key(google, ctx);
+                        });
+                        me.add_api_key_modal = None;
+                        me.focus(ctx);
+                        ctx.notify();
+                    }
+                });
+                ctx.focus(&modal);
+                self.add_api_key_modal = Some(modal);
+                ctx.notify();
+            }
+            AgentOnboardingEvent::AddCustomEndpointRequested => {
+                let existing = ApiKeyManager::as_ref(ctx)
+                    .keys()
+                    .custom_endpoints
+                    .first()
+                    .cloned();
+                let is_editing = existing.is_some();
+                let editing_index = is_editing.then_some(0);
+                let title = if is_editing {
+                    "Edit custom endpoint"
+                } else {
+                    "Add custom endpoint"
+                }
+                .to_string();
+                let body = ctx.add_typed_action_view(move |ctx| {
+                    CustomEndpointModal::new(existing.as_ref(), editing_index, ctx)
+                });
+                ctx.subscribe_to_view(&body, |me, _, event, ctx| match event {
+                    CustomEndpointModalEvent::Close => {
+                        me.add_custom_endpoint_modal = None;
+                        me.focus(ctx);
+                        ctx.notify();
+                    }
+                    CustomEndpointModalEvent::AddEndpoint {
+                        name,
+                        url,
+                        api_key,
+                        models,
+                    } => {
+                        let (name, url, api_key, models) =
+                            (name.clone(), url.clone(), api_key.clone(), models.clone());
+                        ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
+                            manager.add_custom_endpoint(name, url, api_key, models, ctx);
+                        });
+                        me.add_custom_endpoint_modal = None;
+                        me.focus(ctx);
+                        ctx.notify();
+                    }
+                    CustomEndpointModalEvent::SaveEndpoint {
+                        index,
+                        name,
+                        url,
+                        api_key,
+                        models,
+                    } => {
+                        let (index, name, url, api_key, models) = (
+                            *index,
+                            name.clone(),
+                            url.clone(),
+                            api_key.clone(),
+                            models.clone(),
+                        );
+                        ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
+                            manager.save_custom_endpoint(index, name, url, api_key, models, ctx);
+                        });
+                        me.add_custom_endpoint_modal = None;
+                        me.focus(ctx);
+                        ctx.notify();
+                    }
+                    CustomEndpointModalEvent::RemoveEndpoint { index } => {
+                        let index = *index;
+                        ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
+                            manager.remove_custom_endpoint(index, ctx);
+                        });
+                        me.add_custom_endpoint_modal = None;
+                        me.focus(ctx);
+                        ctx.notify();
+                    }
+                });
+
+                let body_for_modal = body.clone();
+                let modal = ctx.add_typed_action_view(move |ctx| {
+                    Modal::new(Some(title), body_for_modal, ctx)
+                        .with_modal_style(UiComponentStyles {
+                            width: Some(560.),
+                            height: Some(600.),
+                            ..Default::default()
+                        })
+                        .with_background_opacity(100)
+                        .with_dismiss_on_click()
+                        .with_dismiss_keystroke(Keystroke::parse("escape").unwrap_or_default())
+                });
+                ctx.subscribe_to_view(&modal, |me, _, event, ctx| match event {
+                    ModalEvent::Close => {
+                        me.add_custom_endpoint_modal = None;
+                        me.focus(ctx);
+                        ctx.notify();
+                    }
+                });
+                body.update(ctx, |body, ctx| body.on_open(ctx));
+                self.add_custom_endpoint_modal = Some(modal);
                 ctx.notify();
             }
         }
@@ -2576,6 +2680,8 @@ impl View for RootView {
     fn on_focus(&mut self, focus_ctx: &FocusContext, ctx: &mut ViewContext<Self>) {
         if focus_ctx.is_self_focused() {
             self.focus(ctx);
+        } else if self.add_api_key_modal.is_some() || self.add_custom_endpoint_modal.is_some() {
+            // Focus belongs to the editor inside the active onboarding modal.
         } else if matches!(
             self.auth_onboarding_state,
             AuthOnboardingState::Onboarding { .. }
@@ -2606,6 +2712,13 @@ impl View for RootView {
 
         let mut stack = Stack::new();
         stack.add_child(child);
+
+        if let Some(modal) = &self.add_api_key_modal {
+            stack.add_child(ChildView::new(modal).finish());
+        }
+        if let Some(modal) = &self.add_custom_endpoint_modal {
+            stack.add_child(ChildView::new(modal).finish());
+        }
 
         if let Some(traffic_light_data) = self.traffic_light_data(app) {
             let theme = Appearance::as_ref(app).theme();

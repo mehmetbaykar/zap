@@ -1,5 +1,5 @@
 //! Shell completion generation for `warpctrl`.
-use clap_complete::aot::{generate, Shell};
+use clap_complete::aot::{Shell, generate};
 use local_control::protocol::{ControlError, ErrorCode};
 
 use crate::local_control::ControlArgs;

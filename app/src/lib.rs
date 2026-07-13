@@ -151,6 +151,7 @@ use ai::metadata_project_rules::read_project_rule_contents;
 use auth::{AuthManager, AuthState, AuthStateProvider};
 use code::editor_management::CodeManager;
 use code::opened_files::OpenedFilesModel;
+use code_review::git_repo_model::GitRepoModels;
 use code_review::GlobalCodeReviewModel;
 use quit_warning::UnsavedStateSummary;
 // Zap (localization, Phase 4): `ServerVoiceTranscriber` was originally used for the default VoiceTranscriber injection; it now uses `VoiceTranscriber::disabled()`, so the same-named import is dropped for now.
@@ -229,6 +230,8 @@ use crate::persistence::model::AgentConversationData;
 use crate::persistence::PersistenceWriter;
 use crate::projects::ProjectManagementModel;
 use crate::server::experiments::ServerExperiments;
+use crate::server::network_log_pane_manager::NetworkLogPaneManager;
+use crate::server::network_logging::NetworkLogModel;
 use crate::session_management::{RunningSessionSummary, SessionNavigationData};
 use crate::settings::manager::SettingsManager;
 use crate::settings::{AISettings, AccessibilitySettings, ScrollSettings, SelectionSettings};
@@ -849,7 +852,12 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
     // the TOML-backed store. When disabled, they live in the platform-native
     // store (same backend as private). Use the correct one for pre-app reads.
     #[cfg_attr(
-        not(any(enable_crash_recovery, any(target_os = "linux", target_os = "freebsd"))),
+        not(any(
+            enable_crash_recovery,
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "macos"
+        )),
         expect(unused)
     )]
     let prefs_for_public_settings: &dyn warpui_extras::user_preferences::UserPreferences =
@@ -898,6 +906,11 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
         let dev_icon = ASSETS.get("bundled/png/local.png")?;
         app_builder.set_dev_icon(dev_icon);
 
+        let show_dock_icon = crate::settings::app_icon::ShowDockIconState::read_from_preferences(
+            prefs_for_public_settings,
+        )
+        .unwrap_or_else(crate::settings::app_icon::ShowDockIconState::default_value);
+        app_builder.set_show_dock_icon_on_launch(show_dock_icon);
         app_builder.set_menu_bar_builder(app_menus::menu_bar);
         app_builder.set_dock_menu_builder(|_| app_menus::dock_menu());
     }
@@ -1060,7 +1073,9 @@ pub(crate) fn initialize_app(
     let auth_state = Arc::new(AuthState::initialize(ctx, None));
     timer.mark_interval_end("AUTH_MANAGER_SET_USER");
 
-    let update_http_client = Arc::new(http_client::Client::new());
+    let mut update_http_client = http_client::Client::new();
+    ctx.add_singleton_model(|ctx| NetworkLogModel::new([&mut update_http_client], ctx));
+    let update_http_client = Arc::new(update_http_client);
 
     // Zap: keep the AuthStateProvider singleton only for legacy call sites to read the local
     // placeholder user state.
@@ -1282,6 +1297,7 @@ pub(crate) fn initialize_app(
     ctx.add_singleton_model(|_| SettingsPaneManager::new());
     ctx.add_singleton_model(|_| AIFactManager::new());
     ctx.add_singleton_model(|_| ExecutionProfileEditorManager::default());
+    ctx.add_singleton_model(|_| NetworkLogPaneManager::default());
     ctx.add_singleton_model(|_| pricing::PricingInfoModel::new());
     ctx.add_singleton_model(|_| {
         ManagedSecretManager::new(
@@ -1490,11 +1506,7 @@ pub(crate) fn initialize_app(
         });
     }
 
-    #[cfg(feature = "local_fs")]
-    {
-        use code_review::git_repo_model::GitRepoModels;
-        ctx.add_singleton_model(|_| GitRepoModels::new());
-    }
+    ctx.add_singleton_model(|_| GitRepoModels::new());
 
     ctx.add_singleton_model(|ctx| {
         ProjectManagementModel::new(persisted_projects, persistence_writer.sender(), ctx)
@@ -2643,8 +2655,6 @@ pub fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::ConversationArtifacts,
         #[cfg(feature = "get_started_tab")]
         FeatureFlag::GetStartedTab,
-        #[cfg(feature = "welcome_tab")]
-        FeatureFlag::WelcomeTab,
         #[cfg(feature = "projects")]
         FeatureFlag::Projects,
         #[cfg(feature = "drive_objects_as_context")]

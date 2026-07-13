@@ -108,11 +108,59 @@ impl SelectedSettings {
 pub(crate) enum OnboardingStep {
     Intro,
     Intention,
+    AiSetup,
     Customize,
     Agent,
+    AiAccess,
     ThirdParty,
     Project,
     ThemePicker,
+}
+
+/// The AI setup selected on the "Choose your AI setup" slide.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AiSetupChoice {
+    #[default]
+    WarpAgent,
+    ThirdParty,
+}
+
+impl std::fmt::Display for AiSetupChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AiSetupChoice::WarpAgent => write!(f, "warp_agent"),
+            AiSetupChoice::ThirdParty => write!(f, "third_party"),
+        }
+    }
+}
+
+/// The local inference access selected during onboarding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AiAccessChoice {
+    #[default]
+    Byok,
+}
+
+impl std::fmt::Display for AiAccessChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AiAccessChoice::Byok => write!(f, "byok"),
+        }
+    }
+}
+
+/// Which opt-out entry point opened the "Are you sure you don't want AI?" modal.
+/// Determines where "Give me AI features" routes the user on cancel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NoAiConfirmationSource {
+    /// Triggered from the intention slide via "Just use the terminal" + Next.
+    Intention,
+    /// Triggered from the AI-setup slide via "I don't want AI".
+    AiSetup,
+    /// Triggered from the "Customize your Zap Agent" slide via "I don't want AI".
+    Agent,
+    /// Triggered from the "Choose how to access AI" slide via "I don't want AI".
+    AiAccess,
 }
 
 #[derive(Clone, Debug)]
@@ -121,6 +169,7 @@ pub(crate) enum OnboardingStateEvent {
     SelectedSlideChanged,
     IntentionChanged,
     Completed,
+    NoAiConfirmationChanged,
 }
 
 #[derive(Clone, Debug)]
@@ -131,10 +180,15 @@ pub(crate) struct OnboardingStateModel {
     project_settings: ProjectOnboardingSettings,
     ui_customization: UICustomizationSettings,
     models: Vec<OnboardingModelInfo>,
-    /// Whether the workspace enforces autonomy settings, hiding the user selection UI.
-    workspace_enforces_autonomy: bool,
     /// Whether the AgentView feature flag is enabled.
     agent_modality_enabled: bool,
+    /// The AI setup selected on the "Choose your AI setup" slide.
+    ai_setup_choice: AiSetupChoice,
+    /// The access method selected on the "Choose how to access AI" slide.
+    ai_access_choice: AiAccessChoice,
+    /// When set, the "Are you sure you don't want AI?" confirmation modal is
+    /// shown; the value records which entry point triggered it.
+    no_ai_confirmation: Option<NoAiConfirmationSource>,
 }
 
 impl OnboardingStateModel {
@@ -142,7 +196,6 @@ impl OnboardingStateModel {
     pub(crate) fn new(
         models: Vec<OnboardingModelInfo>,
         default_model_id: LLMId,
-        workspace_enforces_autonomy: bool,
         agent_modality_enabled: bool,
     ) -> Self {
         Self {
@@ -152,8 +205,10 @@ impl OnboardingStateModel {
             project_settings: ProjectOnboardingSettings::default(),
             ui_customization: UICustomizationSettings::agent_defaults(),
             models,
-            workspace_enforces_autonomy,
             agent_modality_enabled,
+            ai_setup_choice: AiSetupChoice::default(),
+            ai_access_choice: AiAccessChoice::default(),
+            no_ai_confirmation: None,
         }
     }
 
@@ -175,11 +230,7 @@ impl OnboardingStateModel {
                 SelectedSettings::AgentDrivenDevelopment {
                     agent_settings: AgentDevelopmentSettings {
                         selected_model_id: self.agent_settings.selected_model_id.clone(),
-                        autonomy: if self.workspace_enforces_autonomy {
-                            None
-                        } else {
-                            self.agent_settings.autonomy
-                        },
+                        autonomy: self.agent_settings.autonomy,
                         cli_agent_toolbar_enabled: self.agent_settings.cli_agent_toolbar_enabled,
                         session_default: self.agent_settings.session_default,
                         disable_oz: self.agent_settings.disable_oz,
@@ -209,12 +260,98 @@ impl OnboardingStateModel {
         &self.project_settings
     }
 
-    pub(crate) fn workspace_enforces_autonomy(&self) -> bool {
-        self.workspace_enforces_autonomy
-    }
-
     pub(crate) fn agent_modality_enabled(&self) -> bool {
         self.agent_modality_enabled
+    }
+
+    /// Whether the accountless AI-setup flow is enabled.
+    pub(crate) fn ai_setup_flow_active(&self) -> bool {
+        use warp_core::features::FeatureFlag;
+        FeatureFlag::ZapNewSettingsModes.is_enabled()
+    }
+
+    pub(crate) fn ai_setup_choice(&self) -> AiSetupChoice {
+        self.ai_setup_choice
+    }
+
+    pub(crate) fn ai_access_choice(&self) -> AiAccessChoice {
+        self.ai_access_choice
+    }
+
+    pub(crate) fn set_ai_setup_choice(
+        &mut self,
+        choice: AiSetupChoice,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        if self.ai_setup_choice == choice {
+            return;
+        }
+        self.ai_setup_choice = choice;
+        self.agent_settings.disable_oz = matches!(choice, AiSetupChoice::ThirdParty);
+        ctx.notify();
+    }
+
+    pub(crate) fn set_ai_access_choice(
+        &mut self,
+        choice: AiAccessChoice,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        if self.ai_access_choice == choice {
+            return;
+        }
+        self.ai_access_choice = choice;
+        ctx.notify();
+    }
+
+    pub(crate) fn no_ai_confirmation(&self) -> Option<NoAiConfirmationSource> {
+        self.no_ai_confirmation
+    }
+
+    /// Shows the "Are you sure you don't want AI?" confirmation modal, recording
+    /// which opt-out entry point triggered it so cancel can route appropriately.
+    pub(crate) fn request_no_ai_confirmation(
+        &mut self,
+        source: NoAiConfirmationSource,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.no_ai_confirmation = Some(source);
+        ctx.emit(OnboardingStateEvent::NoAiConfirmationChanged);
+        ctx.notify();
+    }
+
+    /// "I don't want AI": commit to the terminal-only path (AI features off) and
+    /// continue the flow there, so declining AI never dead-ends onboarding.
+    pub(crate) fn confirm_no_ai(&mut self, ctx: &mut ModelContext<Self>) {
+        self.no_ai_confirmation = None;
+        self.set_intention(OnboardingIntention::Terminal, ctx);
+        self.set_step(OnboardingStep::Customize, ctx);
+    }
+
+    /// "Give me AI features": abort the opt-out. From the intention slide this is
+    /// an explicit request for AI, so route onto the AI path; from the AI-setup
+    /// slide the user is already on the AI path, so just close the modal.
+    pub(crate) fn cancel_no_ai(&mut self, ctx: &mut ModelContext<Self>) {
+        match self.no_ai_confirmation.take() {
+            Some(NoAiConfirmationSource::Intention) => {
+                self.set_intention(OnboardingIntention::AgentDrivenDevelopment, ctx);
+                self.set_step(OnboardingStep::AiSetup, ctx);
+            }
+            Some(NoAiConfirmationSource::AiSetup)
+            | Some(NoAiConfirmationSource::Agent)
+            | Some(NoAiConfirmationSource::AiAccess)
+            | None => {
+                ctx.emit(OnboardingStateEvent::NoAiConfirmationChanged);
+                ctx.notify();
+            }
+        }
+    }
+
+    /// Closes the confirmation modal without changing the user's path (ESC / X).
+    pub(crate) fn dismiss_no_ai(&mut self, ctx: &mut ModelContext<Self>) {
+        if self.no_ai_confirmation.take().is_some() {
+            ctx.emit(OnboardingStateEvent::NoAiConfirmationChanged);
+            ctx.notify();
+        }
     }
 
     pub fn ui_customization(&self) -> &UICustomizationSettings {
@@ -387,18 +524,6 @@ impl OnboardingStateModel {
         ctx.notify();
     }
 
-    pub(crate) fn set_workspace_enforces_autonomy(
-        &mut self,
-        value: bool,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        if self.workspace_enforces_autonomy == value {
-            return;
-        }
-        self.workspace_enforces_autonomy = value;
-        ctx.notify();
-    }
-
     pub(crate) fn models(&self) -> &Vec<OnboardingModelInfo> {
         &self.models
     }
@@ -492,7 +617,7 @@ impl OnboardingStateModel {
         autonomy: AgentAutonomy,
         ctx: &mut ModelContext<Self>,
     ) {
-        if self.workspace_enforces_autonomy || self.agent_settings.autonomy == Some(autonomy) {
+        if self.agent_settings.autonomy == Some(autonomy) {
             return;
         }
 
@@ -577,25 +702,44 @@ impl OnboardingStateModel {
     pub(crate) fn back(&mut self, ctx: &mut ModelContext<Self>) {
         use warp_core::features::FeatureFlag;
         let theme_picker_last = FeatureFlag::ZapNewSettingsModes.is_enabled();
+        let ai_setup_flow = self.ai_setup_flow_active();
+        let agent_intention = matches!(self.intention, OnboardingIntention::AgentDrivenDevelopment);
 
         let prev = if theme_picker_last {
             match self.step {
                 OnboardingStep::Intro => None,
                 OnboardingStep::Intention => Some(OnboardingStep::Intro),
-                OnboardingStep::Customize => Some(OnboardingStep::Intention),
-                OnboardingStep::Agent => Some(OnboardingStep::Customize),
-                OnboardingStep::ThirdParty => match self.intention {
-                    OnboardingIntention::Terminal => Some(OnboardingStep::Customize),
-                    OnboardingIntention::AgentDrivenDevelopment => Some(OnboardingStep::Agent),
-                },
+                OnboardingStep::AiSetup => Some(OnboardingStep::Intention),
+                OnboardingStep::Customize => {
+                    if ai_setup_flow && agent_intention {
+                        match self.ai_setup_choice {
+                            AiSetupChoice::WarpAgent => Some(OnboardingStep::AiAccess),
+                            AiSetupChoice::ThirdParty => Some(OnboardingStep::ThirdParty),
+                        }
+                    } else {
+                        Some(OnboardingStep::Intention)
+                    }
+                }
+                OnboardingStep::AiAccess => Some(OnboardingStep::Agent),
+                OnboardingStep::Agent => {
+                    if ai_setup_flow {
+                        Some(OnboardingStep::AiSetup)
+                    } else {
+                        Some(OnboardingStep::Customize)
+                    }
+                }
+                OnboardingStep::ThirdParty => Some(OnboardingStep::AiSetup),
                 OnboardingStep::Project => Some(OnboardingStep::ThirdParty),
-                OnboardingStep::ThemePicker => Some(OnboardingStep::ThirdParty),
+                OnboardingStep::ThemePicker => Some(OnboardingStep::Customize),
             }
         } else {
             match self.step {
                 OnboardingStep::Intro => None,
                 OnboardingStep::ThemePicker => Some(OnboardingStep::Intro),
                 OnboardingStep::Intention => Some(OnboardingStep::ThemePicker),
+                // Unreachable in the legacy flow.
+                OnboardingStep::AiSetup => None,
+                OnboardingStep::AiAccess => None,
                 OnboardingStep::Customize => None,
                 OnboardingStep::ThirdParty => None,
                 OnboardingStep::Agent => Some(OnboardingStep::Intention),
@@ -623,17 +767,52 @@ impl OnboardingStateModel {
         }
 
         if theme_picker_last {
+            let ai_setup_flow = self.ai_setup_flow_active();
             match self.step {
                 OnboardingStep::Intro => self.set_step(OnboardingStep::Intention, ctx),
-                OnboardingStep::Intention => self.set_step(OnboardingStep::Customize, ctx),
-                OnboardingStep::Customize => match self.intention {
-                    OnboardingIntention::Terminal => self.set_step(OnboardingStep::ThirdParty, ctx),
+                OnboardingStep::Intention => match self.intention {
+                    OnboardingIntention::Terminal => self.set_step(OnboardingStep::Customize, ctx),
                     OnboardingIntention::AgentDrivenDevelopment => {
-                        self.set_step(OnboardingStep::Agent, ctx)
+                        if ai_setup_flow {
+                            self.set_step(OnboardingStep::AiSetup, ctx)
+                        } else {
+                            self.set_step(OnboardingStep::Customize, ctx)
+                        }
                     }
                 },
-                OnboardingStep::Agent => self.set_step(OnboardingStep::ThirdParty, ctx),
-                OnboardingStep::ThirdParty => self.set_step(OnboardingStep::ThemePicker, ctx),
+                OnboardingStep::AiSetup => match self.ai_setup_choice {
+                    AiSetupChoice::WarpAgent => self.set_step(OnboardingStep::Agent, ctx),
+                    AiSetupChoice::ThirdParty => self.set_step(OnboardingStep::ThirdParty, ctx),
+                },
+                OnboardingStep::Customize => match self.intention {
+                    OnboardingIntention::Terminal => {
+                        self.set_step(OnboardingStep::ThemePicker, ctx)
+                    }
+                    OnboardingIntention::AgentDrivenDevelopment => {
+                        if ai_setup_flow {
+                            self.set_step(OnboardingStep::ThemePicker, ctx)
+                        } else {
+                            self.set_step(OnboardingStep::Agent, ctx)
+                        }
+                    }
+                },
+                OnboardingStep::Agent => {
+                    if ai_setup_flow {
+                        self.set_step(OnboardingStep::AiAccess, ctx)
+                    } else {
+                        self.set_step(OnboardingStep::ThirdParty, ctx)
+                    }
+                }
+                OnboardingStep::AiAccess => self.set_step(OnboardingStep::Customize, ctx),
+                OnboardingStep::ThirdParty => {
+                    if ai_setup_flow
+                        && matches!(self.intention, OnboardingIntention::AgentDrivenDevelopment)
+                    {
+                        self.set_step(OnboardingStep::Customize, ctx)
+                    } else {
+                        self.set_step(OnboardingStep::ThemePicker, ctx)
+                    }
+                }
                 OnboardingStep::Project => self.set_step(OnboardingStep::ThemePicker, ctx),
                 OnboardingStep::ThemePicker => {}
             }
@@ -642,6 +821,9 @@ impl OnboardingStateModel {
                 OnboardingStep::Intro => self.set_step(OnboardingStep::ThemePicker, ctx),
                 OnboardingStep::ThemePicker => self.set_step(OnboardingStep::Intention, ctx),
                 OnboardingStep::Intention => self.set_step(OnboardingStep::Agent, ctx),
+                // Unreachable in the legacy flow.
+                OnboardingStep::AiSetup => {}
+                OnboardingStep::AiAccess => {}
                 OnboardingStep::Customize => {}
                 OnboardingStep::ThirdParty => {}
                 OnboardingStep::Agent => self.set_step(OnboardingStep::Project, ctx),
@@ -682,6 +864,7 @@ impl OnboardingStateModel {
                     ctx
                 );
             }
+            OnboardingStep::AiSetup | OnboardingStep::AiAccess => {}
             OnboardingStep::Customize => {
                 send_telemetry_from_ctx!(
                     OnboardingEvent::SlideViewed {
@@ -719,8 +902,65 @@ impl OnboardingStateModel {
         ctx.emit(OnboardingStateEvent::SelectedSlideChanged);
         ctx.notify();
     }
+
+    /// The `(step_index, step_count)` shown by the bottom-nav progress dots for the
+    /// current step, intention, and flow variant.
+    pub(crate) fn progress(&self) -> (usize, usize) {
+        use warp_core::features::FeatureFlag;
+
+        let is_terminal = matches!(self.intention, OnboardingIntention::Terminal);
+        if !FeatureFlag::ZapNewSettingsModes.is_enabled() {
+            // Legacy flow: ThemePicker → Intention → Agent → Project.
+            return match self.step {
+                OnboardingStep::Intro | OnboardingStep::ThemePicker => (0, 4),
+                OnboardingStep::Intention | OnboardingStep::AiSetup | OnboardingStep::Customize => {
+                    (1, 4)
+                }
+                OnboardingStep::Agent | OnboardingStep::ThirdParty | OnboardingStep::AiAccess => {
+                    (2, 4)
+                }
+                OnboardingStep::Project => (3, 4),
+            };
+        }
+
+        // The Zap Agent path has the extra "Choose how to access AI" step, so it
+        // is one longer than the third-party-agent path.
+        let is_warp_agent_path =
+            !is_terminal && matches!(self.ai_setup_choice, AiSetupChoice::WarpAgent);
+        let step_count = if is_terminal {
+            3
+        } else if is_warp_agent_path {
+            6
+        } else {
+            5
+        };
+        let step_index = match self.step {
+            OnboardingStep::Intro | OnboardingStep::Intention => 0,
+            OnboardingStep::AiSetup => 1,
+            OnboardingStep::Agent => 2,
+            OnboardingStep::AiAccess => 3,
+            OnboardingStep::Customize => {
+                if is_terminal {
+                    1
+                } else if is_warp_agent_path {
+                    4
+                } else {
+                    3
+                }
+            }
+            OnboardingStep::ThirdParty => 2,
+            // Unreachable in the new flow; keep the legacy position.
+            OnboardingStep::Project => 3,
+            OnboardingStep::ThemePicker => step_count - 1,
+        };
+        (step_index, step_count)
+    }
 }
 
 impl Entity for OnboardingStateModel {
     type Event = OnboardingStateEvent;
 }
+
+#[cfg(test)]
+#[path = "model_tests.rs"]
+mod tests;

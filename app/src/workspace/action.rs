@@ -113,12 +113,6 @@ impl VerticalTabsPaneContextMenuTarget {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AutoCloudHandoffTrigger {
-    MacOsSleep,
-    Uri,
-}
-
 #[derive(Debug, Clone)]
 pub enum WorkspaceAction {
     ActivateTab(usize),

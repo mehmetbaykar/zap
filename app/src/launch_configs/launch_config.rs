@@ -156,7 +156,7 @@ impl TryFrom<PaneNodeSnapshot> for PaneTemplateType {
                 | LeafContents::CodeReview(_)
                 | LeafContents::ExecutionProfileEditor
                 | LeafContents::GetStarted
-                | LeafContents::Welcome { .. }
+                | LeafContents::NetworkLog
                 | LeafContents::AIDocument(_)
                 // Zap Wave 7-3: the `EnvironmentManagement` arm was physically deleted along with
                 // the ambient-agent UI subsystem.

@@ -3074,6 +3074,16 @@ pub struct FailedOutputProps<'a> {
 pub fn render_failed_output(props: FailedOutputProps, app: &AppContext) -> Box<dyn Element> {
     let appearance = Appearance::as_ref(app);
 
+    // While an automatic retry/resume is still in flight, don't surface the underlying
+    // transport failure at all. These are typically transient and recover on their own,
+    // so showing the alarming "Warp lost connection" banner (plus debug info) for every
+    // blip is noisy and misleading. Render nothing during in-flight recovery; the full
+    // error banner is only shown once recovery has actually failed. Dogfood builds
+    // (Local/Dev) opt out so developers still see every transport failure aggressively.
+    if props.error.should_suppress_during_recovery() {
+        return Empty::new().finish();
+    }
+
     let error_text = match props.error {
         RenderableAIError::QuotaLimit {
             user_display_message,
@@ -3115,6 +3125,12 @@ pub fn render_failed_output(props: FailedOutputProps, app: &AppContext) -> Box<d
             } else {
                 format!("{ERROR_APOLOGY_TEXT}\n\n{error_message}")
             }
+        }
+        RenderableAIError::TransientNetworkError { .. } => {
+            // Recovering transient errors are handled by the early return above; once we
+            // reach here recovery has failed. These carry their own complete user-facing
+            // copy (plus debug info), so the apology prefix adds nothing.
+            props.error.to_string()
         }
         RenderableAIError::InvalidApiKey {
             provider,

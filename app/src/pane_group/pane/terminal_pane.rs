@@ -15,7 +15,13 @@ use warpui::{
 };
 
 use crate::{
-    ai::{blocklist::BlocklistAIHistoryModel, llms::LLMPreferences, skills::SkillManager},
+    ai::{
+        agent::conversation::{AIConversationId, ConversationStatus},
+        blocklist::BlocklistAIHistoryModel,
+        conversation_utils,
+        llms::LLMPreferences,
+        skills::SkillManager,
+    },
     app_state::{AmbientAgentPaneSnapshot, LeafContents, TerminalPaneSnapshot},
     pane_group::{self, Direction, Event::OpenConversationHistory, PaneGroup},
     persistence::{BlockCompleted, ModelEvent},
@@ -26,7 +32,7 @@ use crate::{
         TerminalManager, TerminalView,
     },
     view_components::ToastFlavor,
-    workspace::{sync_inputs::SyncedInputState, PaneViewLocator},
+    workspace::{sync_inputs::SyncedInputState, PaneViewLocator, WorkspaceRegistry},
     AIExecutionProfilesModel,
 };
 
@@ -476,6 +482,254 @@ impl PaneContent for TerminalPane {
     fn is_pane_being_dragged(&self, ctx: &AppContext) -> bool {
         self.view.as_ref(ctx).is_being_dragged()
     }
+}
+
+#[derive(Clone, Copy)]
+struct AgentConversationActionState {
+    owner_terminal_view_id: EntityId,
+    is_in_progress: bool,
+}
+
+fn agent_conversation_action_state(
+    conversation_id: AIConversationId,
+    ctx: &AppContext,
+) -> Option<AgentConversationActionState> {
+    let history_model = BlocklistAIHistoryModel::as_ref(ctx);
+    let conversation = history_model.conversation(&conversation_id)?;
+    let owner_terminal_view_id =
+        history_model.terminal_view_id_for_conversation(&conversation_id)?;
+    Some(AgentConversationActionState {
+        owner_terminal_view_id,
+        is_in_progress: conversation.status().is_in_progress(),
+    })
+}
+
+fn terminal_view_for_owner_in_group(
+    group: &PaneGroup,
+    owner_terminal_view_id: EntityId,
+    ctx: &AppContext,
+) -> Option<ViewHandle<TerminalView>> {
+    let pane_id = group.find_pane_id_for_terminal_view(owner_terminal_view_id, ctx)?;
+    group.terminal_view_from_pane_id(pane_id, ctx)
+}
+
+fn pane_group_and_terminal_view_for_owner(
+    owner_terminal_view_id: EntityId,
+    ctx: &AppContext,
+) -> Option<(ViewHandle<PaneGroup>, ViewHandle<TerminalView>)> {
+    WorkspaceRegistry::as_ref(ctx)
+        .all_workspaces(ctx)
+        .into_iter()
+        .find_map(|(_, workspace)| {
+            workspace.as_ref(ctx).tab_views().find_map(|pane_group| {
+                terminal_view_for_owner_in_group(
+                    pane_group.as_ref(ctx),
+                    owner_terminal_view_id,
+                    ctx,
+                )
+                .map(|terminal_view| (pane_group.clone(), terminal_view))
+            })
+        })
+}
+
+fn stop_local_agent_conversation(
+    group: &PaneGroup,
+    owner_terminal_view_id: EntityId,
+    conversation_id: AIConversationId,
+    ctx: &mut ViewContext<PaneGroup>,
+) -> bool {
+    let terminal_view = terminal_view_for_owner_in_group(group, owner_terminal_view_id, ctx)
+        .or_else(|| {
+            pane_group_and_terminal_view_for_owner(owner_terminal_view_id, ctx)
+                .map(|(_, terminal_view)| terminal_view)
+        });
+    let Some(terminal_view) = terminal_view else {
+        log::warn!(
+            "StopAgentConversation: no terminal view found for conversation {conversation_id:?}"
+        );
+        return false;
+    };
+
+    terminal_view.update(ctx, |terminal_view, ctx| {
+        terminal_view.stop_local_agent_conversation(conversation_id, ctx);
+    });
+    true
+}
+
+fn stop_agent_conversation(
+    group: &PaneGroup,
+    conversation_id: AIConversationId,
+    ctx: &mut ViewContext<PaneGroup>,
+) {
+    let Some(state) = agent_conversation_action_state(conversation_id, ctx) else {
+        log::warn!("StopAgentConversation: conversation {conversation_id:?} not found");
+        return;
+    };
+    if !state.is_in_progress {
+        return;
+    }
+    if !stop_local_agent_conversation(group, state.owner_terminal_view_id, conversation_id, ctx) {
+        BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
+            history_model.update_conversation_status(
+                state.owner_terminal_view_id,
+                conversation_id,
+                ConversationStatus::Cancelled,
+                ctx,
+            );
+        });
+    }
+}
+
+fn pane_group_hosting_split_off_child(
+    conversation_id: AIConversationId,
+    ctx: &AppContext,
+) -> Option<ViewHandle<PaneGroup>> {
+    WorkspaceRegistry::as_ref(ctx)
+        .all_workspaces(ctx)
+        .into_iter()
+        .find_map(|(_, workspace)| {
+            workspace.as_ref(ctx).tab_views().find_map(|pane_group| {
+                pane_group
+                    .as_ref(ctx)
+                    .child_agent_origin()
+                    .is_some_and(|origin| origin.conversation_id == conversation_id)
+                    .then(|| pane_group.clone())
+            })
+        })
+}
+
+fn discard_child_agent_pane_in_group(
+    group: &mut PaneGroup,
+    conversation_id: AIConversationId,
+    ctx: &mut ViewContext<PaneGroup>,
+) -> bool {
+    let tracked_child_pane = group.child_agent_panes.remove(&conversation_id);
+    let owner_child_pane = BlocklistAIHistoryModel::as_ref(ctx)
+        .terminal_view_id_for_conversation(&conversation_id)
+        .and_then(|terminal_view_id| group.find_pane_id_for_terminal_view(terminal_view_id, ctx));
+    let Some(child_pane_id) = tracked_child_pane.or(owner_child_pane) else {
+        return false;
+    };
+
+    if group
+        .child_agent_origin
+        .as_ref()
+        .is_some_and(|origin| origin.conversation_id == conversation_id)
+    {
+        group.child_agent_origin = None;
+    }
+
+    let was_focused = group.focus_state.as_ref(ctx).is_pane_focused(child_pane_id);
+    if let Some(terminal_view) = group.terminal_view_from_pane_id(child_pane_id, ctx) {
+        terminal_view.update(ctx, |view, ctx| {
+            view.clear_orchestration_split_off(ctx);
+            view.shutdown_pty(ctx);
+        });
+    }
+
+    if let Some(original_pane_id) = group.panes.original_pane_for_replacement(child_pane_id) {
+        group.panes.revert_temporary_replacement(child_pane_id);
+        if was_focused {
+            group.focus_pane(original_pane_id, true, ctx);
+        }
+    } else {
+        group.panes.remove_hidden_pane(child_pane_id);
+    }
+
+    let is_in_tree = group.panes.is_pane_in_tree(child_pane_id);
+    if is_in_tree && group.panes.visible_pane_count() <= 1 {
+        ctx.emit(pane_group::Event::Exited {
+            add_to_undo_stack: false,
+        });
+        return true;
+    }
+
+    if is_in_tree {
+        group.focus_next_terminal_pane_and_activate_session(
+            child_pane_id,
+            pane_group::PaneRemovalReason::Close,
+            ctx,
+        );
+    }
+
+    let discarded = group.cleanup_closed_pane(child_pane_id, ctx);
+    group.handle_pane_count_change(ctx);
+    discarded
+}
+
+fn discard_child_agent_pane_for_conversation(
+    group: &mut PaneGroup,
+    owner_terminal_view_id: Option<EntityId>,
+    conversation_id: AIConversationId,
+    ctx: &mut ViewContext<PaneGroup>,
+) -> bool {
+    if discard_child_agent_pane_in_group(group, conversation_id, ctx) {
+        return true;
+    }
+    if let Some(split_off_pane_group) = pane_group_hosting_split_off_child(conversation_id, ctx) {
+        if split_off_pane_group.id() != ctx.view_id()
+            && split_off_pane_group.update(ctx, |pane_group, ctx| {
+                discard_child_agent_pane_in_group(pane_group, conversation_id, ctx)
+            })
+        {
+            return true;
+        }
+    }
+
+    let Some(owner_terminal_view_id) = owner_terminal_view_id else {
+        return false;
+    };
+    let Some((owner_pane_group, _)) =
+        pane_group_and_terminal_view_for_owner(owner_terminal_view_id, ctx)
+    else {
+        return false;
+    };
+    if owner_pane_group.id() == ctx.view_id() {
+        return false;
+    }
+
+    owner_pane_group.update(ctx, |pane_group, ctx| {
+        discard_child_agent_pane_in_group(pane_group, conversation_id, ctx)
+    })
+}
+
+fn kill_agent_conversation(
+    group: &mut PaneGroup,
+    source_terminal_view_id: Option<EntityId>,
+    conversation_id: AIConversationId,
+    ctx: &mut ViewContext<PaneGroup>,
+) {
+    let state = agent_conversation_action_state(conversation_id, ctx);
+
+    if let Some(state) = state {
+        if state.is_in_progress {
+            stop_local_agent_conversation(
+                group,
+                state.owner_terminal_view_id,
+                conversation_id,
+                ctx,
+            );
+        }
+    }
+
+    let owner_terminal_view_id = state
+        .map(|state| state.owner_terminal_view_id)
+        .or(source_terminal_view_id);
+    if !discard_child_agent_pane_for_conversation(
+        group,
+        owner_terminal_view_id,
+        conversation_id,
+        ctx,
+    ) {
+        log::warn!("KillAgentConversation: no child pane found for {conversation_id:?}");
+    }
+
+    if owner_terminal_view_id.is_none() {
+        log::warn!(
+            "KillAgentConversation: no terminal view found for conversation {conversation_id:?}"
+        );
+    }
+    conversation_utils::delete_conversation(conversation_id, owner_terminal_view_id, ctx);
 }
 
 /// Attaches a terminal view to the pane group by subscribing to its events
@@ -946,6 +1200,15 @@ fn handle_terminal_view_event(
                     open_code_review: open_code_review.clone(),
                 });
             }
+            Event::StopAgentConversation { conversation_id } => {
+                stop_agent_conversation(group, *conversation_id, ctx);
+            }
+            Event::KillAgentConversation { conversation_id } => {
+                let source_terminal_view_id = group
+                    .terminal_view_from_pane_id(terminal_pane_id, ctx)
+                    .map(|terminal_view| terminal_view.id());
+                kill_agent_conversation(group, source_terminal_view_id, *conversation_id, ctx);
+            }
             Event::StartAgentConversation(request) => {
                 dispatch_start_agent_conversation(
                     group,
@@ -962,6 +1225,35 @@ fn handle_terminal_view_event(
                     group.focus_pane(child_pane_id, true, ctx);
                 } else {
                     log::warn!("No hidden pane found for child conversation {conversation_id:?}");
+                }
+            }
+            Event::OpenChildAgentInNewTab { conversation_id } => {
+                if group.child_agent_panes.contains_key(conversation_id) {
+                    ctx.emit(pane_group::Event::OpenChildAgentInNewTab {
+                        conversation_id: *conversation_id,
+                    });
+                } else {
+                    log::warn!(
+                        "OpenChildAgentInNewTab: no hidden pane found for conversation {conversation_id:?}"
+                    );
+                }
+            }
+            Event::OpenChildAgentInNewPane { conversation_id } => {
+                if let Some(&child_pane_id) = group.child_agent_panes.get(conversation_id) {
+                    group.panes.show_pane_for_child_agent(child_pane_id);
+                    if let Some(child_terminal_view) =
+                        group.terminal_view_from_pane_id(child_pane_id, ctx)
+                    {
+                        child_terminal_view.update(ctx, |view, ctx| {
+                            view.mark_as_orchestration_split_off(ctx);
+                        });
+                    }
+                    group.handle_pane_count_change(ctx);
+                    group.focus_pane(child_pane_id, true, ctx);
+                } else {
+                    log::warn!(
+                        "OpenChildAgentInNewPane: no hidden pane found for conversation {conversation_id:?}"
+                    );
                 }
             }
             _ => {}

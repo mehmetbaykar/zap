@@ -27,22 +27,16 @@ pub use callout::{OnboardingCalloutView, OnboardingKeybindings};
 pub use localization::set_localizer;
 
 /// User-facing names of the AI features enabled when the agent intention is selected.
-/// Shared by the intention slide's agent card checklist and the login slide's
-/// skip-login confirmation dialog so the two always stay in sync.
+/// Shared by onboarding surfaces that describe the built-in agent experience.
 pub const AI_FEATURES: &[&str] = &[
     "Zap agents",
     "Oz local agents platform",
-    "Next command predictions",
     "Prompt suggestions",
-    "Remote control with Claude Code, Codex, and other agents",
-    "Agents over SSH",
+    "Next command predictions",
+    "Full Terminal Use",
+    "Codebase Context",
+    "Remote Control with Claude Code, Codex, and other agents",
 ];
-
-/// User-facing names of the Zap Drive features enabled when the terminal
-/// intention is selected with Zap Drive turned on. Shared by the login slide's
-/// skip-login confirmation dialog so the list stays in sync with any future
-/// surfaces that need it.
-pub const WARP_DRIVE_FEATURES: &[&str] = &["Zap Drive", "Session Sharing"];
 
 pub mod components;
 mod visuals;

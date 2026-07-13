@@ -189,8 +189,6 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::ConversationArtifacts,
         #[cfg(feature = "get_started_tab")]
         FeatureFlag::GetStartedTab,
-        #[cfg(feature = "welcome_tab")]
-        FeatureFlag::WelcomeTab,
         #[cfg(feature = "projects")]
         FeatureFlag::Projects,
         #[cfg(feature = "drive_objects_as_context")]
@@ -387,6 +385,10 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::GitCredentialRefresh,
         #[cfg(feature = "remote_code_review")]
         FeatureFlag::RemoteCodeReview,
+        #[cfg(feature = "custom_inference_endpoints")]
+        FeatureFlag::CustomInferenceEndpoints,
+        #[cfg(feature = "supergrok")]
+        FeatureFlag::SuperGrok,
     ]);
 
     flags

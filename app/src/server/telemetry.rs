@@ -1131,7 +1131,9 @@ impl From<QueuedQueryOrigin> for TelemetryQueuedQueryOrigin {
         match origin {
             QueuedQueryOrigin::InitialCloudMode => Self::InitialCloudMode,
             QueuedQueryOrigin::QueueSlashCommand => Self::QueueSlashCommand,
-            QueuedQueryOrigin::AutoQueueToggle => Self::AutoQueueToggle,
+            QueuedQueryOrigin::AutoQueueToggle | QueuedQueryOrigin::LrcAutoQueue => {
+                Self::AutoQueueToggle
+            }
             QueuedQueryOrigin::CompactAndSlashCommand => Self::CompactAndSlashCommand,
             QueuedQueryOrigin::ForkAndCompactSlashCommand => Self::ForkAndCompactSlashCommand,
         }

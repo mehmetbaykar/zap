@@ -25,6 +25,11 @@ use settings::Setting as _;
 use warp_completer::completer::{CommandExitStatus, CommandOutput};
 use warp_core::r#async::debounce;
 use warp_core::user_preferences::GetUserPreferences;
+use warpui::r#async::{SpawnedFutureHandle, Timer};
+use warpui::{
+    AppContext, Entity, ModelAsRef, ModelContext, ModelHandle, SingletonEntity, ViewHandle,
+    WeakModelHandle,
+};
 
 use super::ChipResult;
 use super::{
@@ -38,23 +43,13 @@ use super::{
     prompt::Prompt,
     ChipValue, ContextChipKind,
 };
-#[cfg(feature = "local_fs")]
 use crate::code_review::git_repo_model::{GitRepoStatusEvent, GitRepoStatusModel};
-#[cfg(feature = "local_fs")]
 use crate::code_review::github_repo_model::{GitHubRepoEvent, GitHubRepoModel};
-#[cfg(feature = "local_fs")]
 use crate::context_chips::display_chip::GitLineChanges;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash as _, Hasher as _};
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(feature = "local_fs")]
-use warpui::WeakModelHandle;
-use warpui::{
-    r#async::{SpawnedFutureHandle, Timer},
-    AppContext, ViewHandle,
-};
-use warpui::{Entity, ModelAsRef, ModelContext, ModelHandle, SingletonEntity};
 
 #[cfg(test)]
 #[path = "current_prompt_tests.rs"]
@@ -183,12 +178,10 @@ pub struct CurrentPrompt {
 
     /// When set, git-backed chip values are populated from `GitRepoStatusModel`.
     /// `ShellGitBranch` and `GitDiffStats` are driven by filesystem events.
-    #[cfg(feature = "local_fs")]
     git_repo_status: Option<WeakModelHandle<GitRepoStatusModel>>,
 
     /// When set, the `GithubPullRequest` chip value is populated from
     /// `GitHubRepoModel` for the current repository.
-    #[cfg(feature = "local_fs")]
     github_repo_model: Option<WeakModelHandle<GitHubRepoModel>>,
 }
 
@@ -259,9 +252,7 @@ impl CurrentPrompt {
             update_tx,
             same_line_prompt_enabled: prompt.as_ref(ctx).same_line_prompt_enabled(),
             separator: prompt.as_ref(ctx).separator(),
-            #[cfg(feature = "local_fs")]
             git_repo_status: None,
-            #[cfg(feature = "local_fs")]
             github_repo_model: None,
         }
     }
@@ -1071,7 +1062,6 @@ impl CurrentPrompt {
                     // `GithubPullRequest` only emits when cached PR info actually
                     // changes, so after a rebuild there may be no event to restore
                     // the already-cached value until the next periodic refresh.
-                    #[cfg(feature = "local_fs")]
                     if matches!(chip_kind, ContextChipKind::GithubPullRequest) {
                         self.sync_pr_chip_from_model(ctx);
                     }
@@ -1476,7 +1466,6 @@ impl CurrentPrompt {
     /// metadata events so git-backed prompt chips are updated from the
     /// per-repo status model. PR info is handled separately by
     /// [`Self::set_github_repo_model`].
-    #[cfg(feature = "local_fs")]
     pub fn set_git_repo_status(
         &mut self,
         handle: Option<WeakModelHandle<GitRepoStatusModel>>,
@@ -1527,7 +1516,6 @@ impl CurrentPrompt {
 
     /// Set the per-repo GitHub-info model handle. When `Some`, subscribes to
     /// its events so the `GithubPullRequest` chip value is updated.
-    #[cfg(feature = "local_fs")]
     pub fn set_github_repo_model(
         &mut self,
         handle: Option<WeakModelHandle<GitHubRepoModel>>,
@@ -1570,7 +1558,6 @@ impl CurrentPrompt {
 
     /// Read the current `GitRepoStatusModel` metadata and push it into the
     /// `ShellGitBranch`, `GitBranchStatus`, and `GitDiffStats` chip states.
-    #[cfg(feature = "local_fs")]
     fn apply_git_repo_metadata(&mut self, ctx: &mut ModelContext<Self>) {
         let metadata = self
             .git_repo_status
@@ -1620,7 +1607,6 @@ impl CurrentPrompt {
 
     /// Reads PR info from the per-repo `GitHubRepoModel` and updates the
     /// `GithubPullRequest` chip value if it differs from the current one.
-    #[cfg(feature = "local_fs")]
     fn sync_pr_chip_from_model(&mut self, ctx: &AppContext) {
         let new_pr_value = self
             .github_repo_model
@@ -1641,22 +1627,13 @@ impl CurrentPrompt {
     /// Returns `true` when the given chip's value is updated externally
     /// (e.g. by a filesystem watcher) and the periodic timer should be skipped.
     fn is_updated_externally(&self, chip_kind: &ContextChipKind) -> bool {
-        #[cfg(feature = "local_fs")]
-        {
-            match chip_kind {
-                ContextChipKind::ShellGitBranch
-                | ContextChipKind::GitBranchStatus
-                | ContextChipKind::GitDiffStats => {
-                    return self.git_repo_status.is_some();
-                }
-                ContextChipKind::GithubPullRequest => {
-                    return self.github_repo_model.is_some();
-                }
-                _ => {}
-            }
+        match chip_kind {
+            ContextChipKind::ShellGitBranch
+            | ContextChipKind::GitBranchStatus
+            | ContextChipKind::GitDiffStats => self.git_repo_status.is_some(),
+            ContextChipKind::GithubPullRequest => self.github_repo_model.is_some(),
+            _ => false,
         }
-        let _ = chip_kind;
-        false
     }
 
     /// Heuristic check for `gh` CLI authentication errors in stderr output.

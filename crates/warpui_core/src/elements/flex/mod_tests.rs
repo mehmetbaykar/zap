@@ -1,8 +1,8 @@
-use crate::EntityIdSet;
 use super::*;
 use crate::elements::{Align, ConstrainedBox, ParentElement, Rect, SavePosition, Stack};
 use crate::geometry::rect::RectF;
 use crate::platform::WindowStyle;
+use crate::EntityIdSet;
 use crate::{App, Entity, Presenter, TypedActionView, WindowId, WindowInvalidation};
 
 type RenderFn = dyn Fn(&AppContext) -> Box<dyn Element> + 'static;

@@ -1706,57 +1706,65 @@ impl View for CLISubagentView {
             let mut output_border =
                 Border::all(1.).with_border_fill(internal_colors::neutral_3(theme));
             if let AIBlockOutputStatus::Failed { error, .. } = &status {
-                output_border = Border::all(1.).with_border_color(theme.ui_error_color());
-                output_items.add_child(render_failed_output(
-                    FailedOutputProps {
-                        error,
-                        is_ai_input_enabled: false,
-                        invalid_api_key_button_handle: &self
-                            .state_handles
-                            .invalid_api_key_button_handle,
-                        aws_bedrock_credentials_error_view: None,
-                        icon_right_margin: AVATAR_RIGHT_MARGIN,
-                    },
-                    app,
-                ));
-
-                if is_latest_model && !model.is_restored() && !error.is_invalid_api_key() {
-                    output_items.add_child(
-                    Container::new(render_informational_footer(
+                // While an automatic resume is still in flight, keep the failed exchange
+                // quiet. The full failure UI is surfaced only once recovery has failed.
+                if !error.should_suppress_during_recovery() {
+                    output_border = Border::all(1.).with_border_color(theme.ui_error_color());
+                    output_items.add_child(render_failed_output(
+                        FailedOutputProps {
+                            error,
+                            is_ai_input_enabled: false,
+                            invalid_api_key_button_handle: &self
+                                .state_handles
+                                .invalid_api_key_button_handle,
+                            aws_bedrock_credentials_error_view: None,
+                            icon_right_margin: AVATAR_RIGHT_MARGIN,
+                        },
                         app,
-                        "This response won't count towards your usage. \"Take over\" to continue."
-                            .to_string(),
-                    ))
-                    .with_margin_top(8.)
-                    .with_margin_left(icon_size(app) + AVATAR_RIGHT_MARGIN)
-                    .finish(),
-                );
+                    ));
 
-                    output_items.add_child(
-                        Container::new(render_debug_footer(
-                            DebugFooterProps {
-                                conversation: model.conversation(app),
-                                model: model.as_ref(),
-                                debug_copy_button_handle: self
-                                    .state_handles
-                                    .debug_copy_button_handle
-                                    .clone(),
-                                submit_issue_button_handle: self
-                                    .state_handles
-                                    .submit_issue_button_handle
-                                    .clone(),
-                                should_render_feedback_below: true,
-                            },
-                            |debug_id, ctx| {
-                                ctx.dispatch_typed_action(CLISubagentAction::CopyDebugId(debug_id))
-                            },
-                            |ctx| ctx.dispatch_typed_action(CLISubagentAction::OpenFeedbackDocs),
+                    if is_latest_model && !model.is_restored() && !error.is_invalid_api_key() {
+                        output_items.add_child(
+                        Container::new(render_informational_footer(
                             app,
+                            "This response won't count towards your usage. \"Take over\" to continue."
+                                .to_string(),
                         ))
                         .with_margin_top(8.)
                         .with_margin_left(icon_size(app) + AVATAR_RIGHT_MARGIN)
                         .finish(),
                     );
+
+                        output_items.add_child(
+                            Container::new(render_debug_footer(
+                                DebugFooterProps {
+                                    conversation: model.conversation(app),
+                                    model: model.as_ref(),
+                                    debug_copy_button_handle: self
+                                        .state_handles
+                                        .debug_copy_button_handle
+                                        .clone(),
+                                    submit_issue_button_handle: self
+                                        .state_handles
+                                        .submit_issue_button_handle
+                                        .clone(),
+                                    should_render_feedback_below: true,
+                                },
+                                |debug_id, ctx| {
+                                    ctx.dispatch_typed_action(CLISubagentAction::CopyDebugId(
+                                        debug_id,
+                                    ))
+                                },
+                                |ctx| {
+                                    ctx.dispatch_typed_action(CLISubagentAction::OpenFeedbackDocs)
+                                },
+                                app,
+                            ))
+                            .with_margin_top(8.)
+                            .with_margin_left(icon_size(app) + AVATAR_RIGHT_MARGIN)
+                            .finish(),
+                        );
+                    }
                 }
             }
 

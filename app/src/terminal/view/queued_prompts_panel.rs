@@ -17,7 +17,7 @@ use warpui::elements::{
     Border, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox, Container, CornerRadius,
     CrossAxisAlignment, DragAxis, Draggable, DraggableState, Empty, Expanded, Fill, Flex,
     Hoverable, MinSize, MouseStateHandle, ParentElement, Radius, SavePosition, ScrollbarWidth,
-    Text, DEFAULT_UI_LINE_HEIGHT_RATIO,
+    Shrinkable, Text, DEFAULT_UI_LINE_HEIGHT_RATIO,
 };
 use warpui::fonts::{Properties, Style, Weight};
 use warpui::keymap::Keystroke;
@@ -33,7 +33,7 @@ use crate::ai::blocklist::agent_view::shortcuts::render_keystroke_with_color_ove
 use crate::ai::blocklist::block::cli_controller::{CLISubagentController, CLISubagentEvent};
 use crate::ai::blocklist::{
     BlocklistAIHistoryEvent, BlocklistAIHistoryModel, QueuedQuery, QueuedQueryEvent, QueuedQueryId,
-    QueuedQueryModel,
+    QueuedQueryModel, QueuedQueryOrigin,
 };
 use crate::appearance::Appearance;
 use crate::editor::{
@@ -53,6 +53,9 @@ const MAX_PROMPT_LINES: f32 = 5.;
 const PROMPT_PREVIEW_MAX_CHARS: usize = 500;
 const SEND_NOW_TO_FULL_TERMINAL_USE_AGENT_TOOLTIP: &str = "Send to full terminal use agent";
 const SEND_NOW_AS_READ_ONLY_VIEWER_TOOLTIP: &str = "Read-only viewers cannot send prompts.";
+/// Suffix on rows auto-queued during an agent-requested long-running command, which fire
+/// when that command completes rather than at the end of the full response.
+const LRC_AUTO_QUEUE_ROW_SUFFIX: &str = "(queued until the command finishes)";
 
 /// Returns the position-cache id used to look up a row's bounding rect during a drag.
 /// Indexed by the row's current visual index so swaps maintain stable lookups.
@@ -561,7 +564,7 @@ impl QueuedPromptsPanelView {
         QueuedQueryModel::as_ref(ctx).editing_row(conv_id)
     }
 
-    fn commit_edit(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(crate) fn commit_edit(&mut self, ctx: &mut ViewContext<Self>) {
         let Some(conv_id) = self.active_conversation_id else {
             return;
         };
@@ -641,6 +644,16 @@ impl QueuedPromptsPanelView {
     /// Test accessor: whether the header currently shows the "⏎ to send" hint.
     pub(super) fn enter_hint_shown_for_test(&self, ctx: &AppContext) -> bool {
         self.should_show_enter_hint(ctx)
+    }
+
+    pub(super) fn set_edit_buffer_text_for_test(
+        &mut self,
+        text: &str,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.edit_editor.update(ctx, |editor, ctx| {
+            editor.set_buffer_text(text, ctx);
+        });
     }
 }
 
@@ -836,6 +849,7 @@ impl View for QueuedPromptsPanelView {
                         panel_view_id,
                         index,
                         is_command: query.is_command(),
+                        origin: query.origin(),
                         is_in_edit_mode,
                         is_being_dragged,
                         show_drag_handle,
@@ -871,7 +885,8 @@ fn build_edit_editor(ctx: &mut ViewContext<QueuedPromptsPanelView>) -> ViewHandl
             soft_wrap: true,
             text: text_options,
             propagate_and_no_op_escape_key: PropagateAndNoOpEscapeKey::PropagateFirst,
-            propagate_and_no_op_vertical_navigation_keys: PropagateAndNoOpNavigationKeys::Always,
+            // Keep up/down inside the inline editor so they move the cursor between lines.
+            propagate_and_no_op_vertical_navigation_keys: PropagateAndNoOpNavigationKeys::Never,
             propagate_horizontal_navigation_keys: PropagateHorizontalNavigationKeys::AtBoundary,
             ..Default::default()
         };
@@ -1007,6 +1022,7 @@ struct RenderRowProps<'a> {
     index: usize,
     /// Whether this row is a shell command (rendered with a blue `!` prefix) vs an agent prompt.
     is_command: bool,
+    origin: QueuedQueryOrigin,
     is_in_edit_mode: bool,
     is_being_dragged: bool,
     show_drag_handle: bool,
@@ -1022,6 +1038,7 @@ fn render_row(props: RenderRowProps<'_>, app: &AppContext) -> Box<dyn Element> {
         panel_view_id,
         index,
         is_command,
+        origin,
         is_in_edit_mode,
         is_being_dragged,
         show_drag_handle,
@@ -1096,7 +1113,8 @@ fn render_row(props: RenderRowProps<'_>, app: &AppContext) -> Box<dyn Element> {
             .with_clip(ClipConfig::ellipsis())
             .finish();
             // Command rows are prefaced with a blue `!` so they read as shell commands; prompt
-            // rows render their text directly.
+            // rows render their text directly. Rows auto-queued during an agent-requested
+            // long-running command carry an italic suffix explaining when they will fire.
             if is_command {
                 Flex::row()
                     .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -1108,6 +1126,29 @@ fn render_row(props: RenderRowProps<'_>, app: &AppContext) -> Box<dyn Element> {
                             .finish(),
                     )
                     .with_child(Expanded::new(1., preview).finish())
+                    .finish()
+            } else if origin == QueuedQueryOrigin::LrcAutoQueue {
+                let suffix_color: ColorU = theme.sub_text_color(theme.surface_1()).into();
+                let suffix = Text::new(
+                    LRC_AUTO_QUEUE_ROW_SUFFIX.to_owned(),
+                    appearance.ui_font_family(),
+                    queued_input_font_size,
+                )
+                .with_color(suffix_color)
+                .with_style(Properties {
+                    style: Style::Italic,
+                    weight: Weight::Normal,
+                })
+                .with_selectable(false)
+                .soft_wrap(false)
+                .finish();
+                // The preview shrinks to its text (clipping with an ellipsis when long) so the
+                // suffix hugs it, mirroring the model picker's "(selected)" treatment.
+                Flex::row()
+                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                    .with_spacing(6.)
+                    .with_child(Shrinkable::new(1., preview).finish())
+                    .with_child(suffix)
                     .finish()
             } else {
                 preview

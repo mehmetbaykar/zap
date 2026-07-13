@@ -29,7 +29,6 @@ use crate::env_vars::EnvVarCollectionType;
 use crate::notebooks::file::FileNotebookView;
 use crate::pane_group::focus_state::PaneGroupFocusEvent;
 use crate::pane_group::pane::get_started_pane::GetStartedPane;
-use crate::pane_group::pane::welcome_pane::WelcomePane;
 use crate::pane_group::pane::ActionOrigin;
 use crate::quit_warning::UnsavedStateSummary;
 use crate::settings::{AISettings, DefaultSessionMode, PaneSettings};
@@ -90,7 +89,8 @@ use warpui::notification::NotificationSendError;
 use warpui::windowing::WindowManager;
 use warpui::{
     elements::{ChildView, Element, ParentElement},
-    AppContext, Entity, EntityId, ModelHandle, TypedActionView, View, ViewHandle, WindowId,
+    AppContext, Entity, EntityId, ModelHandle, TypedActionView, View, ViewHandle, WeakViewHandle,
+    WindowId,
 };
 use warpui::{SingletonEntity, ViewContext};
 
@@ -166,6 +166,7 @@ pub use pane::env_var_collection_pane::EnvVarCollectionPane;
 pub use pane::execution_profile_editor_pane::ExecutionProfileEditorPane;
 pub use pane::file_pane::FilePane;
 pub use pane::image_pane::ImagePane;
+pub use pane::network_log_pane::NetworkLogPane;
 pub use pane::notebook_pane::NotebookPane;
 pub use pane::settings_pane::SettingsPane;
 pub use pane::terminal_pane::TerminalPane;
@@ -571,6 +572,10 @@ pub enum Event {
     },
     /// Clears the hovered tab index so it no longer appears as highlighted drop target
     ClearHoveredTabIndex,
+    /// Move a local child-agent pane into a new workspace tab without restarting it.
+    OpenChildAgentInNewTab {
+        conversation_id: AIConversationId,
+    },
     ZapDriveObjectInPane(ObjectUid),
     OpenSuggestedAgentModeWorkflowModal {
         workflow_and_id: SuggestedAgentModeWorkflowAndId,
@@ -840,8 +845,17 @@ pub struct PaneGroup {
     /// be revealed from the parent's status card.
     child_agent_panes: HashMap<AIConversationId, PaneId>,
 
+    /// Source group for a local child-agent pane moved into its own tab.
+    child_agent_origin: Option<ChildAgentOrigin>,
+
     /// Tab-level custom title set via the rename-tab flow.
     custom_title: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct ChildAgentOrigin {
+    pub source_pane_group: WeakViewHandle<PaneGroup>,
+    pub conversation_id: AIConversationId,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -1842,6 +1856,9 @@ impl PaneGroup {
                     "Image pane should not have been persisted, as it is not restorable"
                 ))
             }
+            LeafContents::NetworkLog => Err(anyhow::anyhow!(
+                "Network log pane should not have been persisted, as it cannot be restored"
+            )),
             LeafContents::GetStarted => {
                 if !FeatureFlag::GetStartedTab.is_enabled() {
                     Err(anyhow::anyhow!("GetStarted pane not supported"))
@@ -1857,22 +1874,6 @@ impl PaneGroup {
                     Ok((PaneData::new(pane_id), focus))
                 }
             }
-            LeafContents::Welcome { startup_directory } => {
-                if !FeatureFlag::WelcomeTab.is_enabled() {
-                    Err(anyhow::anyhow!("Welcome pane not supported"))
-                } else {
-                    let pane: Box<dyn AnyPaneContent + 'static> =
-                        Box::new(WelcomePane::new(startup_directory, ctx));
-                    let pane_id = pane.as_pane().id();
-                    pane_contents.insert(pane_id, pane);
-                    let focus = InitialFocus {
-                        focused_pane: leaf.is_focused.then_some(pane_id),
-                        active_session: None,
-                    };
-                    Ok((PaneData::new(pane_id), focus))
-                }
-            } // Zap Wave 7-3: the `EnvironmentManagement` LeafContents arm was physically
-              // removed along with the ambient-agent UI subsystem.
         };
 
         if let (Ok((pane_data, _)), Some(title)) = (&result, custom_vertical_tabs_title.as_deref())
@@ -2558,6 +2559,7 @@ impl PaneGroup {
             is_right_panel_maximized: false,
             pending_ambient_agent_conversation_restorations: HashMap::new(),
             child_agent_panes: HashMap::new(),
+            child_agent_origin: None,
             custom_title: None,
         };
 
@@ -3890,6 +3892,64 @@ impl PaneGroup {
             self.child_agent_panes.remove(&conv_id);
             self.panes.remove_hidden_pane(child_pane_id);
             self.discard_pane(child_pane_id, ctx);
+        }
+    }
+
+    /// Detach a local child-agent pane so the workspace can move its live view into a new tab.
+    pub fn take_child_agent_pane_for_split_off(
+        &mut self,
+        conversation_id: AIConversationId,
+        ctx: &mut ViewContext<Self>,
+    ) -> Option<Box<dyn AnyPaneContent>> {
+        let child_pane_id = self.child_agent_panes.remove(&conversation_id)?;
+
+        if let Some(child_terminal_view) = self.terminal_view_from_pane_id(child_pane_id, ctx) {
+            child_terminal_view.update(ctx, |view, ctx| {
+                view.mark_as_orchestration_split_off(ctx);
+            });
+        }
+
+        self.remove_pane_for_move(&child_pane_id, ctx)
+    }
+
+    pub fn set_child_agent_origin(&mut self, origin: ChildAgentOrigin) {
+        self.child_agent_origin = Some(origin);
+    }
+
+    pub fn child_agent_origin(&self) -> Option<&ChildAgentOrigin> {
+        self.child_agent_origin.as_ref()
+    }
+
+    /// Move a split-off child-agent pane back into its source group as a hidden child pane.
+    pub fn re_adopt_child_agent_pane(
+        &mut self,
+        pane_content: Box<dyn AnyPaneContent>,
+        conversation_id: AIConversationId,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let pane_id = pane_content.as_pane().id();
+        let base_pane_id = self.focused_pane_id(ctx);
+        let inserted = self.add_pane_with_options(
+            pane_content,
+            AddPaneOptions {
+                direction: Direction::Right,
+                base_pane_id: Some(base_pane_id),
+                focus_new_pane: false,
+                visibility: NewPaneVisibility::HiddenForChildAgent,
+                emit_app_state_changed: true,
+            },
+            ctx,
+        );
+        if inserted != Some(pane_id) {
+            log::error!("re_adopt_child_agent_pane: failed to attach pane {pane_id:?}");
+            return;
+        }
+        self.child_agent_panes.insert(conversation_id, pane_id);
+
+        if let Some(terminal_view) = self.terminal_view_from_pane_id(pane_id, ctx) {
+            terminal_view.update(ctx, |view, ctx| {
+                view.clear_orchestration_split_off(ctx);
+            });
         }
     }
 

@@ -26,7 +26,6 @@ terminal::view::shared_session::view_impl::tests::test_resize_shared_session_vie
 terminal::view::shared_session::view_impl::tests::test_resize_shared_session_viewer_independent_of_sharer
 terminal::view::tests::cli_agent_rich_input_hint_text_mentions_active_cli_agent
 terminal::view::tests::cli_agent_rich_input_shell_mode_uses_run_commands_hint_text
-terminal::view::tests::ctrl_c_after_stop_takeover_cancels_conversation
 terminal::view::tests::test_prompt_context_menu_items_for_agent_toolbelt_flag
 terminal::view::tests::test_prompt_context_menu_items_for_context_chips
 terminal::view::tests::test_prompt_context_menu_items_for_no_context_chips

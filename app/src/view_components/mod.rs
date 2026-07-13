@@ -24,7 +24,9 @@ pub use compact_dropdown::{CompactDropdown, CompactDropdownEvent, CompactDropdow
 pub use dismissible_toast::*;
 pub use dropdown::{Dropdown, DropdownAction, DropdownItem, DropdownItemAction};
 pub use feature_popup::*;
-pub use filterable_dropdown::{FilterableDropdown, FilterableDropdownOrientation};
+pub use filterable_dropdown::{
+    FilterableDropdown, FilterableDropdownEvent, FilterableDropdownOrientation,
+};
 pub use markdown_toggle_view::{MarkdownToggleEvent, MarkdownToggleView};
 pub use submittable_text_input::*;
 pub use warning_box::*;

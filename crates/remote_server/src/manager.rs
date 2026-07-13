@@ -22,7 +22,7 @@ use crate::codebase_index_proto::RemoteCodebaseIndexStatus;
 use crate::proto::{
     diff_state, get_diff_state_response, DiffMode, DiffState, DiffStateErrorValue,
     DiffStateFileDelta, DiffStateMetadataUpdate, DiffStateSnapshot, FileStatusInfo,
-    GetDiffStateResponse, GitOpDelta, TextEdit,
+    GetDiffStateResponse, GitOpDelta, GitStatusMetadata, PrInfo, RepositoryInfo, TextEdit,
 };
 use crate::repo_metadata_proto::proto_load_repo_metadata_directory_response_to_update;
 #[cfg(not(target_family = "wasm"))]
@@ -119,7 +119,7 @@ pub enum RemoteCodebaseIndexUpdateOperation {
 #[derive(Clone, Debug)]
 pub struct CommitChainSuccess {
     pub delta: GitOpDelta,
-    pub pr_info: Option<crate::proto::PrInfo>,
+    pub pr_info: Option<PrInfo>,
 }
 
 /// Exit status information captured from the remote server subprocess
@@ -190,6 +190,9 @@ fn client_event_kind(event: &ClientEvent) -> &'static str {
         ClientEvent::DiffStateMetadataUpdateReceived { .. } => "diff_state_metadata_update",
         ClientEvent::DiffStateFileDeltaReceived { .. } => "diff_state_file_delta",
         ClientEvent::BundledSkillsSnapshotReceived { .. } => "bundled_skills_snapshot",
+        ClientEvent::GitStatusPushReceived { .. } => "git_status_push",
+        ClientEvent::GitHubPrInfoPushReceived { .. } => "github_pr_info_push",
+        ClientEvent::GitHubRepositoryInfoPushReceived { .. } => "github_repository_info_push",
     }
 }
 
@@ -472,7 +475,7 @@ pub enum RemoteServerManagerEvent {
     CreatePrResponse {
         host_id: HostId,
         repo_path: StandardizedPath,
-        result: Result<crate::proto::PrInfo, String>,
+        result: Result<PrInfo, String>,
     },
     /// Response to a standalone get-PR-info (`gh pr view`). `Ok(None)` means
     /// there is no open PR for the current branch.
@@ -488,6 +491,30 @@ pub enum RemoteServerManagerEvent {
         host_id: HostId,
         repo_path: StandardizedPath,
         result: Result<Vec<crate::proto::FileChangeEntry>, String>,
+    },
+
+    // --- Git status events (forwarded from ClientEvent push channel) ---
+    /// An aggregate git status push (branch + diff stats) was pushed by the
+    /// server. Consumed by `RemoteGitRepoStatusModel` to drive the tab /
+    /// prompt chips for remote repositories.
+    GitStatusPushReceived {
+        host_id: HostId,
+        repo_path: StandardizedPath,
+        metadata: GitStatusMetadata,
+    },
+    /// PR info for the current branch was pushed by the server. Consumed by
+    /// `RemoteGitHubRepoModel` to drive PR chips for remote repositories.
+    GitHubPrInfoPushReceived {
+        host_id: HostId,
+        repo_path: StandardizedPath,
+        pr_info: Option<PrInfo>,
+    },
+    /// Repository name/owner info was pushed by the server. Consumed by
+    /// `RemoteGitHubRepoModel` to drive repository chips for remote repositories.
+    GitHubRepositoryInfoPushReceived {
+        host_id: HostId,
+        repo_path: StandardizedPath,
+        repository_info: Option<RepositoryInfo>,
     },
 
     // --- Setup events ---
@@ -569,7 +596,10 @@ impl RemoteServerManagerEvent {
             | RemoteServerManagerEvent::GitPushResponse { .. }
             | RemoteServerManagerEvent::CreatePrResponse { .. }
             | RemoteServerManagerEvent::GetPrInfoResponse { .. }
-            | RemoteServerManagerEvent::GetCommittedBranchFilesResponse { .. } => None,
+            | RemoteServerManagerEvent::GetCommittedBranchFilesResponse { .. }
+            | RemoteServerManagerEvent::GitStatusPushReceived { .. }
+            | RemoteServerManagerEvent::GitHubPrInfoPushReceived { .. }
+            | RemoteServerManagerEvent::GitHubRepositoryInfoPushReceived { .. } => None,
             RemoteServerManagerEvent::CodebaseIndexStatusUpdated {
                 session_id: Some(session_id),
                 ..
@@ -603,6 +633,10 @@ pub enum HostRequestError {
     /// server-provided message verbatim so callers can surface it directly.
     #[error("{0}")]
     OperationFailed(String),
+    /// The request was cancelled client-side via
+    /// [`RemoteServerManager::abort_host_request`].
+    #[error("host request aborted")]
+    Aborted,
 }
 
 impl From<crate::client::ClientError> for HostRequestError {
@@ -655,6 +689,69 @@ impl PendingHostRequest {
     fn cancel_timeout(&self) {
         if let Some(abort) = &self.timeout_abort {
             abort.abort();
+        }
+    }
+}
+
+/// Parameters for a host-scoped remote ripgrep search.
+pub struct RipgrepSearchParams {
+    /// Effective ripgrep pattern after applying the caller's regex settings.
+    pub pattern: String,
+    /// Absolute roots to search on the remote host.
+    pub roots: Vec<StandardizedPath>,
+    /// Whether matching should ignore case.
+    pub ignore_case: bool,
+    /// Whether matching should span multiple lines.
+    pub multiline: bool,
+    /// Maximum number of matches requested from the remote host.
+    pub max_matches: u32,
+}
+
+/// A host-scoped remote ripgrep search registered synchronously with
+/// [`RemoteServerManager`], whose typed result can be awaited off-thread.
+///
+/// Synchronous registration is important for query cancellation: by the time
+/// this value is returned, [`RemoteServerManager::abort_host_request`] can
+/// always find the request instead of racing an asynchronously queued
+/// registration task.
+#[must_use = "pending remote searches must be awaited or aborted by request id"]
+pub struct PendingRipgrepSearch {
+    request_id: crate::protocol::RequestId,
+    response: oneshot::Receiver<Result<crate::proto::ServerMessage, HostRequestError>>,
+}
+
+impl PendingRipgrepSearch {
+    pub fn request_id(&self) -> &crate::protocol::RequestId {
+        &self.request_id
+    }
+
+    pub async fn result(self) -> Result<crate::proto::RipgrepSearchSuccess, HostRequestError> {
+        let msg = self
+            .response
+            .await
+            .map_err(|_| HostRequestError::AllSessionsDisconnected)??;
+        ripgrep_search_result(msg)
+    }
+}
+
+fn ripgrep_search_result(
+    msg: crate::proto::ServerMessage,
+) -> Result<crate::proto::RipgrepSearchSuccess, HostRequestError> {
+    match msg.message {
+        Some(crate::proto::server_message::Message::RipgrepSearchResponse(resp)) => {
+            match resp.result {
+                Some(crate::proto::ripgrep_search_response::Result::Success(success)) => {
+                    Ok(success)
+                }
+                Some(crate::proto::ripgrep_search_response::Result::Error(error)) => {
+                    Err(HostRequestError::OperationFailed(error.message))
+                }
+                None => Err(HostRequestError::UnexpectedResponse),
+            }
+        }
+        other => {
+            log::error!("Unexpected response variant for RipgrepSearch: {other:?}");
+            Err(HostRequestError::UnexpectedResponse)
         }
     }
 }
@@ -1293,6 +1390,60 @@ impl RemoteServerManager {
             client.abort_request(&request_id);
         }
         let _ = pending.result_tx.send(Err(HostRequestError::Timeout));
+    }
+
+    /// Registers a remote ripgrep request synchronously and returns its typed
+    /// pending result. Global search uses this instead of `HostRequestHandle`
+    /// so query cancellation cannot race request registration.
+    pub fn start_ripgrep_search(
+        &mut self,
+        host_id: &HostId,
+        params: RipgrepSearchParams,
+    ) -> PendingRipgrepSearch {
+        let request_id = crate::protocol::RequestId::new();
+        let msg = crate::proto::ClientMessage::host_scoped(
+            request_id.to_string(),
+            crate::proto::host_scoped_request::Message::RipgrepSearch(
+                crate::proto::RipgrepSearchRequest {
+                    pattern: params.pattern,
+                    roots: params
+                        .roots
+                        .into_iter()
+                        .map(|path| path.to_string())
+                        .collect(),
+                    ignore_case: params.ignore_case,
+                    multiline: params.multiline,
+                    max_matches: params.max_matches,
+                },
+            ),
+        );
+        let response = self.send_host_request(host_id, msg);
+        PendingRipgrepSearch {
+            request_id,
+            response,
+        }
+    }
+
+    /// Aborts a pending host-scoped request: resolves the caller with
+    /// [`HostRequestError::Aborted`], cancels its timeout timer, and sends a
+    /// best-effort `Abort` notification so the daemon stops work. No-op if
+    /// the request already resolved (response arrived, timed out, or all
+    /// sessions disconnected).
+    pub fn abort_host_request(&mut self, request_id: &crate::protocol::RequestId) {
+        let Some(pending) = self.pending_host_requests.remove(request_id) else {
+            return;
+        };
+        pending.cancel_timeout();
+        log::info!(
+            "Aborting host-scoped request: host={} request_id={request_id}",
+            pending.host_id
+        );
+        // Best-effort daemon-side cancellation. The connection may already
+        // be gone, in which case this is a no-op.
+        if let Some(client) = self.client_for_host(&pending.host_id) {
+            client.abort_request(request_id);
+        }
+        let _ = pending.result_tx.send(Err(HostRequestError::Aborted));
     }
 
     /// Convenience wrapper: constructs a `ClientMessage::host_scoped` from
@@ -2761,6 +2912,38 @@ impl RemoteServerManager {
             .detach();
     }
 
+    /// Sends an `UpdateGitStatus` notification (fire-and-forget) to the
+    /// remote server for the given host.
+    pub fn update_git_status(&self, host_id: HostId, repo_path: &StandardizedPath) {
+        if let Some(client) = self.client_for_host(&host_id) {
+            client.update_git_status(repo_path);
+        } else {
+            log::debug!("Remote server update_git_status: no client for host={host_id}");
+        }
+    }
+
+    /// Sends an `UpdateGitHubPrInfo` notification (fire-and-forget) to the
+    /// remote server for the given host. The daemon's `GitHubRepoModel`
+    /// re-fetches PR info and broadcasts a `GitHubPrInfoPush`.
+    pub fn update_github_pr_info(&self, host_id: HostId, repo_path: &StandardizedPath) {
+        if let Some(client) = self.client_for_host(&host_id) {
+            client.update_github_pr_info(repo_path);
+        } else {
+            log::debug!("Remote server update_github_pr_info: no client for host={host_id}");
+        }
+    }
+
+    /// Sends an `UpdateGitHubRepoInfo` notification (fire-and-forget) to the
+    /// remote server for the given host. The daemon's `GitHubRepoModel`
+    /// re-fetches repository info and broadcasts a `GitHubRepositoryInfoPush`.
+    pub fn update_github_repo_info(&self, host_id: HostId, repo_path: &StandardizedPath) {
+        if let Some(client) = self.client_for_host(&host_id) {
+            client.update_github_repo_info(repo_path);
+        } else {
+            log::debug!("Remote server update_github_repo_info: no client for host={host_id}");
+        }
+    }
+
     /// Forwards a push event from the client event channel as a manager event.
     /// No-ops if the session is not in `Connected` state.
     #[cfg(not(target_family = "wasm"))]
@@ -2886,6 +3069,33 @@ impl RemoteServerManager {
             }
             ClientEvent::BundledSkillsSnapshotReceived { skills } => {
                 ctx.emit(RemoteServerManagerEvent::BundledSkillsSnapshot { host_id, skills });
+            }
+            ClientEvent::GitStatusPushReceived {
+                repo_path,
+                metadata,
+            } => {
+                ctx.emit(RemoteServerManagerEvent::GitStatusPushReceived {
+                    host_id,
+                    repo_path,
+                    metadata,
+                });
+            }
+            ClientEvent::GitHubPrInfoPushReceived { repo_path, pr_info } => {
+                ctx.emit(RemoteServerManagerEvent::GitHubPrInfoPushReceived {
+                    host_id,
+                    repo_path,
+                    pr_info,
+                });
+            }
+            ClientEvent::GitHubRepositoryInfoPushReceived {
+                repo_path,
+                repository_info,
+            } => {
+                ctx.emit(RemoteServerManagerEvent::GitHubRepositoryInfoPushReceived {
+                    host_id,
+                    repo_path,
+                    repository_info,
+                });
             }
             ClientEvent::Disconnected => {
                 // Handled by the drain loop's completion callback.

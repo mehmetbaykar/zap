@@ -21,7 +21,10 @@ fn pill_status_sort_key(status: Option<&ConversationStatus>) -> u8 {
     match status {
         Some(ConversationStatus::Blocked { .. }) => 0,
         Some(ConversationStatus::Error) => 1,
-        Some(ConversationStatus::InProgress) => 2,
+        // A recovering conversation sorts with the actively-running ones.
+        Some(ConversationStatus::InProgress)
+        | Some(ConversationStatus::TransientError)
+        | Some(ConversationStatus::WaitingForEvents) => 2,
         Some(ConversationStatus::Cancelled) | Some(ConversationStatus::Success) => DONE_STATUS_KEY,
         None => 2,
     }
@@ -174,8 +177,10 @@ pub fn aggregated_orchestrator_status(
     history: &BlocklistAIHistoryModel,
     orchestrator_id: AIConversationId,
 ) -> ConversationStatus {
+    let mut orchestrator_status: Option<ConversationStatus> = None;
     let mut first_blocked: Option<ConversationStatus> = None;
     let mut any_in_progress = false;
+    let mut any_waiting = false;
     let mut any_error = false;
     let mut any_cancelled = false;
 
@@ -186,8 +191,15 @@ pub fn aggregated_orchestrator_status(
         let Some(status) = history.conversation(&id).map(|c| c.status().clone()) else {
             continue;
         };
+        if id == orchestrator_id {
+            orchestrator_status = Some(status.clone());
+        }
         match status {
-            ConversationStatus::InProgress => any_in_progress = true,
+            // A recovering node counts as still running for aggregation purposes.
+            ConversationStatus::InProgress | ConversationStatus::TransientError => {
+                any_in_progress = true
+            }
+            ConversationStatus::WaitingForEvents => any_waiting = true,
             ConversationStatus::Blocked { .. } => {
                 if first_blocked.is_none() {
                     first_blocked = Some(status);
@@ -200,10 +212,23 @@ pub fn aggregated_orchestrator_status(
     }
 
     if any_in_progress {
+        if matches!(
+            orchestrator_status,
+            Some(ConversationStatus::WaitingForEvents)
+        ) {
+            return ConversationStatus::WaitingForEvents;
+        }
         return ConversationStatus::InProgress;
     }
     if let Some(blocked) = first_blocked {
         return blocked;
+    }
+    if any_waiting {
+        match orchestrator_status {
+            Some(ConversationStatus::Cancelled) => return ConversationStatus::Cancelled,
+            Some(ConversationStatus::Error) => return ConversationStatus::Error,
+            _ => return ConversationStatus::WaitingForEvents,
+        }
     }
     if any_error {
         return ConversationStatus::Error;

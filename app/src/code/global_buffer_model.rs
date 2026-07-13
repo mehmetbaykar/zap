@@ -139,6 +139,7 @@ pub enum GlobalBufferModelEvent {
     },
     FileSaved {
         file_id: FileId,
+        content_version: ContentVersion,
     },
     FailedToSave {
         file_id: FileId,
@@ -146,9 +147,7 @@ pub enum GlobalBufferModelEvent {
     },
     /// A remote buffer update conflicted with local edits.
     /// The UI should present a resolution dialog.
-    RemoteBufferConflict {
-        file_id: FileId,
-    },
+    RemoteBufferConflict { file_id: FileId },
     /// A server-local buffer was updated from a file-watcher event.
     /// Carries the incremental diff edits for the ServerModel to push
     /// to connected clients as `BufferUpdatedPush`.
@@ -664,7 +663,10 @@ impl GlobalBufferModel {
                 if let Some(state) = self.buffers.get_mut(id) {
                     state.set_base_content_version(*version);
                 }
-                ctx.emit(GlobalBufferModelEvent::FileSaved { file_id: *id });
+                ctx.emit(GlobalBufferModelEvent::FileSaved {
+                    file_id: *id,
+                    content_version: *version,
+                });
             }
             FileModelEvent::FailedToSave { id, error } => {
                 ctx.emit(GlobalBufferModelEvent::FailedToSave {
@@ -684,6 +686,33 @@ impl GlobalBufferModel {
         version: ContentVersion,
         ctx: &mut ModelContext<Self>,
     ) -> Result<(), FileSaveError> {
+        if let Some(state) = self.buffers.get(&file_id) {
+            if let BufferSource::Remote { remote_path, .. } = &state.source {
+                let host_id = remote_path.host_id.clone();
+                let path = remote_path.path.as_str().to_string();
+                let handle = remote_server::manager::RemoteServerManager::as_ref(ctx)
+                    .host_request_handle(&host_id);
+                ctx.spawn(
+                    async move { handle.save_buffer(path).await },
+                    move |_me, result, ctx| match result {
+                        Ok(()) => {
+                            ctx.emit(GlobalBufferModelEvent::FileSaved {
+                                file_id,
+                                content_version: version,
+                            });
+                        }
+                        Err(error) => {
+                            log::warn!("Remote save failed: {error}");
+                            ctx.emit(GlobalBufferModelEvent::FailedToSave {
+                                file_id,
+                                error: Rc::new(FileSaveError::RemoteError(error.to_string())),
+                            });
+                        }
+                    },
+                );
+                return Ok(());
+            }
+        }
         FileModel::handle(ctx).update(ctx, |file_model, ctx| {
             file_model.save(file_id, content, version, ctx)
         })
@@ -1566,6 +1595,19 @@ impl GlobalBufferModel {
         };
         let host_id = remote_path.host_id.clone();
         let path_str = remote_path.path.as_str().to_string();
+        let Some(content_version) = self.buffers.get(&file_id).and_then(|state| {
+            let BufferSource::Remote {
+                sync_clock: Some(sync_clock),
+                ..
+            } = &state.source
+            else {
+                return None;
+            };
+            Some(sync_clock.client_version)
+        }) else {
+            log::warn!("save_remote_buffer: file_id {file_id:?} is not loaded");
+            return;
+        };
 
         let manager = remote_server::manager::RemoteServerManager::handle(ctx);
         let Some(client) = manager.as_ref(ctx).client_for_host(&host_id).cloned() else {
@@ -1592,7 +1634,10 @@ impl GlobalBufferModel {
                     use remote_server::proto::save_buffer_response::Result as SaveResult;
                     match response.result {
                         Some(SaveResult::Success(_)) | None => {
-                            ctx.emit(GlobalBufferModelEvent::FileSaved { file_id });
+                            ctx.emit(GlobalBufferModelEvent::FileSaved {
+                                file_id,
+                                content_version,
+                            });
                         }
                         Some(SaveResult::Error(err)) => {
                             // Propagate the remote save failure up to the editor and show a failure message.

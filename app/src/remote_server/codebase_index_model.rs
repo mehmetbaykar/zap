@@ -390,6 +390,9 @@ impl RemoteCodebaseIndexModel {
             | RemoteServerManagerEvent::DiffStateSnapshotReceived { .. }
             | RemoteServerManagerEvent::DiffStateMetadataUpdateReceived { .. }
             | RemoteServerManagerEvent::DiffStateFileDeltaReceived { .. }
+            | RemoteServerManagerEvent::GitStatusPushReceived { .. }
+            | RemoteServerManagerEvent::GitHubPrInfoPushReceived { .. }
+            | RemoteServerManagerEvent::GitHubRepositoryInfoPushReceived { .. }
             | RemoteServerManagerEvent::GetBranchesResponse { .. }
             | RemoteServerManagerEvent::CommitChainResponse { .. }
             | RemoteServerManagerEvent::GitPushResponse { .. }

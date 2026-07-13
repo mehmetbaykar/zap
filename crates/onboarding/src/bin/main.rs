@@ -101,13 +101,12 @@ impl OnboardingMainView {
             },
         ];
         let onboarding_view = ctx.add_typed_action_view(move |ctx| {
-            // agent_modality_enabled is false for demo purposes.
+            // agent_modality_enabled is false for demo purposes
             AgentOnboardingView::new(
                 themes.clone(),
                 true,
                 models.clone(),
                 default_model_id.clone(),
-                false,
                 false,
                 ctx,
             )
@@ -156,7 +155,9 @@ impl OnboardingMainView {
                 self.state = OnboardingMainState::Finished(finished_view);
                 ctx.notify();
             }
-            AgentOnboardingEvent::SyncWithOsToggled { .. } => {
+            AgentOnboardingEvent::SyncWithOsToggled { .. }
+            | AgentOnboardingEvent::AddApiKeyRequested
+            | AgentOnboardingEvent::AddCustomEndpointRequested => {
                 // No-op in the standalone demo binary
             }
         }
@@ -384,7 +385,6 @@ fn dark_theme() -> WarpTheme {
         dark_mode_colors(),
         None,
         Some("Dark".to_string()),
-        None,
     )
 }
 
@@ -398,7 +398,6 @@ fn light_theme() -> WarpTheme {
         light_mode_colors(),
         None,
         Some("Light".to_string()),
-        None,
     )
 }
 
@@ -418,7 +417,6 @@ fn phenomenon() -> WarpTheme {
             opacity: 100,
         }),
         Some("Phenomenon".to_string()),
-        None,
     )
 }
 
@@ -432,7 +430,6 @@ fn adeberry() -> WarpTheme {
         adeberry_colors(),
         None,
         Some("Adeberry".to_string()),
-        None,
     )
 }
 
@@ -448,10 +445,7 @@ fn build_appearance(theme: WarpTheme, ctx: &mut AppContext) -> Appearance {
         ui_font_family,
         1.2,
         ui_font_family,
-        None,
         ui_font_family,
-        12.0,
-        Default::default(),
     )
 }
 

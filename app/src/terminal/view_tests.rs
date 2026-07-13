@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use crate::ai::agent::conversation::ConversationStatus;
 use crate::ai::agent::{
-    AIAgentExchange, AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus, UserQueryMode,
+    AIAgentActionId, AIAgentExchange, AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus,
+    UserQueryMode,
 };
 use crate::terminal::model::escape_sequences::C0;
 use chrono::Local;
@@ -40,7 +41,7 @@ use crate::{
 use crate::ai::blocklist::agent_view::{toolbar_item::AgentToolbarItemKind, AgentViewState};
 use crate::ai::blocklist::{
     agent_view::AgentViewEntryOrigin, BlocklistAIHistoryEvent, BlocklistAIHistoryModel,
-    InputConfig, InputType, ResponseStreamId,
+    InputConfig, InputType, ResponseStream, ResponseStreamId,
 };
 use crate::ai::llms::LLMId;
 use crate::context_chips::prompt::Prompt;
@@ -1025,6 +1026,35 @@ fn command_block_count_for_conversation(
             )
         })
         .count()
+}
+
+/// Bootstraps the terminal model with one completed block and one active long-running block.
+fn bootstrap_with_long_running_block(view: &mut TerminalView) {
+    let mut model = view.model.lock();
+    model.init_shell(InitShellValue {
+        session_id: 0.into(),
+        shell: "zsh".to_owned(),
+        ..Default::default()
+    });
+    model.bootstrapped(BootstrappedValue {
+        shell: "zsh".to_owned(),
+        ..Default::default()
+    });
+    model.simulate_block("ls", "file.txt");
+    model.simulate_long_running_block("long-command", "output");
+}
+
+/// Places the active block in agent-driving-but-not-monitoring state:
+/// `requested_command_action_id` is set but `long_running_control_state` is None.
+/// This simulates the window between when the agent writes the command to the
+/// PTY and when `BlocklistAIHistoryEvent::CreatedSubtask` fires.
+fn set_active_block_agent_driving(view: &mut TerminalView, conversation_id: AIConversationId) {
+    let action_id = AIAgentActionId::from("test-action".to_owned());
+    view.model
+        .lock()
+        .block_list_mut()
+        .active_block_mut()
+        .set_agent_interaction_mode_for_requested_command(action_id, None, conversation_id);
 }
 
 #[test]
@@ -5569,6 +5599,38 @@ fn submit_cli_agent_rich_input_opencode_defers_enter_and_close() {
 }
 
 #[test]
+fn attach_path_as_context_routes_to_open_cli_agent_rich_input() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+        let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+        let _cli_rich = FeatureFlag::CLIAgentRichInput.override_enabled(true);
+        let _hoa_code_review = FeatureFlag::HoaCodeReview.override_enabled(true);
+
+        let terminal = open_cli_agent_rich_input_for_agent(&mut app, CLIAgent::Claude);
+        let pty_writes: Rc<RefCell<Vec<Vec<u8>>>> = Rc::new(RefCell::new(Vec::new()));
+        let writes = pty_writes.clone();
+        app.update(|ctx| {
+            ctx.subscribe_to_view(&terminal, move |_, event, _| {
+                if let Event::WriteBytesToPty { bytes } = event {
+                    writes.borrow_mut().push(bytes.to_vec());
+                }
+            });
+        });
+
+        terminal.update(&mut app, |view, ctx| {
+            view.attach_path_as_context(std::path::Path::new("src/main.rs"), ctx);
+        });
+
+        terminal.read(&app, |view, ctx| {
+            assert_eq!(view.input.as_ref(ctx).buffer_text(ctx), "src/main.rs");
+        });
+        assert!(
+            pty_writes.borrow().is_empty(),
+            "context should be inserted into rich input instead of written to PTY"
+        );
+    })
+}
+#[test]
 fn drag_drop_image_in_cli_agent_long_running_command_pastes_via_clipboard() {
     // Regression test: dropping an image file into a tab where a CLI agent
     // (e.g. Claude Code) is the foreground long-running process should
@@ -7082,5 +7144,202 @@ fn close_find_bar_preserves_options_on_async_find_path() {
             Some(needle_options().query),
             "closing the find bar must preserve the saved query on the async path"
         );
+    })
+}
+
+#[test]
+fn cmd_k_does_not_clear_buffer_when_agent_is_driving_command() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+
+        let terminal = add_window_with_terminal(&mut app, None);
+
+        terminal.update(&mut app, |view, ctx| {
+            bootstrap_with_long_running_block(view);
+
+            let conversation_id =
+                BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
+                    history.start_new_conversation(view.view_id, false, false, false, ctx)
+                });
+            set_active_block_agent_driving(view, conversation_id);
+
+            assert!(view
+                .model
+                .lock()
+                .block_list()
+                .active_block()
+                .is_agent_driving_command());
+            assert!(!view
+                .model
+                .lock()
+                .block_list()
+                .active_block()
+                .is_agent_monitoring());
+
+            let block_count_before = view.model.lock().block_list().blocks().len();
+
+            view.clear_buffer_for_testing(ctx);
+
+            assert_eq!(
+                view.model.lock().block_list().blocks().len(),
+                block_count_before,
+                "cmd-k must not wipe blocks while the agent is driving a command"
+            );
+        });
+    })
+}
+
+#[test]
+fn cmd_k_in_agent_view_clears_active_block_not_full_buffer_when_agent_driving_command() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+        FeatureFlag::AgentView.set_enabled(true);
+
+        let terminal = add_window_with_terminal(&mut app, None);
+
+        let conversation_id = terminal.update(&mut app, |view, ctx| {
+            let conversation_id = view.agent_view_controller().update(ctx, |controller, ctx| {
+                controller
+                    .try_enter_agent_view(
+                        None,
+                        AgentViewEntryOrigin::Input {
+                            was_prompt_autodetected: false,
+                        },
+                        ctx,
+                    )
+                    .expect("should enter agent view")
+            });
+
+            bootstrap_with_long_running_block(view);
+            set_active_block_agent_driving(view, conversation_id);
+
+            assert!(view
+                .agent_view_controller()
+                .as_ref(ctx)
+                .agent_view_state()
+                .is_fullscreen());
+            assert!(view
+                .model
+                .lock()
+                .block_list()
+                .active_block()
+                .is_agent_driving_command());
+
+            conversation_id
+        });
+
+        let block_count_before = terminal.read(&app, |view, _| {
+            view.model.lock().block_list().blocks().len()
+        });
+
+        terminal.update(&mut app, |view, ctx| {
+            view.clear_buffer_for_testing(ctx);
+        });
+
+        terminal.read(&app, |view, ctx| {
+            // Same conversation still active: no new conversation was started.
+            assert_eq!(
+                view.agent_view_controller()
+                    .as_ref(ctx)
+                    .agent_view_state()
+                    .active_conversation_id(),
+                Some(conversation_id),
+                "cmd-k must not start a new conversation while agent is driving a command"
+            );
+            // Block count unchanged: only the active block output was cleared.
+            assert_eq!(
+                view.model.lock().block_list().blocks().len(),
+                block_count_before,
+                "cmd-k must not remove blocks while agent is driving a command"
+            );
+        });
+    })
+}
+
+#[test]
+fn cmd_k_in_agent_view_cancels_in_progress_conversation_and_starts_new_one() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+        FeatureFlag::AgentView.set_enabled(true);
+
+        let terminal = add_window_with_terminal(&mut app, None);
+
+        let old_conversation_id = terminal.update(&mut app, |view, ctx| {
+            view.agent_view_controller().update(ctx, |controller, ctx| {
+                controller
+                    .try_enter_agent_view(
+                        None,
+                        AgentViewEntryOrigin::Input {
+                            was_prompt_autodetected: false,
+                        },
+                        ctx,
+                    )
+                    .expect("should enter agent view")
+            })
+        });
+
+        // New conversations always start InProgress.
+        terminal.read(&app, |_, ctx| {
+            assert_eq!(
+                BlocklistAIHistoryModel::as_ref(ctx)
+                    .conversation(&old_conversation_id)
+                    .map(|c| c.status().clone()),
+                Some(ConversationStatus::InProgress)
+            );
+        });
+
+        // Attach a mock in-flight response stream so cancel_conversation_progress
+        // can actually cancel it and flip the status to Cancelled.
+        let stream_id = ResponseStreamId::new_for_test();
+        terminal.update(&mut app, |view, ctx| {
+            // Associate the stream_id with the conversation in the history model so
+            // is_processing_response_stream returns true when the controller looks it up.
+            BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
+                let exchange = exchange_with_inputs(vec![]);
+                history
+                    .conversation_mut(&old_conversation_id)
+                    .expect("conversation should exist")
+                    .append_reassigned_exchange(&stream_id, exchange, view.view_id, ctx)
+                    .expect("exchange should append");
+            });
+            let stream = ctx.add_model(|_| ResponseStream::new_for_test(stream_id.clone()));
+            view.ai_controller.update(ctx, |controller, ctx| {
+                controller.register_mock_stream_for_test(
+                    stream_id.clone(),
+                    old_conversation_id,
+                    stream,
+                    ctx,
+                );
+            });
+        });
+
+        // Cmd+K with no long-running command: cancels the old in-progress conversation
+        // (stream is cancelled → AfterStreamFinished → Cancelled status) and starts a new one.
+        terminal.update(&mut app, |view, ctx| {
+            view.clear_buffer_for_testing(ctx);
+        });
+
+        terminal.read(&app, |view, ctx| {
+            // A new conversation must now be active.
+            let new_conversation_id = view
+                .agent_view_controller()
+                .as_ref(ctx)
+                .agent_view_state()
+                .active_conversation_id()
+                .expect("agent view should still be active after cmd-k");
+            assert_ne!(
+                new_conversation_id, old_conversation_id,
+                "cmd-k must start a new conversation when an in-progress one is active"
+            );
+
+            // The old conversation must be Cancelled — the stream was actually cancelled.
+            assert_eq!(
+                BlocklistAIHistoryModel::as_ref(ctx)
+                    .conversation(&old_conversation_id)
+                    .map(|c| c.status().clone()),
+                Some(ConversationStatus::Cancelled),
+                "the old in-progress conversation must be Cancelled after cmd-k"
+            );
+        });
     })
 }

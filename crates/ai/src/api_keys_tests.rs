@@ -86,3 +86,21 @@ fn custom_endpoint_models_preserve_ids_and_generate_missing_ids() {
     assert!(!models[1].config_key.is_empty());
     assert_eq!(models[1].display_label(), "Alias");
 }
+
+#[test]
+fn provider_key_count_counts_non_blank_provider_keys_only() {
+    let keys = ApiKeys {
+        openai: Some("sk-o".into()),
+        anthropic: Some("   ".into()),
+        google: Some("AIza".into()),
+        open_router: None,
+        custom_endpoints: vec![CustomEndpoint {
+            name: "Local".into(),
+            url: "http://127.0.0.1:8080/v1".into(),
+            api_key: "local-key".into(),
+            models: Vec::new(),
+        }],
+    };
+
+    assert_eq!(keys.provider_key_count(), 2);
+}

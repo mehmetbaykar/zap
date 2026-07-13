@@ -18,7 +18,6 @@ struct TestSearchItem {
     id: String,
     priority_tier: u8,
     score: f64,
-    dedup_key: Option<String>,
 }
 
 impl SearchItem for TestSearchItem {
@@ -63,10 +62,6 @@ impl SearchItem for TestSearchItem {
     fn accessibility_label(&self) -> String {
         self.id.clone()
     }
-
-    fn dedup_key(&self) -> Option<String> {
-        self.dedup_key.clone()
-    }
 }
 
 struct StaticSyncSource {
@@ -85,7 +80,6 @@ impl SyncDataSource for StaticSyncSource {
             id: self.result.id.clone(),
             priority_tier: self.result.priority_tier,
             score: self.result.score,
-            dedup_key: self.result.dedup_key.clone(),
         })])
     }
 }
@@ -107,14 +101,12 @@ impl AsyncDataSource for DelayedAsyncSource {
         let id = self.result.id.clone();
         let priority_tier = self.result.priority_tier;
         let score = self.result.score;
-        let dedup_key = self.result.dedup_key.clone();
         Box::pin(async move {
             Timer::after(delay).await;
             Ok(vec![QueryResult::from(TestSearchItem {
                 id,
                 priority_tier,
                 score,
-                dedup_key,
             })])
         })
     }
@@ -141,69 +133,9 @@ impl AsyncDataSource for QueryDrivenDelayedAsyncSource {
                 id,
                 priority_tier: 0,
                 score: 0.0,
-                dedup_key: None,
             })])
         })
     }
-}
-
-#[test]
-fn test_dedupe_on_keeps_highest_score() {
-    // Add items with same dedup key but different scores
-    let results = vec![
-        QueryResult::from(TestSearchItem {
-            id: "item1".to_string(),
-            priority_tier: 0,
-            score: 1.0,
-            dedup_key: Some("key1".to_string()),
-        }),
-        QueryResult::from(TestSearchItem {
-            id: "item2".to_string(),
-            priority_tier: 0,
-            score: 3.0,
-            dedup_key: Some("key1".to_string()),
-        }),
-        QueryResult::from(TestSearchItem {
-            id: "item3".to_string(),
-            priority_tier: 0,
-            score: 2.0,
-            dedup_key: Some("key1".to_string()),
-        }),
-    ];
-
-    let results = dedupe_score(results);
-    // Should keep only the item with highest score (item2 with score 3.0)
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].accept_result().id, "item2");
-}
-
-#[test]
-fn test_dedupe_on_preserves_items_without_keys() {
-    // Add items with and without dedup keys
-    let results = vec![
-        QueryResult::from(TestSearchItem {
-            id: "item1".to_string(),
-            priority_tier: 0,
-            score: 1.0,
-            dedup_key: None,
-        }),
-        QueryResult::from(TestSearchItem {
-            id: "item2".to_string(),
-            priority_tier: 0,
-            score: 2.0,
-            dedup_key: None,
-        }),
-        QueryResult::from(TestSearchItem {
-            id: "item3".to_string(),
-            priority_tier: 0,
-            score: 3.0,
-            dedup_key: Some("key1".to_string()),
-        }),
-    ];
-
-    let results = dedupe_score(results);
-    // Should keep all items without dedup keys
-    assert_eq!(results.len(), 3);
 }
 
 #[test]
@@ -215,13 +147,11 @@ fn test_results_are_sorted_by_tier_then_score() {
             id: "tier0_high".to_string(),
             priority_tier: 0,
             score: 100.0,
-            dedup_key: None,
         }),
         QueryResult::from(TestSearchItem {
             id: "tier1_low".to_string(),
             priority_tier: 1,
             score: 1.0,
-            dedup_key: None,
         }),
     ];
 
@@ -242,7 +172,6 @@ fn test_results_with_equal_tier_and_score_use_source_order_as_tiebreaker() {
         id: "source_0".to_string(),
         priority_tier: 0,
         score: 10.0,
-        dedup_key: None,
     });
     source_0.source_order = 0;
 
@@ -250,7 +179,6 @@ fn test_results_with_equal_tier_and_score_use_source_order_as_tiebreaker() {
         id: "source_1".to_string(),
         priority_tier: 0,
         score: 10.0,
-        dedup_key: None,
     });
     source_1.source_order = 1;
 
@@ -258,7 +186,6 @@ fn test_results_with_equal_tier_and_score_use_source_order_as_tiebreaker() {
         id: "source_2".to_string(),
         priority_tier: 0,
         score: 10.0,
-        dedup_key: None,
     });
     source_2.source_order = 2;
 
@@ -281,7 +208,6 @@ fn test_results_with_mixed_tiers_scores_and_sources_sort_consistently() {
         id: "tier_0_score_100_source_2".to_string(),
         priority_tier: 0,
         score: 100.0,
-        dedup_key: None,
     });
     tier_0_high_score.source_order = 2;
 
@@ -289,7 +215,6 @@ fn test_results_with_mixed_tiers_scores_and_sources_sort_consistently() {
         id: "tier_0_score_50_source_0".to_string(),
         priority_tier: 0,
         score: 50.0,
-        dedup_key: None,
     });
     tier_0_mid_score_early_source.source_order = 0;
 
@@ -297,7 +222,6 @@ fn test_results_with_mixed_tiers_scores_and_sources_sort_consistently() {
         id: "tier_0_score_50_source_1".to_string(),
         priority_tier: 0,
         score: 50.0,
-        dedup_key: None,
     });
     tier_0_mid_score_late_source.source_order = 1;
 
@@ -305,7 +229,6 @@ fn test_results_with_mixed_tiers_scores_and_sources_sort_consistently() {
         id: "tier_1_score_999_source_0".to_string(),
         priority_tier: 1,
         score: 999.0,
-        dedup_key: None,
     });
     tier_1_highest_score.source_order = 0;
 
@@ -337,7 +260,6 @@ fn test_initial_results_timeout_and_appends_late_async_results_without_reorderin
                         id: "sync".to_string(),
                         priority_tier: 0,
                         score: 10.0,
-                        dedup_key: None,
                     },
                 },
                 [QueryFilter::Actions],
@@ -348,8 +270,7 @@ fn test_initial_results_timeout_and_appends_late_async_results_without_reorderin
                     result: TestSearchItem {
                         id: "late_async".to_string(),
                         priority_tier: 0,
-                        score: 0.0,
-                        dedup_key: None,
+                        score: 100.0,
                     },
                 },
                 [QueryFilter::Actions],
@@ -401,8 +322,8 @@ fn test_initial_results_timeout_and_appends_late_async_results_without_reorderin
             );
         });
 
-        // When the async source finishes later, its results are appended to the end without
-        // reordering the already-visible sync results.
+        // When the async source finishes later, its results are placed at the low-priority edge
+        // without reordering the already-visible sync results.
         Timer::after(Duration::from_millis(200)).await;
 
         app.read(|app| {
@@ -414,7 +335,7 @@ fn test_initial_results_timeout_and_appends_late_async_results_without_reorderin
                     .iter()
                     .map(|result| result.accept_result().id)
                     .collect::<Vec<_>>(),
-                vec!["sync", "late_async"]
+                vec!["late_async", "sync"]
             );
         });
     });
@@ -431,7 +352,6 @@ fn test_initial_results_commit_keeps_sorted_results_when_async_finishes_before_t
                         id: "sync".to_string(),
                         priority_tier: 0,
                         score: 10.0,
-                        dedup_key: None,
                     },
                 },
                 [QueryFilter::Actions],
@@ -443,7 +363,6 @@ fn test_initial_results_commit_keeps_sorted_results_when_async_finishes_before_t
                         id: "fast_async".to_string(),
                         priority_tier: 0,
                         score: 0.0,
-                        dedup_key: None,
                     },
                 },
                 [QueryFilter::Actions],

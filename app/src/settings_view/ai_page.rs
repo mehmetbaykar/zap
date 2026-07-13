@@ -7150,8 +7150,8 @@ impl AwsBedrockWidget {
 
         let aws_auth_refresh_command = ai_settings.aws_bedrock_auth_refresh_command.value().clone();
         let aws_auth_refresh_profile = ai_settings.aws_bedrock_profile.value().clone();
-        let is_usage_enabled = is_any_ai_enabled
-            && UserWorkspaces::as_ref(ctx).is_aws_bedrock_credentials_enabled(ctx);
+        let is_usage_enabled =
+            is_any_ai_enabled && *ai_settings.aws_bedrock_credentials_enabled.value();
 
         let aws_auth_refresh_command_editor = ctx.add_typed_action_view(move |ctx| {
             let appearance = Appearance::as_ref(ctx);
@@ -7271,7 +7271,9 @@ impl AwsBedrockWidget {
             ) {
                 let is_any_ai_enabled = AISettings::as_ref(ctx).is_any_ai_enabled(ctx);
                 let is_usage_enabled = is_any_ai_enabled
-                    && UserWorkspaces::as_ref(ctx).is_aws_bedrock_credentials_enabled(ctx);
+                    && *AISettings::as_ref(ctx)
+                        .aws_bedrock_credentials_enabled
+                        .value();
 
                 AISettingsPageView::update_editor_interaction_state(
                     aws_auth_refresh_command_editor_clone.clone(),
@@ -7291,38 +7293,6 @@ impl AwsBedrockWidget {
             }
         });
 
-        let aws_auth_refresh_command_editor_clone = aws_auth_refresh_command_editor.clone();
-        let aws_auth_refresh_profile_editor_clone = aws_auth_refresh_profile_editor.clone();
-        let refresh_credentials_button_clone = refresh_credentials_button.clone();
-        ctx.subscribe_to_model(
-            &UserWorkspaces::handle(ctx),
-            move |_, workspace, event, ctx| {
-                if let UserWorkspacesEvent::TeamsChanged = event {
-                    let is_any_ai_enabled = AISettings::as_ref(ctx).is_any_ai_enabled(ctx);
-                    let is_usage_enabled = is_any_ai_enabled
-                        && workspace
-                            .as_ref(ctx)
-                            .is_aws_bedrock_credentials_enabled(ctx);
-
-                    AISettingsPageView::update_editor_interaction_state(
-                        aws_auth_refresh_command_editor_clone.clone(),
-                        is_usage_enabled,
-                        ctx,
-                    );
-                    AISettingsPageView::update_editor_interaction_state(
-                        aws_auth_refresh_profile_editor_clone.clone(),
-                        is_usage_enabled,
-                        ctx,
-                    );
-                    refresh_credentials_button_clone.update(ctx, |button, ctx| {
-                        button.set_disabled(!is_usage_enabled, ctx);
-                    });
-
-                    ctx.notify();
-                }
-            },
-        );
-
         Self {
             aws_auth_refresh_command_editor,
             aws_auth_refresh_profile_editor,
@@ -7336,25 +7306,11 @@ impl AwsBedrockWidget {
         &self,
         appearance: &Appearance,
         app: &AppContext,
-        is_bedrock_available: bool,
     ) -> Box<dyn Element> {
         let ai_settings = AISettings::as_ref(app);
-        let user_workspaces = UserWorkspaces::as_ref(app);
         let is_any_ai_enabled = ai_settings.is_any_ai_enabled(app);
-        let is_section_enabled = is_any_ai_enabled && is_bedrock_available;
-        let is_admin_enforced = matches!(
-            user_workspaces.aws_bedrock_host_enablement_setting(),
-            crate::workspaces::workspace::HostEnablementSetting::Enforce
-        );
-        let is_toggleable =
-            is_section_enabled && user_workspaces.is_aws_bedrock_credentials_toggleable();
-        let are_credentials_enabled = user_workspaces.is_aws_bedrock_credentials_enabled(app);
-        let is_usage_enabled = is_section_enabled && are_credentials_enabled;
-        let toggle_description = if is_admin_enforced {
-            crate::t!("settings-ai-aws-bedrock-description-managed")
-        } else {
-            crate::t!("settings-ai-aws-bedrock-description")
-        };
+        let are_credentials_enabled = *ai_settings.aws_bedrock_credentials_enabled.value();
+        let is_usage_enabled = is_any_ai_enabled && are_credentials_enabled;
 
         let mut column = Flex::column().with_spacing(16.).with_child(
             Flex::column()
@@ -7362,14 +7318,14 @@ impl AwsBedrockWidget {
                     crate::t!("settings-ai-aws-bedrock-toggle"),
                     AISettingsPageAction::ToggleAwsBedrockCredentialsEnabled,
                     are_credentials_enabled,
-                    is_toggleable,
+                    is_any_ai_enabled,
                     self.credentials_enabled_toggle.clone(),
                     &RefCell::new(HashMap::new()),
                     app,
                 ))
                 .with_child(render_ai_setting_description(
-                    toggle_description,
-                    is_section_enabled,
+                    crate::t!("settings-ai-aws-bedrock-description"),
+                    is_any_ai_enabled,
                     app,
                 ))
                 .finish(),
@@ -7552,8 +7508,8 @@ impl SettingsWidget for AwsBedrockWidget {
     }
 
     fn should_render(&self, app: &AppContext) -> bool {
-        // Only show if admin has enabled AWS Bedrock for the workspace
-        UserWorkspaces::as_ref(app).is_aws_bedrock_available_from_workspace()
+        let _ = app;
+        true
     }
 
     fn render(
@@ -7564,8 +7520,6 @@ impl SettingsWidget for AwsBedrockWidget {
     ) -> Box<dyn Element> {
         let ai_settings = AISettings::as_ref(app);
         let is_any_ai_enabled = ai_settings.is_any_ai_enabled(app);
-        let is_bedrock_available =
-            UserWorkspaces::as_ref(app).is_aws_bedrock_available_from_workspace();
 
         let column = Flex::column()
             .with_child(render_separator(appearance))
@@ -7578,7 +7532,7 @@ impl SettingsWidget for AwsBedrockWidget {
                 .with_padding_bottom(HEADER_PADDING)
                 .finish(),
             )
-            .with_child(self.render_aws_bedrock_section(appearance, app, is_bedrock_available));
+            .with_child(self.render_aws_bedrock_section(appearance, app));
 
         Container::new(column.finish())
             .with_margin_bottom(HEADER_PADDING)

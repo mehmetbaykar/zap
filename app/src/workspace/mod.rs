@@ -24,8 +24,8 @@ pub mod util;
 pub mod view;
 
 pub use action::{
-    AutoCloudHandoffTrigger, CommandSearchOptions, InitContent, RestoreConversationLayout,
-    TabContextMenuAnchor, VerticalTabsPaneContextMenuTarget, WorkspaceAction,
+    CommandSearchOptions, InitContent, RestoreConversationLayout, TabContextMenuAnchor,
+    VerticalTabsPaneContextMenuTarget, WorkspaceAction,
 };
 pub use active_session::ActiveSession;
 pub use global_actions::{
@@ -71,7 +71,7 @@ pub fn is_feedback_skill_available(ctx: &AppContext) -> bool {
     // removed); AI is always available here, matching `AISettings::is_any_ai_enabled` above.
     AISettings::as_ref(ctx).is_any_ai_enabled(ctx)
         && SkillManager::as_ref(ctx)
-            .active_bundled_skill("feedback", ctx)
+            .active_local_bundled_skill("feedback", ctx)
             .is_some()
 }
 

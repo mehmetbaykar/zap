@@ -70,29 +70,27 @@ impl ApiKeys {
     pub fn has_custom_endpoints(&self) -> bool {
         !self.custom_endpoints.is_empty()
     }
-}
 
-/// Controls how AWS credentials are refreshed by [`ApiKeyManager`].
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum AwsCredentialsRefreshStrategy {
-    /// Load credentials from the local AWS credential chain (~/.aws). This is the default.
-    #[default]
-    LocalChain,
-    /// Credentials are managed externally via OIDC/STS.
-    /// The task ID is used to scope the STS AssumeRoleWithWebIdentity session.
-    /// The role ARN + region are the info used to assume the IAM role via STS.
-    OidcManaged {
-        task_id: Option<String>,
-        role_arn: String,
-        region: String,
-    },
+    /// Number of single-provider API keys currently configured (OpenAI,
+    /// Anthropic, Google, OpenRouter). Custom endpoints are counted separately
+    /// via `custom_endpoints`.
+    pub fn provider_key_count(&self) -> usize {
+        [
+            &self.openai,
+            &self.anthropic,
+            &self.google,
+            &self.open_router,
+        ]
+        .into_iter()
+        .filter(|key| key.as_deref().is_some_and(|v| !v.trim().is_empty()))
+        .count()
+    }
 }
 
 /// A structure that manages API keys for AI providers.
 pub struct ApiKeyManager {
     keys: ApiKeys,
     pub(crate) aws_credentials_state: AwsCredentialsState,
-    aws_credentials_refresh_strategy: AwsCredentialsRefreshStrategy,
     secure_storage_write_version: u64,
 }
 
@@ -102,7 +100,6 @@ impl ApiKeyManager {
         Self {
             keys,
             aws_credentials_state: AwsCredentialsState::Missing,
-            aws_credentials_refresh_strategy: AwsCredentialsRefreshStrategy::default(),
             secure_storage_write_version: 0,
         }
     }
@@ -210,17 +207,6 @@ impl ApiKeyManager {
 
     pub fn aws_credentials_state(&self) -> &AwsCredentialsState {
         &self.aws_credentials_state
-    }
-
-    pub fn aws_credentials_refresh_strategy(&self) -> AwsCredentialsRefreshStrategy {
-        self.aws_credentials_refresh_strategy.clone()
-    }
-
-    pub fn set_aws_credentials_refresh_strategy(
-        &mut self,
-        strategy: AwsCredentialsRefreshStrategy,
-    ) {
-        self.aws_credentials_refresh_strategy = strategy;
     }
 
     fn load_keys_from_secure_storage(ctx: &mut ModelContext<Self>) -> ApiKeys {

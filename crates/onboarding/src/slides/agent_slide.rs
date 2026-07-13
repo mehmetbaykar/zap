@@ -25,8 +25,7 @@ use warpui_core::{
 
 use super::two_line_button::{render_two_line_button, TwoLineButtonSpec};
 use super::OnboardingSlide;
-use crate::localization::localized;
-use crate::model::{OnboardingStateEvent, OnboardingStateModel};
+use crate::model::{NoAiConfirmationSource, OnboardingStateEvent, OnboardingStateModel};
 use crate::slides::{bottom_nav, layout, slide_content};
 use crate::visuals::agent_visual;
 
@@ -97,6 +96,7 @@ pub enum AgentSlideAction {
     SelectAutonomy(AgentAutonomy),
     ToggleDisableOz,
     BackClicked,
+    NoAiClicked,
     NextClicked,
 }
 
@@ -113,9 +113,8 @@ pub struct AgentSlide {
     autonomy_partial_mouse_state: MouseStateHandle,
     autonomy_none_mouse_state: MouseStateHandle,
 
-    disable_oz_mouse: MouseStateHandle,
-
     back_button: button::Button,
+    no_ai_button: button::Button,
     next_button: button::Button,
     scroll_state: ClippedScrollStateHandle,
     dropdown_scroll_state: ClippedScrollStateHandle,
@@ -128,13 +127,6 @@ pub struct AgentSlide {
 /// view as the keyboard highlight moves.
 fn model_row_position_id(index: usize) -> String {
     format!("agent_slide_model_row_{index}")
-}
-
-/// Returns the slide's view of the model list: free-tier before premium,
-/// with server order preserved within each tier. The slide owns this sort so
-/// state storage can stay in server order.
-fn sorted_models(models: &[OnboardingModelInfo]) -> Vec<OnboardingModelInfo> {
-    models.to_vec()
 }
 
 impl AgentSlide {
@@ -164,7 +156,8 @@ impl AgentSlide {
                 }
                 OnboardingStateEvent::SelectedSlideChanged
                 | OnboardingStateEvent::IntentionChanged
-                | OnboardingStateEvent::Completed => {}
+                | OnboardingStateEvent::Completed
+                | OnboardingStateEvent::NoAiConfirmationChanged => {}
             }
         });
 
@@ -175,8 +168,8 @@ impl AgentSlide {
             autonomy_full_mouse_state: MouseStateHandle::default(),
             autonomy_partial_mouse_state: MouseStateHandle::default(),
             autonomy_none_mouse_state: MouseStateHandle::default(),
-            disable_oz_mouse: MouseStateHandle::default(),
             back_button: button::Button::default(),
+            no_ai_button: button::Button::default(),
             next_button: button::Button::default(),
             scroll_state: ClippedScrollStateHandle::new(),
             dropdown_scroll_state: ClippedScrollStateHandle::new(),
@@ -199,28 +192,21 @@ impl AgentSlide {
         self.onboarding_state.as_ref(app).agent_settings()
     }
 
-    fn workspace_enforces_autonomy(&self, app: &AppContext) -> bool {
-        self.onboarding_state
-            .as_ref(app)
-            .workspace_enforces_autonomy()
-    }
-
     fn render_content(
         &self,
         appearance: &Appearance,
         settings: &AgentDevelopmentSettings,
-        workspace_enforces_autonomy: bool,
         app: &AppContext,
     ) -> Box<dyn Element> {
         // The collapsed slide content is rendered unconditionally — the expanded
         // state is a floating overlay (built in `View::render`) that sits *on top
         // of* this content, so the underlying layout never shifts between the two
         // states. That keeps the header + picker chip pinned in place.
-        let bottom_nav = self.render_bottom_nav(appearance);
+        let bottom_nav = self.render_bottom_nav(appearance, app);
         slide_content::onboarding_slide_content(
             vec![
                 self.render_header(appearance),
-                self.render_sections(appearance, settings, workspace_enforces_autonomy, app),
+                self.render_sections(appearance, settings, app),
             ],
             bottom_nav,
             self.scroll_state.clone(),
@@ -231,10 +217,7 @@ impl AgentSlide {
     fn render_header(&self, appearance: &Appearance) -> Box<dyn Element> {
         let title = appearance
             .ui_builder()
-            .paragraph(localized(
-                "onboarding-agent-title",
-                "Customize your Zap Agent",
-            ))
+            .paragraph("Customize your Zap Agent")
             .with_style(UiComponentStyles {
                 font_size: Some(36.),
                 font_weight: Some(Weight::Medium),
@@ -244,10 +227,7 @@ impl AgentSlide {
             .finish();
 
         let subtitle = FormattedTextElement::from_str(
-            localized(
-                "onboarding-agent-subtitle",
-                "Select your in-app agent's defaults.",
-            ),
+            "Select your Zap Agent's defaults.",
             appearance.ui_font_family(),
             16.,
         )
@@ -272,15 +252,10 @@ impl AgentSlide {
         &self,
         appearance: &Appearance,
         settings: &AgentDevelopmentSettings,
-        workspace_enforces_autonomy: bool,
         app: &AppContext,
     ) -> Box<dyn Element> {
         let model_section = self.render_model_section(appearance, settings, app);
-        let autonomy_section = if workspace_enforces_autonomy {
-            self.render_autonomy_workspace_enforced(appearance)
-        } else {
-            self.render_autonomy_section(appearance, settings)
-        };
+        let autonomy_section = self.render_autonomy_section(appearance, settings);
 
         let upper_col = Flex::column()
             .with_cross_axis_alignment(CrossAxisAlignment::Start)
@@ -303,23 +278,18 @@ impl AgentSlide {
             upper_col.finish()
         };
 
-        let mut col = Flex::column()
+        let col = Flex::column()
             .with_cross_axis_alignment(CrossAxisAlignment::Start)
             .with_child(upper_sections);
-
-        if FeatureFlag::ZapNewSettingsModes.is_enabled() {
-            let disable_oz_section = self.render_disable_oz_section(appearance, settings);
-            col = col.with_child(
-                Container::new(disable_oz_section)
-                    .with_margin_top(24.)
-                    .finish(),
-            );
-        }
 
         Container::new(col.finish()).with_margin_top(40.).finish()
     }
 
-    fn render_section_header(&self, title: String, appearance: &Appearance) -> Box<dyn Element> {
+    fn render_section_header(
+        &self,
+        title: &'static str,
+        appearance: &Appearance,
+    ) -> Box<dyn Element> {
         appearance
             .ui_builder()
             .paragraph(title)
@@ -338,10 +308,7 @@ impl AgentSlide {
         settings: &AgentDevelopmentSettings,
         app: &AppContext,
     ) -> Box<dyn Element> {
-        let header = self.render_section_header(
-            localized("onboarding-agent-default-model", "Default model"),
-            appearance,
-        );
+        let header = self.render_section_header("Default model", appearance);
 
         let expanded = self.is_model_list_expanded;
         let chip = self.render_collapsed_model_chip(appearance, settings, app, expanded);
@@ -492,8 +459,8 @@ impl AgentSlide {
     }
 
     /// Renders the vertical list of model rows shown inside the floating dropdown
-    /// overlay. Each row shows provider icon + title on the left and an optional
-    /// recommendation pill on the right.
+    /// overlay. Each row shows a provider icon + title on the left, with a
+    /// "Recommended" pill on the right for the default model.
     fn render_model_list_rows(
         &self,
         appearance: &Appearance,
@@ -505,7 +472,7 @@ impl AgentSlide {
         let state = self.onboarding_state.as_ref(app);
         let highlighted_id = self.highlighted_model_id.clone();
         let selected_id = state.agent_settings().selected_model_id.clone();
-        let models = sorted_models(state.models());
+        let models = state.models();
 
         let mut col = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
@@ -619,9 +586,9 @@ impl AgentSlide {
                 .with_child(Container::new(title_el).with_margin_left(8.).finish())
                 .finish();
 
-            // Trailing pill: "Recommended" on the designated default model.
-            let make_pill = |label: String| -> Box<dyn Element> {
-                let badge = Text::new(label, ui_font_family, 11.0)
+            // "Recommended" pill on the server-designated default model.
+            let make_pill = |label: &'static str| -> Box<dyn Element> {
+                let badge = Text::new(label.to_string(), ui_font_family, 11.0)
                     .with_color(internal_colors::text_sub(theme, background_for_text))
                     .with_style(Properties {
                         weight: Weight::Normal,
@@ -640,7 +607,7 @@ impl AgentSlide {
             };
 
             let trailing: Box<dyn Element> = if is_default {
-                make_pill(localized("common-recommended", "Recommended"))
+                make_pill("Recommended")
             } else {
                 Empty::new().finish()
             };
@@ -686,79 +653,12 @@ impl AgentSlide {
             .finish()
     }
 
-    fn render_autonomy_workspace_enforced(&self, appearance: &Appearance) -> Box<dyn Element> {
-        let header = self.render_section_header(
-            localized("onboarding-agent-autonomy", "Autonomy"),
-            appearance,
-        );
-
-        let theme = appearance.theme();
-        let background_for_text = theme.background().into_solid();
-        let ui_font_family = appearance.ui_font_family();
-
-        let title_color = internal_colors::text_main(theme, background_for_text);
-        let subtitle_color = internal_colors::text_sub(theme, background_for_text);
-
-        let title_el = Text::new(
-            localized(
-                "onboarding-agent-set-by-team-workspace",
-                "Managed by local workspace policy",
-            ),
-            ui_font_family,
-            14.0,
-        )
-        .with_color(title_color)
-        .with_style(Properties {
-            weight: Weight::Normal,
-            ..Default::default()
-        })
-        .with_line_height_ratio(1.0)
-        .finish();
-
-        let subtitle_el = Text::new(
-            localized(
-                "onboarding-agent-team-workspace-autonomy-description",
-                "Autonomy settings are configured by the local workspace policy.",
-            ),
-            ui_font_family,
-            12.0,
-        )
-        .with_color(subtitle_color)
-        .with_style(Properties {
-            weight: Weight::Normal,
-            ..Default::default()
-        })
-        .with_line_height_ratio(1.0)
-        .finish();
-
-        let content = Flex::column()
-            .with_cross_axis_alignment(CrossAxisAlignment::Start)
-            .with_child(title_el)
-            .with_child(Container::new(subtitle_el).with_margin_top(8.).finish())
-            .finish();
-
-        let message_box = Container::new(content)
-            .with_uniform_padding(12.)
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
-            .with_border(Border::all(1.).with_border_color(internal_colors::neutral_4(theme)))
-            .finish();
-
-        Flex::column()
-            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_child(header)
-            .with_child(Container::new(message_box).with_margin_top(12.).finish())
-            .finish()
-    }
-
     fn render_autonomy_section(
         &self,
         appearance: &Appearance,
         settings: &AgentDevelopmentSettings,
     ) -> Box<dyn Element> {
-        let header = self.render_section_header(
-            localized("onboarding-agent-autonomy", "Autonomy"),
-            appearance,
-        );
+        let header = self.render_section_header("Autonomy", appearance);
 
         // The rows now take the full column width (vs. the previous three-across layout),
         // so they no longer need the extra height that came from cramped subtitle wrapping.
@@ -770,32 +670,23 @@ impl AgentSlide {
         let text_main = internal_colors::text_main(theme, background_for_text);
         let text_sub = internal_colors::text_sub(theme, background_for_text);
 
-        let autonomy_options: [(AgentAutonomy, String, String, MouseStateHandle); 3] = [
+        let autonomy_options: [(AgentAutonomy, &str, &str, MouseStateHandle); 3] = [
             (
                 AgentAutonomy::Full,
-                localized("onboarding-agent-autonomy-full-title", "Full"),
-                localized(
-                    "onboarding-agent-autonomy-full-subtitle",
-                    "Runs commands, writes code, and reads files without asking.",
-                ),
+                "Full",
+                "Zap Agent runs commands, writes code, and reads files without asking.",
                 self.autonomy_full_mouse_state.clone(),
             ),
             (
                 AgentAutonomy::Partial,
-                localized("onboarding-agent-autonomy-partial-title", "Partial"),
-                localized(
-                    "onboarding-agent-autonomy-partial-subtitle",
-                    "Can plan, read files, and execute low-risk commands. Asks before making any changes or executing sensitive commands.",
-                ),
+                "Partial",
+                "Zap Agent can plan, read files, and execute low-risk commands. Asks before making any changes or executing sensitive commands.",
                 self.autonomy_partial_mouse_state.clone(),
             ),
             (
                 AgentAutonomy::None,
-                localized("onboarding-agent-autonomy-none-title", "None"),
-                localized(
-                    "onboarding-agent-autonomy-none-subtitle",
-                    "Takes no actions without your approval.",
-                ),
+                "None",
+                "Zap Agent takes no actions without your approval.",
                 self.autonomy_none_mouse_state.clone(),
             ),
         ];
@@ -816,8 +707,8 @@ impl AgentSlide {
                 appearance,
                 TwoLineButtonSpec {
                     is_selected,
-                    title,
-                    subtitle,
+                    title: title.to_string(),
+                    subtitle: subtitle.to_string(),
                     height: OPTION_HEIGHT,
                     mouse_state,
                     click_action: AgentSlideAction::SelectAutonomy(autonomy),
@@ -841,47 +732,11 @@ impl AgentSlide {
             .finish()
     }
 
-    fn render_disable_oz_section(
-        &self,
-        appearance: &Appearance,
-        settings: &AgentDevelopmentSettings,
-    ) -> Box<dyn Element> {
-        let theme = appearance.theme();
-        let background_for_text = theme.background().into_solid();
-
-        let checkbox = appearance
-            .ui_builder()
-            .checkbox(self.disable_oz_mouse.clone(), Some(12.))
-            .check(settings.disable_oz)
-            .build()
-            .on_click(|ctx, _, _| ctx.dispatch_typed_action(AgentSlideAction::ToggleDisableOz))
-            .finish();
-
-        let label = Text::new(
-            localized("onboarding-agent-disable-warp-agent", "Disable Zap Agent"),
-            appearance.ui_font_family(),
-            14.0,
-        )
-        .with_color(internal_colors::text_sub(theme, background_for_text))
-        .with_style(Properties {
-            weight: Weight::Normal,
-            ..Default::default()
-        })
-        .with_line_height_ratio(1.0)
-        .finish();
-
-        Flex::row()
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_child(checkbox)
-            .with_child(Container::new(label).with_margin_left(8.).finish())
-            .finish()
-    }
-
-    fn render_bottom_nav(&self, appearance: &Appearance) -> Box<dyn Element> {
+    fn render_bottom_nav(&self, appearance: &Appearance, app: &AppContext) -> Box<dyn Element> {
         let back_button = self.back_button.render(
             appearance,
             button::Params {
-                content: button::Content::Label(localized("common-back", "Back").into()),
+                content: button::Content::Label("Back".into()),
                 theme: &button::themes::Naked,
                 options: button::Options {
                     on_click: Some(Box::new(|ctx, _app, _pos| {
@@ -892,11 +747,27 @@ impl AgentSlide {
             },
         );
 
+        let no_ai_keystroke = Keystroke::parse("cmdorctrl-enter").unwrap_or_default();
+        let no_ai_button = self.no_ai_button.render(
+            appearance,
+            button::Params {
+                content: button::Content::Label("I don't want AI".into()),
+                theme: &button::themes::Naked,
+                options: button::Options {
+                    keystroke: Some(no_ai_keystroke),
+                    on_click: Some(Box::new(|ctx, _app, _pos| {
+                        ctx.dispatch_typed_action(AgentSlideAction::NoAiClicked);
+                    })),
+                    ..button::Options::default(appearance)
+                },
+            },
+        );
+
         let enter = Keystroke::parse("enter").unwrap_or_default();
         let next_button = self.next_button.render(
             appearance,
             button::Params {
-                content: button::Content::Label(localized("common-next", "Next").into()),
+                content: button::Content::Label("Next".into()),
                 theme: &button::themes::Primary,
                 options: button::Options {
                     keystroke: Some(enter),
@@ -908,18 +779,20 @@ impl AgentSlide {
             },
         );
 
-        let step_index = 2;
-        let step_count = if warp_core::features::FeatureFlag::ZapNewSettingsModes.is_enabled() {
-            5
-        } else {
-            4
-        };
+        let right_buttons = Flex::row()
+            .with_main_axis_size(MainAxisSize::Min)
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_child(no_ai_button)
+            .with_child(Container::new(next_button).with_margin_left(8.).finish())
+            .finish();
+
+        let (step_index, step_count) = self.onboarding_state.as_ref(app).progress();
         bottom_nav::onboarding_bottom_nav(
             appearance,
             step_index,
             step_count,
             Some(back_button),
-            Some(next_button),
+            Some(right_buttons),
         )
     }
 
@@ -965,13 +838,11 @@ impl View for AgentSlide {
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         let appearance = Appearance::as_ref(app);
         let settings = self.agent_settings(app);
-        let workspace_enforces_autonomy = self.workspace_enforces_autonomy(app);
-
         // The floating dropdown overlay is built inside `render_model_section`
         // so it inherits the column width naturally. Here we only need the
         // base two-column layout.
         layout::static_left(
-            || self.render_content(appearance, settings, workspace_enforces_autonomy, app),
+            || self.render_content(appearance, settings, app),
             || self.render_visual(appearance, app),
         )
     }
@@ -995,10 +866,7 @@ impl AgentSlide {
             // starts on the selected row.
             let state = self.onboarding_state.as_ref(ctx);
             let selected_id = state.agent_settings().selected_model_id.clone();
-            if let Some(index) = sorted_models(state.models())
-                .iter()
-                .position(|m| m.id == selected_id)
-            {
+            if let Some(index) = state.models().iter().position(|m| m.id == selected_id) {
                 self.dropdown_scroll_state.scroll_to_position(ScrollTarget {
                     position_id: model_row_position_id(index),
                     mode: ScrollToPositionMode::FullyIntoView,
@@ -1009,44 +877,33 @@ impl AgentSlide {
         ctx.notify();
     }
 
-    /// Finds the next model index in the given direction, wrapping around.
-    /// Indices are into the slide's sorted view of the model list.
-    fn next_model_index(&self, start: usize, forward: bool, ctx: &AppContext) -> Option<usize> {
-        let models = sorted_models(self.onboarding_state.as_ref(ctx).models());
-        let count = models.len();
-        if count == 0 {
-            return None;
-        }
-        let idx = if forward {
-            (start + 1) % count
-        } else {
-            (start + count - 1) % count
-        };
-        Some(idx)
-    }
-
-    /// Advances the highlight cursor to the next/previous model, wrapping.
-    /// The origin of the walk is the currently-highlighted id (if any), else the
+    /// Advances the highlight cursor to the next/previous model, wrapping. The
+    /// origin of the walk is the currently-highlighted id (if any), else the
     /// currently-selected id. Also scrolls the dropdown so the newly-highlighted
     /// row stays visible — same `SavePosition` + `scroll_to_position` pattern
     /// used by `VerticalTabsPanelState::scroll_to_tab`.
     fn advance_highlighted_model(&mut self, forward: bool, ctx: &mut ViewContext<Self>) {
-        let state = self.onboarding_state.as_ref(ctx);
-        let sorted = sorted_models(state.models());
-        let selected_id = state.agent_settings().selected_model_id.clone();
+        let (model_ids, selected_id) = {
+            let state = self.onboarding_state.as_ref(ctx);
+            let ids: Vec<LLMId> = state.models().iter().map(|m| m.id.clone()).collect();
+            (ids, state.agent_settings().selected_model_id.clone())
+        };
+        let count = model_ids.len();
+        if count == 0 {
+            return;
+        }
         let start_index = self
             .highlighted_model_id
             .as_ref()
-            .and_then(|id| sorted.iter().position(|m| &m.id == id))
-            .or_else(|| sorted.iter().position(|m| m.id == selected_id))
+            .and_then(|id| model_ids.iter().position(|m| m == id))
+            .or_else(|| model_ids.iter().position(|m| *m == selected_id))
             .unwrap_or(0);
-        let Some(next_index) = self.next_model_index(start_index, forward, ctx) else {
-            return;
+        let next_index = if forward {
+            (start_index + 1) % count
+        } else {
+            (start_index + count - 1) % count
         };
-        let Some(next_id) = sorted.get(next_index).map(|m| m.id.clone()) else {
-            return;
-        };
-        self.highlighted_model_id = Some(next_id);
+        self.highlighted_model_id = Some(model_ids[next_index].clone());
         // Scroll the dropdown so the new highlight is visible. `FullyIntoView`
         // is a no-op when the row is already fully in view, otherwise it
         // scrolls the minimum amount to show it.
@@ -1058,9 +915,6 @@ impl AgentSlide {
     }
 
     fn select_autonomy(&mut self, autonomy: AgentAutonomy, ctx: &mut ViewContext<Self>) {
-        if self.workspace_enforces_autonomy(ctx) {
-            return;
-        }
         self.onboarding_state.update(ctx, |state, ctx| {
             state.set_agent_autonomy(autonomy, ctx);
         });
@@ -1085,9 +939,6 @@ impl OnboardingSlide for AgentSlide {
             self.advance_highlighted_model(/* forward */ false, ctx);
             return;
         }
-        if self.workspace_enforces_autonomy(ctx) {
-            return;
-        }
         let Some(autonomy) = self.agent_settings(ctx).autonomy else {
             return;
         };
@@ -1106,9 +957,6 @@ impl OnboardingSlide for AgentSlide {
         }
         if self.is_model_list_expanded {
             self.advance_highlighted_model(/* forward */ true, ctx);
-            return;
-        }
-        if self.workspace_enforces_autonomy(ctx) {
             return;
         }
         let Some(autonomy) = self.agent_settings(ctx).autonomy else {
@@ -1141,6 +989,12 @@ impl OnboardingSlide for AgentSlide {
         if self.is_model_list_expanded {
             self.set_model_list_expanded(false, ctx);
         }
+    }
+
+    fn on_cmd_or_ctrl_enter(&mut self, ctx: &mut ViewContext<Self>) {
+        self.onboarding_state.update(ctx, |model, ctx| {
+            model.request_no_ai_confirmation(NoAiConfirmationSource::Agent, ctx);
+        });
     }
 }
 
@@ -1189,6 +1043,11 @@ impl TypedActionView for AgentSlide {
             AgentSlideAction::BackClicked => {
                 self.onboarding_state.update(ctx, |state, ctx| {
                     state.back(ctx);
+                });
+            }
+            AgentSlideAction::NoAiClicked => {
+                self.onboarding_state.update(ctx, |model, ctx| {
+                    model.request_no_ai_confirmation(NoAiConfirmationSource::Agent, ctx);
                 });
             }
             AgentSlideAction::NextClicked => {

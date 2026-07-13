@@ -4005,9 +4005,9 @@ impl PaneGroup {
             IPaneType::ExecutionProfileEditor => TypedPane::ExecutionProfileEditor,
             IPaneType::ImageViewer
             | IPaneType::GetStarted
+            | IPaneType::NetworkLog
             | IPaneType::SshServer
             | IPaneType::Sftp
-            | IPaneType::Welcome
             | IPaneType::DeferredPlaceholder => TypedPane::Other,
             #[cfg(test)]
             IPaneType::Dummy => TypedPane::Other,

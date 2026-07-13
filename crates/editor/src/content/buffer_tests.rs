@@ -1,18 +1,18 @@
 use std::ops::Range;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use line_ending::LineEnding;
 use markdown_parser::{
-    parse_html, parse_markdown, FormattedIndentTextInline, FormattedText, FormattedTextFragment,
-    FormattedTextLine,
+    FormattedIndentTextInline, FormattedText, FormattedTextFragment, FormattedTextLine, parse_html,
+    parse_markdown,
 };
 use pathfinder_color::ColorU;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde_yaml::{Mapping, Value};
 use string_offset::{ByteOffset, CharOffset};
-use vec1::{vec1, Vec1};
+use vec1::{Vec1, vec1};
 use warp_util::content_version::ContentVersion;
 use warpui_core::elements::ListIndentLevel;
 use warpui_core::text::point::Point;
@@ -33,7 +33,7 @@ use crate::content::selection::TextStyleBias;
 use crate::content::selection_model::BufferSelectionModel;
 use crate::content::text::{
     BlockHeaderSize, BlockType, BufferBlockItem, BufferBlockStyle, CodeBlockType, IndentBehavior,
-    IndentUnit, TextStyles, TextStylesWithMetadata, TABLE_BLOCK_MARKDOWN_LANG,
+    IndentUnit, TABLE_BLOCK_MARKDOWN_LANG, TextStyles, TextStylesWithMetadata,
 };
 use crate::content::undo::{
     NonAtomicType, ReversibleEditorActions, ReversibleSelectionState, UndoActionType, UndoArg,
@@ -902,8 +902,10 @@ fn test_range_fully_styled() {
             let _ = buffer.style_internal(TextStyles::default().italic(), selection.clone(), ctx);
             assert_eq!(buffer.content.debug(), "<text>h<b_s>e<i_s>ll<b_e><i_e>o");
 
-            assert!(!buffer
-                .ranges_fully_styled(vec1![1.into()..3.into()], TextStyles::default().bold()));
+            assert!(
+                !buffer
+                    .ranges_fully_styled(vec1![1.into()..3.into()], TextStyles::default().bold())
+            );
             assert!(
                 buffer.ranges_fully_styled(vec1![2.into()..4.into()], TextStyles::default().bold())
             );
@@ -911,8 +913,10 @@ fn test_range_fully_styled() {
                 vec1![3.into()..5.into()],
                 TextStyles::default().bold().italic()
             ));
-            assert!(!buffer
-                .ranges_fully_styled(vec1![4.into()..6.into()], TextStyles::default().italic()));
+            assert!(
+                !buffer
+                    .ranges_fully_styled(vec1![4.into()..6.into()], TextStyles::default().italic())
+            );
         });
     });
 }

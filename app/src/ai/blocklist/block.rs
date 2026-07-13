@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use ai::agent::action::{AskUserQuestionItem, InsertReviewComment};
+use ai::agent::action::{AskUserQuestionItem, InsertReviewComment, RunAgentsRequest};
 use base64::Engine as _;
 use chrono::Duration;
 use cli_controller::{CLISubagentController, CLISubagentEvent};
@@ -119,6 +119,9 @@ use crate::ai::blocklist::inline_action::code_diff_view::convert_file_edits_to_f
 use crate::ai::blocklist::inline_action::requested_command::{
     self, RequestedActionViewType, RequestedCommand, RequestedCommandView,
     RequestedCommandViewEvent,
+};
+use crate::ai::blocklist::inline_action::run_agents_card_view::{
+    self, RunAgentsCardView, RunAgentsCardViewEvent,
 };
 use crate::ai::blocklist::inline_action::suggested_unit_tests::{
     SuggestedUnitTestsEvent, SuggestedUnitTestsView,
@@ -250,6 +253,7 @@ pub fn init(app: &mut AppContext) {
     ask_user_question_view::init(app);
     code_diff_view::init(app);
     requested_command::init(app);
+    run_agents_card_view::init(app);
     cli::init(app);
 }
 
@@ -948,6 +952,9 @@ pub struct AIBlock {
     imported_comments: HashMap<AIAgentActionId, ImportedCommentGroup>,
     has_imported_comments: bool,
 
+    /// Per-action local `RunAgents` confirmation cards, created as streamed requests arrive.
+    run_agents_card_views: HashMap<AIAgentActionId, ViewHandle<RunAgentsCardView>>,
+
     /// Handle for the background link detection task, kept so we can abort a previous
     /// detection when a new one is spawned (e.g. on shell data change).
     link_detection_handle: Option<SpawnedFutureHandle>,
@@ -1360,6 +1367,7 @@ impl AIBlock {
             aws_bedrock_credentials_error_view: None,
             imported_comments: Default::default(),
             has_imported_comments: false,
+            run_agents_card_views: Default::default(),
             link_detection_handle: None,
             #[cfg(feature = "local_fs")]
             resolved_code_block_paths: Default::default(),
@@ -1940,6 +1948,13 @@ impl AIBlock {
                     ..
                 } if FeatureFlag::AskUserQuestion.is_enabled() => {
                     self.handle_ask_user_question_stream_update(action_id, questions, ctx);
+                }
+                AIAgentAction {
+                    id: action_id,
+                    action: AIAgentActionType::RunAgents(request),
+                    ..
+                } => {
+                    self.ensure_run_agents_card_view(action_id, request, ctx);
                 }
                 AIAgentAction {
                     id: action_id,
@@ -4023,7 +4038,7 @@ impl AIBlock {
         self.model
             .inputs_to_render(app)
             .iter()
-            .any(|input| input.user_query().is_some())
+            .any(|input| input.display_query().is_some())
     }
 
     /// `true` if the AI block is "finished".
@@ -4452,6 +4467,11 @@ impl AIBlock {
         {
             // If there's a blocking MCP tool call, focus that.
             ctx.focus(&mcp_tool.view);
+            did_focus_subview = true;
+        } else if let Some(run_agents_card) =
+            pending_action_id.and_then(|id| self.run_agents_card_views.get(id))
+        {
+            ctx.focus(run_agents_card);
             did_focus_subview = true;
         } else if let Some(ask_user_question_view) =
             self.ask_user_question_view.as_ref().filter(|view| {
@@ -5094,7 +5114,7 @@ impl AIBlock {
         self.model
             .inputs_to_render(app)
             .iter()
-            .filter_map(|input| input.user_query())
+            .filter_map(|input| input.display_query())
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -5890,9 +5910,20 @@ impl TypedActionView for AIBlock {
                 self.cancel_action(action_id, ctx);
             }
             AIBlockAction::ExecuteNextPendingAction => {
-                self.action_model.update(ctx, |action_model, ctx| {
-                    action_model.execute_next_action_for_user(self.conversation_id(), ctx)
-                });
+                let run_agents_card = self
+                    .action_model
+                    .as_ref(ctx)
+                    .get_pending_action(ctx)
+                    .filter(|action| matches!(action.action, AIAgentActionType::RunAgents(_)))
+                    .and_then(|action| self.run_agents_card_views.get(&action.id))
+                    .cloned();
+                if let Some(run_agents_card) = run_agents_card {
+                    run_agents_card.update(ctx, |view, ctx| view.accept(ctx));
+                } else {
+                    self.action_model.update(ctx, |action_model, ctx| {
+                        action_model.execute_next_action_for_user(self.conversation_id(), ctx)
+                    });
+                }
             }
             AIBlockAction::ExecuteRequestedAction { action_id } => {
                 self.action_model.update(ctx, |action_model, ctx| {
@@ -6343,6 +6374,59 @@ impl TypedActionView for AIBlock {
             }
         }
         ctx.notify();
+    }
+}
+
+impl AIBlock {
+    /// Creates or refreshes local confirmation UI for a streamed `RunAgents` request.
+    fn ensure_run_agents_card_view(
+        &mut self,
+        action_id: &AIAgentActionId,
+        request: &RunAgentsRequest,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if let Some(existing_view) = self.run_agents_card_views.get(action_id) {
+            existing_view.update(ctx, |view, ctx| view.update_request(request, ctx));
+            return;
+        }
+
+        let active_config = {
+            let history = BlocklistAIHistoryModel::as_ref(ctx);
+            let conversation = history.conversation(&self.client_ids.conversation_id);
+            if request.plan_id.is_empty() {
+                None
+            } else {
+                conversation.and_then(|conversation| {
+                    conversation
+                        .orchestration_config_for_plan(&request.plan_id)
+                        .map(|(config, status)| (config.clone(), status))
+                })
+            }
+        };
+
+        let action_id_for_view = action_id.clone();
+        let request = request.clone();
+        let action_model = self.action_model.clone();
+        let run_agents_executor = self.action_model.as_ref(ctx).run_agents_executor(ctx);
+        let block_model = self.model.clone();
+        let view = ctx.add_typed_action_view(move |ctx| {
+            RunAgentsCardView::new(
+                action_id_for_view,
+                &request,
+                active_config,
+                action_model,
+                run_agents_executor,
+                block_model,
+                ctx,
+            )
+        });
+        let action_id_for_event = action_id.clone();
+        ctx.subscribe_to_view(&view, move |block, _, event, ctx| match event {
+            RunAgentsCardViewEvent::RejectRequested => {
+                block.cancel_action(&action_id_for_event, ctx);
+            }
+        });
+        self.run_agents_card_views.insert(action_id.clone(), view);
     }
 }
 

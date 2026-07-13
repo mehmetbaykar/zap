@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rust_embed::RustEmbed;
 use warpui_core::AssetProvider;
 

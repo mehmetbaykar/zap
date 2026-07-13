@@ -41,8 +41,7 @@ use super::model::{
     NewWindow, NewWorkspace, NewWorkspaceTeam, ObjectMetadata, ObjectPermissions, Project, Tab,
     TabGroup, Window, AI_DOCUMENT_PANE_KIND, AI_FACT_PANE_KIND, CODE_PANE_KIND,
     ENV_VAR_COLLECTION_PANE_KIND, EXECUTION_PROFILE_EDITOR_PANE_KIND, MCP_SERVER_PANE_KIND,
-    NOTEBOOK_PANE_KIND, SETTINGS_PANE_KIND, TERMINAL_PANE_KIND, WELCOME_PANE_KIND,
-    WORKFLOW_PANE_KIND,
+    NOTEBOOK_PANE_KIND, SETTINGS_PANE_KIND, TERMINAL_PANE_KIND, WORKFLOW_PANE_KIND,
 };
 use super::{
     schema, BlockCompleted, FinishedCommandMetadata, ModelEvent, PersistedData, PersistenceScope,
@@ -1090,7 +1089,6 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
         diesel::delete(schema::mcp_server_panes::dsl::mcp_server_panes).execute(conn)?;
         diesel::delete(schema::code_review_panes::dsl::code_review_panes).execute(conn)?;
         diesel::delete(schema::ambient_agent_panes::dsl::ambient_agent_panes).execute(conn)?;
-        diesel::delete(schema::welcome_panes::dsl::welcome_panes).execute(conn)?;
         diesel::delete(schema::pane_leaves::dsl::pane_leaves).execute(conn)?;
         diesel::delete(schema::pane_branches::dsl::pane_branches).execute(conn)?;
         diesel::delete(schema::pane_nodes::dsl::pane_nodes).execute(conn)?;
@@ -1186,6 +1184,7 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
                             _ => serde_yaml::to_string(&group.color).ok(),
                         },
                         collapsed: group.collapsed,
+                        pinned: group.pinned,
                     })
                     .collect();
                 diesel::insert_into(schema::tab_groups::dsl::tab_groups)
@@ -1220,6 +1219,7 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
                     tab_group_id: tab
                         .group_id
                         .and_then(|group_id| tab_group_row_ids.get(&group_id).copied()),
+                    pinned: tab.pinned,
                 })
                 .collect();
 
@@ -1371,10 +1371,9 @@ fn save_pane_state(
         LeafContents::AmbientAgent(_) => AMBIENT_AGENT_PANE_KIND,
         LeafContents::ExecutionProfileEditor => EXECUTION_PROFILE_EDITOR_PANE_KIND,
         LeafContents::GetStarted => GET_STARTED_PANE_KIND,
-        LeafContents::Welcome { .. } => WELCOME_PANE_KIND,
         LeafContents::AIDocument(_) => AI_DOCUMENT_PANE_KIND,
         // Zap Wave 7-3: the `EnvironmentManagement` arm was physically deleted along with the variant.
-        LeafContents::SshServer { .. } => {
+        LeafContents::SshServer { .. } | LeafContents::NetworkLog => {
             // These pane types are filtered out before this function is
             // called; see `LeafContents::is_persisted` and the skip in
             // `save_app_state`. Reaching this arm would mean a `pane_nodes`
@@ -1586,17 +1585,6 @@ fn save_pane_state(
         LeafContents::GetStarted => {
             // Stateless
         }
-        LeafContents::Welcome { startup_directory } => {
-            let welcome_pane = model::NewWelcomePane {
-                id,
-                startup_directory: startup_directory
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().into_owned()),
-            };
-            diesel::insert_into(schema::welcome_panes::dsl::welcome_panes)
-                .values(welcome_pane)
-                .execute(conn)?;
-        }
         LeafContents::AIDocument(ai_document_snapshot) => match ai_document_snapshot {
             crate::app_state::AIDocumentPaneSnapshot::Local {
                 document_id,
@@ -1635,6 +1623,9 @@ fn save_pane_state(
             // Unreachable: filtered by `is_persisted` in `save_app_state`.
         }
         LeafContents::Image { .. } => {
+            // Unreachable: filtered by `is_persisted` in `save_app_state`.
+        }
+        LeafContents::NetworkLog => {
             // Unreachable: filtered by `is_persisted` in `save_app_state`.
         }
     }
@@ -2726,15 +2717,6 @@ fn read_node(conn: &mut SqliteConnection, node: model::PaneNode) -> Result<PaneN
                     }
                 }
                 GET_STARTED_PANE_KIND => LeafContents::GetStarted,
-                WELCOME_PANE_KIND => {
-                    let welcome_pane = schema::welcome_panes::dsl::welcome_panes
-                        .find(node.id)
-                        .select(model::WelcomePane::as_select())
-                        .first(conn)?;
-                    LeafContents::Welcome {
-                        startup_directory: welcome_pane.startup_directory.map(PathBuf::from),
-                    }
-                }
                 AI_DOCUMENT_PANE_KIND => {
                     let ai_document_pane = schema::ai_document_panes::dsl::ai_document_panes
                         .find(node.id)
@@ -2865,6 +2847,7 @@ fn read_sqlite_data(conn: &mut SqliteConnection) -> Result<PersistedData, Error>
                         name: group.name,
                         color,
                         collapsed: group.collapsed,
+                        pinned: group.pinned,
                     });
                 }
                 let saved_tabs: Vec<_> = tabs_for_window
@@ -2905,6 +2888,7 @@ fn read_sqlite_data(conn: &mut SqliteConnection) -> Result<PersistedData, Error>
                             left_panel,
                             right_panel,
                             group_id,
+                            pinned: tab.pinned,
                         })
                     })
                     .collect();

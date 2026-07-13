@@ -330,8 +330,11 @@ impl NotificationsModel {
         };
 
         match status {
-            // The agent starts working again -> the previous notification is invalidated.
-            ConversationStatus::InProgress => {
+            // When the agent resumes its work (or is automatically recovering from a
+            // transient failure), clear stale notifications.
+            ConversationStatus::InProgress
+            | ConversationStatus::TransientError
+            | ConversationStatus::WaitingForEvents => {
                 self.remove_notification_by_source(origin, ctx);
             }
             ConversationStatus::Success => {
@@ -486,6 +489,28 @@ pub enum NotificationsEvent {
     NotificationUpdated,
     /// All were marked as read.
     AllNotificationsMarkedRead,
+}
+
+impl ConversationStatus {
+    /// Returns true if the updating the conversation with this status should trigger some
+    /// notification to the user.
+    ///
+    /// Exhaustive match so a new `ConversationStatus` variant forces a
+    /// deliberate decision about whether it should fire a notification.
+    pub fn should_trigger_notification(&self) -> bool {
+        match self {
+            ConversationStatus::Success
+            | ConversationStatus::Blocked { .. }
+            | ConversationStatus::Error => true,
+            // Streaming hasn't reached a notable state; a recovering or
+            // yielded conversation is still active; user-cancellations are
+            // self-evident.
+            ConversationStatus::InProgress
+            | ConversationStatus::TransientError
+            | ConversationStatus::WaitingForEvents
+            | ConversationStatus::Cancelled => false,
+        }
+    }
 }
 
 fn is_terminal_view_visible(terminal_view_id: EntityId, app: &AppContext) -> bool {

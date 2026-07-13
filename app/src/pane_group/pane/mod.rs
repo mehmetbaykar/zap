@@ -22,14 +22,13 @@ pub(super) mod get_started_view;
 pub(super) mod image_pane;
 #[cfg(not(target_family = "wasm"))]
 pub(super) mod local_harness_launch;
+pub(super) mod network_log_pane;
 pub(super) mod notebook_pane;
 pub(super) mod settings_pane;
 pub(crate) mod sftp_pane;
 pub(crate) mod ssh_server_pane;
 pub(super) mod terminal_pane;
 pub mod view;
-pub(super) mod welcome_pane;
-pub(crate) mod welcome_view;
 pub mod workflow_pane;
 
 use std::any::Any;
@@ -37,6 +36,7 @@ use std::fmt::Display;
 
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::pane::get_started_view::GetStartedView;
+use crate::server::network_log_view::NetworkLogView;
 use crate::sftp_manager::browser::SftpBrowserView;
 use crate::ssh_manager::server_view::SshServerView;
 use crate::view_components::action_button::ActionButton;
@@ -64,14 +64,12 @@ use warpui::{
     Action, AppContext, Element, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity,
     View, ViewContext, ViewHandle, WeakModelHandle,
 };
-use welcome_view::WelcomeView;
 
 pub use self::view::{PaneHeaderAction, PaneHeaderCustomAction, PaneView, PaneViewEvent};
 use super::{ActivationReason, LeafContents, PaneGroup, PaneGroupAction};
 
 pub(super) fn init(app: &mut AppContext) {
     self::view::init(app);
-    welcome_view::init(app);
     get_started_view::init(app);
 }
 
@@ -148,9 +146,9 @@ pub(crate) enum IPaneType {
     AIDocument,
     ExecutionProfileEditor,
     GetStarted,
+    NetworkLog,
     SshServer,
     Sftp,
-    Welcome,
     DeferredPlaceholder,
     /// A pane type only for tests.
     #[cfg(test)]
@@ -174,9 +172,9 @@ impl Display for IPaneType {
             IPaneType::AIDocument => write!(f, "AI Document"),
             IPaneType::ExecutionProfileEditor => write!(f, "Execution Profile Editor"),
             IPaneType::GetStarted => write!(f, "GetStarted"),
+            IPaneType::NetworkLog => write!(f, "Network Log"),
             IPaneType::SshServer => write!(f, "SSH Server"),
             IPaneType::Sftp => write!(f, "SFTP"),
-            IPaneType::Welcome => write!(f, "Welcome"),
             IPaneType::DeferredPlaceholder => write!(f, "Placeholder"),
             #[cfg(test)]
             IPaneType::Dummy => write!(f, "Dummy"),
@@ -266,12 +264,12 @@ impl PaneId {
         Self::new_from_ctx(IPaneType::ExecutionProfileEditor, ctx)
     }
 
-    pub fn from_welcome_pane_ctx(ctx: &ViewContext<PaneView<WelcomeView>>) -> Self {
-        Self::new_from_ctx(IPaneType::Welcome, ctx)
-    }
-
     pub fn from_get_started_pane_ctx(ctx: &ViewContext<PaneView<GetStartedView>>) -> Self {
         Self::new_from_ctx(IPaneType::GetStarted, ctx)
+    }
+
+    pub fn from_network_log_pane_ctx(ctx: &ViewContext<PaneView<NetworkLogView>>) -> Self {
+        Self::new_from_ctx(IPaneType::NetworkLog, ctx)
     }
 
     pub fn from_ssh_server_pane_ctx(ctx: &ViewContext<PaneView<SshServerView>>) -> Self {
@@ -371,6 +369,12 @@ impl PaneId {
         Self::new(IPaneType::GetStarted, get_started_pane_view)
     }
 
+    pub fn from_network_log_pane_view(
+        network_log_pane_view: &ViewHandle<PaneView<NetworkLogView>>,
+    ) -> Self {
+        Self::new(IPaneType::NetworkLog, network_log_pane_view)
+    }
+
     pub fn from_ssh_server_pane_view(
         ssh_server_pane_view: &ViewHandle<PaneView<SshServerView>>,
     ) -> Self {
@@ -380,10 +384,6 @@ impl PaneId {
     /// Creates a [`PaneId`] from a [`PaneView<SftpBrowserView>`] entity ID.
     pub fn from_sftp_pane_view(sftp_pane_view: &ViewHandle<PaneView<SftpBrowserView>>) -> Self {
         Self::new(IPaneType::Sftp, sftp_pane_view)
-    }
-
-    pub fn from_welcome_pane_view(welcome_pane_view: &ViewHandle<PaneView<WelcomeView>>) -> Self {
-        Self::new(IPaneType::Welcome, welcome_pane_view)
     }
 
     #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
@@ -501,14 +501,14 @@ impl PaneId {
             IPaneType::GetStarted => {
                 ChildView::<PaneView<GetStartedView>>::with_id(self.0.pane_view_id).finish()
             }
+            IPaneType::NetworkLog => {
+                ChildView::<PaneView<NetworkLogView>>::with_id(self.0.pane_view_id).finish()
+            }
             IPaneType::SshServer => {
                 ChildView::<PaneView<SshServerView>>::with_id(self.0.pane_view_id).finish()
             }
             IPaneType::Sftp => {
                 ChildView::<PaneView<SftpBrowserView>>::with_id(self.0.pane_view_id).finish()
-            }
-            IPaneType::Welcome => {
-                ChildView::<PaneView<WelcomeView>>::with_id(self.0.pane_view_id).finish()
             }
             IPaneType::DeferredPlaceholder => warpui::elements::Empty::new().finish(),
             #[cfg(test)]

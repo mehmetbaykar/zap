@@ -7,10 +7,10 @@ use warpui_core::{AppContext, Element, SizeConstraint};
 use super::{RenderContext, RenderableBlock};
 use crate::editor::RunnableCommandModel;
 use crate::extract_block;
+use crate::render::BLOCK_FOOTER_HEIGHT;
 use crate::render::element::paint::{CursorData, CursorDisplayType};
 use crate::render::model::viewport::ViewportItem;
-use crate::render::model::{bounds, BlockItem, RenderState};
-use crate::render::BLOCK_FOOTER_HEIGHT;
+use crate::render::model::{BlockItem, RenderState, bounds};
 const MERMAID_RENDER_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct RenderableMermaidDiagram {

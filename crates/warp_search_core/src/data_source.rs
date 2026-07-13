@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use enum_iterator::{all, Sequence};
+use enum_iterator::{Sequence, all};
 use lazy_static::lazy_static;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
@@ -469,11 +469,6 @@ impl<T: Action + Clone> QueryResult<T> {
 
     pub fn detail_data(&self) -> Option<crate::item::SearchItemDetail> {
         self.item.detail_data()
-    }
-
-    /// Returns an optional deduplication key for this item from the [`SearchItem`].
-    pub fn dedup_key(&self) -> Option<String> {
-        self.item.dedup_key()
     }
 
     /// Returns whether this item is a static separator,

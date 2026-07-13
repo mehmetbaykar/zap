@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Local;
+pub use execute::run_agents::{RunAgentsExecutorEvent, RunAgentsSpawningSnapshot};
 pub(crate) use execute::{
     apply_edits, coerce_integer_args, FileReadResult, MalformedFinalLineProxyEvent,
 };
@@ -695,6 +696,79 @@ impl BlocklistAIActionModel {
         }
     }
 
+    /// Dispatches a `RunAgents` action with the user-edited local request
+    /// from the confirmation card.
+    pub fn execute_run_agents(
+        &mut self,
+        action_id: &AIAgentActionId,
+        request: ai::agent::action::RunAgentsRequest,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let mut found = None;
+        for (conversation_id, queue) in self.pending_actions.iter_mut() {
+            if let Some(action) = queue.iter_mut().find(|action| &action.id == action_id) {
+                found = Some((*conversation_id, action));
+                break;
+            }
+        }
+        let Some((conversation_id, action)) = found else {
+            log::warn!(
+                "BlocklistAIActionModel::execute_run_agents: no pending action for {action_id:?}"
+            );
+            return;
+        };
+        if !matches!(action.action, AIAgentActionType::RunAgents(_)) {
+            log::warn!(
+                "BlocklistAIActionModel::execute_run_agents: pending action {action_id:?} is not RunAgents"
+            );
+            return;
+        }
+        action.action = AIAgentActionType::RunAgents(request);
+        self.execute_action(action_id, conversation_id, ctx);
+    }
+
+    /// Records a denied local `RunAgents` request without dispatching children.
+    pub fn deny_run_agents(
+        &mut self,
+        action_id: &AIAgentActionId,
+        reason: String,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let mut found = None;
+        for (conversation_id, queue) in self.pending_actions.iter_mut() {
+            if let Some(index) = queue.iter().position(|action| &action.id == action_id) {
+                if let Some(action) = queue.remove(index) {
+                    found = Some((*conversation_id, action));
+                }
+                break;
+            }
+        }
+        let Some((conversation_id, action)) = found else {
+            log::warn!(
+                "BlocklistAIActionModel::deny_run_agents: no pending action for {action_id:?}"
+            );
+            return;
+        };
+        if !matches!(action.action, AIAgentActionType::RunAgents(_)) {
+            log::warn!(
+                "BlocklistAIActionModel::deny_run_agents: pending action {action_id:?} is not RunAgents"
+            );
+            self.pending_actions
+                .entry(conversation_id)
+                .or_default()
+                .push_front(action);
+            return;
+        }
+        let result = Arc::new(AIAgentActionResult {
+            id: action.id,
+            task_id: action.task_id,
+            result: AIAgentActionResultType::RunAgents(
+                ai::agent::action_result::RunAgentsResult::Denied { reason },
+            ),
+        });
+        self.handle_action_result(conversation_id, result, None, ctx);
+    }
+
     /// Attempts to execute the next pending action for the active conversation.
     pub fn execute_next_action_for_user(
         &mut self,
@@ -748,6 +822,21 @@ impl BlocklistAIActionModel {
                 self.terminal_view_id,
                 conversation_id,
                 ConversationStatus::InProgress,
+                ctx,
+            );
+        });
+    }
+
+    fn update_conversation_waiting_for_events_status(
+        &self,
+        conversation_id: AIConversationId,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
+            history_model.update_conversation_status(
+                self.terminal_view_id,
+                conversation_id,
+                ConversationStatus::WaitingForEvents,
                 ctx,
             );
         });
@@ -828,6 +917,7 @@ impl BlocklistAIActionModel {
 
         let action_id = action.id.clone();
         let phase = self.action_phase_for_action(&action, ctx);
+        let is_wait_for_events = matches!(action.action, AIAgentActionType::WaitForEvents(_));
         log::info!(
             "[byop-diag] try_to_execute_action: enter action_id={action_id:?} \
              is_user_initiated={is_user_initiated} phase={phase:?}"
@@ -841,7 +931,11 @@ impl BlocklistAIActionModel {
                 log::info!(
                     "[byop-diag] try_to_execute_action: ExecutedAsync action_id={action_id:?}"
                 );
-                self.update_conversation_in_progress_status(conversation_id, ctx);
+                if is_wait_for_events {
+                    self.update_conversation_waiting_for_events_status(conversation_id, ctx);
+                } else {
+                    self.update_conversation_in_progress_status(conversation_id, ctx);
+                }
                 self.add_running_action(conversation_id, action_id, phase);
                 Some(StartedAction::Async { phase })
             }

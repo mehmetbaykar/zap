@@ -1,9 +1,9 @@
 use std::io;
 
-use clap_complete::aot::{generate, Shell};
+use clap_complete::aot::{Shell, generate};
 use warp_core::channel::ChannelState;
 
-use crate::{binary_name, Args};
+use crate::{Args, binary_name};
 
 /// Generate shell completions for the Zap CLI and write them to stdout.
 pub fn generate_to_stdout(shell: Option<Shell>) -> anyhow::Result<()> {

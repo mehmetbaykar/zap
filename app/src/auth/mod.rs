@@ -29,6 +29,7 @@ use crate::server_time::ServerTimestamp;
 pub const TEST_USER_EMAIL: &str = "test_user@warp.dev";
 pub const TEST_USER_UID: &str = "test_user_uid";
 
+pub mod provider_keys_modal;
 pub mod user_uid;
 
 pub use user_uid::UserUid;
@@ -850,4 +851,6 @@ impl SingletonEntity for AuthManager {}
 /// The `init` / `auth_view_body::init` / `auth_override_warning_body::init` / `login_slide::init` /
 /// `paste_auth_token_modal::init` submodules originally mounted in `init` have all been physically
 /// deleted.
-pub fn init(_app: &mut AppContext) {}
+pub fn init(app: &mut AppContext) {
+    provider_keys_modal::init(app);
+}

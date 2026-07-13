@@ -1,10 +1,10 @@
-use crate::EntityIdSet;
 use super::*;
 use crate::core::View;
 use crate::elements::{ConstrainedBox, Rect, Scrollable, ScrollbarWidth};
 use crate::platform::WindowStyle;
 use crate::prelude::Fill;
 use crate::units::{IntoPixels, Pixels};
+use crate::EntityIdSet;
 use crate::{
     App, AppContext, Entity, Event, Presenter, TypedActionView, ViewContext, WindowInvalidation,
 };

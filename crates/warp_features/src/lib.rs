@@ -322,10 +322,6 @@ pub enum FeatureFlag {
     /// Gates the bundled skill-based implementation of PR comment fetching.
     PRCommentsSkill,
 
-    /// An entrypoint pane type to launch other pane types from a search palette. The default view
-    /// when creating a tab.
-    WelcomeTab,
-
     /// A new first-time user experience which prioritizes choosing a coding repository.
     GetStartedTab,
 
@@ -741,6 +737,12 @@ pub enum FeatureFlag {
     /// and whole tab groups so they stay at the front of the tab list and
     /// are protected from reordering.
     PinnedTabs,
+    /// Enables local OpenAI-compatible endpoints configured by the user.
+    CustomInferenceEndpoints,
+
+    /// Gates the SuperGrok feature, which lets users
+    /// connect a Grok subscription instead of pasting an API key.
+    SuperGrok,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -811,6 +813,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::SshRemoteServer,
     FeatureFlag::AsyncFind,
     FeatureFlag::RestorePromptOnInlineModelSelectorSearch,
+    FeatureFlag::WarpControlCli,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Zap).

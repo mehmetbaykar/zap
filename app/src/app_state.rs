@@ -70,6 +70,7 @@ pub struct TabGroupSnapshot {
     pub name: Option<String>,
     pub color: SelectedTabColor,
     pub collapsed: bool,
+    pub pinned: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -82,6 +83,8 @@ pub struct TabSnapshot {
     pub right_panel: Option<RightPanelSnapshot>,
     /// Tab group this tab belongs to, if any.
     pub group_id: Option<TabGroupId>,
+    /// True when this tab is pinned to the front of the tab list.
+    pub pinned: bool,
 }
 
 impl TabSnapshot {
@@ -150,11 +153,8 @@ pub enum LeafContents {
     ExecutionProfileEditor,
     CodeReview(CodeReviewPaneSnapshot),
     AmbientAgent(AmbientAgentPaneSnapshot),
-    /// An entrypoint pane type to launch other pane types from a search palette. The default view
-    /// when creating a tab.
-    Welcome {
-        startup_directory: Option<PathBuf>,
-    },
+    /// In-memory network log. Never persisted or restored.
+    NetworkLog,
     /// A new first-time user experience which prioritizes choosing a coding repository.
     GetStarted,
     /// SSH server editor pane (openWarp-only). References the `ssh_servers.node_id` primary key to
@@ -188,7 +188,7 @@ impl LeafContents {
             // variant.
             // SSH server editor: the data (host/user/...) is persisted in the ssh_servers table, and
             // the pane itself is just a view, so closing and reopening makes no difference.
-            LeafContents::SshServer { .. } => false,
+            LeafContents::SshServer { .. } | LeafContents::NetworkLog => false,
             // SFTP browser: the remote filesystem depends on an active SSH connection, so the pane
             // is not restorable.
             LeafContents::Sftp { .. } => false,
@@ -212,7 +212,6 @@ impl LeafContents {
             | LeafContents::ExecutionProfileEditor
             | LeafContents::CodeReview(_)
             | LeafContents::AmbientAgent(_)
-            | LeafContents::Welcome { .. }
             | LeafContents::GetStarted => true,
         }
     }

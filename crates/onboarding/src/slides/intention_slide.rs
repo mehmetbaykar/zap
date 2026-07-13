@@ -21,11 +21,10 @@ use warpui_core::{
 };
 
 use super::OnboardingSlide;
-use crate::localization::localized;
-use crate::model::OnboardingStateModel;
+use crate::model::{NoAiConfirmationSource, OnboardingStateModel};
 use crate::slides::{bottom_nav, layout, slide_content};
 use crate::visuals::{intention_terminal_visual, intention_visual};
-use crate::OnboardingIntention;
+use crate::{OnboardingIntention, AI_FEATURES};
 
 #[derive(Debug, Clone)]
 pub enum IntentionSlideAction {
@@ -84,7 +83,7 @@ impl IntentionSlide {
 
         let title = appearance
             .ui_builder()
-            .paragraph(localized("onboarding-intention-title", "Welcome to Zap"))
+            .paragraph("Welcome to Warp")
             .with_style(UiComponentStyles {
                 font_size: Some(36.),
                 font_weight: Some(Weight::Medium),
@@ -94,7 +93,7 @@ impl IntentionSlide {
             .finish();
 
         let subtitle = FormattedTextElement::from_str(
-            localized("onboarding-intention-subtitle", "How do you want to work?"),
+            "How do you want to work?",
             appearance.ui_font_family(),
             16.,
         )
@@ -203,10 +202,7 @@ impl IntentionSlide {
         let header_row = {
             let label = appearance
                 .ui_builder()
-                .paragraph(localized(
-                    "onboarding-intention-agent-title",
-                    "Build faster with AI agents",
-                ))
+                .paragraph("Build faster with AI agents")
                 .with_style(UiComponentStyles {
                     font_size: Some(16.),
                     font_weight: Some(Weight::Semibold),
@@ -244,10 +240,7 @@ impl IntentionSlide {
         };
 
         let description = FormattedTextElement::from_str(
-            localized(
-                "onboarding-intention-agent-description",
-                "An agent-first experience with best in class terminal support. Get terminal and agent driven development AI features like:",
-            ),
+            "An agent-first experience with best in class terminal support. Get terminal and agent driven development AI features like:",
             appearance.ui_font_family(),
             14.,
         )
@@ -258,26 +251,7 @@ impl IntentionSlide {
         .finish();
 
         let checklist = {
-            let items = [
-                localized("onboarding-ai-feature-warp-agents", "Zap agents"),
-                localized(
-                    "onboarding-ai-feature-oz-cloud-agents-platform",
-                    "Oz local agents platform",
-                ),
-                localized(
-                    "onboarding-ai-feature-next-command-predictions",
-                    "Next command predictions",
-                ),
-                localized(
-                    "onboarding-ai-feature-prompt-suggestions",
-                    "Prompt suggestions",
-                ),
-                localized(
-                    "onboarding-ai-feature-remote-control-agents",
-                    "Remote control with Claude Code, Codex, and other agents",
-                ),
-                localized("onboarding-ai-feature-agents-over-ssh", "Agents over SSH"),
-            ];
+            let items = AI_FEATURES;
             // When the agent card is selected, use the theme's green to match the
             // "Blended ANSI/green_fg" token in the design.
             let check_fill = if is_selected {
@@ -288,14 +262,14 @@ impl IntentionSlide {
             let mut col = Flex::column()
                 .with_main_axis_size(MainAxisSize::Min)
                 .with_cross_axis_alignment(CrossAxisAlignment::Start);
-            for item in items {
+            for &item in items {
                 let icon_el = ConstrainedBox::new(Icon::Check.to_warpui_icon(check_fill).finish())
                     .with_width(16.)
                     .with_height(16.)
                     .finish();
                 let text_el = appearance
                     .ui_builder()
-                    .paragraph(item)
+                    .paragraph(item.to_string())
                     .with_style(UiComponentStyles {
                         font_size: Some(14.),
                         font_weight: Some(Weight::Normal),
@@ -347,10 +321,7 @@ impl IntentionSlide {
 
         let label = appearance
             .ui_builder()
-            .paragraph(localized(
-                "onboarding-intention-terminal-title",
-                "Just use the terminal",
-            ))
+            .paragraph("Just use the terminal")
             .with_style(UiComponentStyles {
                 font_size: Some(16.),
                 font_weight: Some(Weight::Semibold),
@@ -363,10 +334,7 @@ impl IntentionSlide {
         let badge = {
             let badge_text = appearance
                 .ui_builder()
-                .paragraph(localized(
-                    "onboarding-intention-terminal-badge",
-                    "No AI features",
-                ))
+                .paragraph("No AI features")
                 .with_style(UiComponentStyles {
                     font_size: Some(12.),
                     font_weight: Some(Weight::Semibold),
@@ -392,10 +360,7 @@ impl IntentionSlide {
             .finish();
 
         let description = FormattedTextElement::from_str(
-            localized(
-                "onboarding-intention-terminal-description",
-                "A modern terminal optimized for speed, context, and control without AI.",
-            ),
+            "A modern terminal optimized for speed, context, and control without AI.",
             appearance.ui_font_family(),
             14.,
         )
@@ -423,7 +388,7 @@ impl IntentionSlide {
         let back_button = self.back_button.render(
             appearance,
             button::Params {
-                content: button::Content::Label(localized("common-back", "Back").into()),
+                content: button::Content::Label("Back".into()),
                 theme: &button::themes::Naked,
                 options: button::Options {
                     on_click: Some(Box::new(|ctx, _app, _pos| {
@@ -436,9 +401,9 @@ impl IntentionSlide {
 
         let new_settings_modes = FeatureFlag::ZapNewSettingsModes.is_enabled();
         let next_text = if !new_settings_modes && selected_index == 1 {
-            localized("common-get-warping", "Get Zapping")
+            "Get Warping"
         } else {
-            localized("common-next", "Next")
+            "Next"
         };
         let enter = Keystroke::parse("enter").unwrap_or_default();
         let next_button = self.next_button.render(
@@ -558,8 +523,14 @@ impl IntentionSlide {
     fn next(&mut self, ctx: &mut ViewContext<Self>) {
         self.onboarding_state.update(ctx, |model, ctx| {
             if FeatureFlag::ZapNewSettingsModes.is_enabled() {
-                // Always advance to Customize slide; both intentions continue the flow.
-                model.next(ctx);
+                match model.intention() {
+                    // "Just use the terminal" confirms leaving AI behind before advancing.
+                    OnboardingIntention::Terminal => {
+                        model.request_no_ai_confirmation(NoAiConfirmationSource::Intention, ctx);
+                    }
+                    // Agent intention routes to the next step (the AI-setup fork).
+                    OnboardingIntention::AgentDrivenDevelopment => model.next(ctx),
+                }
             } else {
                 match model.intention() {
                     OnboardingIntention::Terminal => {

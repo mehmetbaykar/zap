@@ -167,6 +167,7 @@ fn every_host_scoped_request_has_a_response_disposition() {
             M::CreateDirectory(_) => "client::create_directory",
             M::ReadFileChunk(_) => "client::read_file_chunk",
             M::WriteFileChunk(_) => "client::write_file_chunk",
+            M::RipgrepSearch(_) => "manager::start_ripgrep_search",
         }
     }
 

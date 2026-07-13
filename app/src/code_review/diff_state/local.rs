@@ -245,7 +245,7 @@ impl LocalDiffStateModel {
                         ctx.emit(DiffStateModelEvent::SingleFileUpdated { path, diff });
                     }
                     Err(err) => {
-                        warp_core::report_error!(err.as_ref());
+                        err.report_and_log();
                         send_telemetry_from_ctx!(
                             CodeReviewTelemetryEvent::LoadDiffFailed {
                                 error: err.to_string(),
@@ -1559,7 +1559,6 @@ impl LocalDiffStateModel {
             has_head_commit,
             unpushed_commits,
             upstream_ref,
-            pr_info: None,
         })
     }
 
@@ -1625,7 +1624,7 @@ impl LocalDiffStateModel {
             }
             Err(e) => {
                 let err = DiffStateError::from(e);
-                warp_core::report_error!(&err);
+                err.report_and_log();
                 send_telemetry_from_ctx!(
                     CodeReviewTelemetryEvent::CalculateDiffMetadataFailed {
                         error: err.to_string(),
@@ -1667,7 +1666,7 @@ impl LocalDiffStateModel {
             Err(e) => {
                 self.tracked_diff_load_start_time = None;
                 let err = DiffStateError::from_message(e);
-                warp_core::report_error!(&err);
+                err.report_and_log();
                 send_telemetry_from_ctx!(
                     CodeReviewTelemetryEvent::LoadDiffFailed {
                         error: err.to_string(),

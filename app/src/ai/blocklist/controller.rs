@@ -454,12 +454,19 @@ impl InputQuery {
     fn query(&self) -> String {
         match &self.input_query {
             InputQueryType::UserSubmittedQueryFromInput { query, .. } => query.clone(),
-            InputQueryType::AIInputType { ai_input } => ai_input.user_query().unwrap_or_default(),
+            InputQueryType::AIInputType { ai_input } => {
+                ai_input.display_query().unwrap_or_default()
+            }
         }
     }
 }
 
 impl BlocklistAIController {
+    /// Returns bundled-skill catalog origin for this controller's active session.
+    pub fn skill_path_origin(&self, ctx: &AppContext) -> SkillPathOrigin {
+        SessionContext::from_session(self.active_session.as_ref(ctx), ctx).skill_path_origin()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_model: ModelHandle<BlocklistAIInputModel>,
@@ -2846,6 +2853,7 @@ impl BlocklistAIController {
                     waiting_for_network: false,
                     is_user_error: false,
                 },
+                /*recovery_pending*/ false,
                 &response_stream_id,
                 conversation_id,
                 self.terminal_view_id,
@@ -3232,6 +3240,27 @@ impl BlocklistAIController {
             .has_active_stream_for_conversation(conversation_id, ctx)
     }
 
+    #[cfg(test)]
+    pub fn register_mock_stream_for_test(
+        &mut self,
+        stream_id: ResponseStreamId,
+        conversation_id: AIConversationId,
+        stream: ModelHandle<ResponseStream>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let stream_for_subscription = stream.clone();
+        ctx.subscribe_to_model(&stream, move |controller, event, ctx| {
+            controller.handle_response_stream_event(false, event, &stream_for_subscription, ctx);
+        });
+        self.in_flight_response_streams.register_new_stream(
+            stream_id,
+            conversation_id,
+            stream,
+            CancellationReason::ManuallyCancelled,
+            ctx,
+        );
+    }
+
     pub fn cancel_conversation_progress(
         &mut self,
         conversation_id: AIConversationId,
@@ -3461,18 +3490,23 @@ impl BlocklistAIController {
                             // After localization there is no "buy extra credits" business in the BYOP scenario.
                         }
 
-                        let mut renderable_error: RenderableAIError = e.as_ref().into();
+                        let recovery_pending = response_stream
+                            .as_ref(ctx)
+                            .should_resume_conversation_after_stream_finished();
+                        let mut renderable_error: RenderableAIError = (&e).into();
                         if let RenderableAIError::Other {
+                            will_attempt_resume,
+                            waiting_for_network,
+                            ..
+                        }
+                        | RenderableAIError::TransientNetworkError {
                             will_attempt_resume,
                             waiting_for_network,
                             ..
                         } = &mut renderable_error
                         {
-                            let should_attempt_resume = response_stream
-                                .as_ref(ctx)
-                                .should_resume_conversation_after_stream_finished();
-                            *will_attempt_resume |= should_attempt_resume;
-                            if should_attempt_resume {
+                            *will_attempt_resume |= recovery_pending;
+                            if recovery_pending {
                                 let network_status = NetworkStatus::as_ref(ctx);
                                 *waiting_for_network = !network_status.is_online();
                             }
@@ -3481,6 +3515,7 @@ impl BlocklistAIController {
                         history_model.update(ctx, |history_model, ctx| {
                             history_model.mark_response_stream_completed_with_error(
                                 renderable_error,
+                                recovery_pending,
                                 &stream_id,
                                 conversation_id,
                                 self.terminal_view_id,
@@ -3568,6 +3603,7 @@ impl BlocklistAIController {
                                 waiting_for_network: false,
                                 is_user_error: false,
                             },
+                            /*recovery_pending*/ false,
                             &stream_id,
                             conversation_id,
                             self.terminal_view_id,
@@ -3852,6 +3888,7 @@ impl BlocklistAIController {
                             waiting_for_network: false,
                             is_user_error: false,
                         },
+                        /*recovery_pending*/ false,
                         stream_id,
                         conversation_id,
                         self.terminal_view_id,
@@ -3864,6 +3901,7 @@ impl BlocklistAIController {
                 history_model.update(ctx, |history_model, ctx| {
                     history_model.mark_response_stream_completed_with_error(
                         RenderableAIError::ContextWindowExceeded(error_message.to_owned()),
+                        /*recovery_pending*/ false,
                         stream_id,
                         conversation_id,
                         self.terminal_view_id,
@@ -3877,6 +3915,7 @@ impl BlocklistAIController {
                         RenderableAIError::QuotaLimit {
                             user_display_message: None,
                         },
+                        /*recovery_pending*/ false,
                         stream_id,
                         conversation_id,
                         self.terminal_view_id,
@@ -3894,6 +3933,7 @@ impl BlocklistAIController {
                             waiting_for_network: false,
                             is_user_error: false,
                         },
+                        /*recovery_pending*/ false,
                         stream_id,
                         conversation_id,
                         self.terminal_view_id,
@@ -3931,6 +3971,7 @@ impl BlocklistAIController {
                 history_model.update(ctx, |history_model, ctx| {
                     history_model.mark_response_stream_completed_with_error(
                         error,
+                        /*recovery_pending*/ false,
                         stream_id,
                         conversation_id,
                         self.terminal_view_id,
@@ -3951,6 +3992,7 @@ impl BlocklistAIController {
                             waiting_for_network: false,
                             is_user_error: false,
                         },
+                        /*recovery_pending*/ false,
                         stream_id,
                         conversation_id,
                         self.terminal_view_id,
@@ -3963,6 +4005,7 @@ impl BlocklistAIController {
                 history_model.update(ctx, |history_model, ctx| {
                     history_model.mark_response_stream_completed_with_error(
                         RenderableAIError::ContextWindowExceeded(error_message.to_owned()),
+                        /*recovery_pending*/ false,
                         stream_id,
                         conversation_id,
                         self.terminal_view_id,
