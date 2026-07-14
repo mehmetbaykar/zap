@@ -13,7 +13,7 @@ use settings::EditorChoice;
 use warp_util::path::LineAndColumnArg;
 use warpui::{AppContext, SingletonEntity};
 
-pub use self::settings::{EditorLayout, EditorSettings};
+pub use self::settings::{AutosaveMode, EditorLayout, EditorSettings};
 
 pub const SUPPORTED_EDITORS: &[Editor] = &[
     Editor::VSCode,

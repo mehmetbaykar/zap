@@ -296,6 +296,15 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "local_fs")]
+    fn test_autosave_default_is_after_delay() {
+        use crate::util::file::external_editor::settings::Autosave;
+        use crate::util::file::external_editor::AutosaveMode;
+
+        assert_eq!(Autosave::default_value(), AutosaveMode::AfterDelay);
+    }
+
+    #[test]
     fn test_renders_in_warp_notebook_viewer() {
         // Markdown always renders in the notebook viewer, independent of the flag.
         let off = FeatureFlag::JupyterNotebookRendering.override_enabled(false);

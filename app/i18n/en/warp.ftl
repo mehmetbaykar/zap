@@ -2273,6 +2273,10 @@ settings-external-editor-tabbed-desc = When this setting is on, any files opened
 settings-external-editor-prefer-markdown = Open Markdown files in Zap's Markdown Viewer by default
 settings-external-editor-layout-split-pane = Split Pane
 settings-external-editor-layout-new-tab = New Tab
+settings-external-editor-choose-autosave = Autosave edited files
+settings-external-editor-autosave-desc = Automatically save changes a short time after you stop typing.
+settings-external-editor-autosave-off = Off
+settings-external-editor-autosave-after-delay = After delay
 settings-external-editor-default-app = Default App
 
 # =============================================================================

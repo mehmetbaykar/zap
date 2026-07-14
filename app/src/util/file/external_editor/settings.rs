@@ -4,6 +4,29 @@ use settings::{RespectUserSyncSetting, SupportedPlatforms, SyncToCloud};
 
 pub use crate::util::openable_file_type::EditorLayout;
 
+/// When the code editor writes user edits back to disk automatically.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    schemars::JsonSchema,
+    settings_value::SettingsValue,
+)]
+#[schemars(
+    description = "When the code editor saves edits to disk automatically.",
+    rename_all = "snake_case"
+)]
+pub enum AutosaveMode {
+    /// Never autosave; the user saves manually with Cmd/Ctrl+S.
+    Off,
+    /// Save automatically a short time after the last edit.
+    AfterDelay,
+}
+
 #[derive(
     Debug,
     Clone,
@@ -99,6 +122,17 @@ define_settings_group!(EditorSettings, settings: [
         private: false,
         toml_path: "code.editor.open_file_layout",
         description: "The layout used when opening files in the editor.",
+    },
+    autosave: Autosave {
+        type: AutosaveMode,
+        default: AutosaveMode::AfterDelay,
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "code.editor.autosave",
+        max_table_depth: 0,
+        description: "When the code editor saves edits to disk automatically.",
     },
     prefer_markdown_viewer: PreferMarkdownViewer {
         type: bool,

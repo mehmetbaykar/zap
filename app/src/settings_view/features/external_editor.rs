@@ -16,8 +16,8 @@ use crate::settings_view::settings_page::{
     render_body_item, render_dropdown_item, AdditionalInfo, LocalOnlyIconState, ToggleState,
 };
 use crate::util::file::external_editor::settings::{
-    EditorChoice, EditorLayout, OpenCodePanelsFileEditor, OpenFileEditor, OpenFileLayout,
-    PreferMarkdownViewer, PreferTabbedEditorView,
+    Autosave, AutosaveMode, EditorChoice, EditorLayout, OpenCodePanelsFileEditor, OpenFileEditor,
+    OpenFileLayout, PreferMarkdownViewer, PreferTabbedEditorView,
 };
 use crate::util::file::external_editor::{EditorSettings, SUPPORTED_EDITORS};
 use crate::view_components::{Dropdown, DropdownItem};
@@ -30,6 +30,7 @@ pub enum ExternalEditorAction {
     SetEditor(EditorChoice),
     SetCodePanelsEditor(EditorChoice),
     SetLayout(EditorLayout),
+    SetAutosave(AutosaveMode),
     TogglePreferMarkdownViewer,
     ToggleTabbedEditorView,
     OpenUrl(String),
@@ -39,6 +40,7 @@ pub struct ExternalEditorView {
     editor_dropdown: ViewHandle<Dropdown<ExternalEditorAction>>,
     code_panels_editor_dropdown: ViewHandle<Dropdown<ExternalEditorAction>>,
     layout_dropdown: ViewHandle<Dropdown<ExternalEditorAction>>,
+    autosave_dropdown: ViewHandle<Dropdown<ExternalEditorAction>>,
     tabbed_editor_view_mouse_state: SwitchStateHandle,
     prefer_markdown_viewer_switch: SwitchStateHandle,
     markdown_viewer_mouse_state: MouseStateHandle,
@@ -77,6 +79,12 @@ impl ExternalEditorView {
             Self::init_layout_dropdown(&layout_to_open_files, &mut dropdown, ctx);
             dropdown
         });
+        let autosave_mode = *settings.as_ref(ctx).autosave;
+        let autosave_dropdown = ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = Dropdown::new(ctx);
+            Self::init_autosave_dropdown(&autosave_mode, &mut dropdown, ctx);
+            dropdown
+        });
         ctx.subscribe_to_model(
             &EditorSettings::handle(ctx),
             |me, editor_settings, _, ctx| {
@@ -98,6 +106,10 @@ impl ExternalEditorView {
                         ctx,
                     );
                 });
+                me.autosave_dropdown.update(ctx, |dropdown, ctx| {
+                    let mode = *editor_settings.as_ref(ctx).autosave;
+                    Self::init_autosave_dropdown(&mode, dropdown, ctx);
+                });
                 ctx.notify()
             },
         );
@@ -106,6 +118,7 @@ impl ExternalEditorView {
             editor_dropdown,
             code_panels_editor_dropdown,
             layout_dropdown,
+            autosave_dropdown,
             tabbed_editor_view_mouse_state: Default::default(),
             prefer_markdown_viewer_switch: Default::default(),
             markdown_viewer_mouse_state: Default::default(),
@@ -135,6 +148,32 @@ impl ExternalEditorView {
         match layout_to_open_files {
             EditorLayout::SplitPane => dropdown.set_selected_by_name(split_pane_text, ctx),
             EditorLayout::NewTab => dropdown.set_selected_by_name(new_tab_text, ctx),
+        };
+    }
+
+    fn init_autosave_dropdown(
+        autosave_mode: &AutosaveMode,
+        dropdown: &mut Dropdown<ExternalEditorAction>,
+        ctx: &mut ViewContext<Dropdown<ExternalEditorAction>>,
+    ) {
+        let off_text = crate::t!("settings-external-editor-autosave-off");
+        let after_delay_text = crate::t!("settings-external-editor-autosave-after-delay");
+
+        let items = vec![
+            DropdownItem::new(
+                off_text.clone(),
+                ExternalEditorAction::SetAutosave(AutosaveMode::Off),
+            ),
+            DropdownItem::new(
+                after_delay_text.clone(),
+                ExternalEditorAction::SetAutosave(AutosaveMode::AfterDelay),
+            ),
+        ];
+
+        dropdown.set_items(items, ctx);
+        match autosave_mode {
+            AutosaveMode::Off => dropdown.set_selected_by_name(off_text, ctx),
+            AutosaveMode::AfterDelay => dropdown.set_selected_by_name(after_delay_text, ctx),
         };
     }
 
@@ -221,6 +260,21 @@ impl ExternalEditorView {
             TelemetryEvent::FeaturesPageAction {
                 action: "SetLayout".to_string(),
                 value: format!("{layout:?}")
+            },
+            ctx
+        );
+    }
+
+    // Handles [`ExternalEditorAction::SetAutosave`] by updating the autosave mode.
+    fn set_autosave(&mut self, mode: &AutosaveMode, ctx: &mut ViewContext<Self>) {
+        EditorSettings::handle(ctx).update(ctx, |settings, ctx| {
+            report_if_error!(settings.autosave.set_value(*mode, ctx));
+        });
+
+        send_telemetry_from_ctx!(
+            TelemetryEvent::FeaturesPageAction {
+                action: "SetAutosave".to_string(),
+                value: format!("{mode:?}")
             },
             ctx
         );
@@ -321,10 +375,26 @@ impl View for ExternalEditorView {
             &self.layout_dropdown,
         );
 
+        let autosave = render_dropdown_item(
+            appearance,
+            &crate::t!("settings-external-editor-choose-autosave"),
+            Some(&crate::t!("settings-external-editor-autosave-desc")),
+            None,
+            LocalOnlyIconState::for_setting(
+                Autosave::storage_key(),
+                Autosave::sync_to_cloud(),
+                &mut self.local_only_icon_states.borrow_mut(),
+                app,
+            ),
+            None,
+            &self.autosave_dropdown,
+        );
+
         let mut column = Flex::column()
             .with_child(default_editor)
             .with_child(code_panels_editor)
-            .with_child(default_layout);
+            .with_child(default_layout)
+            .with_child(autosave);
 
         if FeatureFlag::TabbedEditorView.is_enabled() {
             column.add_child(render_body_item::<ExternalEditorAction>(
@@ -397,6 +467,7 @@ impl TypedActionView for ExternalEditorView {
                 self.set_code_panels_editor(editor, ctx)
             }
             ExternalEditorAction::SetLayout(layout) => self.set_layout(layout, ctx),
+            ExternalEditorAction::SetAutosave(mode) => self.set_autosave(mode, ctx),
             ExternalEditorAction::TogglePreferMarkdownViewer => {
                 self.toggle_prefer_markdown_viewer(ctx)
             }

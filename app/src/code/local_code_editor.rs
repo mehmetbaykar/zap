@@ -70,6 +70,7 @@ use crate::code_review::comments::CommentId;
 use crate::menu::{Event, Menu, MenuItem, MenuItemFields};
 use crate::settings::{AISettings, CodeSettings};
 use crate::terminal::TerminalView;
+use crate::util::file::external_editor::{AutosaveMode, EditorSettings};
 use crate::workspace::WorkspaceAction;
 
 const DROP_SHADOW_COLOR: ColorU = ColorU {
@@ -80,6 +81,11 @@ const DROP_SHADOW_COLOR: ColorU = ColorU {
 };
 
 const HOVER_DEBOUNCE_PERIOD: Duration = Duration::from_millis(500);
+
+/// How long after the last user edit to autosave, when `code.editor.autosave` is
+/// `AfterDelay`. Rapid edits reset the timer (debounced), so this is the idle gap
+/// after typing stops before the buffer is written to disk.
+const AUTOSAVE_DEBOUNCE_PERIOD: Duration = Duration::from_millis(1000);
 
 use super::diff_viewer::DiffViewer;
 use super::editor::scroll::{ScrollPosition, ScrollTrigger};
@@ -287,6 +293,9 @@ pub struct LocalCodeEditorView {
     context_menu_state: ContextMenuState,
     /// Channel for debouncing hover requests.
     hover_debounce_tx: async_channel::Sender<CharOffset>,
+    /// Signals a pending autosave after a user edit; consumed by a debounced
+    /// stream so only the last edit in a burst triggers a save.
+    autosave_debounce_tx: async_channel::Sender<()>,
     /// State for the LSP hover tooltip.
     pub(super) lsp_hover_state: LspHoverState,
     /// Pending scroll position to apply after the file is loaded. This is used when
@@ -334,6 +343,9 @@ impl LocalCodeEditorView {
                 if origin.from_user() {
                     me.was_edited = true;
                     ctx.emit(LocalCodeEditorEvent::UserEdited);
+                    // Ping the debounced autosave; it writes to disk once edits settle
+                    // (only when `code.editor.autosave` is `AfterDelay`).
+                    let _ = me.autosave_debounce_tx.try_send(());
                 }
             }
             CodeEditorEvent::VimEscapeInNormalMode => {
@@ -470,6 +482,16 @@ impl LocalCodeEditorView {
             |_, _| {},
         );
 
+        // Set up debounce for autosave. Each user edit pings this channel; the
+        // debounced stream fires once after edits settle, and `autosave_if_enabled`
+        // writes to disk only when `code.editor.autosave` is `AfterDelay`.
+        let (autosave_debounce_tx, autosave_debounce_rx) = async_channel::unbounded();
+        ctx.spawn_stream_local(
+            debounce(AUTOSAVE_DEBOUNCE_PERIOD, autosave_debounce_rx),
+            |me, _, ctx| me.autosave_if_enabled(ctx),
+            |_, _| {},
+        );
+
         let model = Self {
             editor,
             diff_type,
@@ -488,6 +510,7 @@ impl LocalCodeEditorView {
             context_menu,
             context_menu_state: Default::default(),
             hover_debounce_tx,
+            autosave_debounce_tx,
             lsp_hover_state: LspHoverState::None,
             pending_scroll_on_load: None,
             processed_diagnostics: Vec::new(),
@@ -1636,6 +1659,26 @@ impl LocalCodeEditorView {
         RemoteServerManager::as_ref(app)
             .client_for_host(&remote_path.host_id)
             .is_none()
+    }
+
+    /// Debounced autosave target. Writes the buffer to disk when the user has
+    /// enabled `code.editor.autosave = AfterDelay` and there are unsaved changes.
+    /// No-op otherwise, so the manual Cmd/Ctrl+S path is unaffected when autosave
+    /// is `Off`. Save errors surface through the usual async FailedToSave banner;
+    /// a remote-disconnected editor is skipped (the user is warned separately).
+    fn autosave_if_enabled(&mut self, ctx: &mut ViewContext<Self>) {
+        if !matches!(
+            *EditorSettings::as_ref(ctx).autosave,
+            AutosaveMode::AfterDelay
+        ) {
+            return;
+        }
+        if !self.has_unsaved_changes(ctx) {
+            return;
+        }
+        if let Err(err) = self.save_local(ctx) {
+            log::debug!("autosave skipped: {err:?}");
+        }
     }
 
     /// Save the file to the local file system (or remotely via the remote server).
