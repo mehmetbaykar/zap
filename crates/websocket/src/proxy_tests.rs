@@ -9,6 +9,16 @@ use super::*;
 /// Tests that manipulate env vars must hold this lock to avoid races.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+/// The global proxy-config slot defaults to `ProxyMode::Off`, which makes
+/// `resolve_proxy` return before the environment-variable path these tests
+/// exercise. Force `System` mode so env parsing is reachable.
+fn use_system_proxy_mode() {
+    set_global_proxy_config(ProxyConfig {
+        mode: ProxyMode::System,
+        ..Default::default()
+    });
+}
+
 fn clear_proxy_env() {
     for var in [
         "HTTPS_PROXY",
@@ -46,6 +56,7 @@ fn resolved_proxy_plain(host: &str) -> Option<ProxyInfo> {
 fn resolve_proxy_returns_none_when_no_env_vars_set() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     assert!(resolved_proxy_tls("example.com").is_none());
     assert!(resolved_proxy_plain("example.com").is_none());
 }
@@ -54,6 +65,7 @@ fn resolve_proxy_returns_none_when_no_env_vars_set() {
 fn resolve_proxy_reads_https_proxy_for_tls() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "http://proxy.corp:3128");
 
     let info = resolved_proxy_tls("example.com").expect("should resolve");
@@ -70,6 +82,7 @@ fn resolve_proxy_reads_https_proxy_for_tls() {
 fn resolve_proxy_reads_http_proxy_for_non_tls() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTP_PROXY", "http://proxy.corp:8080");
 
     let info = resolved_proxy_plain("example.com").expect("should resolve");
@@ -85,6 +98,7 @@ fn resolve_proxy_reads_http_proxy_for_non_tls() {
 fn resolve_proxy_falls_back_to_all_proxy() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("ALL_PROXY", "http://all-proxy.corp:9999");
 
     let tls_info = resolved_proxy_tls("example.com").expect("TLS should fall back to ALL_PROXY");
@@ -102,6 +116,7 @@ fn resolve_proxy_falls_back_to_all_proxy() {
 fn resolve_proxy_prefers_specific_over_all_proxy() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "http://specific:1111");
     env::set_var("ALL_PROXY", "http://fallback:2222");
 
@@ -115,6 +130,7 @@ fn resolve_proxy_prefers_specific_over_all_proxy() {
 fn resolve_proxy_reads_lowercase_env_vars() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("https_proxy", "http://lower.corp:4444");
 
     let info = resolved_proxy_tls("example.com").expect("should resolve from lowercase");
@@ -127,6 +143,7 @@ fn resolve_proxy_reads_lowercase_env_vars() {
 fn resolve_proxy_returns_error_for_malformed_proxy_env() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "://broken");
 
     let err = resolve_proxy(&wss_uri("example.com")).expect_err("malformed proxy env should fail");
@@ -140,6 +157,7 @@ fn resolve_proxy_returns_error_for_malformed_proxy_env() {
 fn resolve_proxy_rejects_https_proxy_urls() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "https://proxy.corp:443");
 
     let err = resolve_proxy(&wss_uri("example.com")).expect_err("https proxy URLs should fail");
@@ -155,6 +173,7 @@ fn resolve_proxy_rejects_https_proxy_urls() {
 fn no_proxy_exact_match() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "http://proxy:3128");
     env::set_var("NO_PROXY", "example.com");
 
@@ -167,6 +186,7 @@ fn no_proxy_exact_match() {
 fn no_proxy_wildcard() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "http://proxy:3128");
     env::set_var("NO_PROXY", "*");
 
@@ -178,6 +198,7 @@ fn no_proxy_wildcard() {
 fn no_proxy_suffix_with_dot() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "http://proxy:3128");
     env::set_var("NO_PROXY", ".warp.dev");
 
@@ -192,6 +213,7 @@ fn no_proxy_suffix_with_dot() {
 fn no_proxy_suffix_without_dot() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "http://proxy:3128");
     env::set_var("NO_PROXY", "warp.dev");
 
@@ -207,6 +229,7 @@ fn no_proxy_suffix_without_dot() {
 fn no_proxy_comma_separated() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "http://proxy:3128");
     env::set_var("NO_PROXY", "localhost, 127.0.0.1, .internal.corp");
 
@@ -221,6 +244,7 @@ fn no_proxy_comma_separated() {
 fn no_proxy_case_insensitive() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
+    use_system_proxy_mode();
     env::set_var("HTTPS_PROXY", "http://proxy:3128");
     env::set_var("NO_PROXY", "Example.COM");
 

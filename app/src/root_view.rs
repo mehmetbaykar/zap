@@ -1531,9 +1531,14 @@ impl RootView {
         };
         #[cfg(not(target_family = "wasm"))]
         let auth_onboarding_state = {
+            // Integration tests boot with a scratch HOME (onboarding never
+            // marked complete) and drive the workspace directly, so showing
+            // the slides would leave window 0 without a workspace view.
+            let is_integration_test = std::env::var("WARP_INTEGRATION").is_ok();
             let should_show_local_onboarding = FeatureFlag::ZapNewSettingsModes.is_enabled()
                 && FeatureFlag::AgentOnboarding.is_enabled()
-                && !has_completed_local_onboarding(ctx);
+                && !has_completed_local_onboarding(ctx)
+                && !is_integration_test;
             if should_show_local_onboarding {
                 let workspace_args_box: Box<WorkspaceArgs> = workspace_args.into();
                 let onboarding_view = Self::create_agent_onboarding_view(ctx);
