@@ -263,6 +263,30 @@ fn missing_lookup_id_returns_none_when_editor_empty() {
     assert!(resolve_test_password(None, SecretKind::OneKeyPassword, "", &store).is_none());
 }
 
+/// Container so that [`SshServerView`] is registered as a typed action view,
+/// mirroring how `ssh_server_pane` mounts it in production.
+struct DropdownTestRoot {
+    server_view: warpui::ViewHandle<SshServerView>,
+}
+
+impl Entity for DropdownTestRoot {
+    type Event = ();
+}
+
+impl View for DropdownTestRoot {
+    fn ui_name() -> &'static str {
+        "DropdownTestRoot"
+    }
+
+    fn render(&self, _: &AppContext) -> Box<dyn Element> {
+        ChildView::new(&self.server_view).finish()
+    }
+}
+
+impl TypedActionView for DropdownTestRoot {
+    type Action = ();
+}
+
 #[test]
 fn selecting_onekey_dropdown_item_does_not_rebuild_dropdown_while_it_is_borrowed() {
     App::test((), |mut app| async move {
@@ -270,29 +294,40 @@ fn selecting_onekey_dropdown_item_does_not_rebuild_dropdown_while_it_is_borrowed
         initialize_settings_for_tests(&mut app);
         app.add_singleton_model(|_| Appearance::mock());
         app.add_singleton_model(|_| SshTreeChangedNotifier::new());
-
-        let (window_id, view) = app.add_window(WindowStyle::NotStealFocus, |ctx| {
-            let mut view = SshServerView::new("server-1".to_string(), ctx);
-            view.node = Some(SshNode {
-                id: "server-1".to_string(),
-                parent_id: None,
-                kind: NodeKind::Server,
-                name: "server".to_string(),
-                sort_order: 0,
-                created_at: chrono::Utc::now().naive_utc(),
-                updated_at: chrono::Utc::now().naive_utc(),
-                is_collapsed: false,
-            });
-            view.auth_type = AuthType::OneKey;
-            view.onekey_credentials = vec![credential(
-                "cred-1",
-                "shared-user",
-                OneKeyCredentialKind::Password,
-                None,
-            )];
-            view.rebuild_onekey_credential_dropdown(ctx);
-            view
+        app.add_singleton_model(|_| {
+            crate::settings_view::keybindings::KeybindingChangedNotifier::new()
         });
+        // Selecting a dropdown item persists through the SSH repository.
+        warp_ssh_manager::set_database_path(
+            std::env::temp_dir().join("zap_server_view_tests.sqlite"),
+        );
+
+        let (window_id, root) = app.add_window(WindowStyle::NotStealFocus, |ctx| {
+            let server_view = ctx.add_typed_action_view(|ctx| {
+                let mut view = SshServerView::new("server-1".to_string(), ctx);
+                view.node = Some(SshNode {
+                    id: "server-1".to_string(),
+                    parent_id: None,
+                    kind: NodeKind::Server,
+                    name: "server".to_string(),
+                    sort_order: 0,
+                    created_at: chrono::Utc::now().naive_utc(),
+                    updated_at: chrono::Utc::now().naive_utc(),
+                    is_collapsed: false,
+                });
+                view.auth_type = AuthType::OneKey;
+                view.onekey_credentials = vec![credential(
+                    "cred-1",
+                    "shared-user",
+                    OneKeyCredentialKind::Password,
+                    None,
+                )];
+                view.rebuild_onekey_credential_dropdown(ctx);
+                view
+            });
+            DropdownTestRoot { server_view }
+        });
+        let view = app.read(|ctx| root.as_ref(ctx).server_view.clone());
         let presenter = app.presenter(window_id).unwrap();
         let mut updated = warpui::EntityIdSet::default();
         updated.insert(app.root_view_id(window_id).unwrap());

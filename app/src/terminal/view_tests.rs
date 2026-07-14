@@ -147,7 +147,8 @@ fn tool_call_result_message_with_result_for_test(
 fn run_shell_command_tool_for_test(command: &str) -> api::message::tool_call::Tool {
     use api::message::tool_call::run_shell_command::WaitUntilCompleteValue;
 
-    // CLI subagent 会挂在这条 shell command block 上；字段只保留序列化所需的最小值。
+    // The CLI subagent attaches to this shell command block; fields keep only the minimum
+    // needed for serialization.
     api::message::tool_call::Tool::RunShellCommand(api::message::tool_call::RunShellCommand {
         command: command.to_string(),
         is_read_only: true,
@@ -164,7 +165,8 @@ fn build_restored_conversation_with_cli_subagent_for_test(
     block_id: BlockId,
     task_id: TaskId,
 ) -> AIConversation {
-    // 构造包含 CLI subagent tool call 的历史 conversation，模拟普通 /agent 历史恢复数据。
+    // Build a historical conversation containing a CLI subagent tool call, simulating ordinary
+    // /agent history-restore data.
     let root_task_id = "root-task";
     let block_id_string = String::from(block_id);
     let task_id_string = String::from(task_id);
@@ -245,7 +247,8 @@ fn cli_subagent_snapshot_json_for_test(
     block_id: &BlockId,
     output: &[u8],
 ) -> String {
-    // 模拟关闭标签后随 conversation_data 留存的完整终端 block 快照。
+    // Simulate the full terminal block snapshot retained in conversation_data after the tab is
+    // closed.
     let mut block = SerializedBlock::new_for_test(b"ssh jump".to_vec(), output.to_vec());
     block.id = block_id.clone();
     block.ai_metadata = serde_json::to_string(&Some(Into::<SerializedAIMetadata>::into(
@@ -285,7 +288,8 @@ fn build_restored_conversation_with_cli_subagent_snapshot_for_test(
         cli_subagent_snapshot_json_for_test(conversation_id, &task_id, &block_id, snapshot_output),
     );
 
-    // task result 故意保留短输出，确保测试验证的是 snapshot 恢复而不是 task fallback。
+    // The task result deliberately keeps short output so the test verifies snapshot restoration,
+    // not the task fallback.
     let root_task_id = "root-task";
     let block_id_string = String::from(block_id);
     let task_id_string = String::from(task_id);
@@ -342,7 +346,8 @@ fn build_restored_conversation_with_cli_subagent_snapshot_for_test(
 }
 
 fn build_restored_conversation_without_cli_subagent_for_test() -> AIConversation {
-    // 构造普通 /agent 历史 conversation，用于确认没有 CLI subagent 时不会误建浮窗。
+    // Build an ordinary /agent history conversation, used to confirm that no floating view is
+    // wrongly created when there is no CLI subagent.
     let root_task_id = "root-task";
     let root_task = create_api_task(
         root_task_id,
@@ -356,7 +361,8 @@ fn build_restored_conversation_without_cli_subagent_for_test() -> AIConversation
 fn serialized_blocks_for_restored_cli_subagent_for_test(
     conversation: &AIConversation,
 ) -> Vec<SerializedBlockListItem> {
-    // 走真实持久化序列化路径，避免测试只验证内存中的临时 view 状态。
+    // Exercise the real persistence serialization path so the test doesn't only verify transient
+    // in-memory view state.
     let serialized_blocks = conversation.to_serialized_blocklist_items();
     assert_eq!(
         serialized_blocks.len(),
@@ -367,7 +373,8 @@ fn serialized_blocks_for_restored_cli_subagent_for_test(
 }
 
 fn clear_ai_metadata_for_serialized_blocks_for_test(blocks: &mut [SerializedBlockListItem]) {
-    // 模拟旧历史记录或损坏记录缺少 ai_metadata 的情况，恢复逻辑应安全跳过。
+    // Simulate old or corrupted history records missing ai_metadata; the restore logic should
+    // skip them safely.
     for item in blocks {
         match item {
             SerializedBlockListItem::Command { block } => block.ai_metadata = None,
@@ -476,8 +483,9 @@ fn restores_cli_subagent_snapshot_when_history_blocks_are_not_preloaded() {
 
         let terminal = add_window_with_terminal(&mut app, None);
         terminal.update(&mut app, |view, ctx| {
-            // 历史列表进入已有 terminal 时不会像新 pane 初始化那样预置 restored blocks；
-            // restore_conversation_after_view_creation 必须自己补回 CLI subagent 的终端快照。
+            // Entering an existing terminal from the history list doesn't preset restored blocks
+            // the way new pane initialization does; restore_conversation_after_view_creation must
+            // backfill the CLI subagent's terminal snapshot itself.
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
@@ -573,8 +581,9 @@ fn assert_exiting_restored_ordinary_agent_view_inserts_entry_card(origin: AgentV
         let conversation_id = conversation.id();
         let terminal = add_window_with_terminal(&mut app, None);
         terminal.update(&mut app, |view, ctx| {
-            // 普通 restored 会话只是在 AgentView 中查看，没有新增 exchange；
-            // ESC 回到 terminal 后仍需要保留一个可再次进入的折叠入口。
+            // An ordinary restored conversation is only viewed in the AgentView, with no new
+            // exchange added; after ESC returns to the terminal, a collapsed re-enterable entry
+            // must remain.
             view.restore_conversation_after_view_creation(
                 RestoredAIConversation::new(conversation),
                 true,
@@ -682,9 +691,10 @@ fn finished_cli_subagent_keeps_read_only_card_when_metadata_matches() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
 
-        // 先恢复一个带 CLI subagent 的历史会话，建立带匹配 metadata 的 command block
-        // 和一个 RestoredReadOnly 视图，模拟 SSH 会话在 agent view 里展开后的状态。
-        // 用带 snapshot 的构造函数，确保 conversation_id 可控且与 block metadata 一致。
+        // First restore a history session with a CLI subagent, establishing a command block with
+        // matching metadata and a RestoredReadOnly view, simulating an SSH session's state after it
+        // is expanded in the agent view. Use the snapshot-bearing constructor to keep
+        // conversation_id controllable and consistent with the block metadata.
         let block_id = BlockId::from("cli-block-finished".to_string());
         let task_id = TaskId::new("cli-task-finished".to_string());
         let conversation_id = AIConversationId::new();
@@ -706,7 +716,7 @@ fn finished_cli_subagent_keeps_read_only_card_when_metadata_matches() {
             );
         });
 
-        // 恢复后应存在 CLI subagent 视图。
+        // A CLI subagent view should exist after restoration.
         terminal.read(&app, |view, _| {
             assert!(
                 view.cli_subagent_views.contains_key(&block_id),
@@ -714,9 +724,10 @@ fn finished_cli_subagent_keeps_read_only_card_when_metadata_matches() {
             );
         });
 
-        // 模拟 SSH 会话结束触发的 FinishedSubagent 事件。
-        // 修复前：live 视图被 remove 后不再重建，卡片消失；
-        // 修复后：在 block 仍持有匹配 metadata 时以 RestoredReadOnly 重建折叠卡片。
+        // Simulate the FinishedSubagent event fired when the SSH session ends.
+        // Before the fix: once the live view was removed it was never rebuilt and the card
+        // disappeared; after the fix: rebuild the collapsed card in RestoredReadOnly mode while the
+        // block still holds matching metadata.
         terminal.update(&mut app, |view, ctx| {
             view.handle_cli_subagent_controller_event(
                 view.cli_subagent_controller.clone(),
@@ -744,8 +755,9 @@ fn finished_cli_subagent_skips_rebuild_when_block_missing() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
 
-        // 用一个不存在于 block_list 的 block_id 触发 FinishedSubagent，
-        // 模拟 block 已被回收 / metadata 无法匹配的情况，重建前置检查应不通过。
+        // Fire FinishedSubagent with a block_id that doesn't exist in the block_list, simulating a
+        // block that has already been reclaimed / whose metadata can't match; the rebuild
+        // precondition check should not pass.
         let block_id = BlockId::from("cli-block-gone".to_string());
         let task_id = TaskId::new("cli-task-gone".to_string());
         let conversation_id = AIConversationId::new();
@@ -791,7 +803,8 @@ fn restored_cli_subagent_windows_ctrl_c_does_not_write_to_pty() {
         });
 
         terminal.update(&mut app, |view, ctx| {
-            // 让 Ctrl-C 的 live 路径具备可观察副作用：如果被转发，会写 ETX 到 PTY。
+            // Give Ctrl-C's live path an observable side effect: if forwarded, it writes ETX to the
+            // PTY.
             view.model
                 .lock()
                 .simulate_long_running_block("sleep 10", "running");

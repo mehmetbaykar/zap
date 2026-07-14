@@ -11487,13 +11487,16 @@ impl Workspace {
         });
     }
 
-    fn should_confirm_close_session(&self) -> bool {
+    fn should_confirm_close_session(&self, ctx: &mut ViewContext<Self>) -> bool {
         // If we're closing the only remaining tab, we're actually going to close the window.
         // We don't need a user confirmation here because there's already another one on window close.
         if self.tab_count() == 1 {
             return false;
         }
-        false
+        // Zap: the cloud session-sharing feature flags are gone; the user setting is
+        // the only remaining gate. This still only guards tabs whose terminal is in a
+        // shared state (see `close_tabs`).
+        *SessionSettings::as_ref(ctx).should_confirm_close_session
     }
 
     /// Checks if the provided tab indices need to be confirmed before closing, unless skip_confirmation is true.
@@ -11509,7 +11512,7 @@ impl Workspace {
     ) -> bool {
         let tab_indices_vec = tab_indices.collect_vec();
         // Check if there are any tabs that can't be closed without confirmation
-        if !skip_confirmation && self.should_confirm_close_session() {
+        if !skip_confirmation && self.should_confirm_close_session(ctx) {
             for i in tab_indices_vec.iter() {
                 let is_tab_shared = self
                     .get_pane_group_view(*i)
@@ -11592,6 +11595,19 @@ impl Workspace {
         // If we are renaming a tab, cancel that.  Closing tabs causes the renamed tab index
         // to fall out of sync.  This can cause inconsistencies.
         self.cancel_tab_rename(ctx);
+
+        // Stop sharing any shared sessions in the closing tabs before removal, so a
+        // tab restored from the undo stack comes back unshared. (The network layer
+        // that used to tear shares down on close was removed with cloud sharing.)
+        for i in tab_indices_vec.iter() {
+            let shared_views = self
+                .get_pane_group_view(*i)
+                .map(|view| view.as_ref(ctx).shared_session_views(ctx))
+                .unwrap_or_default();
+            for terminal_view in shared_views {
+                terminal_view.update(ctx, |view, ctx| view.stop_sharing_session(ctx));
+            }
+        }
 
         // Remove the tabs in reverse order to avoid indexing OOB.
         let mut should_sync_agent_conversations = false;
@@ -14599,7 +14615,17 @@ impl Workspace {
                 ctx,
             ),
             pane_group::Event::CloseSharedSessionPaneRequested { pane_id } => {
-                self.close_pane(pane_group.id(), *pane_id, ctx);
+                if *SessionSettings::as_ref(ctx).should_confirm_close_session {
+                    self.show_close_session_confirmation_dialog(
+                        OpenDialogSource::ClosePane {
+                            pane_group_id: pane_group.id(),
+                            pane_id: *pane_id,
+                        },
+                        ctx,
+                    );
+                } else {
+                    self.close_pane(pane_group.id(), *pane_id, ctx);
+                }
             }
             pane_group::Event::MaximizePaneToggled => {
                 ctx.notify();
@@ -16759,8 +16785,9 @@ impl Workspace {
     }
 
     fn keep_theme(&mut self, ctx: &mut ViewContext<Self>) {
-        // 关闭时把 per-window override map 同步回已提交的 self.theme_override,抵消打开时
-        // select_theme 在 ThisWindow scope 下写入的预览覆盖(否则重开后 override 会丢失)。
+        // On close, sync the per-window override map back to the committed
+        // self.theme_override, undoing the preview override that select_theme wrote under the
+        // ThisWindow scope on open (otherwise the override would be lost after reopening).
         let window_id = ctx.window_id();
         let committed = self.theme_override.clone();
         AppearanceManager::handle(ctx).update(ctx, |appearance_manager, ctx| match &committed {

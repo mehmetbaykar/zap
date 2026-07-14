@@ -346,8 +346,9 @@ impl TerminalView {
             return;
         }
 
-        // 历史列表进入已有 terminal 时不会预先把 conversation 的 block 快照塞进
-        // TerminalModel；这里只补 CLI subagent 持久化快照，避免普通历史命令重复出现。
+        // Entering an existing terminal from the history list doesn't preload the conversation's
+        // block snapshots into the TerminalModel; here we only backfill the CLI subagent's persisted
+        // snapshots to avoid duplicating ordinary history commands.
         let serialized_blocks = conversation.to_serialized_blocklist_items();
         let mut terminal_model = self.model.lock();
         for item in serialized_blocks {
@@ -632,8 +633,9 @@ impl TerminalView {
                     .block_list()
                     .block_with_id(&block_id)
                     .is_some_and(|block| {
-                        // 已恢复的 command block 已经完成，不能依赖 live 长任务 predicate；
-                        // 这里用持久化 metadata 精确确认它属于当前 conversation 的 CLI subagent task。
+                        // The restored command block is already complete, so we can't rely on the
+                        // live long-task predicate; use the persisted metadata to confirm precisely
+                        // that it belongs to the current conversation's CLI subagent task.
                         block.agent_interaction_metadata().is_some_and(|metadata| {
                             metadata.conversation_id() == &conversation.id()
                                 && metadata.subagent_task_id() == Some(&task_id)

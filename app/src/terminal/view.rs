@@ -3302,9 +3302,9 @@ impl TerminalView {
                         && was_modified
                         && !is_exit_due_to_user_takeover_of_lrc
                         && !has_existing_lrc_block)
-                        // restored/历史会话只读查看时不会新增 exchange；
-                        // 用户按 ESC 返回 terminal 后仍需要一个 terminal-mode 入口卡片，
-                        // 否则 fullscreen AgentView 退出后所有 Agent block 都会被隐藏。
+                        // A restored/historical conversation viewed read-only adds no new exchange;
+                        // the user still needs a terminal-mode entry card after ESC returns to the
+                        // terminal, else all Agent blocks hide once the fullscreen AgentView exits.
                         || should_insert_restored_unmodified_entry_card
                         // If the agent view was entered via accepting a 'new conversation
                         // speedbump', an entry block should always be inserted.
@@ -6227,8 +6227,9 @@ impl TerminalView {
 
         if is_live {
             if let Some(initial_requested_command_id) = initial_requested_command_action_id {
-                // live spawn 时，触发 CLI subagent 的那轮 AI block 只是桥接工具调用，
-                // 真正 UI 挂在 command block 上；移除它以保持 requested command 视觉连续。
+                // On live spawn, the AI block that triggered the CLI subagent only bridges the tool
+                // call; the real UI lives on the command block, so remove it to keep the requested
+                // command visually continuous.
                 if let Some((result_ai_block_id, result_conversation_id, result_exchange_id)) =
                     self.rich_content_views.iter().find_map(|view| {
                         let ai_metadata = view.ai_block_metadata()?;
@@ -6272,14 +6273,16 @@ impl TerminalView {
     ) {
         match event {
             CLISubagentViewEvent::TextSelected => {
-                // CLI subagent 的文本选择不能和 block list / alt screen 选择并存，
-                // 先清掉终端侧选择，再交给统一的 rich content selection 逻辑收尾。
+                // A CLI subagent's text selection can't coexist with the block list / alt screen
+                // selection, so clear the terminal-side selection first, then defer to the unified
+                // rich content selection logic to finish up.
                 {
                     let mut model = self.model.lock();
                     model.block_list_mut().clear_selection();
                     model.alt_screen_mut().clear_selection();
                 }
-                // 清理临时拖选状态，避免切换到 CLI subagent view 后仍残留旧选择视觉。
+                // Clear the transient drag-select state so no stale selection visuals linger after
+                // switching to the CLI subagent view.
                 self.is_selecting = false;
                 self.block_text_selection_start_position = None;
                 self.clear_selected_text_except(Some(cli_subagent_view_id), ctx);
@@ -6320,7 +6323,8 @@ impl TerminalView {
                 metadata.and_then(|metadata| metadata.requested_command_action_id().cloned())
             });
 
-            // 只在持锁期间复制 block 快照，写 conversation 时不持有 TerminalModel 锁。
+            // Copy the block snapshot only while holding the lock; don't hold the TerminalModel
+            // lock while writing the conversation.
             let block_snapshot = SerializedBlock::from(block);
             conversation_id
                 .zip(task_id)
@@ -6440,9 +6444,10 @@ impl TerminalView {
                 );
                 self.cli_subagent_views.remove(block_id);
 
-                // SSH 等交互式 CLI subagent 会话结束后，Live 卡片会被回收，
-                // 但用户仍应能在终端里看到折叠的只读终端交互卡片（与重开历史时一致）。
-                // 这里在 block 仍持有匹配 metadata 的前提下，用 RestoredReadOnly 模式重建。
+                // After an interactive CLI subagent session such as SSH ends, the Live card is
+                // reclaimed, but the user should still see the collapsed read-only interaction card
+                // in the terminal (same as reopening from history). Rebuild it in RestoredReadOnly
+                // mode here, provided the block still holds matching metadata.
                 if let Some(conversation_id) = conversation_id {
                     let should_restore = {
                         let model = self.model.lock();
@@ -6513,10 +6518,11 @@ impl TerminalView {
             }
             CLISubagentEvent::ToggledHideResponses => {}
             CLISubagentEvent::UpdatedLastSnapshot { .. } => {
-                // 仅更新内存中的 last_snapshot_at（已在 controller 内完成），
-                // 不触发全量落盘。落盘由低频的 SpawnedSubagent / FinishedSubagent 承担，
-                // 避免 BlockCompleted 时 UpdatedLastSnapshot 与紧随其后的 FinishedSubagent
-                // 连续两次全量序列化整个 conversation 造成主线程写放大。
+                // Only update the in-memory last_snapshot_at (already done inside the controller);
+                // don't trigger a full flush to disk. Flushing is handled by the low-frequency
+                // SpawnedSubagent / FinishedSubagent events, so that on BlockCompleted an
+                // UpdatedLastSnapshot followed immediately by a FinishedSubagent doesn't serialize
+                // the entire conversation twice in a row and amplify main-thread writes.
             }
             CLISubagentEvent::ControlHandedBackAfterTransfer => {
                 // Notify the shell command executor that control was handed back after transfer.
@@ -20935,7 +20941,8 @@ impl TerminalView {
         false
     }
 
-    /// 返回当前终端里是否已经有该 conversation 的 AgentView 入口卡片。
+    /// Returns whether the current terminal already has an AgentView entry card for this
+    /// conversation.
     fn has_agent_view_entry_block_for_conversation(
         &self,
         conversation_id: AIConversationId,

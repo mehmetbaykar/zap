@@ -21,18 +21,15 @@ pub const MAX_BYTES_SHAREABLE: usize = 5000;
 
 #[test]
 fn maybe_rewrite_web_url_to_shared_session_intent_rewrites_matching_web_url() {
+    // Shared-session web intents were removed with cloud session sharing:
+    // `WebIntent` has no `shared_session` branch anymore, so these URLs must
+    // not rewrite to a native intent.
     let web_url = Url::parse(
         "warp://shared_session/00000000-0000-0000-0000-000000000000?pwd=secret&preview=true",
     )
     .expect("valid shared session web URL");
 
-    let maybe_intent = maybe_rewrite_web_url_to_intent(&web_url)
-        .expect("expected shared session web URL to rewrite to an intent URL");
-
-    assert_eq!(maybe_intent.scheme(), "warp");
-    assert_eq!(maybe_intent.host_str(), Some("shared_session"));
-    assert_eq!(maybe_intent.path(), "/00000000-0000-0000-0000-000000000000");
-    assert_eq!(maybe_intent.query(), Some("pwd=secret&preview=true"));
+    assert_eq!(maybe_rewrite_web_url_to_intent(&web_url), None);
 }
 
 #[test]

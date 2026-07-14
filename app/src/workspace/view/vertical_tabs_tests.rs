@@ -713,6 +713,8 @@ fn terminal_primary_line_uses_last_completed_command_when_shell_title_matches_wo
 
 #[test]
 fn terminal_primary_line_falls_back_to_new_session() {
+    // The fallback label comes from t!(); resolve against the English bundle.
+    crate::i18n::init(Some("en"));
     let line = terminal_primary_line_data(
         false,
         None,

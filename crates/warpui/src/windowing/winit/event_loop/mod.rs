@@ -1557,10 +1557,11 @@ impl EventLoop {
                 {
                     return;
                 }
-                // 记录 preedit 文本是否变化：update_ime_position 读取的是终端光标位置，该
-                // 位置只有在 preedit 文本实际改变时才会移动。若同文本仅 cursor_position 不同
-                // (IME 对 set_ime_cursor_area 的回声)，调用 update_ime_position 会再次触发
-                // 回送，引发 2-步振荡崩溃（Fixes #213）。
+                // Record whether the preedit text changed: update_ime_position reads the terminal
+                // cursor position, which only moves when the preedit text actually changes. If the
+                // text is identical and only cursor_position differs (the IME echoing
+                // set_ime_cursor_area), calling update_ime_position fires another echo, causing a
+                // 2-step oscillation crash (Fixes #213).
                 let preedit_text_changed = self
                     .last_preedit
                     .as_ref()

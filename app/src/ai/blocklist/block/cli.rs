@@ -195,7 +195,7 @@ fn cli_subagent_should_render_user_input(
     !should_hide_responses && !is_input_dismissed
 }
 
-/// 判断 CLI subagent 视图在不同模式下是否应该渲染。
+/// Decide whether the CLI subagent view should render in each mode.
 fn cli_subagent_should_render_for_metadata(
     mode: CLISubagentViewMode,
     metadata: Option<&AgentInteractionMetadata>,
@@ -213,7 +213,8 @@ fn cli_subagent_should_render_for_metadata(
     }
 }
 
-/// 统计 CLI 浮窗实际渲染的 output sections，供脱敏索引与 render 累计保持一致。
+/// Count the output sections the CLI popover actually renders, so the redaction index and
+/// render tally stay in sync.
 fn cli_subagent_rendered_output_text_section_count(output: &AIAgentOutput) -> usize {
     output
         .messages
@@ -1923,16 +1924,16 @@ impl View for CLISubagentView {
                         self.state_handles.output_selection_handles.clone();
                     let action_selection_handles =
                         self.state_handles.action_selection_handles.clone();
-                    // 克隆一份本区域句柄进闭包，判断"本区域是否真的在参与选择"。
-                    // Flex 会把同一鼠标事件广播给所有兄弟 SelectableArea，未命中的气泡也会触发本回调，
-                    // 此时不能用未命中的回调去清掉真正命中区域的划词状态。
+                    // Clone this area's handle into the closure to check whether this area is really selecting.
+                    // Flex broadcasts the same mouse event to every sibling SelectableArea, so a non-hit bubble also
+                    // fires this callback; a non-hit callback must not clear the selection of the area actually hit.
                     let action_selection_handle_clone = action_selection_handle.clone();
                     let mut selectable_action = SelectableArea::new(
                         action_selection_handle,
                         move |selection_args, ctx, _| {
                             let selection = selection_args.selection;
-                            // 只有本区域确实参与选择时（正在 selecting 或已产生非空选中文本），
-                            // 才清掉其它同级区域的旧选择；未命中广播则保持原状。
+                            // Only when this area is actually selecting (mid-selection or it produced non-empty
+                            // selected text) do we clear sibling areas' stale selections; a non-hit broadcast leaves them as-is.
                             let is_this_area_active = action_selection_handle_clone.is_selecting()
                                 || selection.as_ref().is_some_and(|s| !s.is_empty());
                             if is_this_area_active {

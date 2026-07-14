@@ -51,6 +51,11 @@ pub fn initialize_settings_for_tests_with_mode(
     use crate::user_config::WarpConfig;
     use crate::window_settings::WindowSettings;
     use crate::workspace::tab_settings::TabSettings;
+
+    // Tests assert on user-visible strings; resolve t!() against the English
+    // bundle instead of returning raw fluent keys. init() is idempotent.
+    crate::i18n::init(Some("en"));
+
     app.add_singleton_model(|ctx| AppExecutionMode::new(mode, is_sandboxed, ctx));
 
     app.update(init_and_register_user_preferences);

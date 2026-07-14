@@ -115,7 +115,7 @@ fn applies_replacements_with_multibyte_and_prefix() {
     let mut text = format!("{}{}", "•  ", original);
     let glyph_offset = 3; // prefix length in chars
 
-    // Secret over chars [2..5): "冲ab"
+    // Secret over chars [2..5): the CJK char plus "ab".
     let start_byte = original
         .chars()
         .take(2)

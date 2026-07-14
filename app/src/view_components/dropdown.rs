@@ -545,7 +545,9 @@ where
         ctx: &mut ViewContext<Self>,
     ) {
         self.close(ctx);
-        ctx.dispatch_typed_action_deferred(action.clone_box());
+        // Upcast so the item action's own type — not `Box<dyn DropdownItemAction>` —
+        // drives handler lookup; the box's TypeId matches no registered view.
+        ctx.dispatch_boxed_typed_action_deferred(action.clone_box());
     }
 
     fn close(&mut self, ctx: &mut ViewContext<Self>) {

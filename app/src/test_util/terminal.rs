@@ -91,6 +91,8 @@ pub fn initialize_app_for_terminal_view(app: &mut App) {
     app.add_singleton_model(AIRequestUsageModel::new_for_test);
     app.add_singleton_model(|_| KeybindingChangedNotifier::new());
     app.add_singleton_model(TerminalKeybindings::new);
+    #[cfg(feature = "local_tty")]
+    crate::terminal::available_shells::register(app);
     app.add_singleton_model(|_| ActiveSession::default());
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
     app.add_singleton_model(AuthManager::new_for_test);

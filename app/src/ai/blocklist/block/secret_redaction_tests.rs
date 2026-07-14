@@ -378,7 +378,7 @@ fn test_detect_secrets_single_secret_custom() {
 #[test]
 #[serial]
 fn test_detect_secrets_single_secret_custom_with_multibyte() {
-    // Set a custom secret regex that matches a Chinese multibyte secret, e.g., "秘密"
+    // Set a custom secret regex that matches a Chinese multibyte secret.
     // Set as user secret (enterprise secrets is empty)
     secrets::set_user_and_enterprise_secret_regexes(
         [&Regex::new("秘密").expect("Should be able to construct regex")],
@@ -388,7 +388,7 @@ fn test_detect_secrets_single_secret_custom_with_multibyte() {
     let text = "foo 秘密 bar";
     let detected_secrets = find_secrets_in_text(text);
 
-    // The Chinese secret "秘密" starts at character index 4 and ends at character index 6
+    // The Chinese multibyte secret starts at character index 4 and ends at character index 6.
     assert_eq!(
         detected_secrets,
         vec![SecretRange {
@@ -496,9 +496,9 @@ fn test_add_secret_redaction_to_text_with_multibyte_characters() {
         line_index: 0,
     };
 
-    // Range for the secret "码1234" in the multibyte text.
+    // Range for the secret substring within the multibyte text.
     let secret_range = SecretRange {
-        char_range: 9..14,  // "码1234"
+        char_range: 9..14,  // char range of the secret substring
         byte_range: 23..30, // Byte range will be larger due to multibyte characters
     };
     let hoverable_secret = Secret {

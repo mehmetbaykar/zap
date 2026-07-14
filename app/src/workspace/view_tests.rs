@@ -508,11 +508,17 @@ fn mock_workspace_with_shared_session(app: &mut App) -> ViewHandle<Workspace> {
 
     terminal_view.update(app, |view, ctx| {
         view.model.lock().block_list_mut().set_bootstrapped();
-        view.attempt_to_share_session(
+        // The sharer network handshake was removed with cloud sharing; put the
+        // terminal directly into the shared state the handshake used to produce.
+        view.model
+            .lock()
+            .set_shared_session_status(SharedSessionStatus::ActiveSharer);
+        view.on_session_share_started(
+            ParticipantId::new(),
+            UserUid::new("mock_user_uid"),
             SharedSessionScrollbackType::All,
-            None,
+            SessionId::new(),
             SessionSourceType::User,
-            false,
             ctx,
         );
     });
@@ -548,6 +554,11 @@ fn mock_workspace_viewing_shared_session(app: &mut App) -> ViewHandle<Workspace>
     });
 
     terminal_view.update(app, |view, ctx| {
+        // The viewer terminal manager (removed with cloud sharing) used to mark
+        // the model as a viewer before the join event arrived.
+        view.model
+            .lock()
+            .set_shared_session_status(SharedSessionStatus::reader());
         view.on_session_share_joined(
             ParticipantId::new(),
             UserUid::new("mock_user_uid"),
@@ -976,11 +987,19 @@ fn setup_session_sharing_test(workspace: &ViewHandle<Workspace>, app: &mut App) 
             view.focused_session_view(ctx)
                 .unwrap()
                 .update(ctx, |terminal, ctx| {
-                    terminal.attempt_to_share_session(
+                    // The sharer network handshake was removed with cloud sharing;
+                    // put the terminal directly into the shared state the
+                    // handshake used to produce.
+                    terminal
+                        .model
+                        .lock()
+                        .set_shared_session_status(SharedSessionStatus::ActiveSharer);
+                    terminal.on_session_share_started(
+                        ParticipantId::new(),
+                        UserUid::new("mock_user_uid"),
                         SharedSessionScrollbackType::None,
-                        None,
+                        SessionId::new(),
                         SessionSourceType::User,
-                        false,
                         ctx,
                     );
                 });
@@ -2727,17 +2746,18 @@ fn test_unified_new_session_menu_uses_new_worktree_config_label_and_order() {
 
             assert!(!labels.iter().any(|label| label == "Worktree in"));
 
-            let separator_index = labels
+            // AI is always enabled in the fork, so an Agent group (with its own
+            // separator) precedes the config group; anchor on the config entry
+            // instead of the first separator.
+            let worktree_index = labels
                 .iter()
-                .position(|label| label == "---")
-                .expect("expected a separator in the new-session menu");
+                .position(|label| label == "New worktree config")
+                .expect("expected the new-worktree-config entry in the new-session menu");
 
+            assert!(worktree_index > 0);
+            assert_eq!(labels.get(worktree_index - 1), Some(&"---".to_string()));
             assert_eq!(
-                labels.get(separator_index + 1),
-                Some(&"New worktree config".to_string())
-            );
-            assert_eq!(
-                labels.get(separator_index + 2),
+                labels.get(worktree_index + 1),
                 Some(&"New tab config".to_string())
             );
         });

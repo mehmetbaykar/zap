@@ -90,12 +90,15 @@ fn default_as_true() -> bool {
     true
 }
 
-/// `should_hide_block` 的序列化判定：仅当值为 `false`（可见）时写入 JSON。
+/// Serialization predicate for `should_hide_block`: write to JSON only when the value is
+/// `false` (visible).
 ///
-/// 历史上该字段被无条件 `skip`，导致 CLI subagent 等需要保持可见的块在重启恢复后
-/// 被 `default = true` 误判为隐藏。这里收窄为「只持久化可见状态」：
-/// - `true`（隐藏，默认）：不序列化，反序列化走 `default_as_true`，与旧数据兼容。
-/// - `false`（可见）：序列化写入，恢复后保持可见。
+/// Historically this field was unconditionally `skip`ped, so blocks that must stay visible
+/// (e.g. CLI subagents) were misjudged as hidden by `default = true` after a restart restore.
+/// Narrow it here to "persist only the visible state":
+/// - `true` (hidden, default): not serialized; deserialization falls back to `default_as_true`,
+///   staying compatible with old data.
+/// - `false` (visible): serialized out and stays visible after restore.
 fn skip_hide_when_true(value: &bool) -> bool {
     *value
 }

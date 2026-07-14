@@ -135,11 +135,11 @@ pub(crate) struct CommandBlockInfo {
     pub(crate) output: String,
     pub(crate) exit_code: ExitCode,
     pub(crate) ai_metadata: Option<String>,
-    /// 为 CLI subagent 恢复时保留稳定的 command block id。
+    /// Stable command block id preserved for CLI subagent restore.
     pub(crate) block_id: Option<BlockId>,
-    /// 记录发起命令的 action id，用于恢复 requested command 关联。
+    /// Action id of the initiating command, used to restore the requested command link.
     pub(crate) requested_command_action_id: Option<AIAgentActionId>,
-    /// 记录 CLI subagent task id，用于恢复只读详情卡关联。
+    /// CLI subagent task id, used to restore the read-only detail card link.
     pub(crate) subagent_task_id: Option<TaskId>,
     /// The api message ID of the tool call that initiated this command.
     /// Used to find the corresponding exchange for PWD and start_ts fallback.
@@ -171,7 +171,7 @@ pub enum RestoreConversationError {
 #[error("Subagent task not found")]
 pub struct SubagentTaskNotFound;
 
-/// CLI subagent 终端 block 的持久化快照。
+/// Persisted snapshot of a CLI subagent terminal block.
 #[derive(Debug, Clone)]
 struct CliSubagentBlockSnapshot {
     task_id: TaskId,
@@ -224,7 +224,7 @@ impl<'de> Deserialize<'de> for CliSubagentBlockSnapshot {
         }
 
         let mut snapshot = Snapshot::deserialize(deserializer)?;
-        // 反序列化时同步 block.id，保证后续 block_list 查找使用稳定 id。
+        // Sync block.id on deserialize so later block_list lookups use the stable id.
         snapshot.block.id = snapshot.block_id.clone();
         Ok(Self {
             task_id: snapshot.task_id,
@@ -360,8 +360,9 @@ pub struct AIConversation {
     /// authorizing repairs or erasing corrupted metadata on save.
     pub(crate) byop_repair_state: RepairStateStatus,
 
-    /// CLI subagent 真实终端 block 快照。task messages 可能只包含截断/摘要输出，
-    /// 因此关闭标签后需要靠这里恢复 SSH 等交互式终端内容。
+    /// Real terminal block snapshots for CLI subagents. Task messages may contain only
+    /// truncated/summary output, so restoring interactive terminals (e.g. SSH) after a
+    /// tab closes relies on these.
     cli_subagent_block_snapshots: HashMap<BlockId, CliSubagentBlockSnapshot>,
 
     /// Per-plan orchestration configs hydrated from
@@ -459,7 +460,7 @@ impl AIConversation {
             return None;
         }
 
-        // 排序仅用于让持久化 JSON 稳定，避免无意义写入抖动。
+        // Sort only to keep the persisted JSON stable and avoid meaningless write churn.
         let snapshots = self
             .cli_subagent_block_snapshots
             .values()
@@ -789,8 +790,8 @@ impl AIConversation {
                 continue;
             };
 
-            // 旧数据或本地合成消息可能没有 CurrentTime/timestamp,恢复时会落到 Unix epoch。
-            // 只修正这种默认值,避免覆盖消息中已经恢复出的真实时间。
+            // Old data or locally synthesized messages may lack CurrentTime/timestamp and land on the
+            // Unix epoch on restore. Only fix that default, so we don't overwrite a real recovered time.
             if Self::is_default_restored_timestamp(exchange.start_time) {
                 exchange.start_time = fallback_timestamp;
             }
@@ -3739,8 +3740,8 @@ impl AIConversation {
         let requested_command_action_id = requested_command_action_id
             .or_else(|| Self::requested_command_action_id_from_snapshot(&block));
 
-        // 恢复历史时必须同时恢复终端内容和 agent 关联元数据，
-        // 否则 block 能显示但展开的 CLI subagent 视图找不到归属。
+        // Restoring history must restore both the terminal content and the agent association
+        // metadata; otherwise the block shows but the expanded CLI subagent view has no owner.
         block.id = snapshot.block_id.clone();
         block.ai_metadata =
             self.cli_subagent_ai_metadata_json(&snapshot.task_id, requested_command_action_id);
@@ -3820,8 +3821,8 @@ impl AIConversation {
         command_blocks: &mut Vec<CommandBlockInfo>,
         seen_command_ids: &mut HashSet<String>,
     ) {
-        // 记录每个 RunShellCommand 的稳定 command id，CLI subagent 会用这个 id
-        // 指向实际被接管的命令块，不能只按最近一条命令猜测。
+        // Record the stable command id of each RunShellCommand; the CLI subagent uses this id to
+        // point at the command block it actually took over, rather than guessing the most recent one.
         let mut run_shell_command_block_indices_by_id = HashMap::new();
 
         // Build a map from tool_call_id to (RunShellCommandResult, result_message_id, result_proto_timestamp)
@@ -3966,8 +3967,8 @@ impl AIConversation {
                     }
                 }
 
-                // CLI subagent metadata 中的 command_id 是恢复时的真实关联源。
-                // 同一组 messages 里可能有多条命令，必须按 command_id 精确回填。
+                // The command_id in the CLI subagent metadata is the real association source on restore.
+                // One message set may hold several commands, so backfill precisely by command_id.
                 if let Some(subagent) = tool_call.subagent() {
                     if let Some(api::message::tool_call::subagent::Metadata::Cli(cli)) =
                         &subagent.metadata
@@ -4127,7 +4128,7 @@ impl AIConversation {
                     })
             });
             if let Some(snapshot) = matching_cli_snapshot {
-                // task message 里的输出可能只是 SSH 交互的截断结果；真实终端快照优先。
+                // Output in the task message may be a truncated SSH interaction; the real terminal snapshot wins.
                 used_cli_snapshot_block_ids.insert(snapshot.block_id.clone());
                 serialized_blocks.push(SerializedBlockListItem::Command {
                     block: Box::new(self.normalized_cli_subagent_snapshot_block(
@@ -4148,7 +4149,8 @@ impl AIConversation {
                 .map(|e| (e.working_directory.clone(), Some(e.start_time)))
                 .unwrap_or((fallback_pwd.clone(), None));
 
-            // CLI subagent 恢复时序列化可见、只读的 agent 关联元数据；其他块保持原有元数据。
+            // On CLI subagent restore, serialize the visible, read-only agent association metadata;
+            // other blocks keep their existing metadata.
             let ai_metadata = if let Some(subagent_task_id) = command_block.subagent_task_id.clone()
             {
                 serde_json::to_string(&Some(Into::<SerializedAIMetadata>::into(
@@ -4201,8 +4203,8 @@ impl AIConversation {
             });
         }
 
-        // 有些交互式 CLI subagent 会话没有可用的 RunShellCommand 完成结果；
-        // 此时 task messages 无法生成 command block，仍要靠 sidecar 追加真实终端快照。
+        // Some interactive CLI subagent sessions have no usable RunShellCommand result, so task
+        // messages can't produce a command block; the sidecar still appends the real terminal snapshot.
         let remaining_cli_snapshots = self
             .cli_subagent_block_snapshots
             .values()

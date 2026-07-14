@@ -149,7 +149,8 @@ mod tests {
 
     #[test]
     fn remote_markdown_detected_via_language_path() {
-        // 远端文件没有本地路径,Markdown 识别必须走 `language_path()`(只取后缀)。
+        // Remote files have no local path, so Markdown detection must go through
+        // `language_path()` (suffix only).
         assert!(is_markdown_file(
             remote("/home/user/notes/README.md").language_path()
         ));

@@ -5,7 +5,7 @@ use markdown_parser::{FormattedTextStyles, Hyperlink};
 use rangemap::RangeSet;
 use string_offset::CharOffset;
 use sum_tree::SumTree;
-use vec1::{Vec1, vec1};
+use vec1::{vec1, Vec1};
 use warpui_core::assets::asset_cache::AssetSource;
 use warpui_core::color::ColorU;
 use warpui_core::elements::ListIndentLevel;
@@ -18,15 +18,15 @@ use warpui_core::units::{IntoPixels, Pixels};
 use super::debug::Describe;
 use super::test_utils::{layout_paragraph, layout_paragraphs};
 use super::{
-    BlockItem, BlockLocation, COMMAND_SPACING, CellLayout, DEFAULT_BLOCK_SPACINGS,
-    HiddenBlockConfig, ImageBlockConfig, LaidOutTable, ParagraphBlock, RenderState,
-    TableBlockConfig, TableStyle, table_offset_map,
+    table_offset_map, BlockItem, BlockLocation, CellLayout, HiddenBlockConfig, ImageBlockConfig,
+    LaidOutTable, ParagraphBlock, RenderState, TableBlockConfig, TableStyle, COMMAND_SPACING,
+    DEFAULT_BLOCK_SPACINGS,
 };
 use crate::content::edit::ParsedUrl;
 use crate::content::text::{
-    BufferBlockStyle, CodeBlockType, FormattedTable, FormattedTextFragment, table_cell_offset_maps,
+    table_cell_offset_maps, BufferBlockStyle, CodeBlockType, FormattedTable, FormattedTextFragment,
 };
-use crate::render::model::test_utils::{TEST_STYLES, laid_out_paragraph, mock_paragraph};
+use crate::render::model::test_utils::{laid_out_paragraph, mock_paragraph, TEST_STYLES};
 use crate::render::model::{
     ColumnUnit, Height, LayoutSummary, LineCount, RenderedSelection, SoftWrapPoint, TEXT_SPACING,
 };
@@ -763,11 +763,9 @@ fn test_scroll_snapshot() {
     assert_eq!(model.height().as_f32(), 24. * 3.);
 
     // Restore the scroll position at the new height. It should still start at the same content.
-    assert!(
-        model
-            .viewport
-            .scroll_to(scroll_position.to_scroll_top(&model), model.height())
-    );
+    assert!(model
+        .viewport
+        .scroll_to(scroll_position.to_scroll_top(&model), model.height()));
     // The reduced content height clamps the restored position to the last viewport.
     assert_eq!(model.viewport.scroll_top().as_f32(), 12.);
 
@@ -779,11 +777,9 @@ fn test_scroll_snapshot() {
     assert_eq!(model.height().as_f32(), 60. + 80. + 24.);
 
     // Restore the scroll position at the new height.
-    assert!(
-        model
-            .viewport
-            .scroll_to(scroll_position.to_scroll_top(&model), model.height())
-    );
+    assert!(model
+        .viewport
+        .scroll_to(scroll_position.to_scroll_top(&model), model.height()));
     // The new scroll position is at the start of the second paragraph.
     assert_eq!(model.viewport.scroll_top().as_f32(), 60.);
 }
@@ -1480,8 +1476,9 @@ mod char_cell {
     use string_offset::CharOffset;
 
     use crate::render::model::{
-        ColumnUnit, LineCount, SoftWrapPoint, char_cell_display_width, char_cell_line_row_starts,
-        char_cell_max_line, char_cell_offset_to_softwrap_point, char_cell_softwrap_point_to_offset,
+        char_cell_display_width, char_cell_line_row_starts, char_cell_max_line,
+        char_cell_offset_to_softwrap_point, char_cell_softwrap_point_to_offset, ColumnUnit,
+        LineCount, SoftWrapPoint,
     };
 
     /// Build the `(line_starts, char_widths)` pair from a text string (mirrors
@@ -1662,7 +1659,7 @@ mod char_cell {
 
     #[test]
     fn wide_char_occupies_two_columns() {
-        // "你好world": 你(2) 好(2) w o r l d. Index 2 ('w') sits at display col 4.
+        // Two width-2 CJK chars followed by w o r l d. Index 2 ('w') sits at display col 4.
         let text = "你好world";
         let (starts, widths) = line_starts_for(text);
         let pt = char_cell_offset_to_softwrap_point(CharOffset::from(2), &starts, &widths, 80);
@@ -1671,12 +1668,12 @@ mod char_cell {
 
     #[test]
     fn wide_char_wraps_when_it_does_not_fit() {
-        // "你好你" at width 4: 你好 fill the first row (4 cols); the third 你
+        // Three width-2 CJK chars at width 4: the first two fill row 0 (4 cols); the third
         // doesn't fit so it wraps to row 1.
         let text = "你好你";
         let (starts, widths) = line_starts_for(text);
         assert_eq!(char_cell_max_line(&starts, &widths, 4), LineCount(2));
-        // Cursor before the third 你 (index 2) is at the start of row 1.
+        // Cursor before the third char (index 2) is at the start of row 1.
         let pt = char_cell_offset_to_softwrap_point(CharOffset::from(2), &starts, &widths, 4);
         assert_eq!(pt, SoftWrapPoint::new(1, ColumnUnit::Chars(0)));
         // Round-trips at each char boundary.
@@ -1704,7 +1701,7 @@ mod char_cell {
 
     #[test]
     fn line_row_starts_breaks_on_wide_chars() {
-        // width 4, "你好你好": two wide chars per row → break before index 2.
+        // width 4, four width-2 CJK chars: two wide chars per row → break before index 2.
         let widths: Vec<u8> = "你好你好"
             .chars()
             .map(|c| char_cell_display_width(c) as u8)

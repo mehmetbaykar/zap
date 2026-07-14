@@ -63,6 +63,8 @@ pub fn init(override_locale: Option<&str>) {
         log::warn!("[i18n] select() failed: {e} — running with fallback only");
     }
 
+    disable_bidi_isolation(&loader);
+
     log::info!(
         "[i18n] initialized; current_languages={:?}, fallback={}",
         loader.current_languages(),
@@ -72,6 +74,16 @@ pub fn init(override_locale: Option<&str>) {
     propagate_ui_locale(&loader);
 
     let _ = LANGUAGE_LOADER.set(loader);
+}
+
+/// Don't wrap interpolated arguments in Unicode bidi isolation marks (FSI/PDI,
+/// U+2068/U+2069): they surface as invisible junk in rendered UI text and break
+/// string comparisons. The UI ships LTR languages only.
+///
+/// The flag only mutates the bundles that exist right now, so this must be
+/// re-applied after every `load_*`/`select` call that (re)creates bundles.
+fn disable_bidi_isolation(loader: &FluentLanguageLoader) {
+    loader.set_use_isolating(false);
 }
 
 /// Forward the resolved UI locale to `warpui::set_ui_locale` so DirectWrite / CoreText
@@ -183,6 +195,7 @@ pub fn set_locale(locale: &str) {
         log::warn!("[i18n] set_locale({locale:?}) failed: {e}");
         return;
     }
+    disable_bidi_isolation(loader);
     log::info!(
         "[i18n] locale switched to {locale:?}; current_languages={:?}",
         loader.current_languages()
@@ -199,6 +212,7 @@ pub fn reset_to_system_locale() {
     if let Err(e) = i18n_embed::select(loader, &Localizations, &requested) {
         log::warn!("[i18n] reset_to_system_locale failed: {e}");
     }
+    disable_bidi_isolation(loader);
     propagate_ui_locale(loader);
 }
 

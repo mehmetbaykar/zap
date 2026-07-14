@@ -6152,11 +6152,18 @@ impl PaneGroup {
     }
 
     pub fn shared_session_view_ids(&self, ctx: &AppContext) -> Vec<EntityId> {
+        self.shared_session_views(ctx)
+            .into_iter()
+            .map(|view| view.id())
+            .collect()
+    }
+
+    pub fn shared_session_views(&self, ctx: &AppContext) -> Vec<ViewHandle<TerminalView>> {
         self.panes_of::<TerminalPane>()
             .filter_map(|p| {
                 let terminal_view = p.terminal_view(ctx);
                 let is_shared = terminal_view.as_ref(ctx).is_sharing_session();
-                is_shared.then(|| terminal_view.id())
+                is_shared.then_some(terminal_view)
             })
             .collect()
     }

@@ -40,10 +40,7 @@ async fn test_yakbak_openai_resp_reasoning_summary_capture() -> TestResult<()> {
 		.reasoning_content
 		.as_deref()
 		.ok_or("reasoning_content should be populated")?;
-	assert!(
-		!reasoning.is_empty(),
-		"reasoning_content populated but empty"
-	);
+	assert!(!reasoning.is_empty(), "reasoning_content populated but empty");
 	// First summary chunk for the recorded prompt starts with a
 	// header line we can pin — the API formats summaries as
 	// "**Topic**\n\nFirst line..." and the exact header is stable
@@ -160,7 +157,7 @@ async fn test_yakbak_openai_resp_stream_tools() -> TestResult<()> {
 
 /// Demonstrates and verifies the UTF-8 chunking fix in WebStream::poll_next().
 ///
-/// When a multi-byte UTF-8 character (e.g. Japanese 日 = 3 bytes) straddles an HTTP
+/// When a multi-byte UTF-8 character (e.g. a 3-byte Japanese kanji) straddles an HTTP
 /// chunk boundary, the old code's `String::from_utf8()` would fail. The fix buffers
 /// incomplete trailing bytes across chunks.
 ///

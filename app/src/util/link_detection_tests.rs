@@ -97,8 +97,8 @@ fn test_possible_file_paths_in_tree_output_absolute_path_leaf() {
 
 #[test]
 fn test_possible_file_paths_in_word_cjk_punctuation() {
-    // Fullwidth colon (U+FF1A) directly touching a path — common in CJK prose
-    // such as `路径：/path/to/file`.
+    // Fullwidth colon (U+FF1A) directly touching a path — common in CJK prose,
+    // where a label and its path run together with no ASCII separator.
     let word = "路径：/path/to/file.md";
     let possible_paths = possible_file_paths_in_word(word).collect_vec();
     assert!(possible_paths.contains(&"/path/to/file.md"));

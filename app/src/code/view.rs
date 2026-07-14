@@ -231,9 +231,10 @@ pub struct TabData {
     editor_view: ViewHandle<LocalCodeEditorView>,
     mouse_state_handles: TabDataMouseStateHandles,
     preview: bool,
-    /// 远端 Markdown 的只读渲染预览视图。`Some` = 正在显示渲染预览,`None` = 显示
-    /// 可编辑源码。仅远端文件会用到 —— 本地 Markdown 走 `ReplaceWithFilePane` 切换到
-    /// `FileNotebookView`,不在 `CodeView` 内联渲染。
+    /// Read-only rendered preview view for remote Markdown. `Some` = showing the rendered
+    /// preview, `None` = showing editable source. Only remote files use this — local Markdown
+    /// goes through `ReplaceWithFilePane` to switch to `FileNotebookView`, rather than
+    /// rendering inline inside `CodeView`.
     rendered_markdown_view: Option<ViewHandle<RichTextEditorView>>,
 }
 
@@ -316,8 +317,9 @@ impl CodeView {
 
     #[cfg(feature = "local_fs")]
     fn update_markdown_mode_segmented_control(&mut self, ctx: &mut ViewContext<Self>) {
-        // 本地文件优先用 `local_path()` / `tab.path` / `source.path()`;远端文件这些都是
-        // `None`,改用 `location.language_path()`(只取后缀,不做文件系统访问)识别 Markdown。
+        // Local files prefer `local_path()` / `tab.path` / `source.path()`; for remote files
+        // these are all `None`, so fall back to `location.language_path()` (suffix only, no
+        // filesystem access) to detect Markdown.
         let path = self
             .local_path(ctx)
             .or_else(|| {
@@ -363,8 +365,8 @@ impl CodeView {
 
             ctx.subscribe_to_view(&handle, |view, _, event, ctx| {
                 let MarkdownToggleEvent::ModeSelected(mode) = event;
-                // 远端文件在 `CodeView` 内联切换渲染/源码;本地文件保持原行为
-                // (Rendered → 替换为 `FileNotebookView` pane)。
+                // Remote files toggle rendered/source inline in `CodeView`; local files keep
+                // the original behavior (Rendered -> replace with a `FileNotebookView` pane).
                 let is_remote = view
                     .tab_at(view.active_tab_index)
                     .and_then(|t| t.location.as_ref())
@@ -386,7 +388,8 @@ impl CodeView {
             self.markdown_mode_segmented_control = Some(handle);
         }
 
-        // 切 tab 时,把分段控件的选中态同步到当前 tab 的渲染状态。
+        // On tab switch, sync the segmented control's selection to the current tab's render
+        // state.
         let control = self.markdown_mode_segmented_control.clone();
         if let Some(control) = control {
             let mode = if self
@@ -405,15 +408,17 @@ impl CodeView {
         ctx.notify();
     }
 
-    /// 为远端 Markdown 文件在 `CodeView` 内联切换只读渲染预览与可编辑源码。
+    /// Toggle between a read-only rendered preview and editable source, inline in `CodeView`,
+    /// for remote Markdown files.
     ///
-    /// `rendered = true`:对当前 buffer 文本做一次快照,构造一个只读
-    /// (`InteractionState::Selectable`)的 [`RichTextEditorView`],存到当前 tab。
-    /// `rendered = false`:清除该视图,回到源码编辑器。
+    /// `rendered = true`: snapshot the current buffer text and build a read-only
+    /// (`InteractionState::Selectable`) [`RichTextEditorView`], stored on the current tab.
+    /// `rendered = false`: clear that view and return to the source editor.
     ///
-    /// 注意:这是**快照**式渲染 —— buffer 后续经 sync 更新时预览不会自动刷新,
-    /// 用户切回 Raw 再切回 Rendered 即可重新渲染。本地文件不走这里
-    /// (走 `RenderMarkdown` → `ReplaceWithFilePane`)。
+    /// Note: this is a **snapshot** render — the preview does not auto-refresh when the buffer
+    /// is later updated via sync; the user can toggle back to Raw and then Rendered to
+    /// re-render. Local files do not go through here (they use
+    /// `RenderMarkdown` -> `ReplaceWithFilePane`).
     #[cfg(feature = "local_fs")]
     fn set_remote_markdown_rendered(&mut self, rendered: bool, ctx: &mut ViewContext<Self>) {
         let index = self.active_tab_index;
@@ -2489,7 +2494,8 @@ impl View for CodeView {
         let tab = self.tab_at(self.active_tab_index);
         let body = if let Some(tab) = tab {
             if let Some(rendered) = &tab.rendered_markdown_view {
-                // 远端 Markdown 的只读渲染预览,内联替换源码编辑器。
+                // Read-only rendered preview for remote Markdown, replacing the source editor
+                // inline.
                 ChildView::new(rendered).finish()
             } else {
                 match self.source {

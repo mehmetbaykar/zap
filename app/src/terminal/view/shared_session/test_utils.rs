@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::terminal::shared_session::protocol::SessionSourceType;
 use crate::terminal::shared_session::protocol::{ParticipantId, ParticipantList, SessionId};
+use crate::terminal::shared_session::SharedSessionStatus;
 use warpui::platform::WindowStyle;
 use warpui::{App, ViewHandle};
 
@@ -17,6 +18,7 @@ use crate::GlobalResourceHandles;
 /// set up for the viewer.
 pub fn terminal_view_for_viewer(app: &mut App) -> ViewHandle<TerminalView> {
     initialize_app_for_terminal_view(app);
+    app.add_singleton_model(remote_server::manager::RemoteServerManager::new);
 
     let global_resource_handles = GlobalResourceHandles::mock(app);
     let GlobalResourceHandles {
@@ -46,6 +48,11 @@ pub fn terminal_view_for_viewer(app: &mut App) -> ViewHandle<TerminalView> {
 
     let user_uid = UserUid::new("mock_user_uid");
     terminal.update(app, |view, ctx| {
+        // The viewer terminal manager (removed with cloud sharing) used to mark
+        // the model as a viewer before the join event arrived.
+        view.model
+            .lock()
+            .set_shared_session_status(SharedSessionStatus::reader());
         view.on_session_share_joined(
             ParticipantId::new(),
             user_uid,

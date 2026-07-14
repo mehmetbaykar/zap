@@ -59,7 +59,7 @@ fn hard_breaks_a_token_wider_than_the_row() {
 #[test]
 fn wide_glyphs_occupy_two_columns_and_are_never_split() {
     // A wide glyph painted with one trailing column to spare drops whole: only
-    // the leading "日" lands, proving it claimed two columns.
+    // the leading glyph lands, proving it claimed two columns.
     let truncated = TuiText::new("日本").truncate();
     assert_eq!(render_to_lines(&truncated, TuiSize::new(3, 1)), vec!["日 "]);
 

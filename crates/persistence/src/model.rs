@@ -1217,7 +1217,7 @@ pub struct AgentConversationData {
     /// Opaque serialized BYOP repair sidecar. The app layer owns validation semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub byop_repair_state_json: Option<String>,
-    /// CLI subagent 终端 block 快照 sidecar。具体 JSON schema 由 app 层负责。
+    /// CLI subagent terminal-block snapshot sidecar. The app layer owns the concrete JSON schema.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli_subagent_block_snapshots_json: Option<String>,
     /// Whether this conversation is pinned in the conversation UI.

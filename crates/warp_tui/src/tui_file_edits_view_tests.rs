@@ -104,9 +104,11 @@ fn diff_pipeline_computes_added_lines_and_ghost_blocks() {
         editor.update(&mut app, |editor, ctx| editor.expand_diffs(ctx));
 
         // Ghost blocks land via the render state's async layout channel; poll
-        // until the spawned handler has stored them.
+        // until the spawned handler has stored them. The bound is generous
+        // because yields get starved when the host is under load — 100
+        // iterations flaked roughly one run in three.
         let mut ghosts = Vec::new();
-        for _ in 0..100 {
+        for _ in 0..100_000 {
             ghosts = app.read(|app| {
                 editor
                     .as_ref(app)

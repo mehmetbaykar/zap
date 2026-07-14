@@ -277,6 +277,16 @@ impl TerminalView {
         reason: SessionEndedReason,
         ctx: &mut ViewContext<Self>,
     ) {
+        // The network layer that used to tear the share down is gone; unshare
+        // locally so the pane leaves the shared state deterministically.
+        if !self.model.lock().shared_session_status().is_sharer() {
+            log::warn!("Attempted to stop sharing current session that is not being shared");
+            return;
+        }
+        self.model
+            .lock()
+            .set_shared_session_status(SharedSessionStatus::NotShared);
+        self.on_session_share_ended(ctx);
         ctx.emit(Event::StopSharingCurrentSession { reason });
     }
 

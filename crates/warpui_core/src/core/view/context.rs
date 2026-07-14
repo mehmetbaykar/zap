@@ -421,10 +421,19 @@ impl<'a, T: Entity> ViewContext<'a, T> {
     /// This is useful to avoid re-entrant view updates (e.g. triggering UI updates
     /// while a view in the responder chain is still mid-update).
     pub fn dispatch_typed_action_deferred<A: Action + 'static>(&mut self, action: A) {
+        self.dispatch_boxed_typed_action_deferred(Box::new(action));
+    }
+
+    /// Like [`Self::dispatch_typed_action_deferred`], but for an already-boxed action.
+    ///
+    /// Dispatching the box directly through the generic method would register the
+    /// `Box<dyn Action>` itself as the action, so its `TypeId` — not the boxed
+    /// action's — would be used for handler lookup and never match any view.
+    pub fn dispatch_boxed_typed_action_deferred(&mut self, action: Box<dyn Action>) {
         self.app.pending_effects.push_back(Effect::TypedAction {
             window_id: self.window_id,
             view_id: self.view_id,
-            action: Box::new(action),
+            action,
         });
     }
 

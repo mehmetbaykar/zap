@@ -1,18 +1,18 @@
 use std::ops::Range;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 
 use line_ending::LineEnding;
 use markdown_parser::{
-    FormattedIndentTextInline, FormattedText, FormattedTextFragment, FormattedTextLine, parse_html,
-    parse_markdown,
+    parse_html, parse_markdown, FormattedIndentTextInline, FormattedText, FormattedTextFragment,
+    FormattedTextLine,
 };
 use pathfinder_color::ColorU;
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 use serde_yaml::{Mapping, Value};
 use string_offset::{ByteOffset, CharOffset};
-use vec1::{Vec1, vec1};
+use vec1::{vec1, Vec1};
 use warp_util::content_version::ContentVersion;
 use warpui_core::elements::ListIndentLevel;
 use warpui_core::text::point::Point;
@@ -33,7 +33,7 @@ use crate::content::selection::TextStyleBias;
 use crate::content::selection_model::BufferSelectionModel;
 use crate::content::text::{
     BlockHeaderSize, BlockType, BufferBlockItem, BufferBlockStyle, CodeBlockType, IndentBehavior,
-    IndentUnit, TABLE_BLOCK_MARKDOWN_LANG, TextStyles, TextStylesWithMetadata,
+    IndentUnit, TextStyles, TextStylesWithMetadata, TABLE_BLOCK_MARKDOWN_LANG,
 };
 use crate::content::undo::{
     NonAtomicType, ReversibleEditorActions, ReversibleSelectionState, UndoActionType, UndoArg,
@@ -902,10 +902,8 @@ fn test_range_fully_styled() {
             let _ = buffer.style_internal(TextStyles::default().italic(), selection.clone(), ctx);
             assert_eq!(buffer.content.debug(), "<text>h<b_s>e<i_s>ll<b_e><i_e>o");
 
-            assert!(
-                !buffer
-                    .ranges_fully_styled(vec1![1.into()..3.into()], TextStyles::default().bold())
-            );
+            assert!(!buffer
+                .ranges_fully_styled(vec1![1.into()..3.into()], TextStyles::default().bold()));
             assert!(
                 buffer.ranges_fully_styled(vec1![2.into()..4.into()], TextStyles::default().bold())
             );
@@ -913,10 +911,8 @@ fn test_range_fully_styled() {
                 vec1![3.into()..5.into()],
                 TextStyles::default().bold().italic()
             ));
-            assert!(
-                !buffer
-                    .ranges_fully_styled(vec1![4.into()..6.into()], TextStyles::default().italic())
-            );
+            assert!(!buffer
+                .ranges_fully_styled(vec1![4.into()..6.into()], TextStyles::default().italic()));
         });
     });
 }
@@ -14286,8 +14282,8 @@ fn test_insert_at_offsets() {
 /// `apply_core_edit_actions` without validating.  The invalid range reaches
 /// `Buffer::edit`, which panics on the `debug_assert!`.
 ///
-/// 这个测试传入历史 crash 样本里的反向范围(`4042..3982`),确认 editor 会防御来自
-/// diff layer 的坏输入。
+/// This test feeds the reversed range from a historical crash sample (`4042..3982`) to confirm the
+/// editor defends against bad input from the diff layer.
 #[test]
 fn test_insert_at_offsets_overlapping_ranges_skipped() {
     App::test((), |mut app| async move {
@@ -14310,8 +14306,8 @@ fn test_insert_at_offsets_overlapping_ranges_skipped() {
 
             let original_text = buffer.text().into_string();
 
-            // 传入 start > end 的反向范围。apply_core_edit_actions 修复后,
-            // 这种范围应被跳过而不是触发 panic。
+            // Feed a reversed range where start > end. After apply_core_edit_actions repairs it,
+            // such a range should be skipped instead of triggering a panic.
             let edits = Vec1::try_from_vec(vec![(
                 "replacement\n".to_string(),
                 CharOffset::from(4042)..CharOffset::from(3982),

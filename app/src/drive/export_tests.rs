@@ -98,6 +98,8 @@ impl ExportTest {
 }
 
 fn initialize_app(app: &mut App) {
+    // Untitled-object export names come from t!(); resolve against the English bundle.
+    crate::i18n::init(Some("en"));
     app.add_singleton_model(ObjectStoreModel::mock);
     app.add_singleton_model(ExportManager::new);
     app.add_singleton_model(UserWorkspaces::default_mock);
