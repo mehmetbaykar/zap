@@ -40,7 +40,6 @@ use super::warp_drive_page::WarpDriveSettingsPageView;
 use super::warpify_page::WarpifyPageView;
 use super::SettingsSection;
 use crate::appearance::Appearance;
-use crate::settings::PreferencesSettings;
 use crate::themes::theme::Fill;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
@@ -532,24 +531,10 @@ impl LocalOnlyIconState {
         mouse_states: &mut HashMap<String, MouseStateHandle>,
         app: &AppContext,
     ) -> Self {
-        if !*PreferencesSettings::as_ref(app).settings_sync_enabled {
-            // Only show the local-only icon if settings sync is enabled.
-            return Self::Hidden;
-        }
-
-        match sync_to_cloud {
-            SyncToCloud::Never => {
-                let mouse_state = mouse_states
-                    .entry(storage_key.to_string())
-                    .or_default()
-                    .clone();
-                Self::Visible {
-                    mouse_state,
-                    custom_tooltip: None,
-                }
-            }
-            _ => Self::Hidden,
-        }
+        // Zap has no per-setting cloud sync: every setting lives only on this
+        // machine, so the "not synced" badge would be noise on every row.
+        let _ = (storage_key, sync_to_cloud, mouse_states, app);
+        Self::Hidden
     }
 }
 

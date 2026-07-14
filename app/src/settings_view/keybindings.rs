@@ -21,7 +21,7 @@ use warpui::{
 };
 
 use super::settings_page::{
-    render_sub_header, LocalOnlyIconState, MatchData, PageType, SettingsPageMeta,
+    render_sub_header, MatchData, PageType, SettingsPageMeta,
     SettingsPageViewHandle, SettingsWidget,
 };
 use super::SettingsSection;
@@ -32,7 +32,6 @@ use crate::editor::{
 };
 use crate::keyboard::{write_custom_keybinding, UserDefinedKeybinding};
 use crate::search_bar::SearchBar;
-use crate::settings::PreferencesSettings;
 use crate::util::bindings::{
     filter_bindings_including_keystroke, reset_keybinding_to_default, set_custom_keybinding,
     CommandBinding,
@@ -1000,9 +999,7 @@ fn trigger_keybinding_notifier(
 }
 
 #[derive(Default)]
-struct KeybindingsWidget {
-    local_only_icon_mouse_state: MouseStateHandle,
-}
+struct KeybindingsWidget;
 
 impl KeybindingsWidget {
     fn render_description(
@@ -1143,14 +1140,9 @@ impl SettingsWidget for KeybindingsWidget {
         appearance: &Appearance,
         app: &AppContext,
     ) -> Box<dyn Element> {
-        let local_only_icon_state = if *PreferencesSettings::as_ref(app).settings_sync_enabled {
-            Some(LocalOnlyIconState::Visible {
-                mouse_state: self.local_only_icon_mouse_state.clone(),
-                custom_tooltip: Some(crate::t!("settings-keybindings-not-synced-tooltip")),
-            })
-        } else {
-            None
-        };
+        // Zap stores everything locally, so the "not synced" badge is never
+        // shown next to the keybindings header.
+        let local_only_icon_state = None;
 
         let subheader = render_sub_header(
             appearance,

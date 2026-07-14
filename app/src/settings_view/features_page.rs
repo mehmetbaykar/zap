@@ -38,7 +38,7 @@ use super::settings_page::render_sub_sub_header;
 use super::settings_page::{
     add_setting, build_reset_button, build_toggle_element, render_body_item,
     render_body_item_label, render_dropdown_item, render_dropdown_item_label,
-    render_local_only_icon, AdditionalInfo, Category, LocalOnlyIconState, MatchData, PageType,
+    AdditionalInfo, Category, LocalOnlyIconState, MatchData, PageType,
     SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, ToggleState, HEADER_PADDING,
     TOGGLE_BUTTON_RIGHT_PADDING,
 };
@@ -69,7 +69,7 @@ use crate::settings::{
     EnableSlashCommandsInTerminal, EnableSshAutoDiscovery, ErrorUnderliningEnabled, ExtraMetaKeys,
     GPUSettings, GlobalHotkeyMode, InputSettings, InputSettingsChangedEvent,
     LinuxSelectionClipboard, MiddleClickPasteEnabled, MouseScrollMultiplier, PreferLowPowerGPU,
-    PreferencesSettings, PreferredGraphicsBackend, QuakeModeSettings, ScrollSettings,
+    PreferredGraphicsBackend, QuakeModeSettings, ScrollSettings,
     ScrollSettingsChangedEvent, SelectionSettings, ShowAutosuggestionIgnoreButton,
     ShowTerminalInputMessageBar, SshSettings, SyntaxHighlighting, TabBehavior,
     UserNativeRedirectPreference, VimModeEnabled, VimStatusBar, VimUnnamedSystemClipboard,
@@ -1394,7 +1394,6 @@ impl FeaturesPageAction {
 #[derive(Default)]
 struct MouseStateHandles {
     local_only_icon_tooltip_states: RefCell<HashMap<String, MouseStateHandle>>,
-    tab_behavior_local_only_icon: MouseStateHandle,
     activation_hotkey_keybinding_editor: MouseStateHandle,
     activation_hotkey_save: MouseStateHandle,
     activation_hotkey_cancel: MouseStateHandle,
@@ -6705,15 +6704,6 @@ impl SettingsWidget for TabKeyBehaviorWidget {
                     .build()
                     .finish(),
             );
-        if *PreferencesSettings::as_ref(app).settings_sync_enabled {
-            tab_key_span.add_child(render_local_only_icon(
-                appearance,
-                view.button_mouse_states
-                    .tab_behavior_local_only_icon
-                    .clone(),
-                None,
-            ));
-        }
 
         let main_row = Flex::row()
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
