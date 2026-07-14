@@ -79,6 +79,7 @@ use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warp_core::user_preferences::GetUserPreferences as _;
 use warp_editor::editor::NavigationKey;
+use warp_errors::{report_error, report_if_error};
 use warp_util::path::ShellFamily;
 use warpui::accessibility::AccessibilityContent;
 use warpui::accessibility::ActionAccessibilityContent;
@@ -327,13 +328,13 @@ use crate::input_suggestions::TabCompletionsPreselectOption;
 use crate::network::NetworkStatus;
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::PaneGroupAction;
+#[cfg(feature = "local_fs")]
+use crate::persistence::{database_file_path_for_current_scope, establish_ro_connection};
 use crate::prefix::longest_common_prefix;
 use crate::prompt::editor_modal::OpenSource as PromptEditorOpenSource;
-use crate::resource_center::mark_feature_used_and_write_to_user_defaults;
-use crate::resource_center::Tip;
-use crate::resource_center::TipAction;
-use crate::resource_center::TipHint;
-use crate::resource_center::TipsCompleted;
+use crate::resource_center::{
+    mark_feature_used_and_write_to_user_defaults, Tip, TipAction, TipHint, TipsCompleted,
+};
 use crate::search::ai_context_menu::mixer::AIContextMenuSearchableAction;
 use crate::search::ai_context_menu::search::is_valid_search_query;
 use crate::search::ai_context_menu::view::AIContextMenuAction;
@@ -390,8 +391,8 @@ use crate::terminal::input::rewind::{RewindMenuEvent, RewindMenuView};
 use crate::terminal::input::skills::{InlineSkillSelectorEvent, InlineSkillSelectorView};
 use crate::terminal::input::slash_command_model::{SlashCommandEntryState, SlashCommandModel};
 use crate::terminal::input::slash_commands::{
-    slash_command_is_submitted_as_prompt, InlineSlashCommandView, SlashCommandDataSource,
-    SlashCommandTrigger,
+    slash_command_is_submitted_as_prompt, GuiSlashCommandDataSource, InlineSlashCommandView,
+    SlashCommandDataSource as _, SlashCommandTrigger,
 };
 use crate::terminal::input::suggestions_mode_model::{
     InputSuggestionsModeEvent, InputSuggestionsModeModel,
@@ -456,7 +457,6 @@ use crate::workspace::WorkspaceAction;
 use crate::AgentModeEntrypoint;
 #[allow(unused_imports)]
 use crate::ASSETS;
-use crate::{report_error, report_if_error};
 
 /// Drop target data for dropping content on the [`Input`].
 #[derive(Debug, Clone)]
@@ -1751,7 +1751,7 @@ pub struct Input {
     prompt_suggestions_view: ViewHandle<PromptSuggestionsView>,
 
     inline_slash_commands_view: ViewHandle<InlineSlashCommandView>,
-    slash_command_data_source: ModelHandle<SlashCommandDataSource>,
+    slash_command_data_source: ModelHandle<GuiSlashCommandDataSource>,
 
     /// Inline conversation menu for selecting AI conversations.
     inline_conversation_menu_view: ViewHandle<InlineConversationMenuView>,
@@ -3087,15 +3087,15 @@ impl Input {
             ctx.add_view(|ctx| PromptSuggestionsView::new(ai_input_model.clone(), ctx));
 
         let slash_command_data_source = ctx.add_model(|ctx| {
-            SlashCommandDataSource::new(
-                slash_commands::DataSourceArgs {
-                    active_session: active_session.clone(),
-                    agent_view_controller: agent_view_controller.clone(),
-                    cli_subagent_controller: cli_subagent_controller.clone(),
-                    terminal_view_id,
-                },
-                ctx,
-            )
+            let args = slash_commands::GuiDataSourceArgs {
+                active_session: active_session.clone(),
+                agent_view_controller: agent_view_controller.clone(),
+                cli_subagent_controller: cli_subagent_controller.clone(),
+                terminal_view_id,
+                // Wired post-construction via `attach_ambient_agent_view_model`.
+                ambient_agent_view_model: None,
+            };
+            GuiSlashCommandDataSource::new(args, ctx)
         });
         let slash_command_model = ctx.add_model(|ctx| {
             SlashCommandModel::new(
@@ -3430,12 +3430,8 @@ impl Input {
         };
 
         #[cfg(feature = "local_fs")]
-        if let Some(db_url) = crate::persistence::database_file_path_for_scope(
-            &crate::persistence::PersistenceScope::App,
-        )
-        .to_str()
-        {
-            if let Ok(conn) = crate::persistence::establish_ro_connection(db_url) {
+        if let Some(db_url) = database_file_path_for_current_scope().to_str() {
+            if let Ok(conn) = establish_ro_connection(db_url) {
                 input.conn = Some(Arc::new(Mutex::new(conn)));
             }
         }

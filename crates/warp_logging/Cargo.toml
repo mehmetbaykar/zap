@@ -12,6 +12,7 @@ cfg-if.workspace = true
 env_logger.workspace = true
 log.workspace = true
 warp_core.workspace = true
+warp_errors.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 dirs.workspace = true

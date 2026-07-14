@@ -10,6 +10,7 @@ use lazy_static::lazy_static;
 use num_traits::Float as _;
 use unicode_width::UnicodeWidthChar;
 use warp_core::features::FeatureFlag;
+use warp_errors::report_error;
 use warpui::assets::asset_cache::{AssetCache, AssetSource, AssetState};
 use warpui::color::ColorU;
 use warpui::elements::{Border, CornerRadius, Fill, Radius, DEFAULT_UI_LINE_HEIGHT_RATIO};

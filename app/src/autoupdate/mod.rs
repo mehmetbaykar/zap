@@ -18,6 +18,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate};
 use rand::Rng as _;
 use settings::Setting as _;
 use warp_core::execution_mode::AppExecutionMode;
+use warp_errors::{report_error, report_if_error};
 use warpui::accessibility::{AccessibilityContent, WarpA11yRole};
 use warpui::platform::TerminationMode;
 use warpui::r#async::Timer;
@@ -32,10 +33,7 @@ use crate::features::FeatureFlag;
 use crate::server::telemetry::TelemetryEvent;
 use crate::settings::AutoupdateSettings;
 use crate::workspace::Workspace;
-use crate::{
-    report_error, report_if_error, send_telemetry_from_ctx, send_telemetry_sync_from_app_ctx,
-    ChannelState,
-};
+use crate::{send_telemetry_from_ctx, send_telemetry_sync_from_app_ctx, ChannelState};
 
 /// SHA-256 verification shared across all three platforms after an OSS download completes:
 /// 1. If no matching asset is found in the cached release, skip (degrade to no verification);
@@ -1151,7 +1149,7 @@ where
                         autoupdate_state.relaunch_failed(ctx);
 
                         let err = anyhow!(err).context("Error applying installed update");
-                        crate::report_error!(&err);
+                        warp_errors::report_error!(&err);
                         callback(Err(err), ctx);
                     }
                 }

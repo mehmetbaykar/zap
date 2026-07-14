@@ -29,10 +29,9 @@ pub use zero_state_block::*;
 use std::sync::LazyLock;
 
 use pathfinder_color::ColorU;
+use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::Fill;
-use warp_core::ui::{appearance::Appearance, color::blend::Blend};
 use warpui::keymap::Keystroke;
-use warpui::{AppContext, SingletonEntity};
 
 use crate::view_components::action_button::ActionButtonTheme;
 
@@ -54,17 +53,6 @@ pub static ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE: LazyLock<Keystroke> = La
         }
     }
 });
-
-pub fn agent_view_bg_fill(app: &AppContext) -> Fill {
-    let appearance = Appearance::as_ref(app);
-    appearance.theme().surface_overlay_1()
-}
-
-pub fn agent_view_bg_color(app: &AppContext) -> ColorU {
-    agent_view_bg_fill(app)
-        .blend(&Appearance::as_ref(app).theme().background())
-        .into_solid()
-}
 
 pub struct AgentViewHeaderTheme;
 

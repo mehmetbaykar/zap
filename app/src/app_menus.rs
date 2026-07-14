@@ -853,7 +853,7 @@ fn make_new_help_menu() -> Menu {
                 links::GITHUB_ISSUES_URL.into(),
             ),
             link_menu_item(
-                crate::t!("app-menu-warp-slack-community"),
+                "Join our Slack community...".to_string(),
                 links::SLACK_URL.into(),
             ),
         ],

@@ -83,13 +83,11 @@ use tokio::fs;
 #[cfg(feature = "voice_input")]
 use voice_input::{StartListeningError, VoiceSessionResult};
 
-use warp_core::{
-    report_if_error,
-    ui::{
-        color::{blend::Blend, contrast::MinimumAllowedContrast, ContrastingColor},
-        theme::{color::internal_colors, Fill},
-    },
+use warp_core::ui::{
+    color::{blend::Blend, contrast::MinimumAllowedContrast, ContrastingColor},
+    theme::{color::internal_colors, Fill},
 };
+use warp_errors::report_if_error;
 #[cfg(feature = "voice_input")]
 use warpui::r#async::SpawnedFutureHandle;
 use warpui::{

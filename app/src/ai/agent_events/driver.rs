@@ -6,8 +6,7 @@ use async_trait::async_trait;
 use futures::future::Either;
 use futures::StreamExt;
 use instant::Instant;
-use warp_core::errors::{register_error, AnyhowErrorExt as _, ErrorExt};
-use warp_core::report_error;
+use warp_errors::{register_error, report_error, AnyhowErrorExt as _, ErrorExt};
 use warpui::r#async::Timer;
 
 use crate::ai::agent_events::{AgentEventStreamClient, AgentRunEvent};

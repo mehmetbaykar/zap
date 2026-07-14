@@ -14,6 +14,7 @@ use itertools::Itertools;
 use uuid::Uuid;
 use warp_editor::model::RichTextEditorModel;
 use warp_editor::render::model::RichTextStyles;
+use warp_errors::report_error;
 use warp_multi_agent_api as maa_api;
 use warpui::color::ColorU;
 use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity, WindowId};

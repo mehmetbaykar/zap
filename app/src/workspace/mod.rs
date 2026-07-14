@@ -105,6 +105,7 @@ pub fn init(app: &mut AppContext) {
     hoa_onboarding::init(app);
     tab_configs::session_config_modal::init(app);
     view::zap_launch_modal::init(app);
+    view::feature_intro_modal::init(app);
     view::codex_modal::init(app);
     view::global_search::view::GlobalSearchView::init(app);
     view::right_panel::RightPanelView::init(app);
@@ -135,6 +136,12 @@ pub fn init(app: &mut AppContext) {
             "enter",
             WorkspaceAction::DismissSessionConfigTabConfigChip,
             id!("Workspace") & id!(flags::SESSION_CONFIG_TAB_CONFIG_CHIP_OPEN),
+        ),
+        // Feature intro never takes focus, so Escape is handled at workspace level.
+        FixedBinding::new(
+            "escape",
+            WorkspaceAction::DismissFeatureIntroModal,
+            id!("Workspace") & id!(flags::FEATURE_INTRO_MODAL_OPEN),
         ),
     ]);
 
@@ -191,6 +198,18 @@ pub fn init(app: &mut AppContext) {
                     "workspace:reset_zap_launch_modal_state",
                     crate::t!("keybinding-desc-workspace-reset-zap-launch-modal-state"),
                     WorkspaceAction::ResetZapLaunchModalState,
+                )
+                .with_context_predicate(id!("Workspace")),
+                EditableBinding::new(
+                    "workspace:open_feature_intro_modal",
+                    "[Debug] Open Feature Intro Modal",
+                    WorkspaceAction::OpenFeatureIntroModal,
+                )
+                .with_context_predicate(id!("Workspace")),
+                EditableBinding::new(
+                    "workspace:reset_feature_intro_modal_state",
+                    "[Debug] Reset Feature Intro Modal State",
+                    WorkspaceAction::ResetFeatureIntroModalState,
                 )
                 .with_context_predicate(id!("Workspace")),
                 EditableBinding::new(

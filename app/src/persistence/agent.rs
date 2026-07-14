@@ -7,13 +7,13 @@ use diesel::prelude::*;
 use diesel::result::Error;
 use diesel::SqliteConnection;
 use prost::Message;
+use warp_errors::report_error;
 use warp_multi_agent_api as api;
 
 use super::model::{AgentConversation, AgentConversationData, AgentConversationSummary};
 use super::ConversationSummaryBackfill;
 use crate::persistence::model::{AgentConversationRecord, AgentTaskRecord};
 use crate::persistence::schema::{self, agent_conversations, agent_tasks};
-use crate::report_error;
 
 /// Maximum size of a single serialized `api::Task` protobuf BLOB stored in
 /// `agent_tasks.task`. Tasks exceeding this limit are skipped on both write

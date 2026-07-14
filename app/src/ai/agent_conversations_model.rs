@@ -15,6 +15,7 @@ use warp_cli::agent::Harness;
 use warp_core::features::FeatureFlag;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::WarpTheme;
+use warp_errors::report_error;
 use warpui::color::ColorU;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, WindowId};
 

@@ -67,10 +67,10 @@ use warpui::clipboard_utils::get_image_filepaths_from_paths;
 use crate::ai::blocklist::agent_view::fork_from_last_known_good_state_exchange_id;
 use crate::ai::blocklist::agent_view::orchestration_pill_bar::OrchestrationPillBar;
 use crate::ai::blocklist::agent_view::{
-    agent_view_bg_fill, AgentViewController, AgentViewControllerEvent, AgentViewDisplayMode,
-    AgentViewEntryBlockParams, AgentViewEntryOrigin, AgentViewHeaderDisabledTheme,
-    AgentViewHeaderTheme, AgentViewZeroStateBlock, AgentViewZeroStateEvent, EphemeralMessageModel,
-    ExitAgentViewError, ExitConfirmationTrigger, InlineAgentViewHeader,
+    AgentViewController, AgentViewControllerEvent, AgentViewDisplayMode, AgentViewEntryBlockParams,
+    AgentViewEntryOrigin, AgentViewHeaderDisabledTheme, AgentViewHeaderTheme,
+    AgentViewZeroStateBlock, AgentViewZeroStateEvent, EphemeralMessageModel, ExitAgentViewError,
+    ExitConfirmationTrigger, InlineAgentViewHeader,
 };
 use crate::ai::conversation_utils;
 use crate::ai::predict::prompt_suggestions::{
@@ -209,6 +209,7 @@ use warp_core::context_flag::ContextFlag;
 use warp_core::r#async::debounce;
 use warp_core::semantic_selection::SemanticSelection;
 use warp_core::user_preferences::GetUserPreferences as _;
+use warp_errors::{report_error, report_if_error};
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 #[cfg(feature = "local_fs")]
 use warp_util::path::LineAndColumnArg;
@@ -527,11 +528,11 @@ use crate::workspace::{CommandSearchOptions, OneTimeModalModel, ToastStack, Work
 use crate::workspace::{ForkAIConversationParams, ForkFromExchange, ForkedConversationDestination};
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::ActiveSession as WindowActiveSession;
-use crate::{
-    report_error, report_if_error, send_telemetry_from_ctx, send_telemetry_on_executor,
-    send_telemetry_sync_from_ctx, AIAgentActionResultType,
-};
 use crate::{safe_error, safe_warn};
+use crate::{
+    send_telemetry_from_ctx, send_telemetry_on_executor, send_telemetry_sync_from_ctx,
+    AIAgentActionResultType,
+};
 use fuzzy_match::match_indices_case_insensitive;
 use warp_editor::editor::NavigationKey;
 
@@ -26841,12 +26842,6 @@ impl View for TerminalView {
         {
             Container::new(element)
                 .with_foreground_overlay(appearance.theme().accent_overlay())
-                .finish()
-        } else if FeatureFlag::AgentView.is_enabled()
-            && self.agent_view_controller.as_ref(app).is_fullscreen()
-        {
-            Container::new(element)
-                .with_foreground_overlay(agent_view_bg_fill(app))
                 .finish()
         } else {
             element

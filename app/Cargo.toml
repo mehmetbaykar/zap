@@ -299,6 +299,7 @@ libsqlite3-sys = { version = "0.33.0", features = ["bundled"] }
 mio = { version = "1.1.1", features = ["os-poll", "os-ext"] }
 tokio.workspace = true
 tokio-util.workspace = true
+warp_errors = { workspace = true, features = ["tokio-errors", "websocket-errors"] }
 
 # AWS SDK (loading credentials for BYO LLM)
 aws-config = { version = "1.8.16", features = ["credentials-login"] }

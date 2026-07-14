@@ -203,6 +203,7 @@ dependencies = [
  "uuid",
  "virtual-fs",
  "warp_core",
+ "warp_errors",
  "warp_multi_agent_api",
  "warp_terminal",
  "warp_util",
@@ -6366,6 +6367,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "warp_core",
+ "warp_errors",
  "wasm-bindgen-futures",
 ]
 
@@ -6379,6 +6381,7 @@ dependencies = [
  "tower",
  "tower-http",
  "warp_core",
+ "warp_errors",
  "warpui_core",
 ]
 
@@ -7891,6 +7894,7 @@ dependencies = [
  "tokio",
  "url",
  "warp_core",
+ "warp_errors",
  "warp_util",
  "warpui_core",
 ]
@@ -8184,6 +8188,7 @@ dependencies = [
  "url",
  "uuid",
  "warp_core",
+ "warp_errors",
  "warpui",
  "warpui_extras",
  "windows 0.62.2",
@@ -9534,6 +9539,7 @@ dependencies = [
  "ui_components",
  "uuid",
  "warp_core",
+ "warp_errors",
  "warp_logging",
  "warpui",
  "warpui_core",
@@ -11463,6 +11469,7 @@ dependencies = [
  "tokio-util",
  "uuid",
  "warp_core",
+ "warp_errors",
  "warp_util",
  "warpui_core",
 ]
@@ -11508,6 +11515,7 @@ dependencies = [
  "virtual-fs",
  "walkdir",
  "warp_core",
+ "warp_errors",
  "warp_util",
  "warpui",
  "warpui_core",
@@ -15421,6 +15429,7 @@ dependencies = [
  "warp_completer",
  "warp_core",
  "warp_editor",
+ "warp_errors",
  "warp_files",
  "warp_isolation_platform",
  "warp_js",
@@ -15689,6 +15698,7 @@ dependencies = [
  "vec1",
  "vim",
  "warp_core",
+ "warp_errors",
  "warp_util",
  "warpui",
  "warpui_core",
@@ -15776,6 +15786,7 @@ dependencies = [
  "log-panics",
  "tempfile",
  "warp_core",
+ "warp_errors",
  "warp_web_event_bus",
  "wasm-bindgen",
  "web-sys",
@@ -15864,6 +15875,7 @@ dependencies = [
  "strum_macros 0.27.2",
  "tantivy",
  "warp_core",
+ "warp_errors",
  "warpui_core",
 ]
 
@@ -15925,6 +15937,7 @@ dependencies = [
  "vte",
  "warp_completer",
  "warp_core",
+ "warp_errors",
  "warp_util",
  "warpui_core",
 ]
@@ -15939,6 +15952,7 @@ dependencies = [
  "command",
  "dirs 6.0.0",
  "futures",
+ "futures-lite 1.13.0",
  "instant",
  "itertools 0.14.0",
  "log",
@@ -15958,6 +15972,7 @@ dependencies = [
  "warp_channel_config",
  "warp_core",
  "warp_editor",
+ "warp_errors",
  "warp_files",
  "warp_terminal",
  "warp_util",
@@ -16144,6 +16159,7 @@ dependencies = [
  "instant",
  "itertools 0.14.0",
  "lazy_static",
+ "libc",
  "log",
  "markdown_parser",
  "minimp4",

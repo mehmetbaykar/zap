@@ -8,7 +8,7 @@ use anyhow::Result;
 use chrono::Local;
 use log::LevelFilter;
 use warp_core::channel::ChannelState;
-use warp_core::report_error;
+use warp_errors::report_error;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 

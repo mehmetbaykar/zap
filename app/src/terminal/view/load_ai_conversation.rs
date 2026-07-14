@@ -6,6 +6,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Local};
 use vec1::Vec1;
 use warp_core::features::FeatureFlag;
+use warp_errors::report_error;
 use warp_multi_agent_api as api;
 use warpui::units::IntoPixels;
 use warpui::{EntityId, ModelHandle, SingletonEntity, ViewContext};

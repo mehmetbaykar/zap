@@ -18,6 +18,7 @@ use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::WarpTheme;
+use warp_errors::report_error;
 use warp_multi_agent_api::response_event::stream_finished;
 use warp_multi_agent_api::response_event::stream_finished::TokenUsage;
 use warp_multi_agent_api::{self as api};
@@ -72,7 +73,7 @@ use crate::terminal::model::block::{
     AgentInteractionMetadata, AgentViewVisibility, BlockId, SerializedAIMetadata, SerializedBlock,
 };
 use crate::ui_components::icons::Icon;
-use crate::{report_error, BlocklistAIHistoryModel, GlobalResourceHandlesProvider};
+use crate::{BlocklistAIHistoryModel, GlobalResourceHandlesProvider};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TodoStatus {

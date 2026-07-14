@@ -14,9 +14,10 @@ use crate::search::mixer::{BoxFuture, DataSourceRunErrorWrapper};
 use crate::search::FuzzyMatchWorkflowResult;
 use crate::server::ids::SyncId;
 use crate::settings::AISettings;
+use crate::terminal::input::slash_commands::AcceptSlashCommandOrSavedPrompt;
 use crate::workflows::WorkflowObjectModel;
 
-use super::{AcceptSlashCommandOrSavedPrompt, InlineItem};
+use super::InlineItem;
 
 pub(super) struct SavedPromptCandidate {
     pub(super) id: SyncId,

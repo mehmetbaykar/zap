@@ -3,10 +3,11 @@ use warp_core::features::FeatureFlag;
 use warpui::{Entity, ModelContext, SingletonEntity, WindowId};
 
 use super::hoa_onboarding;
+use super::view::feature_intro_modal::{FeatureIntroId, FEATURE_INTROS};
 use crate::auth::{AuthManager, AuthManagerEvent};
 use crate::channel::{Channel, ChannelState};
 // Zap (localization, Phase 5): `PreferencesSyncer` has been physically removed.
-use crate::settings::CodeSettings;
+use crate::settings::{AISettings, CodeSettings};
 use crate::terminal::general_settings::GeneralSettings;
 
 /// A generic model for managing one-time modals that should be shown to users only once.
@@ -20,6 +21,9 @@ pub struct OneTimeModalModel {
     is_zap_launch_modal_open: bool,
     /// Whether the HOA onboarding flow is currently being shown.
     is_hoa_onboarding_open: bool,
+    /// Non-blocking feature-intro popover currently shown, if any. It is intentionally
+    /// excluded from `is_any_modal_open` so terminal input remains usable.
+    active_feature_intro: Option<FeatureIntroId>,
     /// The window ID where the currently open one-time modal should be displayed.
     /// This is captured when a modal is first opened and ensures the modal stays on that window.
     target_window_id: Option<WindowId>,
@@ -45,12 +49,18 @@ impl OneTimeModalModel {
                         log::warn!("Failed to mark Zap launch modal as dismissed: {e}");
                     }
                 });
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    for intro in FEATURE_INTROS {
+                        settings.mark_feature_intro_seen(intro.id.as_key(), ctx);
+                    }
+                });
             }
         });
 
         Self {
             is_zap_launch_modal_open: false,
             is_hoa_onboarding_open: false,
+            active_feature_intro: None,
             target_window_id: None,
         }
     }
@@ -78,6 +88,26 @@ impl OneTimeModalModel {
         self.set_hoa_onboarding_open(false, ctx);
     }
 
+    /// Returns the feature intro visible in the target window, if any.
+    pub fn active_feature_intro(&self) -> Option<FeatureIntroId> {
+        if self.target_window_id.is_some() {
+            self.active_feature_intro
+        } else {
+            None
+        }
+    }
+
+    pub fn mark_feature_intro_dismissed(&mut self, ctx: &mut ModelContext<Self>) {
+        if self.set_active_feature_intro(None, ctx) {
+            self.check_and_trigger_hoa_onboarding(ctx);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn force_open_feature_intro(&mut self, id: FeatureIntroId, ctx: &mut ModelContext<Self>) {
+        self.set_active_feature_intro(Some(id), ctx);
+    }
+
     /// Returns true if any one-time modal is currently open.
     pub fn is_any_modal_open(&self) -> bool {
         (self.is_zap_launch_modal_open || self.is_hoa_onboarding_open)
@@ -91,12 +121,40 @@ impl OneTimeModalModel {
 
     pub fn update_target_window_id(&mut self, window_id: WindowId, ctx: &mut ModelContext<Self>) {
         let was_any_modal_visible = self.is_any_modal_open();
+        let was_feature_intro_visible = self.active_feature_intro().is_some();
+        let previous_target = self.target_window_id;
         self.target_window_id = Some(window_id);
-        if was_any_modal_visible != self.is_any_modal_open() {
+        let is_any_modal_visible = self.is_any_modal_open();
+        let is_feature_intro_visible = self.active_feature_intro().is_some();
+        if was_any_modal_visible != is_any_modal_visible
+            || was_feature_intro_visible != is_feature_intro_visible
+            || (is_feature_intro_visible && previous_target != Some(window_id))
+        {
             ctx.emit(OneTimeModalEvent::VisibilityChanged {
-                is_open: self.is_any_modal_open(),
+                is_open: is_any_modal_visible || is_feature_intro_visible,
             });
         }
+    }
+
+    fn set_active_feature_intro(
+        &mut self,
+        intro: Option<FeatureIntroId>,
+        ctx: &mut ModelContext<Self>,
+    ) -> bool {
+        if self.active_feature_intro == intro {
+            return false;
+        }
+
+        self.active_feature_intro = intro;
+        if intro.is_some() && self.target_window_id.is_none() {
+            if let Some(window_id) = ctx.windows().active_window() {
+                self.target_window_id = Some(window_id);
+            }
+        }
+        ctx.emit(OneTimeModalEvent::VisibilityChanged {
+            is_open: intro.is_some(),
+        });
+        true
     }
 
     fn set_zap_launch_modal_open(&mut self, is_open: bool, ctx: &mut ModelContext<Self>) -> bool {
@@ -125,6 +183,10 @@ impl OneTimeModalModel {
         });
 
         if self.check_and_trigger_zap_launch_modal(ctx) {
+            return;
+        }
+
+        if self.check_and_trigger_feature_intro_modal(ctx) {
             return;
         }
 
@@ -188,6 +250,30 @@ impl OneTimeModalModel {
         self.set_zap_launch_modal_open(should_show_zap_modal, ctx);
         should_show_zap_modal
     }
+
+    fn check_and_trigger_feature_intro_modal(&mut self, ctx: &mut ModelContext<Self>) -> bool {
+        if !AISettings::as_ref(ctx).is_any_ai_enabled(ctx) {
+            return false;
+        }
+
+        let next_id = FEATURE_INTROS
+            .iter()
+            .find(|intro| !AISettings::as_ref(ctx).is_feature_intro_seen(intro.id.as_key()))
+            .map(|intro| intro.id);
+        let Some(id) = next_id else {
+            return false;
+        };
+
+        AISettings::handle(ctx).update(ctx, |settings, ctx| {
+            settings.mark_feature_intro_seen(id.as_key(), ctx);
+        });
+
+        let should_show = !matches!(ChannelState::channel(), Channel::Integration);
+        if should_show {
+            self.set_active_feature_intro(Some(id), ctx);
+        }
+        should_show
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,3 +286,7 @@ impl Entity for OneTimeModalModel {
 }
 
 impl SingletonEntity for OneTimeModalModel {}
+
+#[cfg(test)]
+#[path = "one_time_modal_model_tests.rs"]
+mod tests;

@@ -104,6 +104,15 @@ fn test_oss_secure_state_dir_is_disabled() {
 }
 
 #[test]
+fn test_tui_state_dir_is_tui_subdir_of_gui_state_base() {
+    let tui_dir = tui_state_dir();
+    assert_eq!(tui_dir.file_name(), Some(std::ffi::OsStr::new("tui")));
+
+    let gui_state_base = secure_state_dir().unwrap_or_else(state_dir);
+    assert_eq!(tui_dir.parent(), Some(gui_state_base.as_path()));
+}
+
+#[test]
 fn test_project_path_for_zap_dev_app_id() {
     // Covers the `starts_with("Zap")` branch in `project_dirs_for_app_id` on Linux,
     // which maps suffixed application names like `ZapDev` to a dashed lowercase

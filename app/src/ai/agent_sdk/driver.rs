@@ -58,7 +58,8 @@ use oneshot::{Canceled, Receiver, Sender};
 use uuid::Uuid;
 use warp_cli::agent::{Harness, OutputFormat};
 use warp_cli::mcp::MCPSpec;
-use warp_core::{features::FeatureFlag, report_if_error, safe_debug, safe_info};
+use warp_core::{features::FeatureFlag, safe_debug, safe_info};
+use warp_errors::report_if_error;
 use warp_managed_secrets::ManagedSecretValue;
 use warpui::{
     r#async::{FutureExt, TimeoutError},

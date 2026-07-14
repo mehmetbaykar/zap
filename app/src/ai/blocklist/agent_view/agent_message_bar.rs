@@ -4,7 +4,7 @@ use parking_lot::FairMutex;
 use warp_core::features::FeatureFlag;
 use warp_core::ui::appearance::Appearance;
 use warpui::assets::asset_cache::AssetSource;
-use warpui::elements::{Container, Element, Empty, MouseStateHandle};
+use warpui::elements::{Element, Empty, MouseStateHandle};
 use warpui::keymap::Keystroke;
 use warpui::platform::OperatingSystem;
 use warpui::{AppContext, Entity, ModelHandle, SingletonEntity, View, ViewContext};
@@ -15,9 +15,7 @@ use crate::ai::agent::{
     AIAgentExchangeId, AIAgentOutputStatus, FinishedAIAgentOutput, RenderableAIError,
 };
 use crate::ai::blocklist::agent_view::shortcuts::AgentShortcutViewModel;
-use crate::ai::blocklist::agent_view::{
-    agent_view_bg_fill, AgentViewController, AgentViewControllerEvent,
-};
+use crate::ai::blocklist::agent_view::{AgentViewController, AgentViewControllerEvent};
 use crate::ai::blocklist::{
     BlocklistAIContextEvent, BlocklistAIContextModel, BlocklistAIHistoryEvent,
     BlocklistAIInputEvent, BlocklistAIInputModel,
@@ -380,14 +378,7 @@ impl View for AgentMessageBar {
             Some(FigmaMcpStatus::Running) | None => {}
         }
 
-        let message_bar = render_standard_message_bar(message, right_element, app);
-        if self.agent_view_controller.as_ref(app).is_inline() {
-            Container::new(message_bar)
-                .with_background(agent_view_bg_fill(app))
-                .finish()
-        } else {
-            message_bar
-        }
+        render_standard_message_bar(message, right_element, app)
     }
 }
 

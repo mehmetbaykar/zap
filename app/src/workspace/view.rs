@@ -2,6 +2,7 @@ pub(crate) mod codex_modal;
 pub mod conversation_list;
 #[cfg(enable_crash_recovery)]
 mod crash_recovery;
+pub(crate) mod feature_intro_modal;
 pub mod global_search;
 pub(crate) mod launch_modal;
 pub(crate) mod left_panel;
@@ -117,6 +118,10 @@ use crate::workspace::header_toolbar_item::HeaderToolbarItemKind;
 use crate::workspace::tab_group::{TabGroup, TabGroupId};
 use crate::workspace::tab_settings::TabCloseButtonPosition;
 use crate::workspace::view::codex_modal::{CodexModal, CodexModalEvent};
+use crate::workspace::view::feature_intro_modal::{
+    feature_intro_by_id, FeatureIntroCtaTarget, FeatureIntroId, FeatureIntroModal,
+    FeatureIntroModalEvent,
+};
 use crate::workspace::view::zap_launch_modal::{ZapLaunchModal, ZapLaunchModalEvent};
 use crate::workspace::{ForkFromExchange, ForkedConversationDestination};
 use crate::BlocklistAIHistoryModel;
@@ -620,6 +625,9 @@ const MOBILE_OVERLAY_SCRIM_ALPHA: u8 = 128;
 pub const NEW_TAB_BUTTON_POSITION_ID: &str = "new_tab_button";
 pub const NEW_SESSION_MENU_BUTTON_POSITION_ID: &str = "new_session_menu_button";
 
+/// Saved popover position used to keep the changelog chip above the feature intro.
+const FEATURE_INTRO_MODAL_POSITION_ID: &str = "workspace:feature_intro_modal";
+
 // The max length of the title of a fork toast (after which we truncate it).
 const MAX_FORK_TOAST_TITLE_LENGTH: usize = 100;
 
@@ -1016,6 +1024,9 @@ pub struct Workspace {
     suggested_agent_mode_workflow_modal: ViewHandle<SuggestedAgentModeWorkflowModal>,
     suggested_rule_modal: ViewHandle<SuggestedRuleModal>,
     zap_launch_modal: ViewHandle<ZapLaunchModal>,
+    feature_intro_modal: ViewHandle<FeatureIntroModal>,
+    /// Tab that first received the feature intro. Switching tabs hides rather than moves it.
+    feature_intro_tab_pane_group_id: Option<EntityId>,
     codex_modal: ViewHandle<CodexModal>,
     toast_stack: ViewHandle<DismissibleToastStack<WorkspaceAction>>,
     agent_toast_stack: ViewHandle<AgentToastStack>,
@@ -2762,6 +2773,11 @@ impl Workspace {
             me.handle_zap_launch_modal_event(event, ctx);
         });
 
+        let feature_intro_view = ctx.add_typed_action_view(FeatureIntroModal::new);
+        ctx.subscribe_to_view(&feature_intro_view, |me, _, event, ctx| {
+            me.handle_feature_intro_modal_event(event, ctx);
+        });
+
         let launch_config_save_modal = Self::build_launch_config_save_modal(ctx);
 
         let tab_config_params_modal = Self::build_tab_config_params_modal(ctx);
@@ -3044,6 +3060,8 @@ impl Workspace {
                 if model_ref.target_window_id() == Some(ctx.window_id()) {
                     if model_ref.is_zap_launch_modal_open() {
                         me.focus_zap_launch_modal(ctx);
+                    } else if let Some(id) = model_ref.active_feature_intro() {
+                        me.show_feature_intro_modal(id, ctx);
                     } else if model_ref.is_hoa_onboarding_open() {
                         me.show_hoa_onboarding_flow(ctx);
                     }
@@ -3172,6 +3190,8 @@ impl Workspace {
             transcript_details_panel,
             tab_fixed_width: None,
             zap_launch_modal: zap_launch_view,
+            feature_intro_modal: feature_intro_view,
+            feature_intro_tab_pane_group_id: None,
             codex_modal,
             lightbox_view: None,
             hoa_onboarding_flow: None,
@@ -11598,6 +11618,8 @@ impl Workspace {
             return;
         }
 
+        let closed_tab_id = self.tabs.get(index).map(|tab| tab.pane_group.id());
+
         let tabs_closed = self.close_tabs(
             vec![index].into_iter(),
             OpenDialogSource::CloseTab { tab_index: index },
@@ -11608,6 +11630,12 @@ impl Workspace {
 
         // Telemetry whenever tabs actually closed, not when confirmation dialog comes up.
         if tabs_closed {
+            if closed_tab_id.is_some() && closed_tab_id == self.feature_intro_tab_pane_group_id {
+                OneTimeModalModel::handle(ctx).update(ctx, |model, ctx| {
+                    model.mark_feature_intro_dismissed(ctx);
+                });
+                self.feature_intro_tab_pane_group_id = None;
+            }
             ctx.dispatch_global_action("workspace:save_app", ());
             send_telemetry_from_ctx!(
                 TelemetryEvent::TabOperations {
@@ -14259,7 +14287,13 @@ impl Workspace {
             pane_group::Event::Escape => {
                 if self.current_workspace_state.is_resource_center_open {
                     self.current_workspace_state.is_resource_center_open = false;
-                    ctx.notify()
+                    ctx.notify();
+                } else if self.is_feature_intro_visible_on_active_tab(ctx) {
+                    OneTimeModalModel::handle(ctx).update(ctx, |model, ctx| {
+                        model.mark_feature_intro_dismissed(ctx);
+                    });
+                    self.feature_intro_tab_pane_group_id = None;
+                    ctx.notify();
                 }
             }
             pane_group::Event::Exited { add_to_undo_stack } => {
@@ -17190,6 +17224,33 @@ impl Workspace {
                 ctx.notify();
             }
         }
+    }
+
+    fn handle_feature_intro_modal_event(
+        &mut self,
+        event: &FeatureIntroModalEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let cta_target = match event {
+            FeatureIntroModalEvent::GetStarted(id) => {
+                feature_intro_by_id(*id).and_then(|intro| intro.cta_target)
+            }
+            FeatureIntroModalEvent::Close(_) => None,
+        };
+
+        OneTimeModalModel::handle(ctx).update(ctx, |model, ctx| {
+            model.mark_feature_intro_dismissed(ctx);
+        });
+        self.feature_intro_tab_pane_group_id = None;
+        self.focus_active_tab(ctx);
+
+        if let Some(FeatureIntroCtaTarget::SettingsWidget { page, widget_id }) = cta_target {
+            self.open_settings_pane(Some(page), None, ctx);
+            self.settings_pane.update(ctx, |settings, ctx| {
+                settings.scroll_to_settings_widget(page, widget_id(), ctx);
+            });
+        }
+        ctx.notify();
     }
 
     fn handle_codex_modal_event(&mut self, event: &CodexModalEvent, ctx: &mut ViewContext<Self>) {
@@ -20726,6 +20787,17 @@ impl Workspace {
         }
     }
 
+    /// Floats the changelog chip above the feature-intro popover.
+    fn feature_intro_chip_positioning(&self) -> OffsetPositioning {
+        OffsetPositioning::offset_from_save_position_element(
+            FEATURE_INTRO_MODAL_POSITION_ID,
+            vec2f(0., -8.),
+            PositionedElementOffsetBounds::WindowByPosition,
+            PositionedElementAnchor::TopRight,
+            ChildAnchor::BottomRight,
+        )
+    }
+
     fn add_toggle_setting_context_flags(&self, app: &AppContext, context: &mut Context) {
         let privacy_settings = PrivacySettings::as_ref(app);
         let editor_settings = AppEditorSettings::as_ref(app);
@@ -21004,6 +21076,9 @@ impl Workspace {
             context
                 .set
                 .insert(flags::SESSION_CONFIG_TAB_CONFIG_CHIP_OPEN);
+        }
+        if self.is_feature_intro_visible_on_active_tab(app) {
+            context.set.insert(flags::FEATURE_INTRO_MODAL_OPEN);
         }
 
         if tab_settings
@@ -21329,6 +21404,34 @@ impl Workspace {
 
     fn focus_zap_launch_modal(&mut self, ctx: &mut ViewContext<Self>) {
         ctx.focus(&self.zap_launch_modal);
+    }
+
+    fn show_feature_intro_modal(&mut self, id: FeatureIntroId, ctx: &mut ViewContext<Self>) {
+        if self.feature_intro_tab_pane_group_id.is_none() {
+            self.feature_intro_tab_pane_group_id = self
+                .tabs
+                .get(self.active_tab_index)
+                .map(|tab| tab.pane_group.id());
+        }
+        let intro = feature_intro_by_id(id);
+        self.feature_intro_modal.update(ctx, |modal, ctx| {
+            modal.set_feature(intro, ctx);
+        });
+    }
+
+    fn is_feature_intro_visible_on_active_tab(&self, app: &AppContext) -> bool {
+        let one_time = OneTimeModalModel::as_ref(app);
+        if one_time.target_window_id() != Some(self.window_id)
+            || one_time.active_feature_intro().is_none()
+        {
+            return false;
+        }
+        let Some(pinned_tab) = self.feature_intro_tab_pane_group_id else {
+            return true;
+        };
+        self.tabs
+            .get(self.active_tab_index)
+            .is_some_and(|tab| tab.pane_group.id() == pinned_tab)
     }
 
     fn open_left_panel_view(&mut self, action: &LeftPanelAction, ctx: &mut ViewContext<Self>) {
@@ -21684,6 +21787,13 @@ impl TypedActionView for Workspace {
             ShowSessionConfigModal => self.show_session_config_modal(ctx),
             DismissSessionConfigTabConfigChip => {
                 self.dismiss_session_config_tab_config_chip(ctx);
+            }
+            DismissFeatureIntroModal => {
+                OneTimeModalModel::handle(ctx).update(ctx, |model, ctx| {
+                    model.mark_feature_intro_dismissed(ctx);
+                });
+                self.feature_intro_tab_pane_group_id = None;
+                ctx.notify();
             }
             #[cfg(debug_assertions)]
             ShowHoaOnboardingFlow => self.show_hoa_onboarding_flow(ctx),
@@ -23049,6 +23159,30 @@ impl TypedActionView for Workspace {
                     new_value,
                     FeatureFlag::ZapLaunchModal.is_enabled()
                 );
+            }
+            #[cfg(debug_assertions)]
+            OpenFeatureIntroModal => {
+                if let Some(id) = feature_intro_modal::FEATURE_INTROS
+                    .first()
+                    .map(|intro| intro.id)
+                {
+                    OneTimeModalModel::handle(ctx).update(ctx, |model, ctx| {
+                        model.force_open_feature_intro(id, ctx);
+                    });
+                    ctx.notify();
+                }
+            }
+            #[cfg(debug_assertions)]
+            ResetFeatureIntroModalState => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    if let Err(error) = settings
+                        .seen_feature_intro_ids
+                        .set_value(Default::default(), ctx)
+                    {
+                        log::warn!("Failed to reset feature intro seen state: {error}");
+                    }
+                });
+                log::info!("Feature intro seen state has been reset");
             }
             #[cfg(debug_assertions)]
             InstallOpenCodeWarpPlugin => {
@@ -24696,11 +24830,40 @@ impl View for Workspace {
             }
         }
 
+        // Non-blocking feature-intro card, pinned above the active input or window corner.
+        let show_feature_intro = self.is_feature_intro_visible_on_active_tab(app);
+        if show_feature_intro {
+            let positioning = match &input_position_id {
+                Some(input_position_id) => {
+                    self.update_toast_positioning(input_position_id.clone(), app)
+                }
+                None => OffsetPositioning::offset_from_parent(
+                    vec2f(-16., -16.),
+                    ParentOffsetBounds::WindowByPosition,
+                    ParentAnchor::BottomRight,
+                    ChildAnchor::BottomRight,
+                ),
+            };
+            stack.add_positioned_overlay_child(
+                SavePosition::new(
+                    ChildView::new(&self.feature_intro_modal).finish(),
+                    FEATURE_INTRO_MODAL_POSITION_ID,
+                )
+                .finish(),
+                positioning,
+            );
+        }
+
         if let Some(input_position_id) = input_position_id {
             if FeatureFlag::AvatarInTabBar.is_enabled() && self.is_input_box_visible(app) {
+                let positioning = if show_feature_intro {
+                    self.feature_intro_chip_positioning()
+                } else {
+                    self.update_toast_positioning(input_position_id, app)
+                };
                 stack.add_positioned_overlay_child(
                     ChildView::new(&self.update_toast_stack).finish(),
-                    self.update_toast_positioning(input_position_id, app),
+                    positioning,
                 );
             }
         }

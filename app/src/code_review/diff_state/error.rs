@@ -11,7 +11,7 @@
 //! A [`DiffStateError`] pairs a sanitized [`DiffStateErrorKind`] with the raw
 //! underlying error, but only the sanitized half is ever logged:
 //! - [`std::fmt::Display`] renders only the sanitized `kind`, so passing this
-//!   through [`warp_core::report_error!`] keeps logs free of repo paths, refs,
+//!   through [`warp_errors::report_error!`] keeps logs free of repo paths, refs,
 //!   command output, or secrets. The raw cause is never exposed via `Display`
 //!   or `source`.
 //!
@@ -19,8 +19,8 @@
 //! via [`AnyhowErrorExt::is_actionable`] so registered non-actionable causes
 //! (transient I/O, network, etc.) auto-demote it to a warning.
 
-use warp_core::errors::{AnyhowErrorExt, ErrorExt};
 use warp_core::sync_queue::IsTransientError;
+use warp_errors::{AnyhowErrorExt, ErrorExt};
 
 /// Sanitized classification of a [`DiffStateError`]. Every variant has a
 /// fixed, PII-free [`std::fmt::Display`] string that is safe to send to logs.
@@ -148,7 +148,7 @@ impl DiffStateError {
     pub(crate) fn report_and_log(&self) {
         let cause = &self.cause;
         log::warn!("Diff state error: {cause:#}");
-        warp_core::report_error!(self);
+        warp_errors::report_error!(self);
     }
 }
 
@@ -187,7 +187,7 @@ impl ErrorExt for DiffStateError {
         }
     }
 }
-warp_core::errors::register_error!(DiffStateError);
+warp_errors::register_error!(DiffStateError);
 
 impl IsTransientError for DiffStateError {
     fn is_transient(&self) -> bool {

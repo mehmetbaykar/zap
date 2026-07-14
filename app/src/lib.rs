@@ -183,7 +183,7 @@ pub mod workspace;
 pub use persistence::testing as sqlite_testing;
 
 use ::settings::{Setting, ToggleableSetting};
-pub use warp_core::errors::{report_error, report_if_error};
+pub use warp_errors::{report_error, report_if_error};
 // Re-export the debounce function to simplify imports.
 #[cfg(feature = "plugin_host")]
 pub use plugin::{run_plugin_host, PLUGIN_HOST_FLAG};
@@ -1235,11 +1235,13 @@ pub(crate) fn initialize_app(
                 identity_key: identity_key.clone(),
             }
         }
+        // Keep GUI and TUI migrations isolated so either front-end can run a
+        // different local version without migrating the other's database.
+        LaunchMode::Tui { .. } => persistence::PersistenceScope::Tui,
         LaunchMode::App { .. }
         | LaunchMode::CommandLine { .. }
         | LaunchMode::RemoteServerProxy
-        | LaunchMode::Test { .. }
-        | LaunchMode::Tui { .. } => persistence::PersistenceScope::App,
+        | LaunchMode::Test { .. } => persistence::PersistenceScope::App,
     };
     let database_file_path = persistence::database_file_path_for_scope(&persistence_scope);
     // Only read the subsets of persisted data this launch mode actually

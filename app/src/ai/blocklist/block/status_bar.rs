@@ -35,7 +35,7 @@ use crate::ai::agent_tips::AITipModel;
 use crate::ai::blocklist::agent_view::child_agent_status_card::ChildAgentStatusCard;
 use crate::ai::blocklist::agent_view::shortcuts::AgentShortcutViewModel;
 use crate::ai::blocklist::agent_view::{
-    agent_view_bg_fill, AgentMessageBar, AgentViewController, EphemeralMessageModel,
+    AgentMessageBar, AgentViewController, EphemeralMessageModel,
 };
 use crate::ai::blocklist::model::AIBlockModelHelper;
 use crate::ai::blocklist::summarization_cancel_dialog::{
@@ -1114,9 +1114,7 @@ impl View for BlocklistAIStatusBar {
 
         let appearance = Appearance::as_ref(app);
         let theme = appearance.theme();
-        let background = if agent_view_controller.is_inline() {
-            agent_view_bg_fill(app)
-        } else if InputSettings::as_ref(app).is_universal_developer_input_enabled(app)
+        let background = if InputSettings::as_ref(app).is_universal_developer_input_enabled(app)
             || FeatureFlag::AgentView.is_enabled()
         {
             // Use a fully transparent background for universal developer input (or unconditionally, if the new

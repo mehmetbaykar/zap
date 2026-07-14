@@ -1909,6 +1909,18 @@ define_settings_group!(AISettings, settings: [
         private: true,
     },
 
+    // Not user-visible. Tracks one-time feature intros already shown on this device,
+    // keyed by the stable feature-intro id (see `FEATURE_INTROS`). This state is
+    // deliberately local-only; Zap never syncs announcement state through Warp cloud.
+    seen_feature_intro_ids: SeenFeatureIntroIds {
+        type: HashMap<String, bool>,
+        default: HashMap::default(),
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
+        private: true,
+    }
+
     // This is not a user-visible setting - its merely a one-time flag to track if the agents 3 launch modal
     // has been shown to the user.
     //
@@ -2748,6 +2760,24 @@ impl AISettings {
         report_if_error!(self
             .cli_agent_footer_enabled_commands
             .set_value(ToolbarCommandMap::new(map), ctx));
+    }
+
+    /// Whether the feature-intro popover with the given stable key has been seen.
+    pub fn is_feature_intro_seen(&self, key: &str) -> bool {
+        self.seen_feature_intro_ids
+            .get(key)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Records a feature intro as seen in local settings. No-op if already recorded.
+    pub fn mark_feature_intro_seen(&mut self, key: &str, ctx: &mut ModelContext<Self>) {
+        if self.is_feature_intro_seen(key) {
+            return;
+        }
+        let mut map = self.seen_feature_intro_ids.clone();
+        map.insert(key.to_owned(), true);
+        report_if_error!(self.seen_feature_intro_ids.set_value(map, ctx));
     }
 
     /// Whether the plugin install chip was dismissed for the given agent/host.

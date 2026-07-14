@@ -32,10 +32,13 @@ impl TypedActionView for TestHostView {
     type Action = ();
 }
 
-/// Builds a real `BlocklistAIActionModel` over minimal test session state,
-/// mirroring what production surfaces inject into transcript views and agent
-/// blocks.
-pub(crate) fn add_test_action_model(app: &mut App) -> ModelHandle<BlocklistAIActionModel> {
+/// Builds the action model and terminal-event dispatcher injected into TUI agent blocks.
+pub(crate) fn add_test_action_model_and_events(
+    app: &mut App,
+) -> (
+    ModelHandle<BlocklistAIActionModel>,
+    ModelHandle<ModelEventDispatcher>,
+) {
     // Read as a singleton by the action model's executors.
     app.add_singleton_model(|_| BlocklistAIHistoryModel::default());
     let terminal_model = Arc::new(FairMutex::new(TerminalModel::mock(None, None)));
@@ -45,7 +48,7 @@ pub(crate) fn add_test_action_model(app: &mut App) -> ModelHandle<BlocklistAIAct
         app.add_model(|ctx| ModelEventDispatcher::new(model_events_rx, sessions.clone(), ctx));
     let active_session =
         app.add_model(|ctx| ActiveSession::new(sessions.clone(), dispatcher.clone(), ctx));
-    app.add_model(|ctx| {
+    let action_model = app.add_model(|ctx| {
         BlocklistAIActionModel::new(
             terminal_model,
             active_session,
@@ -53,5 +56,6 @@ pub(crate) fn add_test_action_model(app: &mut App) -> ModelHandle<BlocklistAIAct
             EntityId::new(),
             ctx,
         )
-    })
+    });
+    (action_model, dispatcher)
 }

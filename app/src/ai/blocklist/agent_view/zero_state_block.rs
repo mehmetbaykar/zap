@@ -21,7 +21,7 @@ use crate::{
         agent::conversation::AIConversationId,
         blocklist::{
             agent_view::{
-                agent_view_bg_color, AgentViewController, AgentViewEntryOrigin,
+                AgentViewController, AgentViewEntryOrigin,
                 ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE,
             },
             history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel},
@@ -568,9 +568,9 @@ fn render_title_and_description(props: HeaderProps, app: &AppContext) -> Vec<Box
             .finish(),
     );
 
-    let bg = agent_view_bg_color(app);
-    let sub_text_color = theme.sub_text_color(bg.into()).into_solid();
-    let main_text_color = theme.main_text_color(bg.into()).into_solid();
+    let bg = theme.background();
+    let sub_text_color = theme.sub_text_color(bg).into_solid();
+    let main_text_color = theme.main_text_color(bg).into_solid();
 
     match description {
         AgentViewDescription::PlainText(text_items) => {
@@ -699,9 +699,7 @@ fn render_body(props: ZeroStateBodyProps<'_>, app: &AppContext) -> Vec<Box<dyn E
     if should_show_init_callout {
         let appearance = Appearance::as_ref(app);
         let theme = appearance.theme();
-        let main_text_color = theme
-            .main_text_color(agent_view_bg_color(app).into())
-            .into_solid();
+        let main_text_color = theme.main_text_color(theme.background()).into_solid();
         let init_message = Message::new(vec![
             MessageItem::keystroke(Keystroke {
                 key: "/init".to_owned(),

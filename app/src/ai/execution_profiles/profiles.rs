@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp_core::channel::ChannelState;
 use warp_core::user_preferences::GetUserPreferences;
+use warp_errors::report_error;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
 
 use crate::ai::llms::{LLMId, LLMPreferences};

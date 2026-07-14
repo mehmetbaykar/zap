@@ -68,9 +68,8 @@ pub use templatable_installation::TemplatableMCPServerInstallation;
 pub use templatable_installation::{VariableType, VariableValue};
 pub mod parsing;
 pub use parsing::ParsedTemplatableMCPServerResult;
-
 #[cfg(not(target_family = "wasm"))]
-use crate::report_error;
+use warp_errors::report_error;
 #[cfg(not(target_family = "wasm"))]
 pub mod http_client;
 #[cfg(not(target_family = "wasm"))]

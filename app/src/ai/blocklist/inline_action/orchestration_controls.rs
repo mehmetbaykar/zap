@@ -16,6 +16,7 @@ use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::{vec2f, Vector2F};
 use warp_cli::agent::Harness;
 use warp_core::ui::theme::Fill;
+use warp_errors::report_if_error;
 use warpui::elements::{
     ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex,
     Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Point, Radius,

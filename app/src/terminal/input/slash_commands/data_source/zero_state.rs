@@ -1,45 +1,30 @@
-use itertools::Itertools;
 use warpui::{Entity, ModelHandle};
 
 use crate::search::data_source::{Query, QueryResult};
 use crate::search::mixer::DataSourceRunErrorWrapper;
-use crate::search::slash_command_menu::static_commands::commands;
 use crate::search::SyncDataSource;
 use crate::terminal::input::slash_commands::{
-    AcceptSlashCommandOrSavedPrompt, InlineItem, SlashCommandDataSource,
+    AcceptSlashCommandOrSavedPrompt, GuiSlashCommandDataSource, SlashCommandDataSource,
+    TuiSlashCommandDataSource,
 };
 
-pub struct ZeroStateDataSource {
-    slash_command_data_source: ModelHandle<SlashCommandDataSource>,
-    // Upstream's cloud-mode-v2 command palette expands the zero state with a compact item
-    // layout plus skills/saved-prompts listings when this is `true` (via
-    // `InlineItem::with_compact_layout`/`from_saved_prompt` and
-    // `SlashCommandDataSource::active_session_for_v2_zero_state`). That palette
-    // (`cloud_mode_v2_view.rs`) is part of the stripped Warp cloud/handoff-mode cluster and
-    // isn't wired into the module tree (no `mod cloud_mode_v2_view;`), so it never compiles
-    // and the only real caller (`slash_commands/view.rs`) always passes `false`. The flag is
-    // kept for call-site compatibility only; it does not change behavior here.
-    #[allow(dead_code)]
-    is_cloud_mode_v2: bool,
+pub struct GuiZeroStateDataSource {
+    slash_command_data_source: ModelHandle<GuiSlashCommandDataSource>,
 }
 
-impl ZeroStateDataSource {
-    pub fn new(
-        slash_command_data_source: &ModelHandle<SlashCommandDataSource>,
-        is_cloud_mode_v2: bool,
-    ) -> Self {
+impl GuiZeroStateDataSource {
+    pub fn new(slash_command_data_source: &ModelHandle<GuiSlashCommandDataSource>) -> Self {
         Self {
             slash_command_data_source: slash_command_data_source.clone(),
-            is_cloud_mode_v2,
         }
     }
 }
 
-impl Entity for ZeroStateDataSource {
+impl Entity for GuiZeroStateDataSource {
     type Event = ();
 }
 
-impl SyncDataSource for ZeroStateDataSource {
+impl SyncDataSource for GuiZeroStateDataSource {
     type Action = AcceptSlashCommandOrSavedPrompt;
 
     fn run_query(
@@ -51,52 +36,50 @@ impl SyncDataSource for ZeroStateDataSource {
             return Ok(vec![]);
         }
 
-        // This is kind of a convoluted way to explicitly order these commands after all others.
-        //
-        // DataSource implementations must return highest priority items last (results sorted in
-        // ascending order of priority).
-        //
-        // The results construction below basically orders all active commands, sorted
-        // alphabetically, except for the commands in this vec, which are explicitly appended
-        // to all the other alphabetically sorted commands, in this order.
-        let prioritized_commands = vec![
-            &*commands::EDIT,
-            &*commands::CONVERSATIONS,
-            &*commands::PROMPTS,
-            &*commands::PLAN,
-            &*commands::AGENT,
-        ];
-
-        let mut active_prioritized_commands = vec![];
-        let mut results = vec![];
-
-        for (active_command_id, active_command) in self
+        Ok(self
             .slash_command_data_source
             .as_ref(app)
-            .active_commands()
-            .sorted_by_key(|(_, command)| std::cmp::Reverse(&command.name))
-        {
-            if prioritized_commands
-                .iter()
-                .any(|prioritized_command| prioritized_command.name == active_command.name)
-            {
-                active_prioritized_commands.push((active_command_id, active_command));
-            } else {
-                results.push(
-                    InlineItem::from_slash_command(active_command_id, active_command, app).into(),
-                );
-            }
+            .ordered_zero_state_commands(app)
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+}
+
+pub struct TuiZeroStateDataSource {
+    slash_command_data_source: ModelHandle<TuiSlashCommandDataSource>,
+}
+
+impl TuiZeroStateDataSource {
+    pub fn new(slash_command_data_source: &ModelHandle<TuiSlashCommandDataSource>) -> Self {
+        Self {
+            slash_command_data_source: slash_command_data_source.clone(),
+        }
+    }
+}
+
+impl Entity for TuiZeroStateDataSource {
+    type Event = ();
+}
+
+impl SyncDataSource for TuiZeroStateDataSource {
+    type Action = AcceptSlashCommandOrSavedPrompt;
+
+    fn run_query(
+        &self,
+        query: &Query,
+        app: &warpui::AppContext,
+    ) -> Result<Vec<QueryResult<Self::Action>>, DataSourceRunErrorWrapper> {
+        if !query.text.is_empty() {
+            return Ok(vec![]);
         }
 
-        for prioritized_command in prioritized_commands {
-            if let Some((id, command)) = active_prioritized_commands
-                .iter()
-                .find(|(_, active_command)| active_command.name == prioritized_command.name)
-            {
-                results.push(InlineItem::from_slash_command(id, command, app).into());
-            }
-        }
-
-        Ok(results)
+        Ok(self
+            .slash_command_data_source
+            .as_ref(app)
+            .ordered_zero_state_commands(app)
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 }

@@ -8,10 +8,10 @@ use crate::ai::agent::{
     AIAgentInput, CancellationOutcome, CreateDocumentsResult, EditDocumentsResult, ReadFilesResult,
     SubagentCall, SubagentType, TodoOperation,
 };
-use crate::report_error;
 use crate::util::time_format::format_elapsed_seconds;
 use crate::util::truncation::truncate_from_end;
 use ai::agent::file_locations::group_file_contexts_for_display;
+use warp_errors::report_error;
 
 use crate::ai::agent_conversations_model::AgentConversationsModel;
 use crate::ai::ambient_agents::AmbientAgentTaskId;

@@ -669,6 +669,12 @@ pub enum WorkspaceAction {
     /// Reset the Zap launch modal dismissed state (for debugging)
     #[cfg(debug_assertions)]
     ResetZapLaunchModalState,
+    /// Open the local feature-intro popover (for debugging).
+    #[cfg(debug_assertions)]
+    OpenFeatureIntroModal,
+    /// Reset local feature-intro seen state (for debugging).
+    #[cfg(debug_assertions)]
+    ResetFeatureIntroModalState,
     /// Install the opencode-warp plugin from GitHub into the global opencode config.
     #[cfg(debug_assertions)]
     InstallOpenCodeWarpPlugin,
@@ -726,6 +732,8 @@ pub enum WorkspaceAction {
     StartAgentOnboardingTutorial(OnboardingTutorial),
     ShowSessionConfigModal,
     DismissSessionConfigTabConfigChip,
+    /// Dismiss the non-blocking feature-intro popover without requiring focus.
+    DismissFeatureIntroModal,
     /// Start the HOA onboarding flow (for debugging)
     #[cfg(debug_assertions)]
     ShowHoaOnboardingFlow,
@@ -1030,6 +1038,7 @@ impl WorkspaceAction {
             | StartAgentOnboardingTutorial(_)
             | ShowSessionConfigModal
             | DismissSessionConfigTabConfigChip
+            | DismissFeatureIntroModal
             | SaveCurrentTabAsNewConfig(_)
             | SyncTrafficLights
             | OpenTabConfigErrorFile { .. }
@@ -1046,6 +1055,8 @@ impl WorkspaceAction {
             DebugResetAwsBedrockLoginBannerDismissed
             | OpenZapLaunchModal
             | ResetZapLaunchModalState
+            | OpenFeatureIntroModal
+            | ResetFeatureIntroModalState
             | InstallOpenCodeWarpPlugin
             | UseLocalOpenCodeWarpPlugin => false,
             #[cfg(not(target_family = "wasm"))]

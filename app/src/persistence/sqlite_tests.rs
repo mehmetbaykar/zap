@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 #[cfg(target_os = "macos")]
 use std::fs;
 use std::path::PathBuf;
@@ -9,9 +10,10 @@ use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::Vector2F;
 
 use super::{
-    app_database_file_path, database_file_path_for_scope, decode_path, deduplicate_events,
-    encode_path, get_all_codebase_index_metadata, handle_model_event, read_sqlite_data,
-    save_app_state, save_codebase_index_metadata, setup_database, start_writer,
+    app_database_file_path, database_file_path_for_current_scope, database_file_path_for_scope,
+    decode_path, deduplicate_events, encode_path, get_all_codebase_index_metadata,
+    handle_model_event, read_sqlite_data, save_app_state, save_codebase_index_metadata,
+    setup_database, start_writer,
 };
 use crate::ai::persisted_workspace::WorkspaceMetadata;
 use crate::app_state::{
@@ -35,6 +37,32 @@ use crate::workspace::tab_group::TabGroupId;
 fn app_scope_database_path_matches_app_database_path() {
     assert_eq!(
         database_file_path_for_scope(&PersistenceScope::App),
+        app_database_file_path()
+    );
+}
+
+#[test]
+fn tui_scope_database_path_is_tui_subdirectory_of_app_database_dir() {
+    let tui_path = database_file_path_for_scope(&PersistenceScope::Tui);
+    let app_path = database_file_path_for_scope(&PersistenceScope::App);
+
+    assert_ne!(tui_path, app_path);
+    assert_eq!(
+        tui_path,
+        warp_core::paths::tui_state_dir().join("warp.sqlite")
+    );
+
+    let tui_dir = tui_path
+        .parent()
+        .expect("TUI database path should have a parent");
+    assert_eq!(tui_dir.file_name(), Some(OsStr::new("tui")));
+    assert_eq!(tui_dir.parent(), app_path.parent());
+}
+
+#[test]
+fn database_path_for_current_scope_defaults_to_app_scope() {
+    assert_eq!(
+        database_file_path_for_current_scope(),
         app_database_file_path()
     );
 }
@@ -110,6 +138,30 @@ fn sqlite_read_restores_app_state_and_codebase_metadata() {
         .app_state
         .expect("app state should be present for the full scope");
     assert_eq!(restored_app_state.windows.len(), 1);
+    assert_eq!(restored.codebase_indices.len(), 1);
+    assert_eq!(restored.codebase_indices[0].path, metadata.path);
+}
+
+#[test]
+fn tui_database_in_tui_subdirectory_round_trips_data() {
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("tui").join("warp.sqlite");
+    std::fs::create_dir_all(
+        database_path
+            .parent()
+            .expect("database path should have a parent"),
+    )
+    .expect("tui subdirectory should be created");
+    let mut conn = setup_database(&database_path).expect("database should initialize");
+
+    let metadata = test_codebase_metadata("/tmp/tui-repo");
+    save_codebase_index_metadata(&mut conn, metadata.clone())
+        .expect("codebase index metadata should save");
+
+    let restored = read_sqlite_data(&mut conn, PersistedDataScope::TuiFrontend)
+        .expect("persisted data should load");
+    assert!(restored.app_state.is_none());
+    assert!(restored.command_history.is_empty());
     assert_eq!(restored.codebase_indices.len(), 1);
     assert_eq!(restored.codebase_indices[0].path, metadata.path);
 }

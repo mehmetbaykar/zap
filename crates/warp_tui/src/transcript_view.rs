@@ -8,9 +8,8 @@ use std::sync::Arc;
 use parking_lot::FairMutex;
 use warp::tui_export::{
     should_show_task_in_blocklist, AIAgentExchangeId, AIBlockModelImpl, AIConversationId,
-    BlockPadding, BlockSpacing, BlocklistAIActionEvent, BlocklistAIActionModel,
-    BlocklistAIHistoryEvent, BlocklistAIHistoryModel, RichContentItem, RichContentType,
-    TerminalModel,
+    BlockPadding, BlockSpacing, BlocklistAIActionModel, BlocklistAIHistoryEvent,
+    BlocklistAIHistoryModel, ModelEventDispatcher, RichContentItem, RichContentType, TerminalModel,
 };
 use warpui_core::elements::tui::{
     TuiElement, TuiScrollable, TuiScrollableElement, TuiViewportVerticalAlignment,
@@ -21,7 +20,8 @@ use warpui_core::{
     ViewContext,
 };
 
-use super::agent_block::TuiAIBlock;
+use super::agent_block::{TuiAIBlock, TuiAIBlockEvent};
+use super::terminal_block::should_render_terminal_block;
 use super::tui_block_list_viewport_source::{AgentBlockRegistry, TuiBlockListViewportSource};
 
 /// Rows of blank space above every transcript block. Terminal blocks get it
@@ -52,6 +52,7 @@ pub(super) struct TuiTranscriptView {
     terminal_surface_id: EntityId,
     model: Arc<FairMutex<TerminalModel>>,
     action_model: ModelHandle<BlocklistAIActionModel>,
+    model_events: ModelHandle<ModelEventDispatcher>,
     agent_blocks: AgentBlockRegistry,
     viewport: TuiViewportedListState,
 }
@@ -62,6 +63,7 @@ impl TuiTranscriptView {
         terminal_surface_id: EntityId,
         model: Arc<FairMutex<TerminalModel>>,
         action_model: ModelHandle<BlocklistAIActionModel>,
+        model_events: &ModelHandle<ModelEventDispatcher>,
         ctx: &mut ViewContext<Self>,
     ) -> Self {
         ctx.subscribe_to_model(
@@ -69,38 +71,11 @@ impl TuiTranscriptView {
             |view, _, event, ctx| view.handle_history_event(event, ctx),
         );
 
-        // Tool-call rows derive their text from per-action status, so any
-        // status transition must re-measure and re-render the owning block.
-        // Finding the owning block is an O(1) set lookup per block (mirroring
-        // the GUI `AIBlock`'s `requested_action_ids` membership check).
-        ctx.subscribe_to_model(
-            &action_model,
-            |view, _, event: &BlocklistAIActionEvent, ctx| {
-                let action_id = event.action_id();
-                let view_id = view
-                    .agent_blocks
-                    .borrow()
-                    .iter()
-                    .find_map(|(view_id, block)| {
-                        block
-                            .as_ref(ctx)
-                            .renders_action(action_id)
-                            .then_some(*view_id)
-                    });
-                if let Some(view_id) = view_id {
-                    view.model
-                        .lock()
-                        .block_list_mut()
-                        .mark_rich_content_dirty(view_id);
-                    ctx.notify();
-                }
-            },
-        );
-
         Self {
             terminal_surface_id,
             model,
             action_model,
+            model_events: model_events.clone(),
             agent_blocks: Rc::new(RefCell::new(HashMap::new())),
             viewport: TuiViewportedListState::new_at_end(),
         }
@@ -178,6 +153,23 @@ impl TuiTranscriptView {
         }
     }
 
+    /// Whether the transcript has no visible content: no agent block and no
+    /// terminal block it would render (per [`should_render_terminal_block`];
+    /// the idle prompt block awaiting the first command doesn't count). The
+    /// session view fills the transcript slot with the zero state exactly
+    /// while this holds.
+    pub(super) fn is_empty(&self) -> bool {
+        if !self.agent_blocks.borrow().is_empty() {
+            return false;
+        }
+        let model = self.model.lock();
+        let block_list = model.block_list();
+        !block_list
+            .blocks()
+            .iter()
+            .any(|block| should_render_terminal_block(block, block_list))
+    }
+
     /// Returns the view id of the agent block rendering `exchange_id`, if any.
     fn view_id_for_exchange(
         &self,
@@ -213,6 +205,7 @@ impl TuiTranscriptView {
 
         let block_model = Rc::new(block_model);
         let action_model = self.action_model.clone();
+        let model_events = self.model_events.clone();
         let terminal_model = self.model.clone();
         let view = ctx.add_tui_view(|ctx| {
             TuiAIBlock::new(
@@ -220,11 +213,22 @@ impl TuiTranscriptView {
                 exchange_id,
                 block_model,
                 action_model,
+                &model_events,
                 terminal_model,
                 ctx,
             )
         });
         let view_id = view.id();
+        ctx.subscribe_to_view(&view, move |transcript, _, event, ctx| match event {
+            TuiAIBlockEvent::LayoutInvalidated => {
+                transcript
+                    .model
+                    .lock()
+                    .block_list_mut()
+                    .mark_rich_content_dirty(view_id);
+                ctx.notify();
+            }
+        });
         self.agent_blocks.borrow_mut().insert(view_id, view);
         self.model.lock().block_list_mut().append_rich_content(
             RichContentItem::new(Some(RichContentType::AIBlock), view_id, None, false),
@@ -263,8 +267,9 @@ impl TuiTranscriptView {
             );
             return;
         };
-        agent_block.update(ctx, |view, _| {
-            view.replace_model(conversation_id, Rc::new(block_model))
+        agent_block.update(ctx, |view, ctx| {
+            view.replace_model(conversation_id, Rc::new(block_model));
+            ctx.notify();
         });
         self.model
             .lock()

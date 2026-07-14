@@ -21,6 +21,7 @@ use pathfinder_geometry::vector::Vector2F;
 pub use serialized_block::*;
 use warp_core::command::ExitCode;
 use warp_core::features::FeatureFlag;
+use warp_errors::report_error;
 use warp_terminal::model::grid::Dimensions as _;
 use warp_terminal::model::{KeyboardModes, KeyboardModesApplyBehavior};
 use warp_util::path::user_friendly_path;

@@ -4,8 +4,8 @@ use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use warp_cli::agent::Harness;
-use warp_core::report_error;
 use warp_core::ui::theme::WarpTheme;
+use warp_errors::report_error;
 use warpui::color::ColorU;
 
 use crate::ai::artifacts::{deserialize_artifacts, Artifact};

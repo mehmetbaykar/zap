@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use warp_core::ui::appearance::Appearance;
+use warp_errors::report_error;
 use warpui::elements::{
     Border, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container, CornerRadius,
     CrossAxisAlignment, Element, Flex, Hoverable, MainAxisAlignment, MainAxisSize,
@@ -25,7 +26,6 @@ use crate::code_review::git_dialog::{
 use crate::code_review::telemetry_event::{
     CodeReviewTelemetryEvent, GitDialogStatus, GitOperationKind,
 };
-use crate::report_error;
 use crate::ui_components::icons::Icon;
 use crate::util::git::Commit;
 

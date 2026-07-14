@@ -170,12 +170,22 @@ runs:
       if: ${{ inputs.target_os != 'windows' }}
       # Install protoc for generating rust bindings of protobuf APIs.
       uses: ConorMacBride/install-package@3e7ad059e07782ee54fa35f827df52aae0626f30 # v1
+      # Let the macOS fallback below retry without refreshing Homebrew's index.
+      continue-on-error: true
       with:
         brew: protobuf
         choco: protoc
 
-    - name: Fail if protoc install did not succeed (non-Windows)
-      if: ${{ inputs.target_os != 'windows' && steps.install_protoc.outcome == 'failure' }}
+    - name: Install protoc via brew without index update (fallback for macOS)
+      if: ${{ inputs.target_os == 'macos' && steps.install_protoc.outcome == 'failure' }}
+      shell: bash
+      # The install-package action refreshes Homebrew's index first, which can
+      # fail transiently before `brew install` runs. The runner's cached index
+      # is sufficient for protoc, and a real install failure still fails here.
+      run: HOMEBREW_NO_AUTO_UPDATE=1 brew install protobuf
+
+    - name: Fail if protoc install did not succeed
+      if: ${{ inputs.target_os != 'windows' && inputs.target_os != 'macos' && steps.install_protoc.outcome == 'failure' }}
       shell: bash
       run: |
         echo "::error::protoc install step failed on ${{ inputs.target_os }}"

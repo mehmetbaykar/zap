@@ -20,7 +20,7 @@ pub mod testing;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::SyncSender;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
 
 use ai::project_context::model::ProjectRulePath;
@@ -56,13 +56,36 @@ use crate::workspaces::user_profiles::UserProfileWithUID;
 use crate::workspaces::workspace::{Workspace as WorkspaceMetadata, WorkspaceUid};
 
 #[cfg(any(feature = "local_fs", feature = "integration_tests"))]
+pub use sqlite::database_file_path_for_current_scope;
+// Only re-exported for integration tests; in-crate callers should resolve the
+// path for the process's current persistence scope.
+#[cfg(any(feature = "local_fs", feature = "integration_tests"))]
+#[cfg_attr(not(feature = "integration_tests"), expect(unused_imports))]
 pub use sqlite::database_file_path_for_scope;
 #[cfg(any(feature = "local_fs", feature = "integration_tests"))]
 pub use sqlite::establish_ro_connection;
 
+#[derive(Clone)]
 pub enum PersistenceScope {
+    /// The GUI app and launch modes that share its database.
     App,
-    RemoteServerDaemon { identity_key: String },
+    /// The TUI's separate local database.
+    Tui,
+    RemoteServerDaemon {
+        identity_key: String,
+    },
+}
+
+/// The persistence scope selected during process initialization.
+static CURRENT_SCOPE: OnceLock<PersistenceScope> = OnceLock::new();
+
+/// Returns the initialized scope, or the GUI scope in tests that do not run
+/// full application initialization.
+pub fn current_scope() -> PersistenceScope {
+    CURRENT_SCOPE
+        .get()
+        .cloned()
+        .unwrap_or(PersistenceScope::App)
 }
 
 /// Which subsets of [`PersistedData`] a launch mode actually consumes.
@@ -125,6 +148,7 @@ pub fn initialize(
     scope: PersistenceScope,
     data_scope: PersistedDataScope,
 ) -> (Option<Box<PersistedData>>, Option<WriterHandles>) {
+    let _ = CURRENT_SCOPE.set(scope.clone());
     cfg_if::cfg_if! {
         if #[cfg(feature = "local_fs")] {
             sqlite::initialize(ctx, scope, data_scope)

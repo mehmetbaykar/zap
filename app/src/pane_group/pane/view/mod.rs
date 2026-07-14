@@ -15,8 +15,8 @@ use super::{
 use header::PaneHeader;
 use warpui::{
     elements::{
-        Border, Container, DropTarget, DropTargetData, Flex, MainAxisSize, ParentElement,
-        SavePosition, Shrinkable,
+        Border, ConstrainedBox, Container, DropTarget, DropTargetData, Flex, MainAxisSize,
+        ParentElement, SavePosition, Shrinkable,
     },
     presenter::ChildView,
     AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
@@ -30,6 +30,9 @@ pub use header::PaneHeaderAction::CustomAction as PaneHeaderCustomAction;
 pub use header_content::{
     HeaderContent, HeaderRenderContext, StandardHeader, StandardHeaderOptions,
 };
+
+/// Keeps a dragged pane's header finite when its preview receives unbounded constraints.
+const DRAG_PREVIEW_HEADER_MAX_WIDTH: f32 = 400.;
 
 pub fn init(_app: &mut AppContext) {
     // Zap Phase 2a: pane:share_pane_contents keybinding removed (sharing UI gone).
@@ -346,7 +349,11 @@ impl<P: BackingView> View for PaneView<P> {
             // When header is not visible (e.g. during drag operation), use Min sizing to avoid infinite constraint panic.
             let column = Flex::column()
                 .with_main_axis_size(MainAxisSize::Min)
-                .with_child(ChildView::new(&self.header).finish());
+                .with_child(
+                    ConstrainedBox::new(ChildView::new(&self.header).finish())
+                        .with_max_width(DRAG_PREVIEW_HEADER_MAX_WIDTH)
+                        .finish(),
+                );
             return column.finish();
         }
 

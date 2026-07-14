@@ -22,7 +22,8 @@ use lsp::{LspManagerModel, LspManagerModelEvent, LspServerModel, LspState};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use warp_core::{features::FeatureFlag, report_if_error, settings::ToggleableSetting as _};
+use warp_core::{features::FeatureFlag, settings::ToggleableSetting as _};
+use warp_errors::report_if_error;
 use warpui::{
     elements::{
         ChildView, Container, CornerRadius, CrossAxisAlignment, Element, Empty, Flex,

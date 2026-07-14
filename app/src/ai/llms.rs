@@ -9,9 +9,9 @@ use std::{
     sync::{Arc, OnceLock},
 };
 use warp_core::features::FeatureFlag;
-use warp_core::report_error;
 use warp_core::ui::icons::Icon;
 use warp_core::user_preferences::GetUserPreferences;
+use warp_errors::report_error;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
 
 use super::custom_model_routers::{self, CustomModelRouter, ModelConfigError};
@@ -1326,7 +1326,7 @@ impl LLMPreferences {
 
         // Always write byop_last_used_model_id (overwrite even when changed=false, to unify new-tab behavior).
         // An explicit picker switch = the user's strongest intent; new tabs/restarts should all carry it over.
-        use warp_core::errors::report_if_error;
+        use warp_errors::report_if_error;
         let llm_id_str = preferred_llm_id.as_str().to_owned();
         crate::settings::AISettings::handle(ctx).update(ctx, |settings, ctx| {
             if settings.byop_last_used_model_id.to_string() != llm_id_str {
@@ -1669,7 +1669,7 @@ impl LLMPreferences {
             .insert((api_type, model_id.to_owned()), effort);
 
         // Synchronously write AISettings.byop_last_used_reasoning (per-(api_type, model)).
-        use warp_core::errors::report_if_error;
+        use warp_errors::report_if_error;
         let key = crate::settings::BYOPLastUsedReasoningMap::make_key(api_type, model_id);
         crate::settings::AISettings::handle(ctx).update(ctx, |settings, ctx| {
             let mut map = settings.byop_last_used_reasoning.value().0.clone();

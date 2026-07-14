@@ -1,9 +1,11 @@
 mod data_source;
+mod mixer;
 mod search_item;
-mod view;
+pub(super) mod view;
 
 pub use data_source::*;
-pub use view::*;
+pub use mixer::{build_slash_command_mixer, slash_command_query, SlashCommandMixer};
+pub use view::{CloseReason, InlineSlashCommandView, SlashCommandsEvent};
 
 #[cfg(feature = "local_fs")]
 use std::path::PathBuf;
