@@ -446,6 +446,18 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
         case NSEventTypeLeftMouseDown: {
             NSButton *windowButton = [self standardWindowButtonAtEvent:event];
             if (windowButton) {
+                if (@available(macOS 27, *)) {
+                    // On macOS 27, standard window buttons no longer run a
+                    // mouse-tracking loop inside mouseDown:, so a manually
+                    // forwarded mouseDown: never completes a click — the
+                    // button waits for a mouseUp that the LeftMouseUp case
+                    // below redirects to the content view. Route the whole
+                    // gesture through NSWindow's own dispatching instead,
+                    // reusing the native-chrome flag like resize edges do.
+                    _leftMouseDownStartedInNativeWindowChrome = YES;
+                    [super sendEvent:event];
+                    break;
+                }
                 _leftMouseDownStartedInNativeWindowChrome = NO;
                 [windowButton mouseDown:event];
                 break;
