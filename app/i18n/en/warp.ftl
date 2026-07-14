@@ -884,7 +884,6 @@ settings-ai-voice-section = Voice
 settings-ai-other-section = Other
 settings-ai-third-party-cli-section = Third party CLI agents
 settings-ai-experimental-section = Experimental
-settings-ai-aws-bedrock-section = AWS Bedrock
 settings-ai-agents-header = Agents
 settings-ai-profiles-header = Profiles
 settings-ai-models-subheader = Models
@@ -1007,16 +1006,6 @@ settings-ai-coding-agent-select-header = Select coding agent
 # Experimental / Agent
 settings-ai-cloud-agent-computer-use = Computer use in agents
 settings-ai-cloud-agent-computer-use-description = Enable computer use in agent conversations started from the Zap app.
-
-# AWS Bedrock
-settings-ai-aws-bedrock-toggle = Use AWS Bedrock credentials
-settings-ai-aws-bedrock-description = Zap loads and sends local AWS CLI credentials for Bedrock-supported models.
-settings-ai-aws-bedrock-description-managed = Zap loads and sends local AWS CLI credentials for Bedrock-supported models. This setting is managed by your organization.
-settings-ai-aws-login-command = Login Command
-settings-ai-aws-profile = AWS Profile
-settings-ai-aws-auto-login = Automatically run login command
-settings-ai-aws-auto-login-description = When enabled, the login command will run automatically when AWS Bedrock credentials expire.
-settings-ai-refresh = Refresh
 
 # --- ANCHOR-SUB-FEATURES (agent-settings-features) ---
 # settings_view/features_page.rs P0 + P1(category + toggle labels)
