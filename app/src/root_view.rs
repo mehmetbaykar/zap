@@ -1784,9 +1784,21 @@ impl RootView {
             },
         );
 
+        // Zap: BYOP endpoints live in two stores — upstream `ApiKeyManager.custom_endpoints`
+        // (what the onboarding modals write) and the fork's `AISettings.agent_providers`
+        // (pre-existing providers configured via settings, secrets in `AgentProviderSecrets`).
+        // Both resolve through `agent_providers::lookup_byop`, so the onboarding status must
+        // count both or users with existing providers are wrongly told nothing is configured.
+        let fork_provider_count =
+            |ctx: &AppContext| -> usize { AISettings::as_ref(ctx).agent_providers.value().len() };
         let keys = ApiKeyManager::as_ref(ctx).keys().clone();
+        let provider_count = fork_provider_count(ctx);
         onboarding_view.update(ctx, |view, ctx| {
-            view.set_byok_status(keys.provider_key_count(), keys.custom_endpoints.len(), ctx);
+            view.set_byok_status(
+                keys.provider_key_count(),
+                keys.custom_endpoints.len() + provider_count,
+                ctx,
+            );
         });
         let onboarding_view_for_keys = onboarding_view.clone();
         ctx.subscribe_to_model(
@@ -1794,10 +1806,11 @@ impl RootView {
             move |_, api_key_manager, event, ctx| {
                 if matches!(event, ApiKeyManagerEvent::KeysUpdated) {
                     let keys = api_key_manager.as_ref(ctx).keys().clone();
+                    let provider_count = fork_provider_count(ctx);
                     onboarding_view_for_keys.update(ctx, |view, ctx| {
                         view.set_byok_status(
                             keys.provider_key_count(),
-                            keys.custom_endpoints.len(),
+                            keys.custom_endpoints.len() + provider_count,
                             ctx,
                         );
                     });
