@@ -83,7 +83,7 @@ impl IntentionSlide {
 
         let title = appearance
             .ui_builder()
-            .paragraph("Welcome to Warp")
+            .paragraph("Welcome to Zap")
             .with_style(UiComponentStyles {
                 font_size: Some(36.),
                 font_weight: Some(Weight::Medium),
@@ -401,7 +401,7 @@ impl IntentionSlide {
 
         let new_settings_modes = FeatureFlag::ZapNewSettingsModes.is_enabled();
         let next_text = if !new_settings_modes && selected_index == 1 {
-            "Get Warping"
+            "Get Zapping"
         } else {
             "Next"
         };

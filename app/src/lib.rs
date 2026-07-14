@@ -1364,8 +1364,11 @@ pub(crate) fn initialize_app(
     // be initialized after it.
     ctx.add_singleton_model(|ctx| ServerExperiments::new_from_cache(experiments, ctx));
 
-    // Zap (Phase 3c A1): `AIRequestUsageModel` (cloud AI-request quota/credits tracking) has been
-    // removed along with the rest of the subscription quota subsystem; nothing left to register.
+    // Zap (Phase 3c A1): `AIRequestUsageModel` is a stateless always-"unlimited" stub (the cloud
+    // quota/credits subsystem is removed), but upstream UI still reads the singleton eagerly —
+    // e.g. `PromptAlertView::new` via every terminal input's `UniversalDeveloperInputButtonBar` —
+    // so it must stay registered or workspace creation panics.
+    ctx.add_singleton_model(crate::ai::AIRequestUsageModel::new);
 
     ctx.add_singleton_model(|_| UserWorkspaces::new(cached_workspaces, current_workspace_uid));
 

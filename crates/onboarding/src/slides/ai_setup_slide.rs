@@ -24,10 +24,12 @@ use crate::model::{AiSetupChoice, NoAiConfirmationSource, OnboardingStateModel};
 use crate::slides::{bottom_nav, layout, slide_content};
 
 /// Checklist shown on the "Use Zap Agent" card.
+// Zap: BYOP-accurate copy — models come from the user's own keys/endpoints,
+// not a cloud model router.
 const WARP_AGENT_FEATURES: &[&str] = &[
     "Best harness for terminal tasks and agentic coding",
-    "Frontier models from OpenAI, Anthropic, and Google",
-    "Model routing across frontier and open-weight models",
+    "Bring your own provider keys and endpoints",
+    "Any OpenAI-compatible, Anthropic, or Google model",
     "Multi-agent orchestration",
 ];
 

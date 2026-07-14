@@ -28,14 +28,16 @@ pub use localization::set_localizer;
 
 /// User-facing names of the AI features enabled when the agent intention is selected.
 /// Shared by onboarding surfaces that describe the built-in agent experience.
+// Zap: only advertise features the local BYOP build actually ships. Upstream's
+// "Oz local agents platform" and cloud "Remote Control" bullets are removed
+// (those subsystems do not exist in Zap).
 pub const AI_FEATURES: &[&str] = &[
-    "Zap agents",
-    "Oz local agents platform",
+    "Zap agents with your own providers",
     "Prompt suggestions",
     "Next command predictions",
     "Full Terminal Use",
     "Codebase Context",
-    "Remote Control with Claude Code, Codex, and other agents",
+    "Claude Code, Codex, and other CLI agents",
 ];
 
 pub mod components;
