@@ -603,6 +603,16 @@ void init_warp_nswindow(NSWindow<WarpWindowProtocol> *window, bool testMode, boo
                                                                   defer:NO];
     init_warp_nswindow(window_result, testMode, hideTitleBar);
 
+    // Zap: enable native fullscreen for the green traffic-light button so it enters
+    // fullscreen in a single click, like other macOS apps. Without FullScreenPrimary
+    // AppKit treats the green button as a zoom/maximize control and shows the window-
+    // tiling submenu (Fill / Move & Resize / nested Enter Full Screen) instead of
+    // toggling fullscreen directly. Only WarpWindow (the top-level window) gets this;
+    // the pinned WarpPanel keeps FullScreenAuxiliary (they are mutually exclusive) so
+    // it can still float over other apps' fullscreen spaces. The window already knows
+    // how to render in fullscreen (applyFullscreenTitlebarHeight, styleMask checks).
+    window_result.collectionBehavior |= NSWindowCollectionBehaviorFullScreenPrimary;
+
     return window_result;
 }
 
