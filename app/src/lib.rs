@@ -1549,11 +1549,18 @@ pub(crate) fn initialize_app(
             });
 
             for window_id in ctx.window_ids().collect_vec() {
-                SettingsPaneManager::handle(ctx)
-                    .read(ctx, |model, _| model.settings_view(window_id))
-                    .update(ctx, |settings, ctx| {
+                // Skip windows without a registered settings view. A window still in the local
+                // onboarding flow has no workspace yet, so its settings view does not exist.
+                // Zap always reports the user as logged in, so this runs on every startup —
+                // including onboarding — where upstream only reached it for cloud-authed users
+                // that already had a workspace window.
+                if let Some(settings_view) = SettingsPaneManager::handle(ctx)
+                    .read(ctx, |model, _| model.find_settings_view(window_id))
+                {
+                    settings_view.update(ctx, |settings, ctx| {
                         settings.refresh_preferred_graphics_backend_dropdown(ctx);
-                    })
+                    });
+                }
             }
 
             send_telemetry_from_app_ctx!(event, ctx);

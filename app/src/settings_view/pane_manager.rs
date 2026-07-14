@@ -32,6 +32,16 @@ impl SettingsPaneManager {
             .clone()
     }
 
+    /// Fallible variant of [`Self::settings_view`]. Returns `None` when the window has no
+    /// registered settings view yet — e.g. a window still showing the local onboarding flow,
+    /// whose workspace (and thus settings view) has not been created. Callers that iterate over
+    /// every window (not just workspace windows) must use this to avoid panicking.
+    pub fn find_settings_view(&self, window_id: WindowId) -> Option<ViewHandle<SettingsView>> {
+        self.panes
+            .get(&window_id)
+            .map(|data| data.settings_view.clone())
+    }
+
     pub fn register_view(&mut self, window_id: WindowId, view: ViewHandle<SettingsView>) {
         if let Some(data) = self.panes.get_mut(&window_id) {
             data.settings_view = view;
