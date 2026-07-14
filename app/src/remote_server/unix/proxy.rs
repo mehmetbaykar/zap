@@ -20,23 +20,23 @@ use std::time::Duration;
 use super::super::setup;
 
 /// Path to the daemon's Unix domain socket, versioned on release channels.
-pub(super) fn socket_path() -> PathBuf {
-    let dir = setup::remote_server_daemon_dir();
+pub(super) fn socket_path(identity_key: &str) -> PathBuf {
+    let dir = setup::remote_server_daemon_dir(identity_key);
     let expanded = shellexpand::tilde(&dir).into_owned();
     PathBuf::from(expanded).join(setup::daemon_socket_name())
 }
 
 /// Path to the daemon's PID file (also used as the flock target),
 /// versioned on release channels.
-pub(super) fn pid_path() -> PathBuf {
-    let dir = setup::remote_server_daemon_dir();
+pub(super) fn pid_path(identity_key: &str) -> PathBuf {
+    let dir = setup::remote_server_daemon_dir(identity_key);
     let expanded = shellexpand::tilde(&dir).into_owned();
     PathBuf::from(expanded).join(setup::daemon_pid_name())
 }
 
-/// Daemon directory expanded without a tilde.
-fn daemon_dir() -> PathBuf {
-    let dir = setup::remote_server_daemon_dir();
+/// Daemon directory for given identity key, expanded without a tilde.
+fn daemon_dir(identity_key: &str) -> PathBuf {
+    let dir = setup::remote_server_daemon_dir(identity_key);
     let expanded = shellexpand::tilde(&dir).into_owned();
     PathBuf::from(expanded)
 }
@@ -51,8 +51,8 @@ fn daemon_dir() -> PathBuf {
 /// it down naturally after the last client disconnects.
 ///
 /// Errors are logged but do not prevent the proxy from proceeding.
-fn cleanup_old_versions() {
-    let dir = daemon_dir();
+fn cleanup_old_versions(identity_key: &str) {
+    let dir = daemon_dir(identity_key);
     let current_socket = setup::daemon_socket_name();
     let current_pid = setup::daemon_pid_name();
 
@@ -102,9 +102,9 @@ const SUN_PATH_MAX: usize = 103;
 ///
 /// Ensures the daemon is running, then bridges stdin/stdout to the daemon's
 /// Unix socket for the lifetime of this SSH session.
-pub fn run() -> anyhow::Result<()> {
-    let socket_path = socket_path();
-    let pid_path = pid_path();
+pub fn run(identity_key: &str) -> anyhow::Result<()> {
+    let socket_path = socket_path(identity_key);
+    let pid_path = pid_path(identity_key);
 
     // Guard against socket paths that exceed the sun_path limit.
     // Without this check, UnixListener::bind fails silently in the
@@ -129,7 +129,7 @@ pub fn run() -> anyhow::Result<()> {
 
     // Clean up socket/PID files from previous daemon versions so stale
     // daemons left over after autoupdate don't linger.
-    cleanup_old_versions();
+    cleanup_old_versions(identity_key);
 
     // ---- Acquire exclusive flock on the PID file --------------------------------
     //
@@ -170,6 +170,8 @@ pub fn run() -> anyhow::Result<()> {
         let exe = std::env::current_exe()?;
         let mut cmd = command::blocking::Command::new(&exe);
         cmd.arg("remote-server-daemon")
+            .arg("--identity-key")
+            .arg(identity_key)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());

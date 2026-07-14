@@ -25,6 +25,9 @@ use remote_server::transport::{
 #[path = "ssh_transport/installation.rs"]
 pub(crate) mod installation;
 
+/// Stable, non-secret partition for accountless Zap remote-server state.
+const LOCAL_REMOTE_SERVER_IDENTITY_KEY: &str = "zap-local";
+
 /// SSH transport: connects via a ControlMaster socket.
 ///
 /// `socket_path` is the local Unix socket created by the ControlMaster
@@ -69,7 +72,7 @@ impl SshTransport {
     pub fn remote_daemon_socket_path(&self) -> String {
         format!(
             "{}/{}",
-            remote_server_daemon_dir(),
+            remote_server_daemon_dir(LOCAL_REMOTE_SERVER_IDENTITY_KEY),
             remote_server::setup::daemon_socket_name(),
         )
     }
@@ -77,14 +80,17 @@ impl SshTransport {
     pub fn remote_daemon_pid_path(&self) -> String {
         format!(
             "{}/{}",
-            remote_server_daemon_dir(),
+            remote_server_daemon_dir(LOCAL_REMOTE_SERVER_IDENTITY_KEY),
             remote_server::setup::daemon_pid_name(),
         )
     }
 
     fn remote_proxy_command(&self) -> String {
         let binary = remote_server::setup::remote_server_binary();
-        format!("{binary} remote-server-proxy")
+        format!(
+            "{binary} remote-server-proxy --identity-key {}",
+            shell_words::quote(LOCAL_REMOTE_SERVER_IDENTITY_KEY)
+        )
     }
 }
 

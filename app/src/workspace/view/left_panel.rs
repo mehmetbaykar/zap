@@ -70,7 +70,7 @@ use crate::workspace::view::{
     TOGGLE_PROJECT_EXPLORER_BINDING_NAME, TOGGLE_WARP_DRIVE_BINDING_NAME,
 };
 use crate::workspace::WorkspaceAction;
-use crate::TelemetryEvent;
+use crate::{report_error, TelemetryEvent};
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 #[derive(Default)]
@@ -261,7 +261,7 @@ impl LeftPanelView {
         {
             Some(handle) => handle,
             None => {
-                log::error!("Couldn't retrieve left panel resizable state handle.");
+                report_error!("Couldn't retrieve left panel resizable state handle.");
                 resizable_state_handle(600.0)
             }
         };
@@ -991,12 +991,12 @@ impl LeftPanelView {
                 ));
             }
             FileTreeEvent::OpenFile {
-                path,
+                location,
                 target,
                 line_col,
             } => {
                 ctx.emit(LeftPanelEvent::OpenFileWithTarget {
-                    location: BufferLocation::Local(path.clone()),
+                    location: location.clone(),
                     target: target.clone(),
                     line_col: *line_col,
                 });

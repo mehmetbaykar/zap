@@ -5,6 +5,7 @@ use std::sync::Arc;
 use pathfinder_geometry::vector::vec2f;
 #[cfg(not(target_family = "wasm"))]
 use remote_server::manager::RemoteServerManager;
+use warp_core::features::FeatureFlag;
 use warp_core::ui::icons::ICON_DIMENSIONS;
 use warp_editor::model::CoreEditorModel;
 #[cfg(feature = "local_fs")]
@@ -56,8 +57,6 @@ use crate::terminal::model::session::Session;
 use crate::ui_components::icons::Icon;
 #[cfg(feature = "local_fs")]
 use crate::util::openable_file_type::FileTarget;
-use warp_core::features::FeatureFlag;
-
 // `renders_in_warp_notebook_viewer` is only consumed by non-wasm views
 // (`code::view` resolves to `view.rs` off-wasm and to `wasm.rs` on-wasm, and the
 // tooltips helper is `local_fs`-gated). Gate the re-export to match, otherwise it
@@ -1088,10 +1087,7 @@ impl TypedActionView for FileNotebookView {
             FileNotebookAction::ContextMenu(action) => {
                 if matches!(action, ContextMenuAction::Open(_)) {
                     self.send_telemetry_action(NotebookTelemetryAction::OpenContextMenu, ctx);
-                    let copy_file_path = self
-                        .file_state
-                        .local_path()
-                        .map(|p| p.display().to_string());
+                    let copy_file_path = self.file_state.path().map(|p| p.display_path());
                     self.context_menu.set_copy_file_path(copy_file_path);
                 }
                 self.context_menu.handle_action(action, ctx);

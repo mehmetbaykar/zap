@@ -23,6 +23,7 @@ use crate::notifications::item_rendering::{
 };
 use crate::notifications::model::{NotificationsEvent, NotificationsModel};
 use crate::notifications::{NotificationId, NotificationItem, NotificationItems};
+use crate::report_error;
 use crate::ui_components::icons::Icon;
 use crate::view_components::action_button::{ActionButton, ButtonSize, NakedTheme};
 
@@ -227,7 +228,10 @@ impl NotificationMailboxView {
         };
 
         let Some(mouse_state) = self.notification_mouse_states.get(index).cloned() else {
-            log::error!("missing mouse state for notification item at index {index}");
+            report_error!(
+                "missing mouse state for notification item",
+                extra: { "index" => %index }
+            );
             return Empty::new().finish();
         };
 

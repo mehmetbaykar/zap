@@ -319,7 +319,7 @@ impl BundledSkill {
 
     /// Iterates the catalog's definitions as `(id, skill, activation)`.
     /// Used by the daemon to serialize its catalog for the
-    /// `BundledSkillsSnapshot` push.
+    /// aggregate remote Agent Mode context snapshot.
     pub(crate) fn iter_definitions(
         &self,
     ) -> impl Iterator<Item = (&str, &ParsedSkill, &BundledSkillActivation)> {
@@ -451,6 +451,8 @@ pub(crate) async fn read_bundled_skills(
 ///
 /// Supported variables:
 /// - `{{warp_cli_binary_name}}` - The CLI binary name (e.g., `warp` or `warp-cli`)
+/// - `{{warpctrl_binary_name}}` - The channel-specific Warp Control command name
+/// - `{{warpctrl_wrapper_path}}` - Path to the bundled Warp Control wrapper
 /// - `{{warp_url_scheme}}` - The URL scheme (e.g., `warp`, `warpdev`, `warppreview`)
 /// - `{{settings_schema_path}}` - Path to the bundled JSON settings schema
 /// - `{{skill_dir}}` - Path to the bundled skill's directory
@@ -464,6 +466,18 @@ pub(crate) fn build_bundled_skill_context(
         (
             "warp_cli_binary_name".to_owned(),
             ChannelState::channel().cli_command_name().to_owned(),
+        ),
+        (
+            "warpctrl_binary_name".to_owned(),
+            ChannelState::channel().warpctrl_command_name().to_owned(),
+        ),
+        (
+            "warpctrl_wrapper_path".to_owned(),
+            resources_dir
+                .join("bin")
+                .join(ChannelState::channel().warpctrl_command_name())
+                .display()
+                .to_string(),
         ),
         (
             "warp_url_scheme".to_owned(),

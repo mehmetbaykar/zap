@@ -90,7 +90,7 @@ use crate::view_components::{DismissibleToast, ToastType};
 use crate::workflows::workflow::{Argument, Workflow};
 use crate::workflows::WorkflowObject;
 use crate::workspace::ToastStack;
-use crate::{send_telemetry_from_ctx, FeatureFlag};
+use crate::{report_error, send_telemetry_from_ctx, FeatureFlag};
 
 mod alias_argument_selector;
 mod alias_bar;
@@ -549,7 +549,7 @@ impl WorkflowView {
                     if let Result::Err(e) =
                         aliases.update_workflow_id(self.workflow_id, server_id.into(), ctx)
                     {
-                        log::error!("Failed to update aliases after workflow creation: {e:?}");
+                        report_error!(e.context("Failed to update aliases after workflow creation"));
                     }
                 });
 
@@ -1559,7 +1559,7 @@ impl WorkflowView {
 
     fn save_aliases(&mut self, ctx: &mut ViewContext<Self>) {
         if let Err(e) = self.alias_bar.update(ctx, |bar, ctx| bar.save(ctx)) {
-            log::error!("Error saving aliases: {e:?}");
+            report_error!(e.context("Error saving aliases"));
             self.display_error_toast("Error saving aliases".to_string(), ctx);
         }
     }
@@ -1603,7 +1603,7 @@ impl WorkflowView {
                 let client_id = if let Some(id) = self.workflow_id.into_client() {
                     id
                 } else {
-                    log::error!("No client_id obtained for creating workflow");
+                    report_error!("No client_id obtained for creating workflow");
                     self.display_error_toast(String::from("Could not create workflow"), ctx);
                     return;
                 };
@@ -1633,10 +1633,10 @@ impl WorkflowView {
                     self.try_set_view_mode(ctx);
                     ctx.emit(WorkflowViewEvent::CreatedWorkflow(self.workflow_id));
                 } else {
-                    log::error!("Attempting to create workflow but now space found");
+                    report_error!("Attempting to create workflow but now space found");
                 }
             }
-            _ => log::error!("Did not match conditions to either create or save the workflow"),
+            _ => report_error!("Did not match conditions to either create or save the workflow"),
         }
     }
 

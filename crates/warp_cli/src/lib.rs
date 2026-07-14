@@ -54,6 +54,26 @@ pub struct ParentOpts {
     pub handle: Option<process_handle::ProcessHandle>,
 }
 
+/// Returns whether an argument requests one of Zap's hidden worker modes.
+pub fn is_worker_invocation(arg: &str) -> bool {
+    let command = WorkerCommand::augment_subcommands(clap::Command::new("worker"));
+    command.find_subcommand(arg).is_some()
+        || arg.strip_prefix("--").is_some_and(|long_flag| {
+            command
+                .get_subcommands()
+                .any(|subcommand| subcommand.get_long_flag() == Some(long_flag))
+        })
+}
+
+/// Hidden worker arguments used to scope remote-server proxy and daemon
+/// processes without carrying credentials.
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct RemoteServerIdentityArgs {
+    /// Non-secret local identity partition key for the remote-server daemon.
+    #[arg(long = "identity-key", hide = true)]
+    pub identity_key: String,
+}
+
 /// Global options that apply to all CLI commands.
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct GlobalOptions {
@@ -269,14 +289,14 @@ pub enum WorkerCommand {
     /// to the daemon via a Unix domain socket.
     #[cfg(not(target_family = "wasm"))]
     #[clap(hide = true)]
-    RemoteServerProxy,
+    RemoteServerProxy(RemoteServerIdentityArgs),
 
     /// Run the long-lived remote development server daemon.
     /// Listens on a Unix domain socket and accepts multiple concurrent
     /// connections from proxy processes.
     #[cfg(not(target_family = "wasm"))]
     #[clap(hide = true)]
-    RemoteServerDaemon,
+    RemoteServerDaemon(RemoteServerIdentityArgs),
 
     /// Run a headless ripgrep search worker.
     #[cfg(not(target_family = "wasm"))]
@@ -318,6 +338,19 @@ pub enum CliCommand {
     /// Manage providers.
     #[command(subcommand)]
     Provider(crate::provider::ProviderCommand),
+}
+
+impl CliCommand {
+    /// Returns the local command path used to identify this invocation in tracing.
+    pub fn as_str_for_tracing(&self) -> &'static str {
+        match self {
+            Self::Agent(_) => "agent",
+            Self::MCP(_) => "mcp",
+            Self::Model(_) => "model",
+            Self::Whoami => "whoami",
+            Self::Provider(_) => "provider",
+        }
+    }
 }
 
 /// A subcommand of the main Zap application. This includes all [`WorkerCommand`]s as well as app-specific debugging tools.

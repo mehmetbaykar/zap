@@ -74,14 +74,12 @@ pub enum ObjectStoreViewModelEvent {
 
 impl ObjectStoreViewModel {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
-        ctx.subscribe_to_model(
-            &ObjectStoreModel::handle(ctx),
-            Self::handle_object_store_event,
-        );
-        ctx.subscribe_to_model(
-            &UpdateManager::handle(ctx),
-            Self::handle_update_manager_event,
-        );
+        ctx.subscribe_to_model(&ObjectStoreModel::handle(ctx), |me, _, event, ctx| {
+            me.handle_object_store_event(event, ctx)
+        });
+        ctx.subscribe_to_model(&UpdateManager::handle(ctx), |me, _, event, ctx| {
+            me.handle_update_manager_event(event, ctx)
+        });
         Self {
             folder_timestamp_cache: Default::default(),
         }

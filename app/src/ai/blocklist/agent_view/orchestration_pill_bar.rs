@@ -760,7 +760,7 @@ impl TypedActionView for OrchestrationPillBar {
                 //     which walks all tabs/windows and activates the
                 //     containing tab as needed.
                 let owner_view_id =
-                    BlocklistAIHistoryModel::as_ref(ctx).terminal_view_id_for_conversation(id);
+                    BlocklistAIHistoryModel::as_ref(ctx).terminal_surface_id_for_conversation(id);
                 let Some(owner_view_id) = owner_view_id else {
                     log::warn!(
                         "FocusOpenedConversation: no canonical owner for {id:?}; falling back to switch-in-place"
@@ -2175,8 +2175,8 @@ fn render_crumb(
         //     `SwitchAgentViewToConversation` so the breadcrumb stays
         //     useful even after the orchestrator pane has been closed
         //     and the parent conversation only persists in history.
-        if let Some(owner_view_id) =
-            BlocklistAIHistoryModel::as_ref(app).terminal_view_id_for_conversation(&conversation_id)
+        if let Some(owner_view_id) = BlocklistAIHistoryModel::as_ref(app)
+            .terminal_surface_id_for_conversation(&conversation_id)
         {
             let self_pane_group_id =
                 pane_group_id_containing_terminal_view(self_terminal_view_id, app);

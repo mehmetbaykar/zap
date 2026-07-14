@@ -794,7 +794,7 @@ impl AgentConversationsModel {
         // Issue #93 fix: we must subscribe to BlocklistAIHistoryModel events, otherwise after the user
         // deletes a conversation in the history list, this model's cached conversations won't refresh and the UI will keep showing the deleted item.
         let history_model = BlocklistAIHistoryModel::handle(ctx);
-        ctx.subscribe_to_model(&history_model, |me, event, ctx| {
+        ctx.subscribe_to_model(&history_model, |me, _, event, ctx| {
             me.handle_history_event(event, ctx);
         });
 
@@ -1034,7 +1034,7 @@ impl AgentConversationsModel {
                 }
 
                 if let Some(terminal_view_id) =
-                    history_model.terminal_view_id_for_conversation(&conversation_id)
+                    history_model.terminal_surface_id_for_conversation(&conversation_id)
                 {
                     return Some(WorkspaceAction::FocusTerminalViewInWorkspace {
                         terminal_view_id,
@@ -1089,7 +1089,7 @@ impl AgentConversationsModel {
             | BlocklistAIHistoryEvent::RestoredConversations { .. }
             | BlocklistAIHistoryEvent::RemoveConversation { .. }
             | BlocklistAIHistoryEvent::DeletedConversation { .. }
-            | BlocklistAIHistoryEvent::ClearedConversationsInTerminalView { .. }
+            | BlocklistAIHistoryEvent::ClearedConversationsForTerminalSurface { .. }
             | BlocklistAIHistoryEvent::ClearedActiveConversation { .. } => {
                 self.sync_conversations(ctx);
             }
@@ -1165,7 +1165,7 @@ impl AgentConversationsModel {
             // doesn't change any ConversationNavigationData fields (title comes from
             // UpdateTaskDescription, last_updated uses exchange.start_time which is set at append time).
             | BlocklistAIHistoryEvent::UpdatedStreamingExchange { .. }
-            | BlocklistAIHistoryEvent::ConversationOwnershipTransferred { .. }
+            | BlocklistAIHistoryEvent::ConversationTransferredBetweenTerminalSurfaces { .. }
             | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. }
             | BlocklistAIHistoryEvent::ConversationUsageMetadataUpdated { .. }
             | BlocklistAIHistoryEvent::LocalSharedSessionEstablished { .. }

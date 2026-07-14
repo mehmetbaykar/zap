@@ -2,9 +2,9 @@
 //!
 //! These tests deliberately bypass the production [`BlocklistAIContextModel::new`] constructor
 //! (which subscribes to several singletons) and instead use [`BlocklistAIContextModel::new_for_test`]
-//! together with [`super::agent_view::AgentViewController::new`]. That keeps the fixture small
-//! enough to focus on the lock logic without standing up `BlocklistAIHistoryModel`,
-//! `LLMPreferences`, `ObjectStoreModel`, `UpdateManager`, or `AppExecutionMode`.
+//! together with an inert conversation-selection stub. That keeps the fixture small enough to
+//! focus on the lock logic without standing up `BlocklistAIHistoryModel`, `LLMPreferences`,
+//! `ObjectStoreModel`, `UpdateManager`, or `AppExecutionMode`.
 
 use std::sync::Arc;
 
@@ -14,14 +14,15 @@ use warpui::{App, EntityId, ModelHandle};
 
 use super::{BlocklistAIContextModel, PendingAttachment, PendingFile};
 use crate::ai::agent::{AIAgentAttachment, ImageContext};
-use crate::ai::blocklist::agent_view::{AgentViewController, EphemeralMessageModel};
+use crate::ai::blocklist::conversation_selection::{
+    ConversationSelection, MockConversationSelection,
+};
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::update_manager::UpdateManager;
 use crate::terminal::color::{self, Colors};
 use crate::terminal::event_listener::ChannelEventListener;
 use crate::terminal::model::test_utils::block_size;
 use crate::terminal::model::{BlockId, TerminalModel};
-use crate::terminal::view::ambient_agent::AmbientAgentViewModel;
 
 impl BlocklistAIContextModel {
     pub(crate) fn append_pending_attachments_for_test(
@@ -59,24 +60,14 @@ fn build_test_context_model(app: &mut App) -> ModelHandle<BlocklistAIContextMode
     app.add_singleton_model(ObjectStoreModel::mock);
     app.add_singleton_model(UpdateManager::mock);
 
-    let ambient_agent_view_model =
-        app.add_model(|ctx| AmbientAgentViewModel::new(terminal_view_id, false, ctx));
-    let ephemeral_message_model = app.add_model(|_| EphemeralMessageModel::new());
-    let agent_view_controller = app.add_model(|ctx| {
-        AgentViewController::new(
-            terminal_model.clone(),
-            terminal_view_id,
-            ambient_agent_view_model,
-            ephemeral_message_model,
-            ctx,
-        )
-    });
+    let conversation_selection =
+        app.add_model(|_| Box::new(MockConversationSelection) as Box<dyn ConversationSelection>);
 
     app.add_model(|_| {
         BlocklistAIContextModel::new_for_test(
             terminal_model,
             terminal_view_id,
-            agent_view_controller,
+            conversation_selection,
         )
     })
 }

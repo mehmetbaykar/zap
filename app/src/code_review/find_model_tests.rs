@@ -1,4 +1,5 @@
 use super::*;
+use crate::ai::request_usage_model::AIRequestUsageModel;
 use crate::auth::AuthStateProvider;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::code::editor::view::{CodeEditorRenderOptions, CodeEditorView};
@@ -156,6 +157,11 @@ fn initialize_test_app(app: &mut App) {
     app.add_singleton_model(ObjectStoreModel::mock);
     app.add_singleton_model(|_| ActiveSession::default());
     app.add_singleton_model(NotebookKeybindings::new);
+
+    // CodeReviewView reads AI usage/availability when comments are populated
+    // (e.g. to compute the comment tray's "Send to Agent" button state), so
+    // register the same AI singletons the other code_review tests use.
+    app.add_singleton_model(AIRequestUsageModel::new_for_test);
 }
 
 fn create_find_model_with_query(

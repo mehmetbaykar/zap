@@ -9,10 +9,10 @@ use super::settings::UndoCloseSettingsChangedEvent;
 use super::UndoCloseSettings;
 use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::pane_group::{PaneGroup, PaneId};
-use crate::send_telemetry_from_app_ctx;
 use crate::server::telemetry::{TelemetryEvent, UndoCloseItemType};
 use crate::tab::TabData;
 use crate::workspace::Workspace;
+use crate::{report_error, send_telemetry_from_app_ctx};
 
 /// A unique identifier for an item in the undo close stack.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -125,7 +125,8 @@ impl ClosedItem {
 
             for terminal_view_id in terminal_view_ids {
                 history_model.update(ctx, |history_model, _| {
-                    history_model.mark_conversations_historical_for_terminal_view(terminal_view_id);
+                    history_model
+                        .mark_conversations_historical_for_terminal_surface(terminal_view_id);
                 });
             }
         }
@@ -156,7 +157,7 @@ pub struct UndoCloseStack {
 impl UndoCloseStack {
     /// Constructs a new undo close stack.
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
-        ctx.subscribe_to_model(&UndoCloseSettings::handle(ctx), |me, event, ctx| {
+        ctx.subscribe_to_model(&UndoCloseSettings::handle(ctx), |me, _, event, ctx| {
             me.handle_settings_event(event, ctx);
         });
 
@@ -366,9 +367,9 @@ impl UndoCloseStack {
                 }
                 // Log errors if the expired item was not found or multiple items were found
                 if me.stack.len() == initial_len {
-                    log::error!("Undo close expiry task did not find item in stack!");
+                    report_error!("Undo close expiry task did not find item in stack!");
                 } else if me.stack.len() < initial_len - 1 {
-                    log::error!("Undo close expiry task found multiple matching items in stack!");
+                    report_error!("Undo close expiry task found multiple matching items in stack!");
                 } else {
                     log::debug!("Removed expired item from undo stack");
                 }

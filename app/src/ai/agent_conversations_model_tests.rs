@@ -111,7 +111,7 @@ fn test_restored_conversation_emits_restored_kind() {
             model.handle_history_event(
                 &BlocklistAIHistoryEvent::UpdatedConversationStatus {
                     conversation_id: AIConversationId::new(),
-                    terminal_view_id: EntityId::new(),
+                    terminal_surface_id: EntityId::new(),
                     update: ConversationStatusUpdate::Restored,
                     new_status: ConversationStatus::Success,
                 },
@@ -136,7 +136,7 @@ fn test_status_transition_emits_status_set_with_filter_buckets() {
             model.handle_history_event(
                 &BlocklistAIHistoryEvent::UpdatedConversationStatus {
                     conversation_id: AIConversationId::new(),
-                    terminal_view_id: EntityId::new(),
+                    terminal_surface_id: EntityId::new(),
                     update: ConversationStatusUpdate::Changed {
                         prev_status: ConversationStatus::InProgress,
                     },
@@ -169,7 +169,7 @@ fn test_same_bucket_re_emission_emits_status_set_with_equal_filters() {
             model.handle_history_event(
                 &BlocklistAIHistoryEvent::UpdatedConversationStatus {
                     conversation_id: AIConversationId::new(),
-                    terminal_view_id: EntityId::new(),
+                    terminal_surface_id: EntityId::new(),
                     update: ConversationStatusUpdate::Changed {
                         prev_status: ConversationStatus::InProgress,
                     },
@@ -251,7 +251,7 @@ fn test_title_update_refreshes_shadowing_task_title() {
         agent_model.update(&mut app, |model, ctx| {
             model.handle_history_event(
                 &BlocklistAIHistoryEvent::UpdatedConversationTitle {
-                    terminal_view_id: Some(terminal_view_id),
+                    terminal_surface_id: Some(terminal_view_id),
                     conversation_id,
                     title: "Renamed conversation".to_string(),
                 },
@@ -1260,7 +1260,7 @@ fn test_server_token_assignment_does_not_enable_copy_link() {
             model.handle_history_event(
                 &BlocklistAIHistoryEvent::ConversationAgentIdAssigned {
                     conversation_id,
-                    terminal_view_id,
+                    terminal_surface_id: terminal_view_id,
                 },
                 ctx,
             );

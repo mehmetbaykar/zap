@@ -42,7 +42,7 @@ impl ProjectRulesPersister {
         persistence_tx: Option<SyncSender<ModelEvent>>,
         ctx: &mut ModelContext<Self>,
     ) -> Self {
-        ctx.subscribe_to_model(&ProjectContextModel::handle(ctx), |me, event, _ctx| {
+        ctx.subscribe_to_model(&ProjectContextModel::handle(ctx), |me, _, event, _ctx| {
             let ProjectContextModelEvent::KnownRulesChanged(delta) = event else {
                 return;
             };
@@ -76,7 +76,7 @@ impl ProjectRulesPersister {
             }
         });
 
-        ctx.subscribe_to_model(&DetectedRepositories::handle(ctx), |_me, event, ctx| {
+        ctx.subscribe_to_model(&DetectedRepositories::handle(ctx), |_me, _, event, ctx| {
             let DetectedRepositoriesEvent::DetectedGitRepo { repository, .. } = event;
             let repo_path = repository.as_ref(ctx).root_dir().to_local_path_lossy();
 

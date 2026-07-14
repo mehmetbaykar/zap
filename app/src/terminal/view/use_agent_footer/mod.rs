@@ -22,7 +22,6 @@ use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use anyhow::anyhow;
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
 use warp_core::features::FeatureFlag;
@@ -138,6 +137,7 @@ fn rich_input_submit_strategy(agent: CLIAgent) -> RichInputSubmitStrategy {
         | CLIAgent::Omp
         | CLIAgent::Hermes
         | CLIAgent::Vibe
+        | CLIAgent::Antigravity
         | CLIAgent::Unknown => RichInputSubmitStrategy::Inline,
     }
 }
@@ -773,9 +773,9 @@ impl TerminalView {
                         match base64::engine::general_purpose::STANDARD.decode(&image.data) {
                             Ok(bytes) => bytes,
                             Err(_) => {
-                                log::error!(
-                                    "Failed to decode base64 image data for {}",
-                                    image.file_name
+                                report_error!(
+                                    "Failed to decode base64 image data",
+                                    extra: { "file_name" => %image.file_name }
                                 );
                                 continue;
                             }
@@ -861,7 +861,10 @@ impl TerminalView {
                         }
                         Ok(_) => {}
                         Err(e) => {
-                            log::error!("Failed to stat dropped image {path_str}: {e}");
+                            report_error!(
+                                anyhow::Error::new(e).context("Failed to stat dropped image"),
+                                extra: { "path" => %path_str }
+                            );
                             continue;
                         }
                     }
@@ -869,7 +872,10 @@ impl TerminalView {
                     let bytes = match async_fs::read(&path_str).await {
                         Ok(b) => b,
                         Err(e) => {
-                            log::error!("Failed to read dropped image {path_str}: {e}");
+                            report_error!(
+                                anyhow::Error::new(e).context("Failed to read dropped image"),
+                                extra: { "path" => %path_str }
+                            );
                             continue;
                         }
                     };
@@ -1391,8 +1397,9 @@ impl TypedActionView for UseAgentToolbar {
                     .should_render_use_agent_footer_for_user_commands
                     .set_value(false, ctx)
                 {
-                    report_error!(anyhow!("{e:?}")
-                        .context("Failed to set `ShouldRenderUseAgentToolbarForUserCommands`"));
+                    report_error!(
+                        e.context("Failed to set `ShouldRenderUseAgentToolbarForUserCommands`")
+                    );
                 }
             });
         }

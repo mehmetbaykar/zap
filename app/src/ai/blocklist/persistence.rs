@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use chrono::{DateTime, Local};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 use super::AIQueryHistoryOutputStatus;
@@ -14,7 +14,8 @@ use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{
     AIAgentActionType, AIAgentAttachment, AIAgentContext, AIAgentExchangeId, AIAgentInput,
     AIAgentPtyWriteMode, AskUserQuestionItem, FileLocations, PassiveSuggestionResultType,
-    ReadFilesRequest, RequestComputerUseRequest, UseComputerRequest, UserQueryMode,
+    ReadFilesRequest, RequestComputerUseRequest, SearchCodebaseRequest, UseComputerRequest,
+    UserQueryMode,
 };
 use crate::ai::llms::LLMId;
 use crate::terminal::model::block::{BlockId, SerializedBlock};
@@ -160,6 +161,11 @@ pub(crate) enum PersistedAIAgentActionType {
     GetFiles {
         file_names: Vec<String>,
     },
+    GetRelevantFiles {
+        query: String,
+        partial_paths: Option<Vec<String>>,
+        codebase_path: Option<String>,
+    },
     Grep {
         queries: Vec<String>,
         path: String,
@@ -187,9 +193,11 @@ pub(crate) enum PersistedAIAgentActionType {
     },
     SuggestPrompt,
     OpenCodeReview,
+    InitProject,
     UseComputer {
         action_summary: String,
-        actions: Vec<computer_use::Action>,
+        #[serde(deserialize_with = "deserialize_targeted_actions")]
+        actions: Vec<computer_use::TargetedAction>,
         screenshot_params: Option<computer_use::ScreenshotParams>,
     },
     RequestComputerUse {
@@ -199,9 +207,51 @@ pub(crate) enum PersistedAIAgentActionType {
     AskUserQuestion {
         questions: Vec<AskUserQuestionItem>,
     },
+    FetchConversation {
+        conversation_id: String,
+    },
 
     /// Actions that don't need data persisted (since they're restored from conversation tasks) can be mapped to this.
     NotPersisted,
+}
+
+/// Deserializes the persisted `UseComputer` actions, accepting both the current `{ action, target }`
+/// shape and the legacy bare-`Action` shape.
+///
+/// Conversations persisted before `actions` became `Vec<TargetedAction>` stored each element as a
+/// bare [`computer_use::Action`]; those decode with the target defaulting to `Target::Screen`. New
+/// data round-trips unchanged, and serialization still emits the `{ action, target }` shape via the
+/// derived `Serialize` impl.
+fn deserialize_targeted_actions<'de, D>(
+    deserializer: D,
+) -> Result<Vec<computer_use::TargetedAction>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Accepts either the new `{ action, target }` wrapper (with `target` optional) or a bare legacy
+    // `Action` value. `Action`'s variant names never collide with the `action`/`target` keys, so
+    // the untagged match is unambiguous.
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum TargetedActionCompat {
+        Targeted {
+            action: computer_use::Action,
+            #[serde(default)]
+            target: computer_use::Target,
+        },
+        Bare(computer_use::Action),
+    }
+
+    let actions = Vec::<TargetedActionCompat>::deserialize(deserializer)?;
+    Ok(actions
+        .into_iter()
+        .map(|compat| match compat {
+            TargetedActionCompat::Targeted { action, target } => {
+                computer_use::TargetedAction { action, target }
+            }
+            TargetedActionCompat::Bare(action) => computer_use::TargetedAction::screen(action),
+        })
+        .collect())
 }
 
 impl From<&AIAgentActionType> for PersistedAIAgentActionType {
@@ -228,6 +278,15 @@ impl From<&AIAgentActionType> for PersistedAIAgentActionType {
             },
             AIAgentActionType::ReadFiles(ReadFilesRequest { locations: files }) => Self::GetFiles {
                 file_names: files.iter().map(|f| f.name.clone()).collect(),
+            },
+            AIAgentActionType::SearchCodebase(SearchCodebaseRequest {
+                query,
+                partial_paths,
+                codebase_path,
+            }) => Self::GetRelevantFiles {
+                query: query.clone(),
+                partial_paths: partial_paths.clone(),
+                codebase_path: codebase_path.clone(),
             },
             AIAgentActionType::Grep { queries, path } => Self::Grep {
                 queries: queries.clone(),
@@ -269,6 +328,7 @@ impl From<&AIAgentActionType> for PersistedAIAgentActionType {
             }
             AIAgentActionType::SuggestPrompt { .. } => Self::SuggestPrompt,
             AIAgentActionType::OpenCodeReview => Self::OpenCodeReview,
+            AIAgentActionType::InitProject => Self::InitProject,
             AIAgentActionType::InsertCodeReviewComments { .. } => Self::NotPersisted,
             AIAgentActionType::ReadDocuments(_)
             | AIAgentActionType::EditDocuments(_)
@@ -291,6 +351,9 @@ impl From<&AIAgentActionType> for PersistedAIAgentActionType {
             },
             AIAgentActionType::AskUserQuestion { questions } => Self::AskUserQuestion {
                 questions: questions.clone(),
+            },
+            AIAgentActionType::FetchConversation { conversation_id } => Self::FetchConversation {
+                conversation_id: conversation_id.clone(),
             },
         }
     }
@@ -341,6 +404,15 @@ impl TryFrom<PersistedAIAgentActionType> for AIAgentActionType {
                         .collect(),
                 }))
             }
+            PersistedAIAgentActionType::GetRelevantFiles {
+                query,
+                partial_paths,
+                codebase_path,
+            } => Ok(Self::SearchCodebase(SearchCodebaseRequest {
+                query,
+                partial_paths,
+                codebase_path,
+            })),
             PersistedAIAgentActionType::Grep { queries, path } => Ok(Self::Grep { queries, path }),
             PersistedAIAgentActionType::FileGlob { patterns, path } => {
                 Ok(Self::FileGlob { patterns, path })
@@ -379,6 +451,7 @@ impl TryFrom<PersistedAIAgentActionType> for AIAgentActionType {
                 Err(anyhow!("Restoration for suggested prompts is unsupported."))
             }
             PersistedAIAgentActionType::OpenCodeReview => Ok(Self::OpenCodeReview),
+            PersistedAIAgentActionType::InitProject => Ok(Self::InitProject),
             PersistedAIAgentActionType::UseComputer {
                 action_summary,
                 actions,
@@ -397,6 +470,9 @@ impl TryFrom<PersistedAIAgentActionType> for AIAgentActionType {
             })),
             PersistedAIAgentActionType::AskUserQuestion { questions } => {
                 Ok(Self::AskUserQuestion { questions })
+            }
+            PersistedAIAgentActionType::FetchConversation { conversation_id } => {
+                Ok(Self::FetchConversation { conversation_id })
             }
             PersistedAIAgentActionType::NotPersisted => Err(anyhow!(
                 "Restoration is handled through conversation tasks, not persisted blocks."

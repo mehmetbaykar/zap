@@ -68,6 +68,9 @@ pub use templatable_installation::TemplatableMCPServerInstallation;
 pub use templatable_installation::{VariableType, VariableValue};
 pub mod parsing;
 pub use parsing::ParsedTemplatableMCPServerResult;
+
+#[cfg(not(target_family = "wasm"))]
+use crate::report_error;
 #[cfg(not(target_family = "wasm"))]
 pub mod http_client;
 #[cfg(not(target_family = "wasm"))]
@@ -464,7 +467,9 @@ impl MCPServer {
         // serde_json::to_string_pretty should never fail on our JSONMCPServer type, but better to
         // not crash the app if it does.
         .unwrap_or_else(|err| {
-            log::error!("Could not serialize MCP server to user json: {err:?}");
+            report_error!(
+                anyhow::Error::new(err).context("Could not serialize MCP server to user json")
+            );
             Default::default()
         })
     }
@@ -504,7 +509,9 @@ impl MCPServer {
         // serde_json::to_string_pretty should never fail on our JSONMCPServer type, but better to
         // not crash the app if it does.
         .unwrap_or_else(|err| {
-            log::error!("Could not serialize MCP server to user json: {err:?}");
+            report_error!(
+                anyhow::Error::new(err).context("Could not serialize MCP server to user json")
+            );
             Default::default()
         });
 
@@ -543,7 +550,8 @@ impl MCPServer {
                     apply_values(&mut cli_server.static_env_vars, &env_vars);
                 }
                 Err(error) => {
-                    log::error!("Could not read MCP server environment variables from sqlite: {error:?}");
+                    report_error!(anyhow::Error::new(error)
+                        .context("Could not read MCP server environment variables from sqlite"));
                 }
             }
         }

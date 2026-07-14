@@ -53,7 +53,7 @@ use crate::view_components::action_button::{ActionButton, DangerSecondaryTheme, 
 use crate::view_components::DismissibleToast;
 use crate::workspace::ToastStack;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::GlobalResourceHandlesProvider;
+use crate::{report_error, GlobalResourceHandlesProvider};
 
 const DEFAULT_JSON_TEXT: &str = r#"{
     "": {
@@ -599,7 +599,7 @@ impl MCPServersEditPageView {
                 .map(|env_var| (env_var.name.clone(), env_var.value.clone()))
                 .collect();
             let Ok(env_vars_string) = serde_json::to_string(&env_vars) else {
-                log::error!("Could not serialize MCP env vars");
+                report_error!("Could not serialize MCP env vars");
                 return;
             };
             let global_resource_handles = GlobalResourceHandlesProvider::as_ref(ctx).get().clone();
@@ -611,7 +611,8 @@ impl MCPServersEditPageView {
                         environment_variables: env_vars_string,
                     })
                 {
-                    log::error!("Error persisting MCP server env vars to database: {e:?}");
+                    report_error!(anyhow::Error::new(e)
+                        .context("Error persisting MCP server env vars to database"));
                 };
             }
         }

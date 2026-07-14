@@ -58,7 +58,6 @@ pub enum AgentOnboardingVersion {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnboardingVersion {
-    Legacy,
     Agent(AgentOnboardingVersion),
 }
 
@@ -324,7 +323,6 @@ pub enum TerminalAction {
         selected_range: Range<usize>,
     },
     ClearMarkedText,
-    SelectAgenticSuggestion(i32),
     ShowInitializationBlock,
     ShowWarpifySettings,
     /// Removes a pending attachment (image or file) by index in the unified list.
@@ -631,7 +629,6 @@ impl fmt::Debug for TerminalAction {
                 selected_range,
             } => write!(f, "SetMarkedText {{{marked_text:?}, {selected_range:?}}}"),
             ClearMarkedText => write!(f, "ClearMarkedText"),
-            SelectAgenticSuggestion(index) => write!(f, "SelectAgenticSuggestion({index:?})"),
             ShowInitializationBlock => write!(f, "ShowInitializationBlock"),
             ShowWarpifySettings => write!(f, "ShowWarpifySettings"),
             DeleteAttachment { index } => write!(f, "DeleteAttachment({index:?})"),

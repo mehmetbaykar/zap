@@ -44,11 +44,10 @@ fn test_update_both_values_changed() {
 
         // Setup event tracking
         let (sender, receiver) = async_channel::unbounded();
-        let model_handle_clone = model_handle.clone();
-        model_handle.update(&mut app, move |_, ctx| {
+        app.update(|ctx| {
             let sender = sender.clone();
             ctx.subscribe_to_model(
-                &model_handle_clone,
+                &model_handle,
                 move |_, event: &FocusedTerminalInfoEvent, _| match event {
                     FocusedTerminalInfoEvent::TerminalInfoUpdated => {
                         let _ = sender.try_send(());
@@ -85,11 +84,10 @@ fn test_update_additional_value_changed() {
 
         // Setup event tracking
         let (sender, receiver) = async_channel::unbounded();
-        let model_handle_clone = model_handle.clone();
-        model_handle.update(&mut app, move |_, ctx| {
+        app.update(|ctx| {
             let sender = sender.clone();
             ctx.subscribe_to_model(
-                &model_handle_clone,
+                &model_handle,
                 move |_, event: &FocusedTerminalInfoEvent, _| match event {
                     FocusedTerminalInfoEvent::TerminalInfoUpdated => {
                         let _ = sender.try_send(());
@@ -134,11 +132,10 @@ fn test_update_no_change() {
 
         // Setup event tracking
         let (sender, receiver) = async_channel::unbounded();
-        let model_handle_clone = model_handle.clone();
-        model_handle.update(&mut app, move |_, ctx| {
+        app.update(|ctx| {
             let sender = sender.clone();
             ctx.subscribe_to_model(
-                &model_handle_clone,
+                &model_handle,
                 move |_, event: &FocusedTerminalInfoEvent, _| match event {
                     FocusedTerminalInfoEvent::TerminalInfoUpdated => {
                         let _ = sender.try_send(());
@@ -183,11 +180,10 @@ fn test_update_only_remote_toggles() {
 
         // Setup event tracking
         let (sender, receiver) = async_channel::unbounded();
-        let model_handle_clone = model_handle.clone();
-        model_handle.update(&mut app, move |_, ctx| {
+        app.update(|ctx| {
             let sender = sender.clone();
             ctx.subscribe_to_model(
-                &model_handle_clone,
+                &model_handle,
                 move |_, event: &FocusedTerminalInfoEvent, _| match event {
                     FocusedTerminalInfoEvent::TerminalInfoUpdated => {
                         let _ = sender.try_send(());
@@ -232,11 +228,10 @@ fn test_update_only_restored_toggles() {
 
         // Setup event tracking
         let (sender, receiver) = async_channel::unbounded();
-        let model_handle_clone = model_handle.clone();
-        model_handle.update(&mut app, move |_, ctx| {
+        app.update(|ctx| {
             let sender = sender.clone();
             ctx.subscribe_to_model(
-                &model_handle_clone,
+                &model_handle,
                 move |_, event: &FocusedTerminalInfoEvent, _| match event {
                     FocusedTerminalInfoEvent::TerminalInfoUpdated => {
                         let _ = sender.try_send(());

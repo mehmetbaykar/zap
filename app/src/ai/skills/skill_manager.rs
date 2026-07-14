@@ -5,9 +5,11 @@ use std::path::{Path, PathBuf};
 
 use ai::skills::{
     get_provider_for_path, provider_rank, ParsedSkill, SkillPathOrigin, SkillProvider,
-    SkillReference,
+    SkillReference, SkillScope,
 };
-pub use file_watchers::{extract_skill_parent_directory, SkillWatcher, SkillWatcherEvent};
+pub use file_watchers::{
+    extract_skill_parent_directory, read_skills_from_directories, SkillWatcher, SkillWatcherEvent,
+};
 use warp_core::features::FeatureFlag;
 use warp_util::host_id::HostId;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
@@ -19,12 +21,8 @@ use super::bundled::{
     BundledSkillActivation,
 };
 use super::bundled::{BundledSkill, BundledSkills};
-use super::{ActiveSkillLookupError, SkillDescriptor, SkillPathQuery};
-use crate::ai::skills::skill_utils::unique_skills;
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SkillManagerEvent {
-    InventoryChanged,
-}
+use super::{ActiveSkillLookupError, SkillDescriptor, SkillManagerEvent, SkillPathQuery};
+use crate::ai::skills::skill_utils::SkillDeduplicator;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillInventoryDuplicate {
@@ -33,7 +31,7 @@ pub struct SkillInventoryDuplicate {
     pub description: String,
     pub content: String,
     pub provider: SkillProvider,
-    pub scope: ai::skills::SkillScope,
+    pub scope: SkillScope,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +66,11 @@ pub struct SkillManager {
     skills_by_name: HashMap<String, HashSet<LocalOrRemotePath>>,
     /// Skills bundled into Zap for the local host and connected remote hosts.
     bundled_skills: BundledSkills,
+    /// Home directories published by connected remote hosts.
+    ///
+    /// Remote home skills themselves live in the shared file-skill indexes above,
+    /// alongside local home and project skills.
+    remote_home_directories: HashMap<HostId, LocalOrRemotePath>,
     #[allow(dead_code)]
     skill_watcher: ModelHandle<SkillWatcher>, // Can't remove this or it'll get cleaned up after new()
 }
@@ -98,6 +101,7 @@ impl SkillManager {
             skills_by_path: HashMap::new(),
             skills_by_name: HashMap::new(),
             bundled_skills: BundledSkills::default(),
+            remote_home_directories: HashMap::new(),
             skill_watcher,
         }
     }
@@ -124,10 +128,10 @@ impl SkillManager {
         path_origin: &SkillPathOrigin,
         ctx: &AppContext,
     ) -> Vec<SkillDescriptor> {
-        // Collect skill paths as (dir_path, skill_path) tuples for later deduplication.
-        // Home skills use the home directory as their dir_path; project skills use their
-        // owning directory.
+        // Collect file-backed skills for one shared deduplication pass. Home skills use
+        // the home directory as their dir_path; project skills use their owning directory.
         let mut skill_paths = Vec::new();
+        let mut deduplicator = SkillDeduplicator::default();
         let path_matches_location = |path: &LocalOrRemotePath| match (working_directory, path) {
             (Some(LocalOrRemotePath::Local(_)), LocalOrRemotePath::Local(_)) => true,
             (
@@ -140,12 +144,12 @@ impl SkillManager {
             | (None, LocalOrRemotePath::Remote(_)) => false,
         };
 
-        if let Some(home_dir) = dirs::home_dir() {
-            let home_dir = LocalOrRemotePath::Local(home_dir);
-            if path_matches_location(&home_dir) {
+        if let Some(home_dir) = self.home_directory_for_origin(path_origin) {
+            if let Some(home_skill_paths) = self.directory_skills.get(&home_dir) {
                 skill_paths.extend(
-                    self.home_skill_paths()
-                        .into_iter()
+                    home_skill_paths
+                        .iter()
+                        .cloned()
                         .map(|path| (home_dir.clone(), path)),
                 );
             }
@@ -156,7 +160,7 @@ impl SkillManager {
                 .get_root_for_path(working_directory);
 
             for (dir, dir_skill_paths) in &self.directory_skills {
-                if is_home_directory(dir) {
+                if self.is_home_directory(dir) {
                     continue;
                 }
                 // Only include skills from directories that are ancestors of the working directory
@@ -175,7 +179,8 @@ impl SkillManager {
         // Deduplicate skills with identical content installed under the same directory across
         // multiple providers, keeping the skill from the highest-priority provider per
         // [`SKILL_PROVIDER_DEFINITIONS`].
-        let mut skills = unique_skills(&skill_paths, &self.skills_by_path);
+        deduplicator.extend_paths(&skill_paths, &self.skills_by_path);
+        let mut skills = deduplicator.into_descriptors();
 
         // Apply icon overrides for well-known skill names (e.g. partner integrations).
         for skill in &mut skills {
@@ -186,8 +191,8 @@ impl SkillManager {
         }
 
         // Append bundled skills whose activation condition is met, from the
-        // catalog of the host that owns the working directory: SSH sessions
-        // see the remote daemon's catalog (empty until its snapshot arrives),
+        // catalog of the active execution host: SSH sessions see the remote
+        // daemon's catalog (empty until its snapshot arrives),
         // never the local client's. Remote catalog descriptors are referenced
         // by their remote paths so invocation resolves back to the same host's
         // catalog, while direct `BundledSkillId` lookups use `path_origin`.
@@ -200,13 +205,23 @@ impl SkillManager {
 
     /// Returns the currently-known home skill file paths.
     pub fn home_skill_paths(&self) -> Vec<LocalOrRemotePath> {
-        let Some(home_dir) = dirs::home_dir() else {
+        let Some(home_dir) = self.home_directory_for_origin(&SkillPathOrigin::Local) else {
             return vec![];
         };
         self.directory_skills
-            .get(&LocalOrRemotePath::Local(home_dir))
+            .get(&home_dir)
             .map(|skills| skills.iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// Returns the parsed home skills currently cached by the local watcher.
+    pub fn home_skills(&self) -> impl Iterator<Item = &ParsedSkill> + '_ {
+        dirs::home_dir()
+            .map(LocalOrRemotePath::Local)
+            .into_iter()
+            .filter_map(|home_dir| self.directory_skills.get(&home_dir))
+            .flatten()
+            .filter_map(|path| self.skills_by_path.get(path))
     }
 
     /// Returns the currently-known directories which have skills registered.
@@ -265,9 +280,7 @@ impl SkillManager {
             return true;
         }
         // Slow path: check all paths for this skill name.
-        self.skill_paths_by_name(&skill.name)
-            .iter()
-            .filter_map(|path| self.skills_by_path.get(path).map(|skill| skill.provider))
+        self.providers_for_descriptor(skill)
             .any(|provider| providers.contains(&provider))
     }
 
@@ -292,12 +305,22 @@ impl SkillManager {
             return skill.provider;
         }
         // Find the supported provider with the best (lowest) rank among all paths.
-        self.skill_paths_by_name(&skill.name)
-            .iter()
-            .filter_map(|path| self.skills_by_path.get(path).map(|skill| skill.provider))
+        self.providers_for_descriptor(skill)
             .filter(|provider| supported_providers.contains(provider))
             .min_by_key(|provider| provider_rank(*provider))
             .unwrap_or(skill.provider)
+    }
+
+    fn providers_for_descriptor<'a>(
+        &'a self,
+        descriptor: &'a SkillDescriptor,
+    ) -> impl Iterator<Item = SkillProvider> + 'a {
+        self.skills_by_name
+            .get(&descriptor.name)
+            .into_iter()
+            .flatten()
+            .filter(|path| path_matches_reference_location(path, &descriptor.reference))
+            .filter_map(|path| self.skills_by_path.get(path).map(|skill| skill.provider))
     }
 
     /// Returns skill file paths that have the given skill name.
@@ -314,17 +337,13 @@ impl SkillManager {
     }
 
     /// Returns a reference to a parsed skill for a specific SKILL.md file path, if it is cached.
-    /// Falls through to remote bundled catalogs, whose skills are addressed by path.
+    /// Falls through to the remote bundled catalog, whose skills are addressed by path.
     pub fn skill_by_path<P: SkillPathQuery + ?Sized>(
         &self,
         skill_path: &P,
     ) -> Option<&ParsedSkill> {
         let location = skill_path.to_skill_location();
-        self.skills_by_path.get(&location).or_else(|| {
-            location
-                .as_remote()
-                .and_then(|remote| self.bundled_skills.remote_skill_by_path(remote))
-        })
+        self.skill_by_location(&location)
     }
 
     /// Returns the appropriate `SkillReference` for a skill at the given path.
@@ -345,10 +364,7 @@ impl SkillManager {
     /// Get the definition of a skill, if it is cached.
     pub fn skill_by_reference(&self, reference: &SkillReference) -> Option<&ParsedSkill> {
         match reference {
-            SkillReference::Path(path) => self.skills_by_path.get(path).or_else(|| {
-                path.as_remote()
-                    .and_then(|remote| self.bundled_skills.remote_skill_by_path(remote))
-            }),
+            SkillReference::Path(path) => self.skill_by_location(path),
             SkillReference::BundledSkillId(id) => self.bundled_skills.local_skill(id),
         }
     }
@@ -478,11 +494,122 @@ impl SkillManager {
         items
     }
 
+    pub(crate) fn replace_remote_agent_context(
+        &mut self,
+        host_id: HostId,
+        bundled_skills: Option<BundledSkill>,
+        home_skills: Option<(LocalOrRemotePath, Vec<ParsedSkill>)>,
+    ) {
+        match bundled_skills {
+            Some(bundled_skills) => {
+                self.set_remote_bundled_skill(host_id.clone(), bundled_skills);
+            }
+            None => self.remove_remote_bundled_skill(&host_id),
+        }
+        match home_skills {
+            Some((home_dir, skills)) => {
+                self.set_remote_home_skills(host_id, home_dir, skills);
+            }
+            None => self.remove_remote_home_skills(&host_id),
+        }
+    }
+
+    pub(crate) fn remove_remote_agent_context(&mut self, host_id: &HostId) {
+        self.remove_remote_bundled_skill(host_id);
+        self.remove_remote_home_skills(host_id);
+    }
+
+    /// Replaces the home skills published by one remote host.
+    pub(crate) fn set_remote_home_skills(
+        &mut self,
+        host_id: HostId,
+        home_dir: LocalOrRemotePath,
+        skills: Vec<ParsedSkill>,
+    ) {
+        self.remove_remote_home_skills(&host_id);
+        self.remote_home_directories.insert(host_id, home_dir);
+        self.cache_skills(skills);
+    }
+
+    pub(crate) fn remove_remote_home_skills(&mut self, host_id: &HostId) {
+        let Some(home_dir) = self.remote_home_directories.remove(host_id) else {
+            return;
+        };
+        self.remove_skills_for_directory(&home_dir);
+    }
+
+    fn home_directory_for_origin(
+        &self,
+        path_origin: &SkillPathOrigin,
+    ) -> Option<LocalOrRemotePath> {
+        match path_origin {
+            SkillPathOrigin::Local => dirs::home_dir().map(LocalOrRemotePath::Local),
+            SkillPathOrigin::Remote { host_id } => {
+                self.remote_home_directories.get(host_id).cloned()
+            }
+            SkillPathOrigin::RestoredDisplayOnly | SkillPathOrigin::Unavailable => None,
+        }
+    }
+
+    fn is_home_directory(&self, path: &LocalOrRemotePath) -> bool {
+        match path {
+            LocalOrRemotePath::Local(path) => dirs::home_dir().as_ref() == Some(path),
+            LocalOrRemotePath::Remote(remote_path) => self
+                .remote_home_directories
+                .get(&remote_path.host_id)
+                .is_some_and(|home_dir| home_dir == path),
+        }
+    }
+
+    fn skill_by_location(&self, location: &LocalOrRemotePath) -> Option<&ParsedSkill> {
+        self.skills_by_path.get(location).or_else(|| {
+            location
+                .as_remote()
+                .and_then(|remote| self.bundled_skills.remote_skill_by_path(remote))
+        })
+    }
+
+    fn remove_skills_for_directory(&mut self, directory: &LocalOrRemotePath) {
+        let Some(skill_paths) = self.directory_skills.remove(directory) else {
+            return;
+        };
+        for skill_path in skill_paths {
+            self.remove_skill_by_path(&skill_path);
+        }
+    }
+
+    fn remove_skill_by_path(&mut self, skill_path: &LocalOrRemotePath) {
+        let Some(skill) = self.skills_by_path.remove(skill_path) else {
+            return;
+        };
+        let remove_name = self
+            .skills_by_name
+            .get_mut(&skill.name)
+            .is_some_and(|paths| {
+                paths.remove(skill_path);
+                paths.is_empty()
+            });
+        if remove_name {
+            self.skills_by_name.remove(&skill.name);
+        }
+    }
+
     fn handle_skill_watcher_event(
         &mut self,
         event: SkillWatcherEvent,
         ctx: &mut ModelContext<Self>,
     ) {
+        let home_skills_changed = match &event {
+            SkillWatcherEvent::SkillsAdded { skills } => {
+                skills.iter().any(|skill| skill.scope == SkillScope::Home)
+            }
+            SkillWatcherEvent::SkillsDeleted { paths } => paths.iter().any(|path| {
+                self.skills_by_path.values().any(|skill| {
+                    skill.scope == SkillScope::Home
+                        && (skill.path.starts_with(path) || path.starts_with(&skill.path))
+                })
+            }),
+        };
         match event {
             SkillWatcherEvent::SkillsAdded { skills } => {
                 self.handle_skills_added(skills, ctx);
@@ -491,6 +618,9 @@ impl SkillManager {
                 self.handle_skills_deleted(paths, ctx);
             }
         }
+        if home_skills_changed {
+            ctx.emit(SkillManagerEvent::HomeSkillsChanged);
+        }
     }
 
     pub fn handle_skills_added(&mut self, skills: Vec<ParsedSkill>, ctx: &mut ModelContext<Self>) {
@@ -498,6 +628,11 @@ impl SkillManager {
             return;
         }
 
+        self.cache_skills(skills);
+        ctx.emit(SkillManagerEvent::InventoryChanged);
+    }
+
+    fn cache_skills(&mut self, skills: Vec<ParsedSkill>) {
         for skill in skills {
             if let Ok(parent_dir) = extract_skill_parent_directory(&skill.path) {
                 self.directory_skills
@@ -517,8 +652,6 @@ impl SkillManager {
                 );
             }
         }
-
-        ctx.emit(SkillManagerEvent::InventoryChanged);
     }
 
     fn handle_skills_deleted(
@@ -543,26 +676,14 @@ impl SkillManager {
             if dir.starts_with(path) {
                 // Delete this entire entry and remove all skill_paths under this directory from cache
                 for skill_path in skill_paths {
-                    let skill = self.skills_by_path.remove(skill_path);
-                    if let Some(skill) = skill {
-                        self.skills_by_name
-                            .entry(skill.name.clone())
-                            .or_default()
-                            .remove(skill_path);
-                    }
+                    self.remove_skill_by_path(skill_path);
                 }
                 self.directory_skills.remove(dir);
             } else if path.starts_with(dir) {
                 // Remove all skills under this directory that is a child of the deleted path
                 for skill_path in skill_paths {
                     if skill_path.starts_with(path) {
-                        let skill = self.skills_by_path.remove(skill_path);
-                        if let Some(skill) = skill {
-                            self.skills_by_name
-                                .entry(skill.name.clone())
-                                .or_default()
-                                .remove(skill_path);
-                        }
+                        self.remove_skill_by_path(skill_path);
                         self.directory_skills
                             .entry(dir.clone())
                             .or_default()
@@ -606,19 +727,29 @@ impl SkillManager {
             .insert_remote_for_testing(host_id, id, skill, activation);
     }
 }
-
-fn is_home_directory(path: &LocalOrRemotePath) -> bool {
-    let Some(home_dir) = dirs::home_dir() else {
-        return false;
-    };
-    path == &LocalOrRemotePath::Local(home_dir)
-}
-
 impl Entity for SkillManager {
     type Event = SkillManagerEvent;
 }
 
 impl SingletonEntity for SkillManager {}
+
+fn path_matches_reference_location(path: &LocalOrRemotePath, reference: &SkillReference) -> bool {
+    match (path, reference) {
+        (
+            LocalOrRemotePath::Remote(path),
+            SkillReference::Path(LocalOrRemotePath::Remote(reference)),
+        ) => path.host_id == reference.host_id,
+        (
+            LocalOrRemotePath::Local(_),
+            SkillReference::Path(LocalOrRemotePath::Local(_)) | SkillReference::BundledSkillId(_),
+        ) => true,
+        (LocalOrRemotePath::Local(_), SkillReference::Path(LocalOrRemotePath::Remote(_)))
+        | (
+            LocalOrRemotePath::Remote(_),
+            SkillReference::Path(LocalOrRemotePath::Local(_)) | SkillReference::BundledSkillId(_),
+        ) => false,
+    }
+}
 
 #[cfg(test)]
 #[path = "skill_manager_tests.rs"]

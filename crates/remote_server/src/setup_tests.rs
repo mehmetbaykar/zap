@@ -97,14 +97,48 @@ fn parse_uname_missing_arch() {
 }
 
 #[test]
-fn daemon_and_data_dirs_are_static_per_remote_os_user() {
+fn identity_dir_name_is_short_and_deterministic() {
+    let key = "zap-local";
+    let name = remote_server_identity_dir_name(key);
+    assert_eq!(name.len(), 8);
+    assert!(name.chars().all(|character| character.is_ascii_hexdigit()));
+    assert_eq!(name, remote_server_identity_dir_name(key));
+    assert_ne!(name, remote_server_identity_dir_name("different-local"));
+}
+
+#[test]
+fn identity_scopes_daemon_and_data_dirs() {
+    let key = "user@example.com/ssh host";
+    let daemon_dir = remote_server_daemon_dir(key);
+    let data_dir = remote_server_daemon_data_dir(key);
+
     assert_eq!(
-        remote_server_daemon_dir(),
-        format!("{}/daemon", remote_server_dir())
+        daemon_dir,
+        format!(
+            "{}/{}",
+            remote_server_dir(),
+            remote_server_identity_dir_name(key)
+        )
     );
     assert_eq!(
-        remote_server_daemon_data_dir(),
-        format!("{}/data", remote_server_dir())
+        data_dir,
+        format!(
+            "{}/user%40example%2Ecom%2Fssh%20host/data",
+            remote_server_dir()
+        )
+    );
+    assert!(!data_dir.starts_with(&daemon_dir));
+}
+
+#[test]
+fn empty_identity_has_deterministic_partition() {
+    assert_eq!(
+        remote_server_daemon_dir(""),
+        format!("{}/empty", remote_server_dir())
+    );
+    assert_eq!(
+        remote_server_daemon_data_dir(""),
+        format!("{}/empty/data", remote_server_dir())
     );
 }
 
@@ -639,15 +673,16 @@ fn daemon_pid_name_is_short() {
 #[test]
 fn socket_path_fits_within_sun_path_worst_case() {
     // Worst case: preview channel (longest base dir) + 32-char username
-    // (Linux max) + daemon directory + hashed socket (20 chars).
+    // (Linux max) + hashed identity (8 chars) + hashed socket (20 chars).
     //
-    // Path: /home/{user}/.warp-preview/remote-server/daemon/server-{hash8}.sock
+    // Path: /home/{user}/.warp-preview/remote-server/{hash8}/server-{hash8}.sock
     let long_home = "/home/a]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]";
+    let identity_dir = remote_server_identity_dir_name("zap-local");
     let hashed_socket = "server-a1b2c3d4.sock";
     let old_socket = "server-v0.2026.05.13.09.15.stable_01.sock";
 
     // Use .warp-preview (longest channel base dir) for worst case.
-    let daemon_dir = format!("{long_home}/.warp-preview/remote-server/daemon");
+    let daemon_dir = format!("{long_home}/.warp-preview/remote-server/{identity_dir}");
 
     let hashed_path = format!("{daemon_dir}/{hashed_socket}");
 

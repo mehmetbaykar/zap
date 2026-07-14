@@ -144,6 +144,17 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
                             }
                         }
                     }
+                    AIAgentActionResultType::SearchCodebase(search_codebase_result) => {
+                        if let crate::ai::agent::SearchCodebaseResult::Success { files } =
+                            search_codebase_result
+                        {
+                            for file in files {
+                                if let AnyFileContent::StringContent(content) = &mut file.content {
+                                    redact_secrets(content);
+                                }
+                            }
+                        }
+                    }
                     AIAgentActionResultType::RequestFileEdits(request_file_edits_result) => {
                         if let crate::ai::agent::RequestFileEditsResult::Success {
                             diff,
@@ -201,8 +212,9 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
                     AIAgentActionResultType::UseComputer(_)
                     | AIAgentActionResultType::RequestComputerUse(_) => {}
 
-                    // Local orchestration results contain only identifiers or canonical errors.
-                    AIAgentActionResultType::StartAgent(_)
+                    // Local-only results never cross the Warp protocol.
+                    AIAgentActionResultType::FetchConversation(_)
+                    | AIAgentActionResultType::StartAgent(_)
                     | AIAgentActionResultType::SendMessageToAgent(_)
                     | AIAgentActionResultType::RunAgents(_)
                     | AIAgentActionResultType::WaitForEvents(_) => {}
@@ -225,6 +237,10 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
                     AIAgentActionResultType::AskUserQuestion(result) => {
                         redact_ask_user_question_result(result);
                     }
+                    // Orchestrate results contain agent IDs / canonical error
+                    // strings only; no user-provided text to redact.
+                    AIAgentActionResultType::RunAgents(_)
+                    | AIAgentActionResultType::WaitForEvents(_) => {}
                 }
             }
             AIAgentInput::FetchReviewComments { repo_path, context } => {

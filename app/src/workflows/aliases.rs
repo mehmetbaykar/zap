@@ -10,6 +10,7 @@ use warpui::{AppContext, ModelContext, SingletonEntity};
 use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
 use crate::cloud_object::StoredObject as _;
 use crate::drive::ObjectTypeAndId;
+use crate::report_error;
 use crate::server::ids::SyncId;
 
 define_settings_group!(WorkflowAliases, settings: [
@@ -18,6 +19,7 @@ define_settings_group!(WorkflowAliases, settings: [
         default: vec![],
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: true,
         storage_key: "WorkflowAliases",
     }
@@ -39,7 +41,7 @@ pub struct WorkflowAlias {
 impl WorkflowAliases {
     /// Call once to subscribe to UpdateManager notifications that a workflow has been deleted.
     pub fn connect(&self, ctx: &mut ModelContext<Self>) {
-        ctx.subscribe_to_model(&ObjectStoreModel::handle(ctx), |me, event, ctx| {
+        ctx.subscribe_to_model(&ObjectStoreModel::handle(ctx), |me, _, event, ctx| {
             let result = match event {
                 ObjectStoreEvent::ObjectTrashed {
                     type_and_id: ObjectTypeAndId::Workflow(server_id),
@@ -49,7 +51,7 @@ impl WorkflowAliases {
             };
 
             if let Err(e) = result {
-                log::error!("Error removing aliases for workflow: {e:?}");
+                report_error!(e.context("Error removing aliases for workflow"));
             }
         });
     }

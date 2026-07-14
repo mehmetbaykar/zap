@@ -22,43 +22,63 @@ use super::server_model::{ConnectionId, ServerModel};
 
 /// Run the `remote-server-daemon` subcommand.
 ///
-/// Binds a Unix domain socket and writes a PID file, then delegates the
-/// WarpUI app startup to [`super::run_daemon_app`] with the Unix-specific
-/// `ServerModel` constructor.
-pub fn run_daemon() -> anyhow::Result<()> {
-    // socket_path: ~/.warp[-channel]/remote-server/daemon/server.sock
-    //   The Unix domain socket the daemon binds on.  Proxy processes connect
-    //   to it and bridge their SSH stdio channel through it.
-    //
-    // pid_path:    ~/.warp[-channel]/remote-server/daemon/server.pid
-    //   Contains the daemon's PID.  Proxy processes read it and use
-    //   kill(pid, 0) to detect whether the daemon is still alive before
-    //   deciding whether to start a new one.
-    let socket_path = proxy::socket_path();
-    let pid_path = proxy::pid_path();
+/// Full app initialization runs through `run_internal`; [`launch_daemon`]
+/// binds the identity-scoped socket after singleton registration completes.
+pub fn run_daemon(identity_key: String) -> anyhow::Result<()> {
+    let result = crate::run_internal(crate::LaunchMode::RemoteServerDaemon {
+        identity_key: identity_key.clone(),
+    });
+
+    let socket_path = proxy::socket_path(&identity_key);
+    let pid_path = proxy::pid_path(&identity_key);
+    let _ = std::fs::remove_file(&socket_path);
+    let _ = std::fs::remove_file(&pid_path);
+    log::info!("Daemon exiting");
+    result
+}
+
+/// Binds the identity-scoped Unix socket and registers the daemon model after
+/// shared application initialization has completed.
+pub(crate) fn launch_daemon(identity_key: &str, ctx: &mut warpui::AppContext) {
+    let socket_path = proxy::socket_path(identity_key);
+    let pid_path = proxy::pid_path(identity_key);
 
     if let Some(parent) = socket_path.parent() {
-        proxy::ensure_private_daemon_dir(parent)?;
+        if let Err(error) = proxy::ensure_private_daemon_dir(parent) {
+            log::error!("Daemon: failed to create private directory: {error:#}");
+            return;
+        }
     }
     if socket_path.exists() {
-        std::fs::remove_file(&socket_path)?;
+        let _ = std::fs::remove_file(&socket_path);
     }
 
-    // Bind with std (no async runtime needed yet); converted to
-    // async_io::Async inside the closure where the executor is active.
-    let listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
-    std::fs::set_permissions(&socket_path, Permissions::from_mode(0o600))?;
-    // async_io::Async::new() requires non-blocking mode.
-    listener.set_nonblocking(true)?;
+    let listener = match std::os::unix::net::UnixListener::bind(&socket_path) {
+        Ok(listener) => listener,
+        Err(error) => {
+            log::error!(
+                "Daemon: failed to bind socket at {}: {error}",
+                socket_path.display()
+            );
+            return;
+        }
+    };
+    if let Err(error) = std::fs::set_permissions(&socket_path, Permissions::from_mode(0o600)) {
+        log::error!("Daemon: failed to secure socket permissions: {error}");
+        return;
+    }
+    if let Err(error) = listener.set_nonblocking(true) {
+        log::error!("Daemon: failed to make listener nonblocking: {error}");
+        return;
+    }
     log::info!("Daemon bound to {}", socket_path.display());
 
-    std::fs::write(&pid_path, std::process::id().to_string())?;
+    if let Err(error) = std::fs::write(&pid_path, std::process::id().to_string()) {
+        log::error!("Daemon: failed to write PID file: {error}");
+        return;
+    }
 
-    super::run_daemon_app(move |ctx| {
-        // Spawn the Unix socket accept loop.  The listener and connection
-        // handling are entirely Unix-specific; ServerModel itself is
-        // platform-agnostic and only sees register_connection /
-        // deregister_connection calls.
+    ctx.add_singleton_model(move |ctx| {
         let spawner = ctx.spawner();
         let exec = ctx.background_executor();
         let spawner_loop = spawner.clone();
@@ -67,8 +87,8 @@ pub fn run_daemon() -> anyhow::Result<()> {
         exec.spawn(async move {
             let listener = match async_io::Async::new(listener) {
                 Ok(l) => l,
-                Err(e) => {
-                    log::error!("Daemon: async listener error: {e}");
+                Err(error) => {
+                    log::error!("Daemon: async listener error: {error}");
                     return;
                 }
             };
@@ -87,19 +107,14 @@ pub fn run_daemon() -> anyhow::Result<()> {
                             ))
                             .detach();
                     }
-                    Err(e) => log::error!("Daemon: accept error: {e}"),
+                    Err(error) => log::error!("Daemon: accept error: {error}"),
                 }
             }
         })
         .detach();
 
         ServerModel::new(ctx)
-    })?;
-
-    let _ = std::fs::remove_file(&socket_path);
-    let _ = std::fs::remove_file(&pid_path);
-    log::info!("Daemon exiting");
-    Ok(())
+    });
 }
 
 /// Handles a single Unix socket connection from a proxy process.

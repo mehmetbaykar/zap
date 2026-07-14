@@ -115,7 +115,8 @@ pub(super) fn read_recent_ai_queries(
 
 /// Selects the up-arrow prompt-history queries from `recent_ai_queries` (ordered oldest-first):
 /// the newest [`MAX_AI_QUERIES_FOR_UPARROW`] entries, kept oldest-first. Equivalent to the former
-/// `read_ai_queries` as long as the input holds at least that many of the newest queries.
+/// `read_ai_queries_for_uparrow_prompt_history` as long as the input holds at least that many of
+/// the newest queries.
 pub(super) fn process_ai_queries_for_uparrow_prompt(
     mut recent_ai_queries: Vec<PersistedAIInput>,
 ) -> Vec<PersistedAIInput> {

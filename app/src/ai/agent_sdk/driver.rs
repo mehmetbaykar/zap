@@ -46,7 +46,6 @@ use crate::{
             TemplatableMCPServerInstallation, TemplatableMCPServerManager,
         },
     },
-    auth::AuthStateProvider,
     server::ids::{ServerId, SyncId},
 };
 use anyhow::Context as _;
@@ -277,14 +276,10 @@ pub enum AgentDriverError {
     MCPMissingVariables,
     #[error("Agent profile \"{0}\" not found")]
     ProfileError(String),
-    #[error("Local user state is unavailable. Restart Zap and try again.")]
-    NotLoggedIn,
     #[error("Saved prompt not found for id {0}")]
     AIWorkflowNotFound(String),
     #[error("Terminal bootstrap failed")]
     BootstrapFailed,
-    #[error("Error syncing Zap Drive")]
-    WarpDriveSyncFailed,
     #[error("Requested environment not found: {0}")]
     EnvironmentNotFound(String),
     #[error("Environment setup failed: {0}")]
@@ -302,8 +297,6 @@ pub enum AgentDriverError {
     ConversationCancelled { reason: CancellationReason },
     #[error("The agent got stuck waiting for user confirmation on the action: {blocked_action}")]
     ConversationBlocked { blocked_action: String },
-    #[error("Timed out refreshing team metadata")]
-    TeamMetadataRefreshTimeout,
     #[error("{0}")]
     SkillResolutionFailed(String),
     #[error("Failed to build agent configuration")]
@@ -350,11 +343,6 @@ impl AgentDriver {
                 working_dir.display()
             )
         );
-
-        // Zap initializes the local user at startup; reaching here means the local auth singleton was not initialized correctly.
-        if !AuthStateProvider::as_ref(ctx).get().is_logged_in() {
-            return Err(AgentDriverError::NotLoggedIn);
-        }
 
         // Build environment variables from secrets for the terminal session.
         // Do not override env vars that are already set to a non-empty value in the current
@@ -455,7 +443,7 @@ impl AgentDriver {
         )?;
 
         // Subscribe to TerminalDriver events for task-specific handling.
-        ctx.subscribe_to_model(&terminal_driver, |me, event, _| {
+        ctx.subscribe_to_model(&terminal_driver, |me, _, event, _| {
             me.handle_terminal_driver_event(event);
         });
 
@@ -650,7 +638,7 @@ impl AgentDriver {
         let mut tx = Some(tx);
         ctx.subscribe_to_model(
             &templatable_mcp_manager,
-            move |_me, event, ctx| match event {
+            move |_me, _, event, ctx| match event {
                 TemplatableMCPServerManagerEvent::StateChanged { uuid, state } => {
                     let mut pending_ids = mcp_to_start.borrow_mut();
                     if !pending_ids.contains(uuid) {
@@ -763,7 +751,7 @@ impl AgentDriver {
         let templatable_mcp_manager = TemplatableMCPServerManager::handle(ctx);
         let manager_clone = templatable_mcp_manager.clone();
 
-        ctx.subscribe_to_model(&templatable_mcp_manager, move |_me, event, ctx| {
+        ctx.subscribe_to_model(&templatable_mcp_manager, move |_me, _, event, ctx| {
             if let TemplatableMCPServerManagerEvent::StateChanged { uuid, state } = event {
                 if !uuids_to_start.contains(uuid) {
                     return;
@@ -850,7 +838,7 @@ impl AgentDriver {
         let templatable_manager_handle = TemplatableMCPServerManager::handle(ctx);
         let manager_clone = templatable_manager_handle.clone();
 
-        ctx.subscribe_to_model(&templatable_manager_handle, move |_me, event, ctx| {
+        ctx.subscribe_to_model(&templatable_manager_handle, move |_me, _, event, ctx| {
             if let TemplatableMCPServerManagerEvent::StateChanged { uuid, state } = event {
                 if !pending_uuids.contains(uuid) {
                     return;
@@ -1216,8 +1204,11 @@ impl AgentDriver {
         let conversation_id_cell = Arc::new(Mutex::new(Option::<String>::None));
         let conversation_id_cell_for_handler = Arc::clone(&conversation_id_cell);
 
-        ctx.subscribe_to_model(&history_model_handle, move |me, event, ctx| {
-            if event.terminal_view_id().is_some_and(|id| id != terminal_id) {
+        ctx.subscribe_to_model(&history_model_handle, move |me, _, event, ctx| {
+            if event
+                .terminal_surface_id()
+                .is_some_and(|id| id != terminal_id)
+            {
                 return;
             }
 
@@ -1293,7 +1284,7 @@ impl AgentDriver {
 
                 }
 
-                BlocklistAIHistoryEvent::UpdatedConversationStatus { terminal_view_id: conversation_terminal_id, conversation_id, .. } => {
+                BlocklistAIHistoryEvent::UpdatedConversationStatus { terminal_surface_id: conversation_terminal_id, conversation_id, .. } => {
                     if *conversation_terminal_id != terminal_id {
                         return;
                     }
@@ -1364,7 +1355,7 @@ impl AgentDriver {
                 }
                 BlocklistAIHistoryEvent::StartedNewConversation { .. }
                 | BlocklistAIHistoryEvent::ReassignedExchange { .. }
-                | BlocklistAIHistoryEvent::ClearedConversationsInTerminalView { .. }
+                | BlocklistAIHistoryEvent::ClearedConversationsForTerminalSurface { .. }
                 | BlocklistAIHistoryEvent::UpdatedAutoexecuteOverride { .. }
                 | BlocklistAIHistoryEvent::SplitConversation { .. }
                 | BlocklistAIHistoryEvent::RemoveConversation { .. }
@@ -1377,7 +1368,7 @@ impl AgentDriver {
                 | BlocklistAIHistoryEvent::ClearedActiveConversation { .. }
                 | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
                 | BlocklistAIHistoryEvent::ConversationAgentIdAssigned { .. }
-                | BlocklistAIHistoryEvent::ConversationOwnershipTransferred { .. }
+                | BlocklistAIHistoryEvent::ConversationTransferredBetweenTerminalSurfaces { .. }
                 | BlocklistAIHistoryEvent::ConversationUsageMetadataUpdated { .. }
                 | BlocklistAIHistoryEvent::LocalSharedSessionEstablished { .. }
                 | BlocklistAIHistoryEvent::OrchestrationConfigUpdated { .. } => (),
@@ -1461,7 +1452,7 @@ impl AgentDriver {
 
         ctx.subscribe_to_model(
             &CLIAgentSessionsModel::handle(ctx),
-            move |me, event, ctx| match event {
+            move |me, _, event, ctx| match event {
                 CLIAgentSessionsModelEvent::StatusChanged {
                     terminal_view_id: event_tid,
                     status,

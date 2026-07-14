@@ -111,7 +111,9 @@ impl ShellCommandExecutor {
         terminal_view_id: EntityId,
         ctx: &mut ModelContext<Self>,
     ) -> Self {
-        ctx.subscribe_to_model(model_event_dispatcher, Self::handle_terminal_model_event);
+        ctx.subscribe_to_model(model_event_dispatcher, |me, _, event, ctx| {
+            me.handle_terminal_model_event(event, ctx);
+        });
 
         Self {
             active_session,

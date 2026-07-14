@@ -25,7 +25,7 @@ use warpui_core::{
 
 use super::two_line_button::{render_two_line_button, TwoLineButtonSpec};
 use super::OnboardingSlide;
-use crate::model::{NoAiConfirmationSource, OnboardingStateEvent, OnboardingStateModel};
+use crate::model::{OnboardingStateEvent, OnboardingStateModel};
 use crate::slides::{bottom_nav, layout, slide_content};
 use crate::visuals::agent_visual;
 
@@ -96,7 +96,6 @@ pub enum AgentSlideAction {
     SelectAutonomy(AgentAutonomy),
     ToggleDisableOz,
     BackClicked,
-    NoAiClicked,
     NextClicked,
 }
 
@@ -114,7 +113,6 @@ pub struct AgentSlide {
     autonomy_none_mouse_state: MouseStateHandle,
 
     back_button: button::Button,
-    no_ai_button: button::Button,
     next_button: button::Button,
     scroll_state: ClippedScrollStateHandle,
     dropdown_scroll_state: ClippedScrollStateHandle,
@@ -169,7 +167,6 @@ impl AgentSlide {
             autonomy_partial_mouse_state: MouseStateHandle::default(),
             autonomy_none_mouse_state: MouseStateHandle::default(),
             back_button: button::Button::default(),
-            no_ai_button: button::Button::default(),
             next_button: button::Button::default(),
             scroll_state: ClippedScrollStateHandle::new(),
             dropdown_scroll_state: ClippedScrollStateHandle::new(),
@@ -747,22 +744,6 @@ impl AgentSlide {
             },
         );
 
-        let no_ai_keystroke = Keystroke::parse("cmdorctrl-enter").unwrap_or_default();
-        let no_ai_button = self.no_ai_button.render(
-            appearance,
-            button::Params {
-                content: button::Content::Label("I don't want AI".into()),
-                theme: &button::themes::Naked,
-                options: button::Options {
-                    keystroke: Some(no_ai_keystroke),
-                    on_click: Some(Box::new(|ctx, _app, _pos| {
-                        ctx.dispatch_typed_action(AgentSlideAction::NoAiClicked);
-                    })),
-                    ..button::Options::default(appearance)
-                },
-            },
-        );
-
         let enter = Keystroke::parse("enter").unwrap_or_default();
         let next_button = self.next_button.render(
             appearance,
@@ -779,20 +760,13 @@ impl AgentSlide {
             },
         );
 
-        let right_buttons = Flex::row()
-            .with_main_axis_size(MainAxisSize::Min)
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_child(no_ai_button)
-            .with_child(Container::new(next_button).with_margin_left(8.).finish())
-            .finish();
-
         let (step_index, step_count) = self.onboarding_state.as_ref(app).progress();
         bottom_nav::onboarding_bottom_nav(
             appearance,
             step_index,
             step_count,
             Some(back_button),
-            Some(right_buttons),
+            Some(next_button),
         )
     }
 
@@ -990,12 +964,6 @@ impl OnboardingSlide for AgentSlide {
             self.set_model_list_expanded(false, ctx);
         }
     }
-
-    fn on_cmd_or_ctrl_enter(&mut self, ctx: &mut ViewContext<Self>) {
-        self.onboarding_state.update(ctx, |model, ctx| {
-            model.request_no_ai_confirmation(NoAiConfirmationSource::Agent, ctx);
-        });
-    }
 }
 
 impl TypedActionView for AgentSlide {
@@ -1043,11 +1011,6 @@ impl TypedActionView for AgentSlide {
             AgentSlideAction::BackClicked => {
                 self.onboarding_state.update(ctx, |state, ctx| {
                     state.back(ctx);
-                });
-            }
-            AgentSlideAction::NoAiClicked => {
-                self.onboarding_state.update(ctx, |model, ctx| {
-                    model.request_no_ai_confirmation(NoAiConfirmationSource::Agent, ctx);
                 });
             }
             AgentSlideAction::NextClicked => {

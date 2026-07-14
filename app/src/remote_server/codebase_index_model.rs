@@ -114,7 +114,7 @@ pub struct RemoteCodebaseIndexSettingsEntry {
 impl RemoteCodebaseIndexModel {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
         let manager = RemoteServerManager::handle(ctx);
-        ctx.subscribe_to_model(&manager, |me, event, ctx| {
+        ctx.subscribe_to_model(&manager, |me, _, event, ctx| {
             me.handle_remote_server_manager_event(event, ctx);
         });
 
@@ -381,7 +381,7 @@ impl RemoteCodebaseIndexModel {
             RemoteServerManagerEvent::SessionConnecting { .. }
             | RemoteServerManagerEvent::SessionConnectionFailed { .. }
             | RemoteServerManagerEvent::HostConnected { .. }
-            | RemoteServerManagerEvent::BundledSkillsSnapshot { .. }
+            | RemoteServerManagerEvent::RemoteAgentContextSnapshot { .. }
             | RemoteServerManagerEvent::RepoMetadataSnapshot { .. }
             | RemoteServerManagerEvent::RepoMetadataUpdated { .. }
             | RemoteServerManagerEvent::RepoMetadataDirectoryLoaded { .. }

@@ -10,8 +10,10 @@ use pathfinder_geometry::vector::Vector2F;
 
 use super::{
     app_database_file_path, database_file_path_for_scope, decode_path, deduplicate_events,
-    encode_path, handle_model_event, read_sqlite_data, save_app_state, setup_database,
+    encode_path, get_all_codebase_index_metadata, handle_model_event, read_sqlite_data,
+    save_app_state, save_codebase_index_metadata, setup_database, start_writer,
 };
+use crate::ai::persisted_workspace::WorkspaceMetadata;
 use crate::app_state::{
     AppState, CodePaneSnapShot, CodePaneTabSnapshot, LeafContents, LeafSnapshot, PaneNodeSnapshot,
     TabGroupSnapshot, TabSnapshot, TerminalPaneSnapshot, WindowSnapshot,
@@ -20,7 +22,7 @@ use crate::cloud_object::model::actions::{ObjectAction, ObjectActionSubtype, Obj
 use crate::cloud_object::{ObjectIdType, Owner, StoredObject};
 use crate::code::editor_management::CodeSource;
 use crate::notebooks::{NotebookObject, NotebookObjectModel};
-use crate::persistence::{BlockCompleted, ModelEvent, PersistenceScope};
+use crate::persistence::{BlockCompleted, ModelEvent, PersistedDataScope, PersistenceScope};
 use crate::server::ids::{ClientId, SyncId};
 use crate::server_time::ServerTimestamp;
 use crate::tab::SelectedTabColor;
@@ -38,9 +40,12 @@ fn app_scope_database_path_matches_app_database_path() {
 }
 
 #[test]
-fn remote_server_daemon_scope_database_path_uses_local_data_dir() {
-    let path = database_file_path_for_scope(&PersistenceScope::RemoteServerDaemon);
-    let expected_data_dir = remote_server::setup::remote_server_daemon_data_dir();
+fn remote_server_daemon_scope_database_path_uses_identity_data_dir() {
+    let identity_key = "user@example.com/ssh host";
+    let path = database_file_path_for_scope(&PersistenceScope::RemoteServerDaemon {
+        identity_key: identity_key.to_string(),
+    });
+    let expected_data_dir = remote_server::setup::remote_server_daemon_data_dir(identity_key);
 
     assert!(path.is_absolute());
     assert_eq!(
@@ -73,6 +78,84 @@ fn remote_server_daemon_database_permissions_are_owner_only() {
     assert_eq!(database_path.metadata().unwrap().mode() & 0o777, 0o600);
 }
 
+fn test_codebase_metadata(path: &str) -> WorkspaceMetadata {
+    WorkspaceMetadata {
+        path: PathBuf::from(path),
+        navigated_ts: Some(Utc::now()),
+        modified_ts: None,
+        queried_ts: None,
+    }
+}
+
+#[test]
+fn sqlite_read_restores_app_state_and_codebase_metadata() {
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("warp.sqlite");
+    let mut conn = setup_database(&database_path).expect("database should initialize");
+
+    let app_state = AppState {
+        windows: vec![test_terminal_window_snapshot(false)],
+        active_window_index: Some(0),
+        block_lists: Default::default(),
+        running_mcp_servers: Default::default(),
+    };
+    save_app_state(&mut conn, &app_state).expect("app state should save");
+
+    let metadata = test_codebase_metadata("/tmp/remote-repo");
+    save_codebase_index_metadata(&mut conn, metadata.clone())
+        .expect("codebase index metadata should save");
+    let restored =
+        read_sqlite_data(&mut conn, PersistedDataScope::Full).expect("persisted data should load");
+    let restored_app_state = restored
+        .app_state
+        .expect("app state should be present for the full scope");
+    assert_eq!(restored_app_state.windows.len(), 1);
+    assert_eq!(restored.codebase_indices.len(), 1);
+    assert_eq!(restored.codebase_indices[0].path, metadata.path);
+}
+
+#[test]
+fn sqlite_writer_reuses_codebase_index_metadata_events() {
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("warp.sqlite");
+    let conn = setup_database(&database_path).expect("database should initialize");
+
+    let writer = start_writer(conn, database_path.clone()).expect("writer should start");
+    let metadata = test_codebase_metadata("/tmp/writer-repo");
+    writer
+        .sender
+        .send(ModelEvent::UpsertCodebaseIndexMetadata {
+            index_metadata: Box::new(metadata.clone()),
+        })
+        .expect("upsert event should send");
+    writer
+        .sender
+        .send(ModelEvent::Terminate)
+        .expect("terminate event should send");
+    writer.handle.join().expect("writer should terminate");
+
+    let mut conn = setup_database(&database_path).expect("database should reopen");
+    let restored = get_all_codebase_index_metadata(&mut conn).expect("metadata should load");
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].path, metadata.path);
+
+    let writer = start_writer(conn, database_path.clone()).expect("writer should restart");
+    writer
+        .sender
+        .send(ModelEvent::DeleteCodebaseIndexMetadata {
+            repo_path: metadata.path,
+        })
+        .expect("delete event should send");
+    writer
+        .sender
+        .send(ModelEvent::Terminate)
+        .expect("terminate event should send");
+    writer.handle.join().expect("writer should terminate");
+
+    let mut conn = setup_database(&database_path).expect("database should reopen");
+    let restored = get_all_codebase_index_metadata(&mut conn).expect("metadata should load");
+    assert!(restored.is_empty());
+}
 #[test]
 fn test_deduplicate_snapshots() {
     let completed_block_1 = BlockCompleted {
@@ -206,7 +289,8 @@ fn test_local_object_store_round_trips_update_trash_action_and_delete() {
     drop(conn);
     let mut conn = setup_database(&database_path).expect("database should reopen");
     {
-        let restored = read_sqlite_data(&mut conn).expect("persisted data should load");
+        let restored = read_sqlite_data(&mut conn, PersistedDataScope::Full)
+            .expect("persisted data should load");
         let restored_notebook = restored
             .cloud_objects
             .iter()
@@ -231,7 +315,8 @@ fn test_local_object_store_round_trips_update_trash_action_and_delete() {
     drop(conn);
 
     let mut conn = setup_database(&database_path).expect("database should reopen after delete");
-    let restored = read_sqlite_data(&mut conn).expect("persisted data should load after delete");
+    let restored = read_sqlite_data(&mut conn, PersistedDataScope::Full)
+        .expect("persisted data should load after delete");
     assert!(restored.cloud_objects.is_empty());
     assert!(restored.object_actions.is_empty());
 }
@@ -302,9 +387,10 @@ fn test_sqlite_round_trips_vertical_tabs_panel_open() {
 
     save_app_state(&mut conn, &app_state).expect("app state should save");
 
-    let restored = read_sqlite_data(&mut conn)
+    let restored = read_sqlite_data(&mut conn, PersistedDataScope::Full)
         .expect("app state should load")
-        .app_state;
+        .app_state
+        .expect("app state should be present for the full scope");
 
     assert_eq!(restored.active_window_index, Some(1));
     assert_eq!(
@@ -376,9 +462,10 @@ fn test_sqlite_round_trips_custom_vertical_tabs_title() {
 
     save_app_state(&mut conn, &app_state).expect("app state should save");
 
-    let restored = read_sqlite_data(&mut conn)
+    let restored = read_sqlite_data(&mut conn, PersistedDataScope::Full)
         .expect("app state should load")
-        .app_state;
+        .app_state
+        .expect("app state should be present for the full scope");
 
     let PaneNodeSnapshot::Leaf(LeafSnapshot {
         custom_vertical_tabs_title,
@@ -452,9 +539,10 @@ fn test_sqlite_round_trips_code_pane_with_multiple_tabs() {
 
     save_app_state(&mut conn, &app_state).expect("app state should save");
 
-    let restored = read_sqlite_data(&mut conn)
+    let restored = read_sqlite_data(&mut conn, PersistedDataScope::Full)
         .expect("app state should load")
-        .app_state;
+        .app_state
+        .expect("app state should be present for the full scope");
 
     assert_eq!(restored.windows.len(), 1);
     let restored_tab = &restored.windows[0].tabs[0];
@@ -576,9 +664,10 @@ fn test_sqlite_round_trips_tab_groups() {
 
     save_app_state(&mut conn, &app_state).expect("app state should save");
 
-    let restored = read_sqlite_data(&mut conn)
+    let restored = read_sqlite_data(&mut conn, PersistedDataScope::Full)
         .expect("app state should load")
-        .app_state;
+        .app_state
+        .expect("app state should be present for the full scope");
 
     assert_eq!(restored.windows.len(), 1);
     let restored_window = &restored.windows[0];
@@ -736,9 +825,10 @@ fn test_sqlite_round_trips_pinned_state() {
 
     save_app_state(&mut conn, &app_state).expect("app state should save");
 
-    let restored = read_sqlite_data(&mut conn)
+    let restored = read_sqlite_data(&mut conn, PersistedDataScope::Full)
         .expect("app state should load")
-        .app_state;
+        .app_state
+        .expect("app state should be present for the full scope");
 
     assert_eq!(restored.windows.len(), 1);
     let restored_window = &restored.windows[0];
@@ -969,9 +1059,10 @@ fn test_sqlite_drops_too_small_bounds_on_read() {
     )
     .expect("corrupting update should succeed");
 
-    let restored = read_sqlite_data(&mut conn)
+    let restored = read_sqlite_data(&mut conn, PersistedDataScope::Full)
         .expect("app state should load")
-        .app_state;
+        .app_state
+        .expect("app state should be present for the full scope");
 
     assert_eq!(restored.windows.len(), 1);
     assert!(

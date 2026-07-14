@@ -119,6 +119,8 @@ impl SkillManagerPanel {
                 me.rebuild_source_dropdown(ctx);
                 ctx.notify();
             }
+            // InventoryChanged already drives panel refresh for home-skill mutations.
+            SkillManagerEvent::HomeSkillsChanged => {}
         });
 
         // The "source" dropdown used in the collapsed state. Created by this panel's ViewContext;

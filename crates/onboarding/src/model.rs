@@ -157,8 +157,6 @@ pub(crate) enum NoAiConfirmationSource {
     Intention,
     /// Triggered from the AI-setup slide via "I don't want AI".
     AiSetup,
-    /// Triggered from the "Customize your Zap Agent" slide via "I don't want AI".
-    Agent,
     /// Triggered from the "Choose how to access AI" slide via "I don't want AI".
     AiAccess,
 }
@@ -337,7 +335,6 @@ impl OnboardingStateModel {
                 self.set_step(OnboardingStep::AiSetup, ctx);
             }
             Some(NoAiConfirmationSource::AiSetup)
-            | Some(NoAiConfirmationSource::Agent)
             | Some(NoAiConfirmationSource::AiAccess)
             | None => {
                 ctx.emit(OnboardingStateEvent::NoAiConfirmationChanged);

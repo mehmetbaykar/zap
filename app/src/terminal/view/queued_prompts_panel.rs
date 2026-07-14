@@ -51,6 +51,8 @@ use crate::view_components::action_button::{ActionButton, ButtonSize, NakedTheme
 const MAX_PROMPT_LINES: f32 = 5.;
 /// Max characters shown in a row's single-line preview before truncation.
 const PROMPT_PREVIEW_MAX_CHARS: usize = 500;
+const SEND_NOW_PENDING_LRC_TOOLTIP: &str =
+    "Prompts cannot be sent until the full terminal use agent is initialized.";
 const SEND_NOW_TO_FULL_TERMINAL_USE_AGENT_TOOLTIP: &str = "Send to full terminal use agent";
 const SEND_NOW_AS_READ_ONLY_VIEWER_TOOLTIP: &str = "Read-only viewers cannot send prompts.";
 /// Suffix on rows auto-queued during an agent-requested long-running command, which fire
@@ -301,6 +303,13 @@ impl QueuedPromptsPanelView {
             && !queue_model.queue(conv_id).is_empty()
     }
 
+    /// Returns whether the reusable inline edit editor is currently holding focus for an active
+    /// queued prompt row. Parent views use this to avoid stealing focus during async AI/tool
+    /// updates.
+    pub(in crate::terminal) fn is_inline_edit_editor_focused(&self, ctx: &AppContext) -> bool {
+        self.editing_row_id(ctx).is_some() && self.edit_editor.is_focused(ctx)
+    }
+
     /// Re-renders when the host input transitions between empty and non-empty, so the header
     /// hint tracks whether Enter would send.
     fn handle_host_editor_event(&mut self, event: &EditorEvent, ctx: &mut ViewContext<Self>) {
@@ -357,16 +366,16 @@ impl QueuedPromptsPanelView {
             return;
         };
 
-        let row_ids: Vec<QueuedQueryId> = QueuedQueryModel::as_ref(ctx)
+        let rows: Vec<(QueuedQueryId, QueuedQueryOrigin)> = QueuedQueryModel::as_ref(ctx)
             .queue(conv_id)
             .iter()
-            .map(QueuedQuery::id)
+            .map(|query| (query.id(), query.origin()))
             .collect();
         let lrc_subagent_in_progress = self
             .cli_subagent_controller
             .as_ref(ctx)
             .is_agent_in_control();
-        for query_id in &row_ids {
+        for (query_id, origin) in &rows {
             let Some(send_now_button) = self
                 .row_states
                 .get(query_id)
@@ -374,8 +383,11 @@ impl QueuedPromptsPanelView {
             else {
                 continue;
             };
-            let disabled = !self.can_send_prompt;
-            let tooltip = if !self.can_send_prompt {
+            let disabled_for_pending_lrc = *origin == QueuedQueryOrigin::PendingLrcAutoQueue;
+            let disabled = disabled_for_pending_lrc || !self.can_send_prompt;
+            let tooltip = if disabled_for_pending_lrc {
+                SEND_NOW_PENDING_LRC_TOOLTIP
+            } else if !self.can_send_prompt {
                 SEND_NOW_AS_READ_ONLY_VIEWER_TOOLTIP
             } else if lrc_subagent_in_progress {
                 SEND_NOW_TO_FULL_TERMINAL_USE_AGENT_TOOLTIP
@@ -411,7 +423,7 @@ impl QueuedPromptsPanelView {
         ctx: &mut ViewContext<Self>,
     ) {
         let is_for_this_view = event
-            .terminal_view_id()
+            .terminal_surface_id()
             .is_some_and(|id| id == self.terminal_view_id);
         if !is_for_this_view {
             return;
@@ -443,6 +455,7 @@ impl QueuedPromptsPanelView {
             | QueuedQueryEvent::Removed {
                 conversation_id, ..
             }
+            | QueuedQueryEvent::RowUnlocked { conversation_id }
             | QueuedQueryEvent::Reordered { conversation_id }
             | QueuedQueryEvent::EditEntered {
                 conversation_id, ..
@@ -527,6 +540,9 @@ impl QueuedPromptsPanelView {
                         .entry(*query_id)
                         .or_insert_with(|| build_row_state(*query_id, &text, ctx));
                 }
+                self.update_send_now_availability(ctx);
+            }
+            QueuedQueryEvent::RowUnlocked { .. } => {
                 self.update_send_now_availability(ctx);
             }
             QueuedQueryEvent::Reordered { .. }
@@ -646,6 +662,7 @@ impl QueuedPromptsPanelView {
         self.should_show_enter_hint(ctx)
     }
 
+    /// Test helper: replaces the inline edit editor buffer.
     pub(super) fn set_edit_buffer_text_for_test(
         &mut self,
         text: &str,
@@ -1127,7 +1144,9 @@ fn render_row(props: RenderRowProps<'_>, app: &AppContext) -> Box<dyn Element> {
                     )
                     .with_child(Expanded::new(1., preview).finish())
                     .finish()
-            } else if origin == QueuedQueryOrigin::LrcAutoQueue {
+            } else if origin == QueuedQueryOrigin::LrcAutoQueue
+                || origin == QueuedQueryOrigin::PendingLrcAutoQueue
+            {
                 let suffix_color: ColorU = theme.sub_text_color(theme.surface_1()).into();
                 let suffix = Text::new(
                     LRC_AUTO_QUEUE_ROW_SUFFIX.to_owned(),

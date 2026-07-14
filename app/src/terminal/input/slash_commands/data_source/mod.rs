@@ -67,12 +67,12 @@ impl SlashCommandDataSource {
             cli_subagent_controller,
             terminal_view_id,
         } = args;
-        ctx.subscribe_to_model(&active_session, |me, event, ctx| match event {
+        ctx.subscribe_to_model(&active_session, |me, _, event, ctx| match event {
             ActiveSessionEvent::UpdatedPwd | ActiveSessionEvent::Bootstrapped => {
                 me.recompute_active_commands(ctx);
             }
         });
-        ctx.subscribe_to_model(&cli_subagent_controller, |me, event, ctx| {
+        ctx.subscribe_to_model(&cli_subagent_controller, |me, _, event, ctx| {
             if let CLISubagentEvent::SpawnedSubagent { .. }
             | CLISubagentEvent::FinishedSubagent { .. }
             | CLISubagentEvent::UpdatedControl { .. } = event
@@ -80,19 +80,19 @@ impl SlashCommandDataSource {
                 me.recompute_active_commands(ctx);
             }
         });
-        ctx.subscribe_to_model(&agent_view_controller, |me, event, ctx| match event {
+        ctx.subscribe_to_model(&agent_view_controller, |me, _, event, ctx| match event {
             AgentViewControllerEvent::EnteredAgentView { .. }
             | AgentViewControllerEvent::ExitedAgentView { .. } => {
                 me.recompute_active_commands(ctx);
             }
             _ => (),
         });
-        ctx.subscribe_to_model(&AISettings::handle(ctx), |me, event, ctx| {
+        ctx.subscribe_to_model(&AISettings::handle(ctx), |me, _, event, ctx| {
             if matches!(event, AISettingsChangedEvent::IsAnyAIEnabled { .. }) {
                 me.recompute_active_commands(ctx);
             }
         });
-        ctx.subscribe_to_model(&InputSettings::handle(ctx), |me, event, ctx| {
+        ctx.subscribe_to_model(&InputSettings::handle(ctx), |me, _, event, ctx| {
             if matches!(
                 event,
                 InputSettingsChangedEvent::EnableSlashCommandsInTerminal { .. }
@@ -103,7 +103,7 @@ impl SlashCommandDataSource {
 
         ctx.subscribe_to_model(
             &CLIAgentSessionsModel::handle(ctx),
-            move |me, event, ctx| {
+            move |me, _, event, ctx| {
                 if let CLIAgentSessionsModelEvent::InputSessionChanged {
                     terminal_view_id: event_terminal_view_id,
                     ..

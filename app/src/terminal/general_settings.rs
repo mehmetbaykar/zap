@@ -12,6 +12,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: true,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: false,
         toml_path: "general.show_warning_before_quitting",
         description: "Whether to show a warning dialog before quitting Zap.",
@@ -21,6 +22,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: false,
         supported_platforms: SupportedPlatforms::MAC,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: false,
         toml_path: "general.quit_on_last_window_closed",
         description: "Whether to quit Zap when the last window is closed.",
@@ -30,6 +32,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: true,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: false,
         toml_path: "general.restore_session",
         description: "Whether to restore the previous session when Zap starts up.",
@@ -42,6 +45,7 @@ define_settings_group!(GeneralSettings, settings: [
             Box::new(SupportedPlatforms::WINDOWS),
         ),
         sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
         private: false,
         toml_path: "general.login_item",
         description: "Whether to launch Zap automatically when you log in.",
@@ -59,6 +63,7 @@ define_settings_group!(GeneralSettings, settings: [
             Box::new(SupportedPlatforms::WINDOWS),
         ),
         sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
     persist_conversations: PersistConversations {
@@ -66,6 +71,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: true,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::ALL,
         private: false,
         toml_path: "general.persist_conversations",
         description: "Whether to persist agent conversations to the local database so they appear in /conversations history. Independent of session restore.",
@@ -75,6 +81,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: true,
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: false,
         toml_path: "general.link_tooltip",
         description: "Whether to show a tooltip when hovering over links.",
@@ -84,6 +91,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: HashSet::new(),
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
     welcome_tips_skipped_or_completed: WelcomeTipsCompleted {
@@ -91,6 +99,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
     agent_mode_onboarding_block_shown: AgentModeOnboardingBlockShown {
@@ -98,6 +107,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
     user_default_shell_unsupported_banner_state: UserDefaultShellUnsupportedBannerState {
@@ -105,6 +115,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: BannerState::default(),
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
     open_in_warp_banner_dismissed_for_markdown: OpenInWarpBannerDismissedMarkdown {
@@ -112,6 +123,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
     open_in_warp_banner_dismissed_for_code_and_text: OpenInWarpBannerDismissedCode {
@@ -119,6 +131,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
     did_non_anonymous_user_log_in: DidNonAnonymousUserLogIn {
@@ -126,6 +139,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
     // One-time flag tracking whether the Zap launch modal has already been
@@ -136,6 +150,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::No),
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
     auto_open_code_review_pane_on_first_agent_change: AutoOpenCodeReviewPaneOnFirstAgentChange {
@@ -143,6 +158,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: false,
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: false,
         toml_path: "code.editor.auto_open_code_review_pane_on_first_agent_change",
         description: "Whether to automatically open the code review pane when the agent makes its first change.",
@@ -152,6 +168,7 @@ define_settings_group!(GeneralSettings, settings: [
         default: HashSet::new(),
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: true,
     },
 ]);

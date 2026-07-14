@@ -4,7 +4,9 @@ use ai::skills::{ParsedSkill, SkillPathOrigin, SkillProvider, SkillReference, Sk
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
-use crate::ai::skills::{ActiveSkillLookupError, SkillDescriptor, SkillPathQuery};
+use crate::ai::skills::{
+    ActiveSkillLookupError, SkillDescriptor, SkillManagerEvent, SkillPathQuery,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillManagerEvent {

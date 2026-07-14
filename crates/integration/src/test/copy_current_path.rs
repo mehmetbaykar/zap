@@ -2,7 +2,7 @@ use warp::integration_testing::clipboard::assert_clipboard_contains_string;
 use warp::integration_testing::command_palette::open_command_palette_and_run_action;
 use warp::integration_testing::terminal::wait_until_bootstrapped_single_pane_for_tab;
 use warp::integration_testing::view_getters::pane_group_view;
-use warpui::integration::{AssertionOutcome, TestStep};
+use warpui_core::integration::{AssertionOutcome, TestStep};
 
 use super::{new_builder, Builder};
 use crate::util::write_all_rc_files_for_test;

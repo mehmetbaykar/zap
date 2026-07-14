@@ -19,6 +19,7 @@ use parking_lot::Mutex;
 use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::Vector2F;
 use rustc_hash::FxHashMap;
+use warp_errors::report_error;
 
 use super::{
     autotracking, ActionCallback, BlurContext, FocusContext, GlobalActionCallback, GlobalShortcut,
@@ -29,7 +30,7 @@ use crate::accessibility::{AccessibilityVerbosity, ActionAccessibilityContent};
 use crate::actions::StandardAction;
 use crate::assets::asset_cache::{AssetCache, AssetHandle, AssetSource, AssetState};
 use crate::assets::AssetProvider;
-use crate::core::{ActionType, Window};
+use crate::core::{ActionType, StoredView, Window};
 use crate::event::KeyState;
 use crate::fonts::{self, ExternalFontFamily, FallbackFontModel, RequestedFallbackFontSource};
 use crate::image_cache::{self, ImageCache};
@@ -55,13 +56,16 @@ use crate::util::post_inc;
 use crate::windowing::{self, WindowCallbacks, WindowManager};
 use crate::{
     assets, rendering, AccessibilityData, Action, AddSingletonModel, AddWindowOptions, AnyModel,
-    AnyModelHandle, AnyView, ApplicationBundleInfo, Clipboard, CurrentRenderWindowGuard,
-    CursorInfo, Effect, Element, Entity, EntityId, EntityIdMap, EntityIdSet, Event,
-    GetSingletonModelHandle, ModelAsRef, ModelContext, ModelHandle,
-    NextNewWindowsHasThisWindowsBoundsUponClose, Presenter, ReadModel, ReadView, Scene,
-    SingletonEntity, SpawnedFuture, TaskId, TypedActionView, UpdateModel, UpdateView, View,
-    ViewAsRef, ViewContext, ViewHandle, WindowId, WindowInvalidation, ZoomFactor,
+    AnyModelHandle, ApplicationBundleInfo, Clipboard, CurrentRenderWindowGuard, CursorInfo, Effect,
+    Element, Entity, EntityId, EntityIdMap, EntityIdSet, Event, GetSingletonModelHandle,
+    ModelAsRef, ModelContext, ModelHandle, NextNewWindowsHasThisWindowsBoundsUponClose, Presenter,
+    ReadModel, ReadView, Scene, SingletonEntity, SpawnedFuture, TaskId, TypedActionView,
+    UpdateModel, UpdateView, View, ViewAsRef, ViewContext, ViewHandle, WindowId,
+    WindowInvalidation, ZoomFactor,
 };
+
+#[cfg(feature = "tui")]
+mod tui;
 
 lazy_static! {
     static ref LAST_USER_ACTION_UNIX_TIMESTAMP: AtomicI64 = AtomicI64::new(0);
@@ -69,6 +73,20 @@ lazy_static! {
 
 #[derive(Clone)]
 pub struct App(Rc<RefCell<AppContext>>);
+
+/// A weak handle to the owning [`App`], obtained via [`AppContext::weak_app`].
+/// Upgrade it to a strong [`App`] to re-enter the shared core from a spawned
+/// task (for example, the TUI runtime's input loop) without keeping the app
+/// alive past termination.
+#[derive(Clone)]
+pub struct WeakApp(rc::Weak<RefCell<AppContext>>);
+
+impl WeakApp {
+    /// Upgrades to a strong [`App`] handle if the app is still alive.
+    pub fn upgrade(&self) -> Option<App> {
+        self.0.upgrade().map(App)
+    }
+}
 
 impl App {
     pub fn test<A: assets::AssetProvider, T: 'static, F: Future<Output = T> + 'static>(
@@ -234,7 +252,7 @@ impl App {
             let responder_chain = ctx.get_responder_chain(window_id);
             let res = ctx.dispatch_standard_action(action, window_id, &responder_chain);
             if let Err(error) = res {
-                log::error!("error dispatching standard action: {error}");
+                report_error!(error.context("error dispatching standard action"));
             }
         });
     }
@@ -459,7 +477,7 @@ impl UpdateModel for App {
 impl UpdateView for App {
     fn update_view<T, F, S>(&mut self, handle: &ViewHandle<T>, update: F) -> S
     where
-        T: View,
+        T: Entity,
         F: FnOnce(&mut T, &mut ViewContext<T>) -> S,
     {
         self.as_mut().update_view(handle, update)
@@ -469,7 +487,7 @@ impl UpdateView for App {
 impl ReadView for App {
     fn read_view<T, F, S>(&self, handle: &ViewHandle<T>, read: F) -> S
     where
-        T: View,
+        T: 'static,
         F: FnOnce(&T, &AppContext) -> S,
     {
         let state = self.0.borrow();
@@ -486,11 +504,11 @@ impl ViewAsRef for App {
     // That effort is currently unjustified because we want
     // to ideally strip the *AsRef, Read* and Update* implementations
     // from [`App`].
-    fn view<T: View>(&self, _handle: &ViewHandle<T>) -> &T {
+    fn view<T: 'static>(&self, _handle: &ViewHandle<T>) -> &T {
         unimplemented!("Read from [`App::read_view`] instead");
     }
 
-    fn try_view<T: View>(&self, _handle: &ViewHandle<T>) -> Option<&T> {
+    fn try_view<T: 'static>(&self, _handle: &ViewHandle<T>) -> Option<&T> {
         unimplemented!("Read from [`App::read_view`] instead");
     }
 }
@@ -862,6 +880,12 @@ impl AppContext {
         &self.background
     }
 
+    /// Returns a weak handle to the owning [`App`], for spawned tasks that need
+    /// to re-enter the shared core later without keeping it alive.
+    pub fn weak_app(&self) -> WeakApp {
+        WeakApp(self.weak_self.clone())
+    }
+
     pub fn window_bounds(&self, window_id: &WindowId) -> Option<RectF> {
         *self.window_bounds.get(window_id)?
     }
@@ -987,6 +1011,27 @@ impl AppContext {
         self.presenters.remove(&window_id);
     }
 
+    /// Collects invalidations for the given window from all sources: manual
+    /// and autotracking.
+    ///
+    /// This operation is destructive: it will clear the caches for both manual
+    /// and autotracked invalidations. Drained by the GUI presenter's
+    /// `build_scene` and (with the `tui` feature) by the TUI runtime's draw
+    /// loop.
+    pub(crate) fn take_all_invalidations_for_window(
+        &mut self,
+        window_id: WindowId,
+    ) -> WindowInvalidation {
+        let mut invalidations = self
+            .window_invalidations
+            .remove(&window_id)
+            .unwrap_or_default();
+        invalidations
+            .updated
+            .extend(autotracking::take_invalidations_for_window(window_id));
+        invalidations
+    }
+
     pub fn invalidate_all_views_for_window(&mut self, window_id: WindowId) {
         let Some(window) = self.windows.get(&window_id) else {
             return;
@@ -1057,10 +1102,15 @@ impl AppContext {
             });
     }
 
-    /// Subscribes to a [`ViewHandle`] for changes, calling `callback` with the emitted event whenever the view is invalidated.
+    /// Subscribes to a GUI or TUI [`ViewHandle`] for emitted events.
+    ///
+    /// The [`ViewHandle`] parameter is the proof that `S` is a view: callers can
+    /// only obtain one through GUI or TUI view creation APIs. The generic bound
+    /// stays at [`Entity`] so this can accept both GUI [`View`](crate::View) and
+    /// TUI [`TuiView`](crate::TuiView) instances while still accessing `S::Event`.
     pub fn subscribe_to_view<S, F>(&mut self, handle: &ViewHandle<S>, mut callback: F)
     where
-        S: View,
+        S: Entity,
         S::Event: 'static,
         F: 'static + FnMut(ViewHandle<S>, &S::Event, &mut AppContext),
     {
@@ -1239,10 +1289,10 @@ impl AppContext {
     /// View + Action combination.
     fn add_typed_action<V>(&mut self)
     where
-        V: TypedActionView + View,
+        V: TypedActionView + Entity,
     {
         let handler = Box::new(
-            |view: &mut dyn AnyView,
+            |view: &mut dyn Any,
              action: &dyn Any,
              app: &mut AppContext,
              window_id: WindowId,
@@ -1257,7 +1307,6 @@ impl AppContext {
                     .downcast_ref()
                     .expect("Handlers are hashed by action type");
                 let view = view
-                    .as_any_mut()
                     .downcast_mut()
                     .expect("Handlers are hashed by view type");
                 let mut ctx = ViewContext::new(app, window_id, view_id);
@@ -1300,7 +1349,7 @@ impl AppContext {
         let name = name.into();
         let name_clone = name.clone();
         let handler = Box::new(
-            move |view: &mut dyn AnyView,
+            move |view: &mut dyn Any,
                   arg: &dyn Any,
                   app: &mut AppContext,
                   window_id: WindowId,
@@ -1309,15 +1358,16 @@ impl AppContext {
                     Some(arg) => {
                         let mut ctx = ViewContext::new(app, window_id, view_id);
                         handler(
-                            view.as_any_mut()
-                                .downcast_mut()
-                                .expect("downcast is type safe"),
+                            view.downcast_mut().expect("downcast is type safe"),
                             arg,
                             &mut ctx,
                         )
                     }
                     None => {
-                        log::error!("Could not downcast argument for action {name_clone}");
+                        report_error!(
+                            "Could not downcast argument for action",
+                            extra: { "action" => name_clone }
+                        );
                         false
                     }
                 }
@@ -1351,7 +1401,10 @@ impl AppContext {
                         false,
                         "Could not downcast argument for action {name_clone}: {location:?}"
                     );
-                    log::error!("Could not downcast argument for action {name_clone}");
+                    report_error!(
+                        "Could not downcast argument for action",
+                        extra: { "action" => name_clone }
+                    );
                 }
             },
         );
@@ -1372,7 +1425,7 @@ impl AppContext {
             .collect::<Vec<ModelHandle<M>>>()
     }
 
-    pub fn root_view<T: View>(&self, window_id: WindowId) -> Option<ViewHandle<T>> {
+    pub fn root_view<T: Entity>(&self, window_id: WindowId) -> Option<ViewHandle<T>> {
         self.windows
             .get(&window_id)
             .and_then(|window| window.root_view.as_ref())
@@ -1447,7 +1500,10 @@ impl AppContext {
         if let Some(parents) = self.view_parents.get(&window_id) {
             while let Some(parent_id) = parents.get(&view_id) {
                 if chain.contains(parent_id) {
-                    log::error!("Cycle detected in the view hierarchy at view {parent_id}");
+                    report_error!(
+                        "Cycle detected in the view hierarchy",
+                        extra: { "view" => parent_id }
+                    );
                     break;
                 }
                 view_id = *parent_id;
@@ -1546,7 +1602,8 @@ impl AppContext {
                     // child view determined it should be propagated to the parent view.
                     if !dispatched_actions.contains(name.as_str()) {
                         for handler in handlers.iter_mut().rev() {
-                            let handled = handler(view.as_mut(), arg, self, window_id, *view_id);
+                            let handled =
+                                handler(view.as_any_mut(), arg, self, window_id, *view_id);
                             any_action_handled |= handled;
                             if handled {
                                 dispatched_actions.insert(name.clone());
@@ -1622,7 +1679,13 @@ impl AppContext {
             let view_type = ViewType(view.as_any().type_id());
             let found = match handlers.get_mut(&view_type) {
                 Some(handler) => {
-                    handler(view.as_mut(), action.as_any(), self, window_id, *view_id);
+                    handler(
+                        view.as_any_mut(),
+                        action.as_any(),
+                        self,
+                        window_id,
+                        *view_id,
+                    );
                     true
                 }
                 None => false,
@@ -1884,7 +1947,7 @@ impl AppContext {
         match self.contexts_from_responder_chain(window_id, &responder_chain) {
             Ok(ctxs) => ctxs,
             Err(error) => {
-                log::error!("Unable to fetch Key Bindings for View: {error}");
+                report_error!(error.context("Unable to fetch Key Bindings for View"));
                 Vec::new()
             }
         }
@@ -1931,7 +1994,7 @@ impl AppContext {
         let contexts = match self.contexts_from_responder_chain(window_id, &responder_chain) {
             Ok(ctxs) => ctxs,
             Err(error) => {
-                log::error!("Unable to fetch Key Bindings for View: {error}");
+                report_error!(error.context("Unable to fetch Key Bindings for View"));
                 return Vec::new();
             }
         };
@@ -2001,7 +2064,7 @@ impl AppContext {
     /// The "responder chain" is the view hierarchy to match against with bindings.
     /// This prefers the focused view and its ancestors; if no view is focused it
     /// dispatches to the root view.
-    fn get_responder_chain(&self, window_id: WindowId) -> Vec<EntityId> {
+    pub(crate) fn get_responder_chain(&self, window_id: WindowId) -> Vec<EntityId> {
         if let Some(focused) = self.focused_view_id(window_id) {
             self.view_ancestors(window_id, focused)
         } else if let Some(root) = self.root_view_id(window_id) {
@@ -2038,7 +2101,7 @@ impl AppContext {
             }
 
             if let Err(error) = res {
-                log::error!("error dispatching custom action: {error}");
+                report_error!(error.context("error dispatching custom action"));
             }
         } else {
             // We hit this case when the user is in the course of editing their keybindings.
@@ -2237,7 +2300,7 @@ impl AppContext {
         on_completion_callback: F,
     ) where
         F: 'static + Send + Sync + FnOnce(&mut T, RequestPermissionsOutcome, &mut ViewContext<T>),
-        T: View,
+        T: Entity,
     {
         self.platform_delegate
             .request_desktop_notification_permissions(Box::new(
@@ -2249,8 +2312,7 @@ impl AppContext {
                     {
                         let mut view_context = ViewContext::new(ctx, window_id, view_id);
                         on_completion_callback(
-                            view.as_mut()
-                                .as_any_mut()
+                            view.as_any_mut()
                                 .downcast_mut()
                                 .expect("Should be able to downcast to mutable view."),
                             request_permissions_outcome,
@@ -2295,7 +2357,7 @@ impl AppContext {
         on_error_callback: F,
     ) where
         F: 'static + Send + Sync + FnOnce(&mut T, NotificationSendError, &mut ViewContext<T>),
-        T: View,
+        T: Entity,
     {
         self.platform_delegate.send_desktop_notification(
             content,
@@ -2308,8 +2370,7 @@ impl AppContext {
                 {
                     let mut view_context = ViewContext::new(ctx, window_id, view_id);
                     on_error_callback(
-                        view.as_mut()
-                            .as_any_mut()
+                        view.as_any_mut()
                             .downcast_mut()
                             .expect("Should be able to downcast to mutable view."),
                         notification_error,
@@ -2461,7 +2522,7 @@ impl AppContext {
                 let responder_chain = ctx.get_responder_chain(window_id);
                 let res = ctx.dispatch_standard_action(action, window_id, &responder_chain);
                 if let Err(error) = res {
-                    log::error!("error dispatching standard action: {error}");
+                    report_error!(error.context("error dispatching standard action"));
                 }
             }),
             event_callback: Box::new(move |event, ctx| {
@@ -2603,7 +2664,7 @@ impl AppContext {
 
         match window_result {
             Err(err) => {
-                log::error!("error opening window: {err}");
+                report_error!("error opening window", extra: { "error" => %err });
             }
             Ok(_) => {
                 self.on_window_invalidated(window_id, move |window_id, ctx| {
@@ -2613,9 +2674,21 @@ impl AppContext {
                         // of the actual work later.
                         window.request_redraw();
 
-                        // In tests, however, there's no real event loop, so we need to do the work now.
-                        // While this _shouldn't_ be necessary in integration tests, it currently is.
-                        if ctx.is_unit_test || cfg!(feature = "integration_tests") {
+                        // In tests there's typically no host event loop pumping redraws in
+                        // step with assertions, so build the scene eagerly here. This also
+                        // dispatches the synthetic MouseMoved that keeps `Hoverable` state
+                        // correct after layout changes, which hover- and focus-driven tests
+                        // depend on.
+                        //
+                        // `defer_scene_build` opts out of this: when a build drives a
+                        // continuous stream of invalidations, eager building here forms an
+                        // invalidation → build_scene → synthetic MouseMoved → invalidation
+                        // loop that pins the main thread and starves the async executor. Those
+                        // builds rely on the normal platform redraw path instead.
+                        if ctx.is_unit_test
+                            || (cfg!(feature = "integration_tests")
+                                && !cfg!(feature = "defer_scene_build"))
+                        {
                             ctx.build_scene(window_id, window.as_ctx());
                         }
                     }
@@ -2720,7 +2793,7 @@ impl AppContext {
             self.windows.remove(&window_id),
             self.window_bounds.remove(&window_id),
         ) else {
-            log::error!("Closed a window that was missing underlying window data!");
+            report_error!("Closed a window that was missing underlying window data!");
             self.flush_effects();
             return None;
         };
@@ -2751,7 +2824,7 @@ impl AppContext {
         } = data;
 
         let Some(bounds) = bounds else {
-            log::error!("Had no bounds for cached closed window!");
+            report_error!("Had no bounds for cached closed window!");
             return;
         };
 
@@ -2943,7 +3016,9 @@ impl AppContext {
         let mut ctx = ViewContext::new(self, window_id, view_id);
         let handle = if let Some(view) = build_view(&mut ctx) {
             if let Some(window) = self.windows.get_mut(&window_id) {
-                window.views.insert(view_id, Box::new(view));
+                window
+                    .views
+                    .insert(view_id, StoredView::Gui(Box::new(view)));
             } else {
                 panic!("Window does not exist");
             }
@@ -3020,8 +3095,26 @@ impl AppContext {
             .windows
             .get_mut(&window_id)
             .expect("Window does not exist");
-        window.views.insert(view_id, Box::new(view));
+        window
+            .views
+            .insert(view_id, StoredView::Gui(Box::new(view)));
 
+        self.register_typed_action_view_internal::<V>(window_id, view_id, parent_view_id)
+    }
+
+    /// Shared post-insert registration for typed-action views — both GUI and
+    /// (with the `tui` feature) TUI: records the view-to-window mapping and
+    /// optional structural parentage, registers the view type's action handler,
+    /// marks the view for redraw, and produces its handle.
+    fn register_typed_action_view_internal<V>(
+        &mut self,
+        window_id: WindowId,
+        view_id: EntityId,
+        parent_view_id: Option<EntityId>,
+    ) -> ViewHandle<V>
+    where
+        V: TypedActionView + Entity,
+    {
         // Register in view_to_window mapping
         self.view_to_window.insert(view_id, window_id);
 
@@ -3409,6 +3502,11 @@ impl AppContext {
         }
     }
 
+    /// Fires each invalidated window's [`Self::on_window_invalidated`] callback.
+    /// Normally run at the end of [`Self::flush_effects`], but also called
+    /// directly to imperatively trigger a redraw after work that doesn't flush
+    /// app effects (e.g. the repaint tasks in this file, and the TUI driver's
+    /// input handling).
     fn update_windows(&mut self) {
         let invalidated_window_ids = self
             .window_invalidations
@@ -3423,25 +3521,6 @@ impl AppContext {
                 self.invalidation_callbacks.insert(window_id, callback);
             }
         }
-    }
-
-    /// Collects invalidations for the given window from all sources: manual
-    /// and autotracking.
-    ///
-    /// This operation is destructive: It will clear the caches for both manual and autotracked
-    /// invalidations.
-    pub(super) fn take_all_invalidations_for_window(
-        &mut self,
-        window_id: WindowId,
-    ) -> WindowInvalidation {
-        let mut invalidations = self
-            .window_invalidations
-            .remove(&window_id)
-            .unwrap_or_default();
-        invalidations
-            .updated
-            .extend(autotracking::take_invalidations_for_window(window_id));
-        invalidations
     }
 
     #[cfg(any(test, feature = "test-util"))]
@@ -3490,7 +3569,7 @@ impl AppContext {
                             keystroke_handled = handled;
                         }
                         Err(error) => {
-                            log::error!("error dispatching keystroke: {error}");
+                            report_error!(error.context("error dispatching keystroke"));
                         }
                     }
                 }
@@ -3645,7 +3724,7 @@ impl AppContext {
                     log::warn!("Unable to load requested fallback font: {e:?}");
                 }
                 AssetState::Loading { .. } => {
-                    log::error!("Fallback font asset should not be in a loading state");
+                    report_error!("Fallback font asset should not be in a loading state");
                 }
             }
         }
@@ -4026,7 +4105,7 @@ impl AppContext {
         }
     }
 
-    fn notify_view_observers(&mut self, window_id: WindowId, view_id: EntityId) {
+    pub(crate) fn notify_view_observers(&mut self, window_id: WindowId, view_id: EntityId) {
         self.window_invalidations
             .entry(window_id)
             .or_default()
@@ -4336,7 +4415,7 @@ impl AppContext {
                     .get_mut(&window_id)
                     .and_then(|w| w.views.remove(&view_id))
                 {
-                    callback(view.as_mut(), output, self, window_id, view_id);
+                    callback(view.as_any_mut(), output, self, window_id, view_id);
                     self.windows
                         .get_mut(&window_id)
                         .ok_or_else(|| anyhow!("Unable to retrieve window for view"))?
@@ -4356,7 +4435,7 @@ impl AppContext {
                     .get_mut(&window_id)
                     .and_then(|w| w.views.remove(&view_id))
                 {
-                    on_item(view.as_mut(), output, self, window_id, view_id);
+                    on_item(view.as_any_mut(), output, self, window_id, view_id);
                     self.windows
                         .get_mut(&window_id)
                         .ok_or_else(|| anyhow!("Unable to retrieve window for view"))?
@@ -4410,7 +4489,7 @@ impl AppContext {
                     .get_mut(&window_id)
                     .and_then(|w| w.views.remove(&view_id))
                 {
-                    callback(view.as_mut(), self, window_id, view_id);
+                    callback(view.as_any_mut(), self, window_id, view_id);
                     self.windows
                         .get_mut(&window_id)
                         .expect("Window should exist.")
@@ -4541,7 +4620,7 @@ impl UpdateModel for AppContext {
 impl UpdateView for AppContext {
     fn update_view<T, F, S>(&mut self, handle: &ViewHandle<T>, update: F) -> S
     where
-        T: View,
+        T: Entity,
         F: FnOnce(&mut T, &mut ViewContext<T>) -> S,
     {
         self.pending_flushes += 1;
@@ -4686,6 +4765,8 @@ impl AppContext {
             .unwrap_or_default()
     }
 
+    /// Renders the given GUI view to its `Box<dyn Element>`, tracking any
+    /// `Tracked` reads as rendering dependencies.
     pub fn render_view(&self, window_id: WindowId, view_id: EntityId) -> Result<Box<dyn Element>> {
         // Make the window available to window-blind theme accessors in case this
         // view tree is built outside `build_scene` (position queries, view
@@ -4697,23 +4778,37 @@ impl AppContext {
             .windows
             .get(&window_id)
             .ok_or_else(|| anyhow!("window not found"))?;
-        window
-            .views
-            .get(&view_id)
-            .map(|view| autotracking::render_view(window_id, view_id, || view.render(self)))
-            .ok_or_else(|| anyhow!("view not found"))
+        match window.views.get(&view_id) {
+            Some(StoredView::Gui(view)) => {
+                Ok(autotracking::render_view(window_id, view_id, || {
+                    view.render(self)
+                }))
+            }
+            #[cfg(feature = "tui")]
+            Some(StoredView::Tui(_)) => Err(anyhow!("view is not a GUI view")),
+            None => Err(anyhow!("view not found")),
+        }
     }
 
+    // This feeds the GUI presenter, so TUI views in the shared registry are
+    // skipped: they are rendered by the TUI presenter via `render_tui_view`
+    // instead. Revisit if a window ever mixes rendered worlds. The clippy
+    // allow is needed because the filter half of `filter_map` is only
+    // exercised when the additive `tui` feature adds the non-GUI variant.
+    #[allow(clippy::unnecessary_filter_map)]
     pub fn render_views(&self, window_id: WindowId) -> Result<EntityIdMap<Box<dyn Element>>> {
         // See `render_view` above.
         let _render_window_guard = CurrentRenderWindowGuard::new(window_id);
-
         self.windows
             .get(&window_id)
             .map(|w| {
                 w.views
                     .iter()
-                    .map(|(id, view)| (*id, view.render(self)))
+                    .filter_map(|(id, view)| match view {
+                        StoredView::Gui(view) => Some((*id, view.render(self))),
+                        #[cfg(feature = "tui")]
+                        StoredView::Tui(_) => None,
+                    })
                     .collect::<EntityIdMap<_>>()
             })
             .ok_or_else(|| anyhow!("window not found"))
@@ -4766,7 +4861,7 @@ impl ReadModel for AppContext {
 }
 
 impl ViewAsRef for AppContext {
-    fn view<T: View>(&self, handle: &ViewHandle<T>) -> &T {
+    fn view<T: 'static>(&self, handle: &ViewHandle<T>) -> &T {
         let window_id = handle.window_id(self);
         if let Some(window) = self.windows.get(&window_id) {
             if let Some(view) = window.views.get(&handle.id()) {
@@ -4786,7 +4881,7 @@ impl ViewAsRef for AppContext {
 
     /// Returns the backing view, or None if materializing the view would
     /// otherwise produce a circular view reference.
-    fn try_view<T: View>(&self, handle: &ViewHandle<T>) -> Option<&T> {
+    fn try_view<T: 'static>(&self, handle: &ViewHandle<T>) -> Option<&T> {
         let window_id = handle.window_id(self);
         self.windows
             .get(&window_id)?
@@ -4800,7 +4895,7 @@ impl ViewAsRef for AppContext {
 impl ReadView for AppContext {
     fn read_view<T, F, S>(&self, handle: &ViewHandle<T>, read: F) -> S
     where
-        T: View,
+        T: 'static,
         F: FnOnce(&T, &AppContext) -> S,
     {
         read(self.view(handle), self)

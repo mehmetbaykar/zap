@@ -21,7 +21,6 @@ use settings_page::{
 use warp_core::channel::ChannelState;
 use warp_core::context_flag::ContextFlag;
 use warp_core::features::FeatureFlag;
-use warp_core::send_telemetry_from_ctx;
 use warp_core::settings::ToggleableSetting as _;
 use warp_core::ui::theme::color::internal_colors;
 use warp_editor::editor::NavigationKey;
@@ -40,6 +39,7 @@ use warpui::{
     UpdateView as _, View, ViewContext, ViewHandle,
 };
 
+use crate::ai::custom_model_routers::CustomModelRouter;
 use crate::ai::execution_profiles::profiles::ClientProfileId;
 use crate::appearance::Appearance;
 use crate::editor::{
@@ -50,7 +50,6 @@ use crate::menu::{self, Menu, MenuItem, MenuItemFields};
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::pane::view;
 use crate::pane_group::{BackingView, Direction, PaneConfiguration, PaneEvent, SplitPaneState};
-use crate::server::telemetry::MCPServerCollectionPaneEntrypoint;
 use crate::settings::{AISettings, BlockVisibilitySettings, SettingsFileError};
 use crate::settings_view::mcp_servers_page::{MCPServersSettingsPage, MCPServersSettingsPageEvent};
 use crate::terminal::model::blockgrid::BlockGrid;
@@ -61,7 +60,7 @@ use crate::util::bindings::{
 };
 use crate::view_components::ToastFlavor;
 use crate::workspace::WorkspaceAction;
-use crate::{GlobalResourceHandlesProvider, TelemetryEvent};
+use crate::GlobalResourceHandlesProvider;
 
 mod about_page;
 mod agent_providers_widget;
@@ -70,6 +69,7 @@ mod appearance_page;
 mod cloud_sync_page;
 mod code_page;
 pub(crate) mod custom_inference_modal;
+mod custom_router_view;
 mod directory_color_add_picker;
 mod execution_profile_view;
 mod features;
@@ -86,6 +86,7 @@ mod remove_custom_endpoint_confirmation_dialog;
 // Zap Wave 6-8: `referrals_page` / `show_blocks_view` were physically removed along with the
 // `ReferralsClient` / `BlockClient` traits — both pages were entirely stub Err / empty lists, with no local value.
 mod scripting_page;
+mod set_default_model_modal;
 mod settings_file_footer;
 pub(crate) mod settings_page;
 // Zap Wave 7-3: `telemetry` was physically removed along with its only variant `EnvironmentsPageOpened` (ambient-agent UI).
@@ -96,6 +97,7 @@ mod warpify_page;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use ai_page::cli_agent_settings_widget_id;
+pub(crate) use ai_page::custom_model_routers_widget_id;
 pub use code_page::CodeSettingsPageView;
 pub use features_page::FeaturesPageAction;
 pub use settings_page::{
@@ -189,7 +191,7 @@ pub(super) fn render_model_chips(
     chips.finish()
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq)]
 pub enum SettingsViewEvent {
     Pane(PaneEvent),
     StartResize,
@@ -201,6 +203,8 @@ pub enum SettingsViewEvent {
     },
     OpenAIFactCollection,
     OpenMCPServerCollection,
+    OpenCustomRouterEditor(Option<CustomModelRouter>),
+    OpenCustomRouterFile(PathBuf),
     OpenExecutionProfileEditor(ClientProfileId),
     OpenProjectRulesPane {
         rule_paths: Vec<PathBuf>,
@@ -373,15 +377,13 @@ impl FromStr for SettingsSection {
 /// Only allowlisted widgets are linkable, so the public URL contract stays
 /// stable and internal widget identifiers (Rust type names) are not exposed.
 /// Add an entry here to make a new widget deep-linkable.
-///
-/// Note: upstream also seeded `custom_router` (CustomModelRouters); that feature
-/// is not present in Zap and is intentionally omitted.
 pub fn settings_widget_deeplink_target(slug: &str) -> Option<(SettingsSection, &'static str)> {
     match slug {
         "global_hotkey" => Some((
             SettingsSection::Features,
             features_page::global_hotkey_widget_id(),
         )),
+        "custom_router" => Some((SettingsSection::WarpAgent, custom_model_routers_widget_id())),
         #[cfg(not(target_family = "wasm"))]
         "cli_agents" => Some((
             SettingsSection::ThirdPartyCLIAgents,
@@ -1807,6 +1809,14 @@ impl SettingsView {
             AISettingsPageEvent::OpenMCPServerCollection => {
                 ctx.emit(SettingsViewEvent::OpenMCPServerCollection)
             }
+            #[cfg(feature = "local_fs")]
+            AISettingsPageEvent::OpenCustomRouterEditor(router) => {
+                ctx.emit(SettingsViewEvent::OpenCustomRouterEditor(router.clone()));
+            }
+            #[cfg(feature = "local_fs")]
+            AISettingsPageEvent::OpenCustomRouterFile(path) => {
+                ctx.emit(SettingsViewEvent::OpenCustomRouterFile(path.clone()));
+            }
             AISettingsPageEvent::OpenExecutionProfileEditor(profile_id) => {
                 ctx.emit(SettingsViewEvent::OpenExecutionProfileEditor(*profile_id));
             }
@@ -2472,15 +2482,6 @@ impl TypedActionView for SettingsView {
         match action {
             SettingsAction::SelectAndRefresh(section) => {
                 self.set_and_refresh_current_page_internal(*section, false, true, ctx);
-
-                if *section == SettingsSection::MCPServers {
-                    send_telemetry_from_ctx!(
-                        TelemetryEvent::MCPServerCollectionPaneOpened {
-                            entrypoint: MCPServerCollectionPaneEntrypoint::MCPSettingsTab,
-                        },
-                        ctx
-                    );
-                }
             }
             SettingsAction::ToggleUmbrella(nav_index) => {
                 if let Some(SettingsNavItem::Umbrella(umbrella)) =

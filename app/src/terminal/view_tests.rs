@@ -94,10 +94,6 @@ impl TerminalManager for TestTerminalManager {
         self.model.clone()
     }
 
-    fn view(&self) -> ViewHandle<TerminalView> {
-        self.view.clone()
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -969,7 +965,7 @@ fn append_exchange_with_inputs_and_handle_event(
         &BlocklistAIHistoryEvent::AppendedExchange {
             exchange_id,
             task_id: task_id.clone(),
-            terminal_view_id: view.view_id,
+            terminal_surface_id: view.view_id,
             conversation_id,
             is_hidden: false,
             response_stream_id: Some(response_stream_id.clone()),
@@ -1102,7 +1098,7 @@ fn updated_conversation_metadata_refreshes_selected_conversation_pane_title() {
             view.handle_ai_history_model_event(
                 BlocklistAIHistoryModel::handle(ctx),
                 &BlocklistAIHistoryEvent::UpdatedConversationTitle {
-                    terminal_view_id: Some(view.view_id),
+                    terminal_surface_id: Some(view.view_id),
                     conversation_id,
                     title: "Renamed title".to_string(),
                 },
@@ -1596,7 +1592,7 @@ fn appended_exchange_renders_in_current_owner_after_conversation_transfer() {
 
         BlocklistAIHistoryModel::handle(&app).read(&app, |history, _| {
             assert_eq!(
-                history.terminal_view_id_for_conversation(&conversation_id),
+                history.terminal_surface_id_for_conversation(&conversation_id),
                 Some(transferred_owner_view_id)
             );
         });
@@ -1641,7 +1637,7 @@ fn appended_exchange_renders_in_current_owner_after_conversation_transfer() {
                 &BlocklistAIHistoryEvent::AppendedExchange {
                     exchange_id,
                     task_id: task_id.clone(),
-                    terminal_view_id: original_owner_view_id,
+                    terminal_surface_id: original_owner_view_id,
                     conversation_id,
                     is_hidden: false,
                     response_stream_id: Some(response_stream_id.clone()),
@@ -1656,7 +1652,7 @@ fn appended_exchange_renders_in_current_owner_after_conversation_transfer() {
                 &BlocklistAIHistoryEvent::AppendedExchange {
                     exchange_id,
                     task_id,
-                    terminal_view_id: original_owner_view_id,
+                    terminal_surface_id: original_owner_view_id,
                     conversation_id,
                     is_hidden: false,
                     response_stream_id: Some(response_stream_id),
@@ -4980,30 +4976,6 @@ fn use_agent_footer_renders_for_transfer_handoff_even_when_user_command_footer_s
                 .last_non_hidden_rich_content_block_after_block(Some(active_block_index))
                 .map(|(_, item)| item.view_id);
             assert_eq!(rendered_footer_view_id, Some(view.use_agent_footer.id()));
-        });
-    })
-}
-
-#[test]
-fn test_first_onboarding_block_exists() {
-    App::test((), |mut app| async move {
-        initialize_app_for_terminal_view(&mut app);
-        let terminal = add_window_with_terminal(&mut app, None);
-
-        terminal.update(&mut app, |terminal_view, ctx| {
-            terminal_view.handle_action(
-                &TerminalAction::OnboardingFlow(OnboardingVersion::Legacy),
-                ctx,
-            );
-        });
-        terminal.update(&mut app, |terminal_view, ctx| {
-            assert!(terminal_view.block_onboarding_active);
-            // Here we assert that Agentic Suggestions block is the first one. As we modify the sequence, this test will have to be updated.
-            ctx.subscribe_to_model(&History::handle(ctx), move |me, _, event, _| match event {
-                HistoryEvent::Initialized(_) => {
-                    assert!(me.onboarding_agentic_suggestions_block.is_some());
-                }
-            });
         });
     })
 }

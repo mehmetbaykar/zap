@@ -75,6 +75,8 @@ pub fn init(app: &mut AppContext) {
 }
 
 #[cfg(feature = "local_fs")]
+use anyhow::Context as _;
+#[cfg(feature = "local_fs")]
 use warp_util::path::LineAndColumnArg;
 
 #[cfg(feature = "local_fs")]
@@ -82,6 +84,7 @@ use crate::code::editor_management::CodeSource;
 // Import keybinding constants from code view to ensure consistency
 use crate::code::view::SAVE_FILE_BINDING_NAME;
 use crate::notebooks::file::MarkdownDisplayMode;
+use crate::report_error;
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::settings::EditorLayout;
 #[cfg(feature = "local_fs")]
@@ -257,21 +260,26 @@ impl AIDocumentView {
                 use crate::ai::blocklist::BlocklistAIHistoryEvent;
                 match event {
                     BlocklistAIHistoryEvent::UpdatedConversationStatus {
-                        terminal_view_id, ..
+                        terminal_surface_id,
+                        ..
                     } => {
                         // Check if this is our terminal view
                         if let Some(tv) = &me.original_terminal_view {
-                            if tv.id() == *terminal_view_id {
+                            if tv.id() == *terminal_surface_id {
                                 me.update_header_buttons(ctx);
                             }
                         }
                     }
                     BlocklistAIHistoryEvent::RestoredConversations {
-                        terminal_view_id,
+                        terminal_surface_id,
                         conversation_ids,
                     } => {
                         // Try to populate terminal view if conversations were restored
-                        me.maybe_populate_terminal_view(*terminal_view_id, conversation_ids, ctx);
+                        me.maybe_populate_terminal_view(
+                            *terminal_surface_id,
+                            conversation_ids,
+                            ctx,
+                        );
                     }
                     _ => {}
                 }
@@ -923,8 +931,10 @@ impl AIDocumentView {
         ctx.open_save_file_picker(
             move |path_opt: Option<String>, _me: &mut Self, _ctx: &mut ViewContext<Self>| {
                 if let Some(path) = path_opt {
-                    if let Err(e) = std::fs::write(&path, &markdown) {
-                        log::error!("Failed to export AI document: {e}");
+                    if let Err(e) =
+                        std::fs::write(&path, &markdown).context("Failed to export AI document")
+                    {
+                        report_error!(e);
                     }
                 }
             },
@@ -1052,7 +1062,7 @@ impl TypedActionView for AIDocumentView {
                         self.refresh(ctx);
                     }
                     Err(e) => {
-                        log::error!("Failed to restore previous version: {e}");
+                        report_error!(e.context("Failed to restore previous version"));
                     }
                 }
             }
@@ -1171,6 +1181,13 @@ impl BackingView for AIDocumentView {
 
         // openWarp localization: the cloud menu items "Copy Link" / "Show in Zap Drive"
         // were only shown after a successful cloud sync; the local path is completely unreachable, so they are removed.
+
+        menu_items.push(
+            MenuItemFields::new("Copy as Markdown")
+                .with_on_select_action(AIDocumentAction::CopyAsMarkdown)
+                .with_icon(Icon::Copy)
+                .into_item(),
+        );
 
         menu_items.push(
             MenuItemFields::new("Copy as Markdown")

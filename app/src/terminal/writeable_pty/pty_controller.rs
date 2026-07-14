@@ -11,15 +11,16 @@ use warpui::{Entity, ModelContext, ModelHandle, SingletonEntity};
 
 use super::Message;
 use crate::ai::agent::AIAgentPtyWriteMode;
+#[cfg(feature = "local_fs")]
+use crate::report_error;
 use crate::terminal::input::CommandExecutionSource;
 use crate::terminal::line_editor_status::{LineEditorStatus, LineEditorStatusEvent};
 use crate::terminal::model::ansi::Handler;
 use crate::terminal::model::completions::ShellCompletion;
-use crate::terminal::model::escape_sequences;
 use crate::terminal::model::session::{
     ExecutorCommandEvent, InBandCommandCancelledEvent, SessionInfo, Sessions,
 };
-use crate::terminal::model::StartCommandOutcome;
+use crate::terminal::model::{escape_sequences, StartCommandOutcome};
 use crate::terminal::model_events::{AnsiHandlerEvent, ModelEvent, ModelEventDispatcher};
 use crate::terminal::shell::ShellType;
 use crate::terminal::view::LINEFEED_REGEX;
@@ -109,7 +110,7 @@ impl<T: EventLoopSender> PtyController<T> {
         terminal_model: Arc<FairMutex<TerminalModel>>,
         ctx: &mut ModelContext<Self>,
     ) -> Self {
-        ctx.subscribe_to_model(&model_event_dispatcher, |me, event, ctx| match event {
+        ctx.subscribe_to_model(&model_event_dispatcher, |me, _, event, ctx| match event {
             ModelEvent::Handler(AnsiHandlerEvent::UserCommandFinished) => {
                 me.is_user_command_executing = false;
             }
@@ -175,7 +176,7 @@ impl<T: EventLoopSender> PtyController<T> {
             _ => (),
         });
 
-        ctx.subscribe_to_model(&line_editor_status, |me, event, ctx| {
+        ctx.subscribe_to_model(&line_editor_status, |me, _, event, ctx| {
             if let LineEditorStatusEvent::Active = event {
                 let input_reporting_seq = me
                     .model_event_dispatcher
@@ -428,7 +429,7 @@ impl<T: EventLoopSender> PtyController<T> {
                     self.source_bootstrap_script(path, shell_type, ctx);
                 } else {
                     self.write_terminating_bootstrap_bytes(ctx);
-                    log::error!("Could not convert bootstrap script file path to str");
+                    report_error!("Could not convert bootstrap script file path to str");
                 }
 
                 self.bootstrap_file = Some(file);

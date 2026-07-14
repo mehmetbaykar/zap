@@ -36,7 +36,6 @@ use crate::{
             CLIAgentSessionsModelEvent,
         },
         input::{models::InlineModelSelectorTab, MenuPositioningProvider},
-        model_events::ModelEvent,
         profile_model_selector::{ProfileModelSelector, ProfileModelSelectorEvent},
         session_settings::{SessionSettings, SessionSettingsChangedEvent, ToolbarChipSelection},
         shared_session::SharedSessionStatus,
@@ -48,7 +47,7 @@ use crate::{
     ui_components::{icon_with_status::render_cli_agent_logo, icons::Icon},
     view_components::{
         action_button::{
-            ActionButton, ActionButtonTheme, AdjoinedSide, ButtonSize, KeystrokeSource, NakedTheme,
+            ActionButton, ActionButtonTheme, AdjoinedSide, ButtonSize, KeystrokeSource,
             TooltipAlignment,
         },
         DismissibleToast,
@@ -70,7 +69,7 @@ use crate::voice::transcriber::TranscribeError;
 use ai::document::{AIDocumentId, AIDocumentVersion};
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
-use pathfinder_geometry::vector::{vec2f, Vector2F};
+use pathfinder_geometry::vector::Vector2F;
 use settings::Setting;
 use settings::ToggleableSetting;
 #[cfg(not(target_family = "wasm"))]
@@ -95,11 +94,9 @@ use warp_core::{
 use warpui::r#async::SpawnedFutureHandle;
 use warpui::{
     elements::{
-        Border, ChildAnchor, ChildView, Clipped, ConstrainedBox, Container, CornerRadius,
-        CrossAxisAlignment, DispatchEventResult, Element, EventHandler, Expanded, Flex,
-        MainAxisAlignment, MainAxisSize, OffsetPositioning, ParentElement, PositionedElementAnchor,
-        PositionedElementOffsetBounds, Radius, Shrinkable, Stack, Text, Wrap, WrapFill,
-        WrapFillEntireRun, DEFAULT_UI_LINE_HEIGHT_RATIO,
+        ChildView, Clipped, ConstrainedBox, Container, CrossAxisAlignment, DispatchEventResult,
+        Element, EventHandler, Flex, MainAxisAlignment, MainAxisSize, ParentElement, Shrinkable,
+        Wrap, WrapFill, WrapFillEntireRun,
     },
     AppContext, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
@@ -186,7 +183,6 @@ pub struct AgentInputFooter {
     file_button: ViewHandle<ActionButton>,
     context_window_button: ViewHandle<ActionButton>,
     model_selector: ViewHandle<ProfileModelSelector>,
-    ftu_callout_close_button: ViewHandle<ActionButton>,
     // Zap Wave 7-3:`environment_selector` field was removed with the hosted-mode footer.
     reasoning_depth_selector: ViewHandle<ReasoningDepthSelector>,
     prompt_alert: ViewHandle<PromptAlertView>,
@@ -199,7 +195,6 @@ pub struct AgentInputFooter {
     display_chip_config: DisplayChipConfig,
 
     terminal_model: Arc<FairMutex<TerminalModel>>,
-    render_ftu_callout: bool,
 
     // CLI agent-specific buttons (rendered when a CLI agent session is active).
     file_explorer_button: ViewHandle<ActionButton>,
@@ -602,12 +597,6 @@ impl AgentInputFooter {
                 ctx.notify()
             }
         });
-        ctx.subscribe_to_model(&display_chip_config.model_events, |me, _, event, ctx| {
-            if let ModelEvent::AgentTaggedInChanged { .. } = event {
-                me.update_ftu_callout_render_state(ctx);
-            }
-        });
-
         let prompt_for_session_settings = prompt.clone();
         ctx.subscribe_to_model(
             &SessionSettings::handle(ctx),
@@ -632,18 +621,16 @@ impl AgentInputFooter {
             &BlocklistAIHistoryModel::handle(ctx),
             |me, _, event, ctx| {
                 if event
-                    .terminal_view_id()
+                    .terminal_surface_id()
                     .is_some_and(|id| id != me.terminal_view_id)
                 {
                     return;
                 }
-                me.update_ftu_callout_render_state(ctx);
-
                 match event {
                     BlocklistAIHistoryEvent::StartedNewConversation { .. }
                     | BlocklistAIHistoryEvent::SetActiveConversation { .. }
                     | BlocklistAIHistoryEvent::ClearedActiveConversation { .. }
-                    | BlocklistAIHistoryEvent::ClearedConversationsInTerminalView { .. }
+                    | BlocklistAIHistoryEvent::ClearedConversationsForTerminalSurface { .. }
                     | BlocklistAIHistoryEvent::RemoveConversation { .. }
                     | BlocklistAIHistoryEvent::UpdatedAutoexecuteOverride { .. } => {
                         me.sync_fast_forward_button(ctx);
@@ -699,7 +686,6 @@ impl AgentInputFooter {
             reasoning_depth_selector,
             prompt_alert,
             terminal_model,
-            render_ftu_callout: false,
             left_display_chips: vec![],
             right_display_chips: vec![],
             cli_display_chips: vec![],
@@ -709,20 +695,11 @@ impl AgentInputFooter {
             cli_voice_input_state: CLIVoiceInputState::default(),
             #[cfg(feature = "voice_input")]
             cli_transcription_handle: None,
-            ftu_callout_close_button: ctx.add_typed_action_view(|_ctx| {
-                ActionButton::new("", NakedTheme)
-                    .with_icon(Icon::X)
-                    .with_size(ButtonSize::XSmall)
-                    .on_click(|ctx| {
-                        ctx.dispatch_typed_action(AgentInputFooterAction::DismissFtuModelCallout);
-                    })
-            }),
             v2_model_selector,
         };
         me.sync_fast_forward_button(ctx);
         me.update_context_window_button(ctx);
         me.update_display_chips(&prompt, ctx);
-        me.update_ftu_callout_render_state(ctx);
         me
     }
 
@@ -1354,36 +1331,6 @@ impl AgentInputFooter {
         self.model_selector.as_ref(app).is_open()
     }
 
-    fn update_ftu_callout_render_state(&mut self, ctx: &mut ViewContext<Self>) {
-        let ftu_dismissed = *AISettings::as_ref(ctx).ftu_model_callout_dismissed;
-        if !self.render_ftu_callout && ftu_dismissed {
-            return;
-        }
-
-        let showing_ftu_model_picker = FeatureFlag::InlineMenuHeaders.is_enabled()
-            && self
-                .terminal_model
-                .lock()
-                .block_list()
-                .active_block()
-                .is_agent_in_control_or_tagged_in();
-        if showing_ftu_model_picker && !ftu_dismissed {
-            if !self.render_ftu_callout {
-                self.render_ftu_callout = true;
-                ctx.notify();
-            }
-            AISettings::handle(ctx).update(ctx, |settings, ctx| {
-                // This setting actually indicates whether we've shown the ftu callout at all,
-                // but it originally tracked whether the user manually dismissed the callout and
-                // we don't want to resurface the callout to folks who have already dismissed.
-                let _ = settings.ftu_model_callout_dismissed.set_value(true, ctx);
-            });
-        } else if !showing_ftu_model_picker && self.render_ftu_callout {
-            self.render_ftu_callout = false;
-            ctx.notify();
-        }
-    }
-
     fn handle_profile_model_selector_event(
         &mut self,
         event: &ProfileModelSelectorEvent,
@@ -1401,11 +1348,6 @@ impl AgentInputFooter {
                 ctx.emit(AgentInputFooterEvent::OpenSettings(*section));
             }
             ProfileModelSelectorEvent::ToggleInlineModelSelector => {
-                if self.render_ftu_callout {
-                    self.render_ftu_callout = false;
-                    ctx.notify();
-                }
-
                 let initial_tab = if self
                     .terminal_model
                     .lock()
@@ -1908,118 +1850,8 @@ impl View for AgentInputFooter {
             container = container.with_padding_right(16.);
         }
 
-        // If the model chip has switched to show the ftu model options
-        // (and this is the first time this has happened)
-        // we show a little callout explaining the change.
-        let showing_ftu_model_picker = FeatureFlag::InlineMenuHeaders.is_enabled()
-            && terminal_model
-                .block_list()
-                .active_block()
-                .is_agent_in_control_or_tagged_in();
-        if showing_ftu_model_picker && self.render_ftu_callout {
-            let mut stack = Stack::new();
-            stack.add_child(container.finish());
-            stack.add_positioned_overlay_child(
-                render_ftu_callout(&self.ftu_callout_close_button, app),
-                OffsetPositioning::offset_from_save_position_element(
-                    "profile_model_selector_model_button",
-                    vec2f(8., -8.),
-                    PositionedElementOffsetBounds::WindowByPosition,
-                    PositionedElementAnchor::TopRight,
-                    ChildAnchor::BottomRight,
-                ),
-            );
-            stack.finish()
-        } else {
-            container.finish()
-        }
+        container.finish()
     }
-}
-
-/// Render a message bubble calling out that the model has switched now that we're in FTU mode.
-/// This callout is dismissable and does not re-appear once you've dismissed it once.
-fn render_ftu_callout(
-    close_button: &ViewHandle<ActionButton>,
-    app: &AppContext,
-) -> Box<dyn Element> {
-    let appearance = Appearance::as_ref(app);
-    let theme = appearance.theme();
-    let background = theme.background().blend(&theme.accent().with_opacity(50));
-    let text_color = internal_colors::text_main(theme, background.into_solid());
-
-    let callout_box = ConstrainedBox::new(
-        Container::new(
-            Flex::row()
-                .with_cross_axis_alignment(CrossAxisAlignment::Start)
-                .with_spacing(8.)
-                .with_child(
-                    Expanded::new(
-                        1.,
-                        Text::new(
-                            "Now using Full Terminal Agent's default model.",
-                            appearance.ui_font_family(),
-                            appearance.monospace_font_size() - 2.,
-                        )
-                        .with_color(text_color)
-                        .with_line_height_ratio(DEFAULT_UI_LINE_HEIGHT_RATIO)
-                        .with_selectable(false)
-                        .finish(),
-                    )
-                    .finish(),
-                )
-                .with_child(
-                    Container::new(ChildView::new(close_button).finish())
-                        .with_margin_top(-3.)
-                        .finish(),
-                )
-                .finish(),
-        )
-        .with_vertical_padding(12.)
-        .with_horizontal_padding(16.)
-        .with_background(background)
-        .with_border(Border::all(1.).with_border_fill(theme.accent()))
-        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
-        .finish(),
-    )
-    .with_width(348.)
-    .finish();
-
-    // The way that we render the little triangle in the bottom of the message bubble
-    // is by rendering two triangle icons (a filled triangle and an outlined triangle) and then
-    // stacking them on top of each other below the message bubble. I don't think there's a simpler
-    // way to do this with our UI framework.
-    let triangle_stack = Stack::new()
-        .with_child(
-            ConstrainedBox::new(
-                Icon::CalloutTriangleBorderDown
-                    .to_warpui_icon(Fill::Solid(theme.accent().into_solid()))
-                    .finish(),
-            )
-            .with_width(24.)
-            .with_height(24.)
-            .finish(),
-        )
-        .with_child(
-            ConstrainedBox::new(
-                Icon::CalloutTriangleFillDown
-                    .to_warpui_icon(background)
-                    .finish(),
-            )
-            .with_width(24.)
-            .with_height(24.)
-            .finish(),
-        );
-
-    Flex::column()
-        .with_main_axis_size(MainAxisSize::Min)
-        .with_child(callout_box)
-        .with_child(
-            Container::new(triangle_stack.finish())
-                .with_margin_left(300.)
-                .with_margin_top(-3.)
-                .finish(),
-        )
-        .finish()
 }
 
 #[derive(Debug, Clone)]
@@ -2032,7 +1864,6 @@ pub enum AgentInputFooterAction {
     ToggleFileExplorer,
     ToggleRichInput,
     ToggleAutodetectionSetting,
-    DismissFtuModelCallout,
     InstallPlugin,
     UpdatePlugin,
     OpenPluginInstallInstructionsPane,
@@ -2113,12 +1944,6 @@ impl TypedActionView for AgentInputFooter {
                         .ai_autodetection_enabled_internal
                         .toggle_and_save_value(ctx));
                 });
-            }
-            AgentInputFooterAction::DismissFtuModelCallout => {
-                if self.render_ftu_callout {
-                    self.render_ftu_callout = false;
-                    ctx.notify();
-                }
             }
             AgentInputFooterAction::InstallPlugin => {
                 #[cfg(not(target_family = "wasm"))]

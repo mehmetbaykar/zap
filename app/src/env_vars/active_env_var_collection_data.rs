@@ -51,7 +51,7 @@ impl ActiveEnvVarCollectionData {
         // to refresh).
         let object_store_model = ObjectStoreModel::handle(ctx);
 
-        ctx.subscribe_to_model(&object_store_model, |me, event, ctx| {
+        ctx.subscribe_to_model(&object_store_model, |me, _, event, ctx| {
             me.handle_object_store_event(event, ctx);
         });
 

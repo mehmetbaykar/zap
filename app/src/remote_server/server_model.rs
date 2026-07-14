@@ -1,4 +1,5 @@
 use crate::terminal::shell::ShellType;
+use ::ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
 use repo_metadata::repositories::{DetectedRepositories, RepoDetectionSource};
 use repo_metadata::{RepoMetadataEvent, RepoMetadataModel, RepositoryIdentifier};
 use std::collections::{HashMap, HashSet};
@@ -24,19 +25,20 @@ use super::proto::{
     client_message, delete_file_response, discard_files_response, get_diff_state_response,
     git_commit_chain_response, git_create_pr_response, git_get_committed_branch_files_response,
     git_get_pr_info_response, git_push_response, host_scoped_request, notification,
-    resolve_conflict_response, run_command_response, save_buffer_response, server_message,
-    session_scoped_request, write_file_response, Abort, BranchInfo, BufferEdit, BufferUpdatedPush,
-    BundledSkillProto, BundledSkillsSnapshot, ClientMessage, CloseBuffer, DeleteFile,
-    DeleteFileResponse, DeleteFileSuccess, DiscardFilesError, DiscardFilesResponse,
-    DiscardFilesSuccess, ErrorCode, ErrorResponse, FailedFileRead, FileContextProto,
-    FileOperationError, GetBranchesError, GetBranchesResponse, GetBranchesSuccess,
-    GetDiffStateResponse, GitCommitChainRequest, GitCommitChainResponse, GitCommitChainSuccess,
-    GitCreatePrRequest, GitCreatePrResponse, GitGetCommittedBranchFilesRequest,
-    GitGetCommittedBranchFilesResponse, GitGetCommittedBranchFilesSuccess, GitGetPrInfoRequest,
-    GitGetPrInfoResponse, GitGetPrInfoSuccess, GitHubPrInfoPush, GitHubRepositoryInfoPush,
-    GitOpDelta, GitOpError, GitPushRequest, GitPushResponse, GitStatusPush, Initialize,
+    remote_skill_proto, resolve_conflict_response, run_command_response, save_buffer_response,
+    server_message, session_scoped_request, write_file_response, Abort, BranchInfo, BufferEdit,
+    BufferUpdatedPush, ClientMessage, CloseBuffer, DeleteFile, DeleteFileResponse,
+    DeleteFileSuccess, DiscardFilesError, DiscardFilesResponse, DiscardFilesSuccess, ErrorCode,
+    ErrorResponse, FailedFileRead, FileContextProto, FileOperationError, GetBranchesError,
+    GetBranchesResponse, GetBranchesSuccess, GetDiffStateResponse, GitCommitChainRequest,
+    GitCommitChainResponse, GitCommitChainSuccess, GitCreatePrRequest, GitCreatePrResponse,
+    GitGetCommittedBranchFilesRequest, GitGetCommittedBranchFilesResponse,
+    GitGetCommittedBranchFilesSuccess, GitGetPrInfoRequest, GitGetPrInfoResponse,
+    GitGetPrInfoSuccess, GitHubPrInfoPush, GitHubRepositoryInfoPush, GitOpDelta, GitOpError,
+    GitPushRequest, GitPushResponse, GitStatusPush, HomeSkillMetadata, Initialize,
     InitializeResponse, NavigatedToDirectory, NavigatedToDirectoryResponse, OpenBuffer,
-    OpenBufferResponse, ReadFileContextResponse, ResolveConflict, ResolveConflictResponse,
+    OpenBufferResponse, ReadFileContextResponse, RemoteAgentContextSnapshot,
+    RemoteContextFileProto, RemoteSkillProto, ResolveConflict, ResolveConflictResponse,
     ResolveConflictSuccess, RipgrepSearchRequest, RunCommandError, RunCommandErrorCode,
     RunCommandRequest, RunCommandResponse, RunCommandSuccess, SaveBuffer, SaveBufferResponse,
     SaveBufferSuccess, ServerMessage, SessionBootstrapped, TextEdit, UpdateGitHubPrInfo,
@@ -75,7 +77,9 @@ pub type ConnectionId = uuid::Uuid;
 use super::protocol::RequestId;
 use crate::ai::agent::FileLocations;
 use crate::ai::blocklist::{read_local_file_context, ReadFileContextResult};
-use crate::ai::skills::{bundled_skills_snapshot_protos, BundledSkill};
+use crate::ai::skills::{
+    bundled_skill_snapshot_protos, BundledSkill, SkillManager, SkillManagerEvent,
+};
 use crate::code_review::git_actions;
 use crate::terminal::model::session::command_executor::{
     ExecuteCommandOptions, LocalCommandExecutor,
@@ -83,18 +87,48 @@ use crate::terminal::model::session::command_executor::{
 use crate::util::git;
 
 /// Resolves the global bundled resources directory populated by the install
-/// script (see [`remote_server::setup::remote_server_bundled_resources_dir`]),
-/// expanding the shell-form `~/` prefix against this process's home directory.
-///
-/// This deliberately does not use `warp_core::paths::bundled_resources_dir`,
-/// whose macOS behavior resolves resources inside an app bundle. The global
-/// location is version-independent: the last install wins, and slight skew
-/// against this daemon's version is accepted.
+/// script, expanding the shell-form `~/` prefix against this process's home
+/// directory.
 fn daemon_bundled_resources_dir() -> Option<PathBuf> {
     let dir = remote_server::setup::remote_server_bundled_resources_dir();
     let suffix = dir.strip_prefix("~/")?;
     let dir = dirs::home_dir()?.join(suffix);
     dir.is_dir().then_some(dir)
+}
+
+fn remote_agent_context_snapshot(
+    revision: u64,
+    bundled_skills: &[RemoteSkillProto],
+    ctx: &warpui::AppContext,
+) -> RemoteAgentContextSnapshot {
+    let home_dir = dirs::home_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut skills = bundled_skills.to_vec();
+    skills.extend(
+        SkillManager::as_ref(ctx)
+            .home_skills()
+            .map(|skill| RemoteSkillProto {
+                path: skill.path.display_path(),
+                content: skill.content.clone(),
+                source: Some(remote_skill_proto::Source::Home(HomeSkillMetadata {})),
+            }),
+    );
+    skills.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut global_rules = ProjectContextModel::as_ref(ctx)
+        .global_rules()
+        .map(|rule| RemoteContextFileProto {
+            path: rule.path.display_path(),
+            content: rule.content,
+        })
+        .collect::<Vec<_>>();
+    global_rules.sort_by(|a, b| a.path.cmp(&b.path));
+    RemoteAgentContextSnapshot {
+        revision,
+        home_dir,
+        skills,
+        global_rules,
+    }
 }
 
 /// Outcome of dispatching a request-style `ClientMessage`.
@@ -230,16 +264,12 @@ pub struct ServerModel {
     /// Returned in every `InitializeResponse` so clients can deduplicate
     /// host-scoped models.
     host_id: String,
-    /// The bundled skill catalog, pre-parsed and serialized for the
-    /// `BundledSkillsSnapshot` push. `None` until startup parsing completes
-    /// (or forever, when the global resources directory is absent).
-    bundled_skills: Option<Vec<BundledSkillProto>>,
-    /// Connections that have already received the `BundledSkillsSnapshot`
-    /// push, either from the parse-completion broadcast or during their
-    /// `Initialize` handshake. Prevents a duplicate push when parsing
-    /// completes between a connection registering its sender and its
-    /// `Initialize` being handled.
-    bundled_skills_sent: HashSet<ConnectionId>,
+    /// Bundled skill source entries detected and rendered on the daemon.
+    bundled_skills: Vec<RemoteSkillProto>,
+    /// Latest revisioned full replacement of all daemon-host Agent Mode context.
+    remote_agent_context_snapshot: RemoteAgentContextSnapshot,
+    /// Connections that have already received the current snapshot revision.
+    remote_agent_context_snapshot_sent: HashSet<ConnectionId>,
     /// Per-session command executors created from `SessionBootstrapped` notifications.
     executors: HashMap<SessionId, Arc<LocalCommandExecutor>>,
     /// Tracks in-flight file write/delete operations and handles cleanup.
@@ -289,14 +319,17 @@ impl ServerModel {
             std::process::id(),
             host_id
         );
+        let bundled_skills = Vec::new();
+        let remote_agent_context_snapshot = remote_agent_context_snapshot(1, &bundled_skills, ctx);
         let mut model = Self {
             connection_senders: HashMap::new(),
             snapshot_sent_roots_by_connection: HashMap::new(),
             grace_timer_cancel: None,
             in_progress: HashMap::new(),
             host_id,
-            bundled_skills: None,
-            bundled_skills_sent: HashSet::new(),
+            bundled_skills,
+            remote_agent_context_snapshot,
+            remote_agent_context_snapshot_sent: HashSet::new(),
             executors: HashMap::new(),
             pending_file_ops: PendingFileOps::new(),
             #[cfg(feature = "local_fs")]
@@ -313,7 +346,7 @@ impl ServerModel {
         // connected proxy sessions.
         {
             let file_model = FileModel::handle(ctx);
-            ctx.subscribe_to_model(&file_model, |me, event, ctx| {
+            ctx.subscribe_to_model(&file_model, |me, _, event, ctx| {
                 let file_id = event.file_id();
                 let Some(pending_kind) = me.pending_file_ops.get(&file_id).map(|op| &op.kind)
                 else {
@@ -364,7 +397,7 @@ impl ServerModel {
         }
         {
             let repo_model = RepoMetadataModel::handle(ctx);
-            ctx.subscribe_to_model(&repo_model, |me, event, ctx| match event {
+            ctx.subscribe_to_model(&repo_model, |me, _, event, ctx| match event {
                 RepoMetadataEvent::IncrementalUpdateReady { update } => {
                     me.send_server_message(
                         None,
@@ -419,7 +452,7 @@ impl ServerModel {
         #[cfg(feature = "local_fs")]
         {
             let gbm = GlobalBufferModel::handle(ctx);
-            ctx.subscribe_to_model(&gbm, |me, event, ctx| match event {
+            ctx.subscribe_to_model(&gbm, |me, _, event, ctx| match event {
                 GlobalBufferModelEvent::BufferLoaded { file_id, .. } => {
                     // Complete all pending OpenBuffer requests for this file.
                     let pending = me
@@ -608,32 +641,41 @@ impl ServerModel {
         // to proto messages and send them to connected clients.
         {
             let diff_states = model.diff_states.clone();
-            ctx.subscribe_to_model(&diff_states, |me, dispatch, _ctx| {
+            ctx.subscribe_to_model(&diff_states, |me, _, dispatch, _ctx| {
                 me.handle_diff_state_update(dispatch);
             });
         }
-        // Parse the bundled skill catalog from the global install location.
-        // Parsing never blocks the initialize handshake: connections that
-        // initialize before parsing completes receive the catalog via the
-        // completion broadcast instead. Deliberately not feature-flag gated:
-        // the flag controls exposure on the client (catalog storage and
-        // skill selection), where the connecting user's flag state actually
-        // lives — a headless daemon only sees its own channel defaults.
+        {
+            let skill_manager = SkillManager::handle(ctx);
+            ctx.subscribe_to_model(&skill_manager, |me, _, event, ctx| match event {
+                SkillManagerEvent::HomeSkillsChanged => {
+                    me.refresh_remote_agent_context_snapshot(ctx);
+                }
+                SkillManagerEvent::InventoryChanged => {}
+            });
+        }
+        {
+            let project_context = ProjectContextModel::handle(ctx);
+            ctx.subscribe_to_model(&project_context, |me, _, event, ctx| match event {
+                ProjectContextModelEvent::GlobalRulesChanged(_) => {
+                    me.refresh_remote_agent_context_snapshot(ctx);
+                }
+                ProjectContextModelEvent::PathIndexed
+                | ProjectContextModelEvent::KnownRulesChanged(_) => {}
+            });
+        }
         if let Some(resources_dir) = daemon_bundled_resources_dir() {
             ctx.spawn(
                 BundledSkill::detect_in_resources_dir(resources_dir),
-                |me, catalog, _| {
-                    let skills = bundled_skills_snapshot_protos(&catalog);
+                |me, catalog, ctx| {
+                    let skills = bundled_skill_snapshot_protos(&catalog);
                     log::info!("Daemon parsed {} bundled skills", skills.len());
-                    me.bundled_skills = Some(skills);
-                    me.broadcast_bundled_skills_snapshot();
+                    me.bundled_skills = skills;
+                    me.refresh_remote_agent_context_snapshot(ctx);
                 },
             );
         } else {
-            log::info!(
-                "Daemon found no global bundled resources directory; \
-                 bundled skills unavailable on this host"
-            );
+            log::warn!("Daemon bundled resources directory is unavailable");
         }
         // Start the grace timer immediately so the daemon exits if no proxy
         // connects within GRACE_PERIOD. In practice the spawning proxy connects
@@ -644,38 +686,40 @@ impl ServerModel {
         model
     }
 
-    /// Broadcasts the parsed bundled skill catalog to all connections.
-    /// No-op until startup parsing has completed.
-    fn broadcast_bundled_skills_snapshot(&mut self) {
-        let Some(skills) = self.bundled_skills.clone() else {
-            return;
-        };
+    fn refresh_remote_agent_context_snapshot(&mut self, ctx: &warpui::AppContext) {
+        let revision = self
+            .remote_agent_context_snapshot
+            .revision
+            .saturating_add(1);
+        self.remote_agent_context_snapshot =
+            remote_agent_context_snapshot(revision, &self.bundled_skills, ctx);
+        self.broadcast_remote_agent_context_snapshot();
+    }
+
+    fn broadcast_remote_agent_context_snapshot(&mut self) {
         self.send_server_message(
             None,
             None,
-            server_message::Message::BundledSkillsSnapshot(BundledSkillsSnapshot { skills }),
+            server_message::Message::RemoteAgentContextSnapshot(
+                self.remote_agent_context_snapshot.clone(),
+            ),
         );
-        self.bundled_skills_sent
+        self.remote_agent_context_snapshot_sent
             .extend(self.connection_senders.keys().copied());
     }
 
-    /// Pushes the parsed bundled skill catalog to a single connection.
-    /// No-op until startup parsing has completed, or when the catalog was
-    /// already delivered to this connection (e.g. it registered before the
-    /// parse-completion broadcast fired).
-    fn send_bundled_skills_snapshot_to_connection(&mut self, conn_id: ConnectionId) {
-        if self.bundled_skills_sent.contains(&conn_id) {
+    fn send_remote_agent_context_snapshot_to_connection(&mut self, conn_id: ConnectionId) {
+        if self.remote_agent_context_snapshot_sent.contains(&conn_id) {
             return;
         }
-        let Some(skills) = self.bundled_skills.clone() else {
-            return;
-        };
         self.send_server_message(
             Some(conn_id),
             None,
-            server_message::Message::BundledSkillsSnapshot(BundledSkillsSnapshot { skills }),
+            server_message::Message::RemoteAgentContextSnapshot(
+                self.remote_agent_context_snapshot.clone(),
+            ),
         );
-        self.bundled_skills_sent.insert(conn_id);
+        self.remote_agent_context_snapshot_sent.insert(conn_id);
     }
 
     /// Called when a proxy connects.  Inserts `conn_tx` into the connection
@@ -705,7 +749,7 @@ impl ServerModel {
     /// and starts the grace timer if no connections remain.
     pub fn deregister_connection(&mut self, conn_id: ConnectionId, ctx: &mut ModelContext<Self>) {
         self.snapshot_sent_roots_by_connection.remove(&conn_id);
-        self.bundled_skills_sent.remove(&conn_id);
+        self.remote_agent_context_snapshot_sent.remove(&conn_id);
         // Guard against double-deregister (reader and writer tasks both call
         // this on connection close; the second call must be a safe no-op).
         if self.connection_senders.remove(&conn_id).is_none() {
@@ -1099,8 +1143,6 @@ impl ServerModel {
     /// skips strict version enforcement, which keeps the
     /// `script/deploy_remote_server` developer workflow functional.
     ///
-    /// Sends bundled skills when startup parsing already completed. The
-    /// initialize request itself carries no account or hosted-service state.
     fn handle_initialize(
         &mut self,
         msg: Initialize,
@@ -1110,13 +1152,10 @@ impl ServerModel {
     ) -> HandlerOutcome {
         log::info!("Handling Initialize (request_id={request_id})");
         let _ = (msg, ctx);
-        // Push the bundled skill catalog to this connection if it is already
-        // parsed and the parse-completion broadcast didn't already deliver it
-        // (parsing can complete between this connection registering its
-        // sender and its `Initialize` being handled). Enqueued on the same
-        // channel as the response below, so the client buffers it as a push
-        // event during the handshake.
-        self.send_bundled_skills_snapshot_to_connection(conn_id);
+
+        // Enqueued on the same channel as the response below, so the client
+        // buffers it as a push event during the handshake.
+        self.send_remote_agent_context_snapshot_to_connection(conn_id);
 
         let server_version = ChannelState::app_version().unwrap_or("").to_string();
         HandlerOutcome::Sync(server_message::Message::InitializeResponse(
@@ -2832,7 +2871,7 @@ impl ServerModel {
         };
 
         let path_for_sub = repo_path.clone();
-        ctx.subscribe_to_model(&handle, move |me, _event, ctx| {
+        ctx.subscribe_to_model(&handle, move |me, _, _event, ctx| {
             let proto_metadata = {
                 let Some(handle) = me.git_status_models.get(&path_for_sub) else {
                     return;
@@ -3051,7 +3090,7 @@ impl ServerModel {
         };
 
         let path_for_sub = repo_path.clone();
-        ctx.subscribe_to_model(&handle, move |me, event, ctx| match event {
+        ctx.subscribe_to_model(&handle, move |me, _, event, ctx| match event {
             GitHubRepoEvent::PrInfoChanged => me.push_github_pr_info(&path_for_sub, ctx),
             GitHubRepoEvent::RepositoryInfoChanged => {
                 me.push_github_repository_info(&path_for_sub, ctx)

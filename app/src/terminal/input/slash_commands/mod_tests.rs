@@ -1,35 +1,31 @@
-use crate::features::FeatureFlag;
-use crate::search::slash_command_menu::static_commands::{commands, Availability};
-const BASELINE_AVAILABILITY: Availability = Availability::AGENT_VIEW
-    .union(Availability::AI_ENABLED)
-    .union(Availability::NO_LRC_CONTROL);
+use super::slash_command_is_submitted_as_prompt;
+use crate::search::slash_command_menu::static_commands::commands;
 
+/// The centralized classifier must mark only the prompt-submitting commands (/compact, /plan,
+/// /orchestrate) as "submitted as a prompt". Every other slash command emits an immediate action
+/// and must be treated as "run now" by the prompt-queue gate and the shared-session viewer path.
 #[test]
-fn not_cloud_agent_commands_are_only_active_outside_cloud_mode() {
-    let local_context = BASELINE_AVAILABILITY | Availability::NOT_CLOUD_AGENT;
-    assert!(commands::AGENT.is_active(local_context));
-    assert!(commands::NEW.is_active(local_context));
+fn slash_command_is_submitted_as_prompt_only_for_prompt_commands() {
+    // Prompt-submitting commands reiterate their text into the conversation.
+    assert!(slash_command_is_submitted_as_prompt(&commands::COMPACT));
+    assert!(slash_command_is_submitted_as_prompt(&commands::PLAN));
+    assert!(slash_command_is_submitted_as_prompt(&commands::ORCHESTRATE));
 
-    let cloud_context = BASELINE_AVAILABILITY;
-    assert!(!commands::AGENT.is_active(cloud_context));
-    assert!(!commands::NEW.is_active(cloud_context));
-
-    let _cloud_mode_input_v2 = FeatureFlag::CloudModeInputV2.override_enabled(true);
-    let cloud_mode_v2_context = BASELINE_AVAILABILITY | Availability::CLOUD_AGENT_V2;
-    assert!(!commands::AGENT.is_active(cloud_mode_v2_context));
-    assert!(!commands::NEW.is_active(cloud_mode_v2_context));
-}
-
-#[test]
-fn cloud_mode_v2_commands_are_active_only_in_cloud_mode_v2_context() {
-    let cloud_context = BASELINE_AVAILABILITY;
-    assert!(!commands::HARNESS.is_active(cloud_context));
-
-    let _cloud_mode_input_v2 = FeatureFlag::CloudModeInputV2.override_enabled(true);
-    let cloud_mode_v2_context = BASELINE_AVAILABILITY | Availability::CLOUD_AGENT_V2;
-    assert!(commands::PLAN.is_active(cloud_mode_v2_context));
-    assert!(commands::MODEL.is_active(cloud_mode_v2_context));
-    assert!(commands::HARNESS.is_active(cloud_mode_v2_context));
+    // Action-emitting commands run immediately and are never queued / forwarded as prompts.
+    assert!(!slash_command_is_submitted_as_prompt(&commands::FORK));
+    assert!(!slash_command_is_submitted_as_prompt(
+        &commands::FORK_AND_COMPACT
+    ));
+    assert!(!slash_command_is_submitted_as_prompt(&commands::FORK_FROM));
+    assert!(!slash_command_is_submitted_as_prompt(
+        &commands::COMPACT_AND
+    ));
+    assert!(!slash_command_is_submitted_as_prompt(&commands::MODEL));
+    assert!(!slash_command_is_submitted_as_prompt(&commands::REWIND));
+    assert!(!slash_command_is_submitted_as_prompt(
+        &commands::CONVERSATIONS
+    ));
+    assert!(!slash_command_is_submitted_as_prompt(&commands::QUEUE));
 }
 
 #[cfg(all(feature = "local_fs", windows))]

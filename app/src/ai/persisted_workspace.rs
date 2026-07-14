@@ -532,7 +532,7 @@ impl PersistedWorkspace {
             .unwrap_or_default();
         for server in server_handles {
             let workspace_display = workspace_display.clone();
-            ctx.subscribe_to_model(&server, move |_, event, ctx| {
+            ctx.subscribe_to_model(&server, move |_, _, event, ctx| {
                 if let LspEvent::Failed(error) = event {
                     log::warn!(
                         "Failed to start LSP server for {workspace_display}: {error}"

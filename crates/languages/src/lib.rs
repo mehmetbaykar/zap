@@ -114,8 +114,8 @@ pub fn language_by_local_filename(path: &Path) -> Option<Arc<Language>> {
     )
 }
 
-/// Normalizes common markdown language aliases to their internal names.
-/// For example, "go" -> "golang", "bash" -> "shell", etc.
+/// Normalizes common language-name aliases to their canonical internal names.
+/// For example, "go" -> "golang", "bash" -> "shell", "md" -> "markdown".
 fn normalize_language_name(name: &str) -> &str {
     match name {
         "go" => "golang",

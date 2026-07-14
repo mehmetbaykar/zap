@@ -53,7 +53,9 @@ use crate::ui_components::icons::Icon;
 use crate::ui_components::item_highlight::{ImageOrIcon, ItemHighlightState};
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::EditorSettings;
-use crate::util::openable_file_type::{is_file_content_binary, EditorLayout, FileTarget};
+use crate::util::openable_file_type::{
+    is_file_content_binary, is_jupyter_notebook_file, is_markdown_file, EditorLayout, FileTarget,
+};
 #[cfg(feature = "local_fs")]
 use crate::util::openable_file_type::{
     resolve_file_target_to_open_in_warp, resolve_file_target_with_editor_choice,
@@ -2236,7 +2238,7 @@ impl FileTreeView {
         );
 
         ctx.emit(FileTreeEvent::OpenFile {
-            path: path.to_path_buf(),
+            location: BufferLocation::Local(path.to_path_buf()),
             target,
             line_col: None,
         });
@@ -2258,11 +2260,7 @@ impl FileTreeView {
 
         match item {
             FileTreeItem::File { metadata, .. } => {
-                if !is_remote {
-                    let path = metadata.path.to_local_path_lossy();
-                    self.open_file(&path, None, ctx);
-                } else {
-                    // Remote images open in the image viewer; other remote files use buffer sync.
+                if is_remote {
                     #[cfg(feature = "local_tty")]
                     if let Some(host_id) = root_dir.remote_host_id.clone() {
                         let remote_path = crate::code::buffer_location::RemotePath::new(
@@ -2275,9 +2273,37 @@ impl FileTreeView {
                         ) {
                             ctx.emit(FileTreeEvent::OpenRemoteImage { remote_path });
                         } else {
-                            ctx.emit(FileTreeEvent::OpenRemoteFile { remote_path });
+                            let remote_file_path = Path::new(metadata.path.as_str());
+                            let target = if is_jupyter_notebook_file(remote_file_path)
+                                && FeatureFlag::JupyterNotebookRendering.is_enabled()
+                            {
+                                FileTarget::MarkdownViewer(EditorLayout::SplitPane)
+                            } else if is_markdown_file(remote_file_path) {
+                                #[cfg(feature = "local_fs")]
+                                {
+                                    if *EditorSettings::as_ref(ctx).prefer_markdown_viewer {
+                                        FileTarget::MarkdownViewer(EditorLayout::SplitPane)
+                                    } else {
+                                        FileTarget::CodeEditor(EditorLayout::SplitPane)
+                                    }
+                                }
+                                #[cfg(not(feature = "local_fs"))]
+                                {
+                                    FileTarget::CodeEditor(EditorLayout::SplitPane)
+                                }
+                            } else {
+                                FileTarget::CodeEditor(EditorLayout::SplitPane)
+                            };
+                            ctx.emit(FileTreeEvent::OpenFile {
+                                location: BufferLocation::Remote(remote_path),
+                                target,
+                                line_col: None,
+                            });
                         }
                     }
+                } else {
+                    let path = metadata.path.to_local_path_lossy();
+                    self.open_file(&path, None, ctx);
                 }
             }
             FileTreeItem::DirectoryHeader { directory, .. } => {
@@ -2899,7 +2925,7 @@ pub enum FileTreeEvent {
     AttachAsContext { path: PathBuf },
     #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
     OpenFile {
-        path: PathBuf,
+        location: BufferLocation,
         target: FileTarget,
         line_col: Option<LineAndColumnArg>,
     },

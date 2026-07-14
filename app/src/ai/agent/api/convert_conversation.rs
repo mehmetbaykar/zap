@@ -1451,6 +1451,7 @@ fn create_exchange_from_messages(
             model_id: model.model_id.clone().into(),
             display_name: model.model_display_name.clone(),
             is_fallback: model.is_fallback,
+            prompt_cache_expires_at: None,
         }),
         request_cost: None,
     };

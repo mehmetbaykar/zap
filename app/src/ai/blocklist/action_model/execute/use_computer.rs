@@ -1,6 +1,7 @@
 use ai::agent::action_result::AIAgentActionResultType;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use warp_core::features::FeatureFlag;
 use warpui::{Entity, ModelContext};
 
 use super::{ActionExecution, AnyActionExecution, ExecuteActionInput, PreprocessActionInput};
@@ -44,7 +45,13 @@ impl UseComputerExecutor {
             async move {
                 let mut actor = computer_use::create_actor();
                 match actor
-                    .perform_actions(&actions, computer_use::Options { screenshot_params })
+                    .perform_actions(
+                        &actions,
+                        computer_use::Options {
+                            screenshot_params,
+                            background_enabled: FeatureFlag::BackgroundComputerUse.is_enabled(),
+                        },
+                    )
                     .await
                 {
                     Ok(result) => UseComputerResult::Success(result),

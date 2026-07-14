@@ -220,3 +220,25 @@ app/src/ai/geap_credentials_tests.rs
 app/src/workspace/view/auto_handoff_sleep_modal
 crates/ai/src/geap_credentials.rs
 specs/managed-mcp-cli-resolution/TECH.md
+# Slice 5 (474cf6b0..1c376cb0f) cloud/auth/telemetry additions rejected:
+.agents/skills/logging-and-error-reporting/SKILL.md
+app/src/ai/agent_sdk/memory_store.rs
+app/src/ai/blocklist/action_model/execute/start_recording.rs
+app/src/ai/blocklist/action_model/execute/stop_recording.rs
+app/src/ai/blocklist/action_model/recording_controller.rs
+app/src/ai/blocklist/local_agent_task_sync_model/update_queue.rs
+app/src/server/server_api/download.rs
+app/src/settings/tui_autoupdate.rs
+app/src/settings_view/platform/create_api_key_modal_tests.rs
+app/src/workspace/view/free_ai_removal_modal.rs
+crates/graphql/src/api/ai_tests.rs
+crates/warp_multi_agent_client
+crates/managed_secrets_wasm/src/lib_tests.rs
+crates/warp_server_client/src/base_client_tests.rs
+crates/warp_server_client/src/public_api.rs
+crates/warp_server_client/src/public_api_tests.rs
+crates/warp_cli/src/memory_store.rs
+crates/warp_tui/src/autoupdate.rs
+crates/warp_tui/src/autoupdate_tests.rs
+crates/warp_tui/src/telemetry.rs
+specs/byok-byoe-enterprise/PRODUCT.md

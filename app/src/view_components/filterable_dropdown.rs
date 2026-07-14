@@ -18,7 +18,7 @@ use warpui::{
 
 use super::dropdown::{
     DropdownAction, DropdownItem, DropdownItemAction, MenuHeaderTextFormatter, DROPDOWN_PADDING,
-    TOP_MENU_BAR_MAX_WIDTH,
+    TOP_MENU_BAR_HEIGHT, TOP_MENU_BAR_MAX_WIDTH,
 };
 use crate::appearance::Appearance;
 use crate::editor::{
@@ -59,6 +59,12 @@ pub struct FilterableDropdown<A: DropdownItemAction = ()> {
     style_override: Option<UiComponentStyles>,
     hovered_style_override: Option<UiComponentStyles>,
     menu_header_text_override: Option<MenuHeaderTextFormatter>,
+    /// Optional placeholder shown in the closed top bar when no item is
+    /// selected. Setting a placeholder also opts the dropdown into allowing an
+    /// empty selection: `set_filtered_items` will not auto-highlight the first
+    /// item when nothing has been selected yet, so the top bar stays blank
+    /// instead of leaking the first item as a phantom selection.
+    placeholder: Option<String>,
     /// True when a pinned footer has been registered via `set_footer`.
     /// When true, the footer lives inside the `Menu`'s own `Dismiss` (via
     /// `Menu::set_pinned_footer_builder`), so clicks on it never trigger the
@@ -68,7 +74,7 @@ pub struct FilterableDropdown<A: DropdownItemAction = ()> {
     has_pinned_footer: bool,
     menu_width: Option<f32>,
     vertical_margin: f32,
-    top_bar_height: Option<f32>,
+    top_bar_height: f32,
     /// See `Dropdown::use_overlay_layer`. Mirrors the same opt-out for
     /// `FilterableDropdown` callers (the orchestrate environment
     /// picker) that need to render in the parent's Normal layer
@@ -130,10 +136,11 @@ where
             style_override: None,
             hovered_style_override: None,
             menu_header_text_override: None,
+            placeholder: None,
             has_pinned_footer: false,
             menu_width: None,
             vertical_margin: DROPDOWN_PADDING,
-            top_bar_height: None,
+            top_bar_height: TOP_MENU_BAR_HEIGHT,
             use_overlay_layer: true,
             match_menu_width_to_top_bar: false,
             _action_type: PhantomData,
@@ -146,11 +153,37 @@ where
         ctx.notify();
     }
 
+    /// Override the top-bar height.
+    /// so callers (e.g. the orchestrate environment picker) that mix
+    /// `Dropdown` and `FilterableDropdown` in the same row can size them
+    /// identically.
+    pub fn set_top_bar_height(&mut self, height: f32, ctx: &mut ViewContext<Self>) {
+        self.top_bar_height = height;
+        ctx.notify();
+    }
+
+    /// Override the vertical margin applied above and below the dropdown's top
+    /// bar (default [`DROPDOWN_PADDING`]). Set to `0.` when the caller manages
+    /// its own spacing and needs the bar to align flush with sibling inputs.
+    pub fn set_vertical_margin(&mut self, vertical_margin: f32, ctx: &mut ViewContext<Self>) {
+        self.vertical_margin = vertical_margin;
+        ctx.notify();
+    }
+
     pub fn set_menu_header_text_override<F>(&mut self, formatter: F)
     where
         F: Fn(&str) -> String + 'static,
     {
         self.menu_header_text_override = Some(Box::new(formatter));
+    }
+
+    /// Sets placeholder text shown (greyed) in the closed top bar when no item
+    /// is selected, and opts the dropdown into allowing an empty selection so
+    /// the placeholder is preserved rather than being replaced by the first
+    /// item after filtering.
+    pub fn set_placeholder(&mut self, placeholder: impl Into<String>, ctx: &mut ViewContext<Self>) {
+        self.placeholder = Some(placeholder.into());
+        ctx.notify();
     }
 
     pub fn set_footer<F>(&mut self, builder: F, ctx: &mut ViewContext<Self>)
@@ -304,15 +337,6 @@ where
         self.top_bar_max_width = max_width;
     }
 
-    /// Override the top-bar height.
-    /// so callers (e.g. the orchestrate environment picker) that mix
-    /// `Dropdown` and `FilterableDropdown` in the same row can size them
-    /// identically.
-    pub fn set_top_bar_height(&mut self, height: f32, ctx: &mut ViewContext<Self>) {
-        self.top_bar_height = Some(height);
-        ctx.notify();
-    }
-
     pub fn set_menu_width(&mut self, width: f32, ctx: &mut ViewContext<Self>) {
         self.menu_width = Some(width);
         self.dropdown.update(ctx, |menu, ctx| {
@@ -427,8 +451,8 @@ where
     }
 
     fn render_closed_top_bar(&self, appearance: &Appearance) -> Box<dyn Element> {
-        let (selected_item_text, font_family_id) = match self.static_menu_header {
-            Some(header) => (header.to_string(), None),
+        let (selected_item_text, font_family_id, is_placeholder) = match self.static_menu_header {
+            Some(header) => (header.to_string(), None, false),
             None => match self.selected_item.clone() {
                 Some(MenuItem::Item(fields)) => {
                     let label = fields.label();
@@ -437,11 +461,32 @@ where
                     } else {
                         label.to_string()
                     };
-                    (text, fields.override_font_family())
+                    (text, fields.override_font_family(), false)
                 }
-                _ => (String::new(), None),
+                _ => match &self.placeholder {
+                    Some(placeholder) => (placeholder.clone(), None, true),
+                    None => (String::new(), None, false),
+                },
             },
         };
+
+        let mut base_style = self.style_override.unwrap_or(UiComponentStyles {
+            padding: Some(Coords {
+                top: 5.,
+                bottom: 5.,
+                left: 8.,
+                right: 8.,
+            }),
+            ..Default::default()
+        });
+        if is_placeholder {
+            base_style.font_color = Some(
+                appearance
+                    .theme()
+                    .sub_text_color(appearance.theme().surface_1())
+                    .into(),
+            );
+        }
 
         let mut top_bar = appearance
             .ui_builder()
@@ -458,15 +503,7 @@ where
                 )
                 .with_inner_padding(10.),
             )
-            .with_style(self.style_override.unwrap_or(UiComponentStyles {
-                padding: Some(Coords {
-                    top: 5.,
-                    bottom: 5.,
-                    left: 8.,
-                    right: 8.,
-                }),
-                ..Default::default()
-            }))
+            .with_style(base_style)
             .set_clicked_styles(None);
 
         if let Some(hovered_style) = self.hovered_style_override {
@@ -552,10 +589,6 @@ where
     }
 
     fn render_top_bar(&self, appearance: &Appearance) -> Box<dyn Element> {
-        let effective_height = self
-            .top_bar_height
-            .unwrap_or_else(|| appearance.dropdown_top_bar_height());
-
         let top_bar_element = if self.is_expanded {
             self.render_filter_input(appearance)
         } else {
@@ -566,7 +599,7 @@ where
             Container::new(
                 ConstrainedBox::new(top_bar_element)
                     .with_max_width(self.top_bar_max_width)
-                    .with_height(effective_height)
+                    .with_height(self.top_bar_height)
                     .finish(),
             )
             .finish(),
@@ -679,6 +712,11 @@ where
         // If it isn't, we set the selected element to the first index of
         // the new elements such that there's always a candidate element to select.
         let current_label = self.current_selected_item_label().to_string();
+        // When a placeholder is configured and nothing is selected yet, don't
+        // auto-highlight the first item: doing so emits `ItemSelected`, which
+        // the subscription would cache as a phantom selection and surface in
+        // the top bar (defeating the blank/placeholder state).
+        let allow_empty_selection = self.placeholder.is_some() && current_label.is_empty();
         let mut current_label_not_visible = true;
         self.dropdown.update(ctx, |dropdown, ctx| {
             dropdown.set_items(
@@ -698,7 +736,11 @@ where
             );
 
             if current_label_not_visible && !dropdown.is_empty() {
-                dropdown.set_selected_by_index(0, ctx);
+                if allow_empty_selection {
+                    dropdown.reset_selection(ctx);
+                } else {
+                    dropdown.set_selected_by_index(0, ctx);
+                }
             } else {
                 dropdown.set_selected_by_name(&current_label, ctx);
             }
@@ -733,6 +775,23 @@ where
 
     pub fn set_menu_header_to_static(&mut self, header: &'static str) {
         self.static_menu_header = Some(header);
+    }
+
+    /// Test-only: drive the filter input with `query` and re-filter the list,
+    /// mirroring what happens when a user types into the search field.
+    #[cfg(test)]
+    pub(crate) fn set_filter_query_for_test(&mut self, query: &str, ctx: &mut ViewContext<Self>) {
+        self.filter_editor.update(ctx, |editor, ctx| {
+            editor.select_all(ctx);
+            editor.insert_selected_text(query, ctx);
+        });
+        self.set_filtered_items(ctx);
+    }
+
+    /// Test-only: the number of items currently visible after filtering.
+    #[cfg(test)]
+    pub(crate) fn visible_items_len_for_test(&self, ctx: &AppContext) -> usize {
+        self.dropdown_items_len(ctx)
     }
 }
 

@@ -15,15 +15,14 @@ use crate::codebase_index_proto::{
 };
 use crate::proto::{
     host_scoped_request, notification, read_file_chunk_response, server_message,
-    session_scoped_request, Abort, BufferEdit, BundledSkillProto, ClientMessage, CloseBuffer,
-    CreateDirectory, CreateDirectoryResponse, DeleteFile, DiffMode, DiffStateFileDelta,
-    DiffStateMetadataUpdate, DiffStateSnapshot, ErrorCode, GitStatusMetadata, Initialize,
-    InitializeResponse, ListDirectory, ListDirectoryResponse, LoadRepoMetadataDirectoryResponse,
-    NavigatedToDirectoryResponse, PrInfo, ReadFileChunk, ReadFileChunkResponse, RepositoryInfo,
-    ResolvePath, ResolvePathResponse, RunCommandRequest, RunCommandResponse, SaveBuffer,
-    SaveBufferResponse, ServerMessage, SessionBootstrapped, TextEdit, UnsubscribeDiffState,
-    UpdateGitHubPrInfo, UpdateGitHubRepoInfo, UpdateGitStatus, WriteFileChunk,
-    WriteFileChunkResponse,
+    session_scoped_request, Abort, BufferEdit, ClientMessage, CloseBuffer, CreateDirectory,
+    CreateDirectoryResponse, DeleteFile, DiffMode, DiffStateFileDelta, DiffStateMetadataUpdate,
+    DiffStateSnapshot, ErrorCode, GitStatusMetadata, Initialize, InitializeResponse, ListDirectory,
+    ListDirectoryResponse, LoadRepoMetadataDirectoryResponse, NavigatedToDirectoryResponse, PrInfo,
+    ReadFileChunk, ReadFileChunkResponse, RemoteAgentContextSnapshot, RepositoryInfo, ResolvePath,
+    ResolvePathResponse, RunCommandRequest, RunCommandResponse, SaveBuffer, SaveBufferResponse,
+    ServerMessage, SessionBootstrapped, TextEdit, UnsubscribeDiffState, UpdateGitHubPrInfo,
+    UpdateGitHubRepoInfo, UpdateGitStatus, WriteFileChunk, WriteFileChunkResponse,
 };
 use crate::repo_metadata_proto::{proto_snapshot_to_update, proto_to_repo_metadata_update};
 
@@ -131,8 +130,10 @@ pub enum ClientEvent {
         mode: DiffMode,
         delta: DiffStateFileDelta,
     },
-    /// The daemon pushed its pre-parsed bundled skill catalog.
-    BundledSkillsSnapshotReceived { skills: Vec<BundledSkillProto> },
+    /// The daemon pushed a revisioned full replacement of its Agent Mode context.
+    RemoteAgentContextSnapshotReceived {
+        snapshot: RemoteAgentContextSnapshot,
+    },
     /// An aggregate git status push (branch + diff stats) was pushed by the
     /// server for the tab / prompt chips.
     GitStatusPushReceived {
@@ -765,10 +766,8 @@ impl RemoteServerClient {
                     delta,
                 })
             }
-            server_message::Message::BundledSkillsSnapshot(snapshot) => {
-                Some(ClientEvent::BundledSkillsSnapshotReceived {
-                    skills: snapshot.skills,
-                })
+            server_message::Message::RemoteAgentContextSnapshot(snapshot) => {
+                Some(ClientEvent::RemoteAgentContextSnapshotReceived { snapshot })
             }
             server_message::Message::GitStatusPush(push) => {
                 let Some(repo_path) = StandardizedPath::try_new(&push.repo_path).ok() else {

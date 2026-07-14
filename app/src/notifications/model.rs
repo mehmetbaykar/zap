@@ -59,12 +59,12 @@ impl SingletonEntity for NotificationsModel {}
 impl NotificationsModel {
     pub(crate) fn new(ctx: &mut ModelContext<Self>) -> Self {
         let history_model = BlocklistAIHistoryModel::handle(ctx);
-        ctx.subscribe_to_model(&history_model, move |me, event, ctx| {
+        ctx.subscribe_to_model(&history_model, move |me, _, event, ctx| {
             me.handle_history_event(event, ctx);
         });
 
         let cli_sessions_model = CLIAgentSessionsModel::handle(ctx);
-        ctx.subscribe_to_model(&cli_sessions_model, |me, event, ctx| {
+        ctx.subscribe_to_model(&cli_sessions_model, |me, _, event, ctx| {
             me.handle_cli_agent_session_event(event, ctx);
         });
 
@@ -234,7 +234,7 @@ impl NotificationsModel {
         }
 
         let BlocklistAIHistoryEvent::UpdatedConversationStatus {
-            terminal_view_id,
+            terminal_surface_id,
             conversation_id,
             // Conversations restored at startup should not trigger a notification.
             update: ConversationStatusUpdate::Changed { .. },
@@ -265,7 +265,7 @@ impl NotificationsModel {
             &status,
             *conversation_id,
             latest_query,
-            *terminal_view_id,
+            *terminal_surface_id,
             ctx,
         );
     }
@@ -301,7 +301,7 @@ impl NotificationsModel {
                 conversation
                     .and_then(|c| c.parent_conversation_id())
                     .and_then(|parent_id| {
-                        ai_history_model.terminal_view_id_for_conversation(&parent_id)
+                        ai_history_model.terminal_surface_id_for_conversation(&parent_id)
                     })
                     .unwrap_or(terminal_view_id)
             };

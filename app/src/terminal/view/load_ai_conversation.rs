@@ -727,7 +727,7 @@ impl TerminalView {
         );
 
         if !BlocklistAIHistoryModel::as_ref(ctx)
-            .is_terminal_view_conversation_transcript_viewer(self.view_id)
+            .is_terminal_surface_conversation_transcript_viewer(self.view_id)
         {
             BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
                 history_model.set_active_conversation_id(conversation_id, self.view_id, ctx);

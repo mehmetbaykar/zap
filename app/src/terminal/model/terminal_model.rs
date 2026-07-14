@@ -951,12 +951,12 @@ impl TerminalModel {
     pub fn set_is_input_dirty(&mut self, value: bool) {
         self.is_input_dirty = value;
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     #[allow(clippy::too_many_arguments)]
     /// Returns a bootstrapped `TerminalModel` with no restored blocks
     /// and just one default block to avoid any side effects of being
     /// in the middle of the bootstrap sequence.
-    pub fn new_for_test(
+    pub(crate) fn new_for_test(
         sizes: BlockSize,
         colors: color::List,
         event_proxy: ChannelEventListener,
@@ -2970,7 +2970,7 @@ impl ansi::Handler for TerminalModel {
                 // Not being able to read the value should not cause a full-app crash. Instead,
                 // bootstrapping should fail in the same way that it would if the DCS message
                 // were otherwise corrupted.
-                log::error!("Received bootstrap message with no pending session info.");
+                report_error!("Received bootstrap message with no pending session info.");
                 return;
             }
         };
@@ -3129,9 +3129,9 @@ impl ansi::Handler for TerminalModel {
                         uname: data.uname,
                     }))
             }
-            None => log::error!(
-                "Received invalid shell name in init_subshell: {}",
-                data.shell
+            None => report_error!(
+                "Received invalid shell name in init_subshell",
+                extra: { "shell" => %data.shell }
             ),
         }
     }
@@ -3153,9 +3153,9 @@ impl ansi::Handler for TerminalModel {
                         ))
                 }
                 None => {
-                    log::error!(
-                        "Received invalid shell name in SourcedRCFileForWarpValue: {}",
-                        data.shell
+                    report_error!(
+                        "Received invalid shell name in SourcedRCFileForWarpValue",
+                        extra: { "shell" => %data.shell }
                     );
                 }
             }

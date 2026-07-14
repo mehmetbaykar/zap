@@ -396,7 +396,7 @@ impl TryFrom<api::message::tool_call::UseComputer> for AIAgentActionType {
                 let Some(action_type) = action.r#type else {
                     return Err(ToolToAIAgentActionError::MissingComputerUseActionType);
                 };
-                match action_type {
+                let action = match action_type {
                     use_computer::action::Type::MouseMove(mouse_move) => {
                         Ok(computer_use::Action::MouseMove {
                             to: coordinates_to_vec(mouse_move.to.as_ref())?,
@@ -444,7 +444,11 @@ impl TryFrom<api::message::tool_call::UseComputer> for AIAgentActionType {
                         let key = convert_key(key_up.key)?;
                         Ok(computer_use::Action::KeyUp { key })
                     }
-                }
+                }?;
+                Ok(computer_use::TargetedAction {
+                    action,
+                    target: computer_use::Target::Screen,
+                })
             })
             .try_collect()?;
         let screenshot_params = value
@@ -511,6 +515,7 @@ fn convert_screenshot_params(
         max_long_edge_px: (params.max_long_edge_px > 0).then_some(params.max_long_edge_px as usize),
         max_total_px: (params.max_total_px > 0).then_some(params.max_total_px as usize),
         region,
+        target: computer_use::Target::Screen,
     }
 }
 

@@ -629,7 +629,7 @@ impl CLISubagentView {
             move |me, _history_model, event, ctx| match event {
                 BlocklistAIHistoryEvent::UpgradedTask {
                     optimistic_id: old_id,
-                    confirmed_task_id: new_id,
+                    server_id: new_id,
                     ..
                 } if *old_id == task_id_clone => {
                     task_id_clone = new_id.clone();

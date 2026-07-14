@@ -7,6 +7,7 @@ use futures::future::Either;
 use futures::StreamExt;
 use instant::Instant;
 use warp_core::errors::{register_error, AnyhowErrorExt as _, ErrorExt};
+use warp_core::report_error;
 use warpui::r#async::Timer;
 
 use crate::ai::agent_events::{AgentEventStreamClient, AgentRunEvent};
@@ -476,8 +477,13 @@ fn log_stream_failure(
 ) {
     let label = filter.log_label();
     if agent_event_failure_should_log_error(err, failures, failures_before_error_log) {
-        log::error!(
-            "Agent event stream failed {failures} consecutive times for {label}, retrying in {backoff:?}: {err:#}"
+        report_error!(
+            err,
+            extra: {
+                "failures" => %failures,
+                "label" => %label,
+                "backoff" => ?backoff
+            }
         );
     } else {
         log::warn!(

@@ -26,14 +26,15 @@ impl QueuedQueryId {
 /// The origin is informational for telemetry; FIFO ordering and firing semantics are uniform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueuedQueryOrigin {
-    /// Filed while the initial Cloud Mode prompt waits to be handed off.
-    InitialCloudMode,
     /// Filed via the `/queue <prompt>` slash command.
     QueueSlashCommand,
     /// Filed via the auto-queue toggle in the warping indicator.
     AutoQueueToggle,
     /// Filed because auto-queue was in effect during an agent-requested long-running command.
     LrcAutoQueue,
+    /// Filed while an agent-requested run_shell_command action's snapshot has not yet fired.
+    /// Locked for manual push and auto-fire until the snapshot fires.
+    PendingLrcAutoQueue,
     /// Filed as the follow-up prompt of a `/compact-and <prompt>` slash command, waiting for
     /// the summarize to finish.
     CompactAndSlashCommand,
@@ -113,6 +114,12 @@ impl QueuedQuery {
             QueuedQueryKind::Command => &[],
         }
     }
+    /// Returns true if this row is locked from user mutation, reorder, and auto-fire.
+    /// Locked rows cannot be edited, deleted, reordered, pushed manually, or auto-fired by
+    /// the drain mechanism. Pending LRC rows remain locked until the action snapshot fires.
+    pub fn is_locked(&self) -> bool {
+        self.origin == QueuedQueryOrigin::PendingLrcAutoQueue
+    }
 }
 
 /// What the auto-fire drain should do with the head row. Produced by
@@ -187,6 +194,11 @@ pub enum QueuedQueryEvent {
         conversation_id: AIConversationId,
         query_id: QueuedQueryId,
     },
+    /// Emitted when PendingLrcAutoQueue rows are transitioned to LrcAutoQueue after
+    /// the action snapshot fires.
+    RowUnlocked {
+        conversation_id: AIConversationId,
+    },
     Removed {
         conversation_id: AIConversationId,
         query_id: QueuedQueryId,
@@ -232,7 +244,7 @@ impl QueuedQueryModel {
         // from its owning terminal view. Agent-view exit is intentionally NOT subscribed to:
         // conversations (cloud agents in particular) outlive their visible session.
         let history_handle = BlocklistAIHistoryModel::handle(ctx);
-        ctx.subscribe_to_model(&history_handle, |this, event, ctx| {
+        ctx.subscribe_to_model(&history_handle, |this, _, event, ctx| {
             this.handle_history_event(event, ctx);
         });
 
@@ -243,7 +255,7 @@ impl QueuedQueryModel {
         // the chip and ghost text re-render with the new effective state.
         let default_mode = AISettings::as_ref(ctx).default_prompt_submission_mode;
         let ai_settings_handle = AISettings::handle(ctx);
-        ctx.subscribe_to_model(&ai_settings_handle, |this, event, ctx| match event {
+        ctx.subscribe_to_model(&ai_settings_handle, |this, _, event, ctx| match event {
             AISettingsChangedEvent::PromptSubmissionMode { .. } => {
                 this.default_mode = AISettings::as_ref(ctx).default_prompt_submission_mode;
                 ctx.emit(QueuedQueryEvent::DefaultModeChanged);
@@ -274,7 +286,7 @@ impl QueuedQueryModel {
             } => {
                 self.drop_conversation(*conversation_id, ctx);
             }
-            BlocklistAIHistoryEvent::ClearedConversationsInTerminalView {
+            BlocklistAIHistoryEvent::ClearedConversationsForTerminalSurface {
                 cleared_conversation_ids,
                 ..
             } => {
@@ -316,7 +328,7 @@ impl QueuedQueryModel {
     pub fn has_autofireable_prompt(&self, conversation_id: AIConversationId) -> bool {
         self.queues
             .get(&conversation_id)
-            .is_some_and(|state| !state.queue.is_empty())
+            .is_some_and(|state| state.queue.first().is_some_and(|row| !row.is_locked()))
     }
 
     /// Marks that a dispatched queued command is running for `conversation_id`. While set, the
@@ -351,7 +363,7 @@ impl QueuedQueryModel {
         history_model: &BlocklistAIHistoryModel,
     ) -> Option<AIConversationId> {
         history_model
-            .all_live_conversations_for_terminal_view(terminal_view_id)
+            .all_live_conversations_for_terminal_surface(terminal_view_id)
             .find_map(|conversation| {
                 self.has_command_in_flight(conversation.id())
                     .then_some(conversation.id())
@@ -457,6 +469,56 @@ impl QueuedQueryModel {
         }
     }
 
+    /// Transitions all `PendingLrcAutoQueue` rows for `conversation_id` to `LrcAutoQueue`,
+    /// unlocking them for auto-fire when the command completes. Emits `RowUnlocked` if any
+    /// rows were changed.
+    pub fn unlock_pending_lrc_rows(
+        &mut self,
+        conversation_id: AIConversationId,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let Some(state) = self.queues.get_mut(&conversation_id) else {
+            return;
+        };
+        let mut unlocked = false;
+        for row in state.queue.iter_mut() {
+            if row.origin == QueuedQueryOrigin::PendingLrcAutoQueue {
+                row.origin = QueuedQueryOrigin::LrcAutoQueue;
+                unlocked = true;
+            }
+        }
+        if unlocked {
+            ctx.emit(QueuedQueryEvent::RowUnlocked { conversation_id });
+        }
+    }
+
+    /// Removes all `PendingLrcAutoQueue` rows for `conversation_id` so stale locked
+    /// rows do not linger.
+    pub fn remove_pending_lrc_rows(
+        &mut self,
+        conversation_id: AIConversationId,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let Some(state) = self.queues.get_mut(&conversation_id) else {
+            return;
+        };
+        let mut removed_ids = Vec::new();
+        state.queue.retain(|row| {
+            if row.origin == QueuedQueryOrigin::PendingLrcAutoQueue {
+                removed_ids.push(row.id);
+                false
+            } else {
+                true
+            }
+        });
+        for query_id in removed_ids {
+            ctx.emit(QueuedQueryEvent::Removed {
+                conversation_id,
+                query_id,
+            });
+        }
+    }
+
     /// Appends `query` to the tail of `conversation_id`'s queue.
     pub fn append(
         &mut self,
@@ -503,7 +565,7 @@ impl QueuedQueryModel {
     /// [`Self::remove_fired_row`] once it has been dispatched or restored to the input.
     pub fn peek_autofire(&self, conversation_id: AIConversationId) -> Option<AutofireAction> {
         let state = self.queues.get(&conversation_id)?;
-        let first = state.queue.first()?;
+        let first = state.queue.first().filter(|row| !row.is_locked())?;
         let first_in_edit_mode = state.editing == Some(first.id);
         Some(if first_in_edit_mode {
             AutofireAction::PopFromEditMode {

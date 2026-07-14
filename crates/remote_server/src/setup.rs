@@ -329,14 +329,59 @@ pub fn remote_server_dir() -> String {
     format!("~/{warp_dir}/remote-server")
 }
 
-/// Returns the remote OS user's directory used for the daemon socket and PID file.
-pub fn remote_server_daemon_dir() -> String {
-    format!("{}/daemon", remote_server_dir())
+/// Returns a short, deterministic directory name for a remote-server
+/// identity key, used for daemon socket and PID paths.
+///
+/// Hashing to 8 hex characters keeps sockets within the Unix `sun_path`
+/// limit across channels.
+pub fn remote_server_identity_dir_name(identity_key: &str) -> String {
+    use std::hash::{Hash, Hasher};
+
+    if identity_key.is_empty() {
+        return "empty".to_string();
+    }
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    identity_key.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())[..8].to_string()
 }
 
-/// Returns the remote OS user's directory used for daemon-owned local data files.
-pub fn remote_server_daemon_data_dir() -> String {
-    format!("{}/data", remote_server_dir())
+/// Percent-encodes an identity key for use in regular filesystem paths.
+fn percent_encode_identity_key(identity_key: &str) -> String {
+    if identity_key.is_empty() {
+        return "empty".to_string();
+    }
+
+    let mut encoded = String::with_capacity(identity_key.len());
+    for byte in identity_key.bytes() {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+/// Returns identity-scoped remote directory used for daemon socket and PID files.
+pub fn remote_server_daemon_dir(identity_key: &str) -> String {
+    format!(
+        "{}/{}",
+        remote_server_dir(),
+        remote_server_identity_dir_name(identity_key)
+    )
+}
+
+/// Returns identity-scoped remote directory used for daemon-owned local data.
+///
+/// Full percent-encoded key avoids sharing persistent data after a hash collision.
+pub fn remote_server_daemon_data_dir(identity_key: &str) -> String {
+    format!(
+        "{}/{}/data",
+        remote_server_dir(),
+        percent_encode_identity_key(identity_key)
+    )
 }
 
 /// Returns a short, deterministic 8-hex-char hash of the app version string.

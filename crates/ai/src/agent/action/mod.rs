@@ -17,12 +17,13 @@ use warp_terminal::model::BlockId;
 
 use crate::agent::action_result::{
     AIAgentActionResultType, AskUserQuestionResult, CallMCPToolResult, CreateDocumentsResult,
-    EditDocumentsResult, FileGlobResult, FileGlobV2Result, GrepResult, InsertReviewCommentsResult,
-    ReadDocumentsResult, ReadFilesResult, ReadMCPResourceResult, ReadShellCommandOutputResult,
-    ReadSkillResult, RequestCommandOutputResult, RequestComputerUseResult, RequestFileEditsResult,
-    RunAgentsResult, SendMessageToAgentResult, StartAgentResult, StartAgentVersion,
-    SuggestNewConversationResult, SuggestPromptResult, TransferShellCommandControlToUserResult,
-    UseComputerResult, WaitForEventsResult, WriteToLongRunningShellCommandResult,
+    EditDocumentsResult, FetchConversationResult, FileGlobResult, FileGlobV2Result, GrepResult,
+    InsertReviewCommentsResult, ReadDocumentsResult, ReadFilesResult, ReadMCPResourceResult,
+    ReadShellCommandOutputResult, ReadSkillResult, RequestCommandOutputResult,
+    RequestComputerUseResult, RequestFileEditsResult, RunAgentsResult, SearchCodebaseResult,
+    SendMessageToAgentResult, StartAgentResult, StartAgentVersion, SuggestNewConversationResult,
+    SuggestPromptResult, TransferShellCommandControlToUserResult, UseComputerResult,
+    WaitForEventsResult, WriteToLongRunningShellCommandResult,
 };
 use crate::agent::{AIAgentCitation, FileLocations};
 use crate::diff_validation::ParsedDiff;
@@ -66,6 +67,8 @@ pub enum AIAgentActionType {
 
     /// AI requested getting the content of some files.
     ReadFiles(ReadFilesRequest),
+
+    SearchCodebase(SearchCodebaseRequest),
 
     /// AI requested a vector of edits. Each edit holds a list of diffs on a single code file.
     RequestFileEdits {
@@ -111,6 +114,7 @@ pub enum AIAgentActionType {
 
     SuggestPrompt(SuggestPromptRequest),
 
+    InitProject,
     OpenCodeReview,
 
     ReadDocuments(ReadDocumentsRequest),
@@ -134,6 +138,10 @@ pub enum AIAgentActionType {
 
     // AI requested to read a skill.
     ReadSkill(ReadSkillRequest),
+
+    FetchConversation {
+        conversation_id: String,
+    },
 
     StartAgent {
         version: StartAgentVersion,
@@ -243,6 +251,10 @@ impl AIAgentActionType {
         matches!(self, Self::ReadFiles(..))
     }
 
+    pub fn is_search_codebase(&self) -> bool {
+        matches!(self, Self::SearchCodebase(..))
+    }
+
     pub fn is_grep(&self) -> bool {
         matches!(self, Self::Grep { .. })
     }
@@ -264,6 +276,9 @@ impl AIAgentActionType {
                 AIAgentActionResultType::RequestFileEdits(RequestFileEditsResult::Cancelled)
             }
             Self::ReadFiles(..) => AIAgentActionResultType::ReadFiles(ReadFilesResult::Cancelled),
+            Self::SearchCodebase(..) => {
+                AIAgentActionResultType::SearchCodebase(SearchCodebaseResult::Cancelled)
+            }
             Self::Grep { .. } => AIAgentActionResultType::Grep(GrepResult::Cancelled),
             Self::FileGlob { .. } => AIAgentActionResultType::FileGlob(FileGlobResult::Cancelled),
             Self::FileGlobV2 { .. } => {
@@ -286,6 +301,7 @@ impl AIAgentActionType {
             Self::SuggestPrompt { .. } => {
                 AIAgentActionResultType::SuggestPrompt(SuggestPromptResult::Cancelled)
             }
+            Self::InitProject => AIAgentActionResultType::InitProject,
             Self::OpenCodeReview => AIAgentActionResultType::OpenCodeReview,
             Self::ReadDocuments(_) => {
                 AIAgentActionResultType::ReadDocuments(ReadDocumentsResult::Cancelled)
@@ -309,6 +325,9 @@ impl AIAgentActionType {
                 AIAgentActionResultType::RequestComputerUse(RequestComputerUseResult::Cancelled)
             }
             Self::ReadSkill(_) => AIAgentActionResultType::ReadSkill(ReadSkillResult::Cancelled),
+            Self::FetchConversation { .. } => {
+                AIAgentActionResultType::FetchConversation(FetchConversationResult::Cancelled)
+            }
             Self::StartAgent { version, .. } => {
                 AIAgentActionResultType::StartAgent(StartAgentResult::Cancelled {
                     version: *version,
@@ -341,6 +360,7 @@ impl AIAgentActionType {
             Self::RequestCommandOutput { .. } => "Running command",
             Self::WriteToLongRunningShellCommand { .. } => "Writing to shell",
             Self::ReadFiles(_) => "Reading files",
+            Self::SearchCodebase(_) => "Searching codebase",
             Self::RequestFileEdits { .. } => "Editing files",
             Self::Grep { .. } => "Searching content",
             Self::FileGlob { .. } | Self::FileGlobV2 { .. } => "Finding files",
@@ -348,6 +368,7 @@ impl AIAgentActionType {
             Self::CallMCPTool { .. } => "Calling MCP tool",
             Self::SuggestNewConversation { .. } => "Suggesting new conversation",
             Self::SuggestPrompt { .. } => "Suggesting prompts",
+            Self::InitProject => "Initializing project",
             Self::OpenCodeReview => "Opening code review",
             Self::ReadDocuments(_) => "Reading documents",
             Self::EditDocuments(_) => "Editing documents",
@@ -357,6 +378,7 @@ impl AIAgentActionType {
             Self::InsertCodeReviewComments { .. } => "Inserting review comments",
             Self::RequestComputerUse(_) => "Requesting computer use",
             Self::ReadSkill(_) => "Reading skill",
+            Self::FetchConversation { .. } => "Fetching conversation",
             Self::StartAgent { .. } => "Starting agent",
             Self::SendMessageToAgent { .. } => "Sending message",
             Self::TransferShellCommandControlToUser { .. } => "Transferring control",
@@ -375,6 +397,7 @@ impl AIAgentActionType {
                 "Write to long running shell command".to_string()
             }
             Self::ReadFiles(_) => "Read files".to_string(),
+            Self::SearchCodebase(_) => "Search codebase".to_string(),
             Self::RequestFileEdits { file_edits, .. } => {
                 let file_names = file_edits.iter().filter_map(|edit| edit.file()).join(", ");
                 format!("Edit {file_names}")
@@ -385,6 +408,7 @@ impl AIAgentActionType {
             Self::CallMCPTool { .. } => "Call mcp tool".to_string(),
             Self::SuggestNewConversation { .. } => "Suggest new conversation".to_string(),
             Self::SuggestPrompt { .. } => "Suggest prompt".to_string(),
+            Self::InitProject => "Init project".to_string(),
             Self::OpenCodeReview => "Open code review".to_string(),
             Self::ReadDocuments(_) => "Read documents".to_string(),
             Self::EditDocuments(_) => "Edit documents".to_string(),
@@ -396,6 +420,7 @@ impl AIAgentActionType {
             }
             Self::RequestComputerUse(_) => "Request computer use".to_string(),
             Self::ReadSkill(_) => "Read skill".to_string(),
+            Self::FetchConversation { .. } => "Fetch conversation".to_string(),
             Self::StartAgent { name, .. } => format!("Start agent: {name}"),
             Self::SendMessageToAgent { subject, .. } => format!("Send message: {subject}"),
             Self::TransferShellCommandControlToUser { .. } => {
@@ -439,6 +464,7 @@ impl Display for AIAgentActionType {
             AIAgentActionType::ReadFiles(request) => {
                 write!(f, "{request}")
             }
+            AIAgentActionType::SearchCodebase(request) => write!(f, "{request}"),
             AIAgentActionType::RequestFileEdits { file_edits, title } => {
                 let file_names = file_edits
                     .iter()
@@ -489,6 +515,7 @@ impl Display for AIAgentActionType {
             AIAgentActionType::SuggestPrompt(request) => {
                 write!(f, "SuggestPrompt: {request:?}")
             }
+            AIAgentActionType::InitProject => write!(f, "InitProject"),
             AIAgentActionType::OpenCodeReview => {
                 write!(f, "OpenCodeReview")
             }
@@ -549,6 +576,9 @@ impl Display for AIAgentActionType {
             }
             AIAgentActionType::ReadSkill(req) => {
                 write!(f, "ReadSkill: {}", req.skill)
+            }
+            AIAgentActionType::FetchConversation { conversation_id } => {
+                write!(f, "FetchConversation: {conversation_id}")
             }
             AIAgentActionType::StartAgent { name, .. } => {
                 write!(f, "StartAgent: {name}")
@@ -653,6 +683,19 @@ impl Display for ReadFilesRequest {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SearchCodebaseRequest {
+    pub query: String,
+    pub partial_paths: Option<Vec<String>>,
+    pub codebase_path: Option<String>,
+}
+
+impl Display for SearchCodebaseRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SearchCodebase: {}", self.query)
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ReadDocumentsRequest {
     pub document_ids: Vec<AIDocumentId>,
 }
@@ -683,7 +726,8 @@ pub struct CreateDocumentsRequest {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UseComputerRequest {
     pub action_summary: String,
-    pub actions: Vec<computer_use::Action>,
+    /// Each action carries the surface (screen or a specific window) it targets.
+    pub actions: Vec<computer_use::TargetedAction>,
     /// If set, a screenshot will be captured after the actions are executed.
     pub screenshot_params: Option<computer_use::ScreenshotParams>,
 }

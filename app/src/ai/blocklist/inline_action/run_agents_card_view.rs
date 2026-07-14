@@ -14,8 +14,8 @@ use ai::agent::orchestration_config::{
 use ai::skills::SkillReference;
 use pathfinder_geometry::vector::vec2f;
 use warpui::elements::{
-    Border, ChildView, Container, CornerRadius, CrossAxisAlignment, Empty, Flex, MainAxisSize,
-    OffsetPositioning, ParentElement, Radius, Stack, Text,
+    Border, ChildAnchor, ChildView, Container, CornerRadius, CrossAxisAlignment, Empty, Flex,
+    OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Stack, Text, Wrap,
 };
 use warpui::keymap::FixedBinding;
 use warpui::{
@@ -43,6 +43,7 @@ use crate::ai::blocklist::inline_action::requested_action::{
 use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
 use crate::appearance::Appearance;
 use crate::menu::{Event as MenuEvent, Menu, MenuItemFields, MenuVariant};
+use crate::report_error;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
 use crate::view_components::action_button::{ButtonSize, KeystrokeSource, NakedTheme};
@@ -568,9 +569,9 @@ impl View for RunAgentsCardView {
             if let AIAgentActionResultType::RunAgents(orchestrate_result) = &result.result {
                 return render_terminal_state(orchestrate_result, appearance, app);
             }
-            log::error!(
-                "Unexpected action result type for orchestrate: {:?}",
-                result.result
+            report_error!(
+                "Unexpected action result type for orchestrate",
+                extra: { "result_type" => ?result.result }
             );
             return Empty::new().finish();
         }
@@ -782,18 +783,22 @@ fn render_agents_section(state: &RunAgentsEditState, app: &AppContext) -> Box<dy
     .with_color(blended_colors::text_disabled(theme, theme.background()))
     .finish();
 
-    let mut pills_row = Flex::row()
+    let pills_row = Wrap::row()
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
-        .with_main_axis_size(MainAxisSize::Min)
-        .with_spacing(4.);
-    for cfg in &state.agent_run_configs {
-        pills_row.add_child(render_static_agent_pill(&cfg.name, app));
-    }
+        .with_spacing(4.)
+        .with_run_spacing(4.)
+        .with_children(
+            state
+                .agent_run_configs
+                .iter()
+                .map(|cfg| render_static_agent_pill(&cfg.name, app)),
+        )
+        .finish();
 
     Flex::column()
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_child(Container::new(label).with_margin_bottom(6.).finish())
-        .with_child(pills_row.finish())
+        .with_child(pills_row)
         .finish()
 }
 

@@ -89,7 +89,7 @@ use crate::view_components::{DismissibleToast, ToastType};
 use crate::workflows::{WorkflowSource, WorkflowType};
 use crate::workspace::ToastStack;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::{cmd_or_ctrl_shift, report_if_error, safe_info, send_telemetry_from_ctx};
+use crate::{cmd_or_ctrl_shift, report_error, report_if_error, safe_info, send_telemetry_from_ctx};
 
 mod details_bar;
 
@@ -835,7 +835,9 @@ impl NotebookView {
                     });
                 }
             }
-            ActiveNotebook::None => log::error!("Tried to save notebook, but none were active"),
+            ActiveNotebook::None => {
+                report_error!("Tried to save notebook, but none were active")
+            }
         }
     }
 
@@ -1759,7 +1761,9 @@ impl NotebookView {
                     });
                 }
             }
-            ActiveNotebook::None => log::error!("Tried to save notebook, but none were active"),
+            ActiveNotebook::None => {
+                report_error!("Tried to save notebook, but none were active")
+            }
         }
     }
 

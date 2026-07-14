@@ -121,7 +121,12 @@ impl View for ExecutionProfileView {
             .as_ref()
             .and_then(|id| llm_preferences.get_llm_info(id))
             .map(|info| info.display_name.clone())
-            .unwrap_or_else(|| crate::t!("settings-exec-profile-auto"));
+            .unwrap_or_else(|| {
+                llm_preferences
+                    .get_default_cli_agent_model(app)
+                    .display_name
+                    .clone()
+            });
 
         // The title model falls back to the base model's display name; matching base means "not set independently".
         let title_model = profile
@@ -167,7 +172,12 @@ impl View for ExecutionProfileView {
             .as_ref()
             .and_then(|id| llm_preferences.get_llm_info(id))
             .map(|info| info.display_name.clone())
-            .unwrap_or_else(|| crate::t!("settings-exec-profile-auto"));
+            .unwrap_or_else(|| {
+                llm_preferences
+                    .get_default_computer_use_model(app)
+                    .display_name
+                    .clone()
+            });
 
         Container::new(
             Flex::column()

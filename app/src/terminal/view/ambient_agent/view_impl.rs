@@ -3,6 +3,7 @@
 use warp_cli::agent::Harness;
 
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
+use crate::ai::agent::RenderableAIError;
 use warpui::prelude::Empty;
 
 use crate::ai::blocklist::{agent_view::AgentViewEntryOrigin, BlocklistAIHistoryModel};
@@ -49,11 +50,11 @@ impl TerminalView {
         };
 
         BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
-            history_model.update_conversation_status_with_error_message(
+            history_model.update_conversation_status_with_error(
                 self.id(),
                 conversation_id,
                 status,
-                error_message,
+                error_message.map(|message| RenderableAIError::other(message, false)),
                 ctx,
             );
         });

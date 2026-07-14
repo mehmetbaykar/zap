@@ -1,6 +1,7 @@
 use std::io;
 use std::sync::Mutex;
 
+use warp_errors::report_error;
 use windows_registry::{Key, CURRENT_USER};
 use windows_result::HRESULT;
 

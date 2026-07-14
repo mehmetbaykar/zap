@@ -33,7 +33,8 @@ use crate::server::telemetry::TelemetryEvent;
 use crate::settings::AutoupdateSettings;
 use crate::workspace::Workspace;
 use crate::{
-    report_if_error, send_telemetry_from_ctx, send_telemetry_sync_from_app_ctx, ChannelState,
+    report_error, report_if_error, send_telemetry_from_ctx, send_telemetry_sync_from_app_ctx,
+    ChannelState,
 };
 
 /// SHA-256 verification shared across all three platforms after an OSS download completes:
@@ -226,7 +227,7 @@ impl AutoupdateState {
             // When the app is activated, enqueue one possible daily check; it also reads the
             // user settings before running.
             let state_handle = WindowManager::handle(ctx);
-            ctx.subscribe_to_model(&state_handle, |me, event, ctx| {
+            ctx.subscribe_to_model(&state_handle, |me, _, event, ctx| {
                 let windowing::StateEvent::ValueChanged { current, previous } = event;
                 if previous.stage == ApplicationStage::Inactive
                     && current.stage == ApplicationStage::Active
@@ -1202,7 +1203,7 @@ pub fn spawn_child_if_necessary(app: &mut AppContext) {
                 log::info!("Terminating app for relaunch. Bye!");
             }
             Err(e) => {
-                log::error!("Error relaunching app after autoupdate: {e:?}");
+                report_error!(e.context("Error relaunching app after autoupdate"));
                 AutoupdateState::handle(app).update(app, |autoupdate_state, ctx| {
                     autoupdate_state.relaunch_failed(ctx);
                 });

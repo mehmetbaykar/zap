@@ -17,7 +17,7 @@ use super::native_preference::NativePreferenceSettings;
 use super::network::NetworkSettings;
 use super::{
     AISettings, AccessibilitySettings, AliasExpansionSettings, AppEditorSettings,
-    AutoupdateSettings, BlockVisibilitySettings, CodeSettings, DebugSettings,
+    AutoupdateSettings, BlockVisibilitySettings, ChangelogSettings, CodeSettings, DebugSettings,
     EmacsBindingsSettings, FontSettings, FontSettingsChangedEvent, GPUSettings, InputBoxType,
     InputModeSettings, InputSettings, LocalControlSettings, PaneSettings,
     SameLinePromptBlockSettings, ScrollSettings, SelectionSettings, SshSettings, ThemeSettings,
@@ -83,6 +83,7 @@ pub fn register_all_settings(ctx: &mut AppContext) {
     NativePreferenceSettings::register(ctx);
     NetworkSettings::register(ctx);
     AutoupdateSettings::register(ctx);
+    ChangelogSettings::register(ctx);
     PreferencesSettings::register(ctx);
     WarpDrivePrivacySettings::register(ctx);
     UserAppInstallDetectionSettings::register(ctx);
@@ -165,6 +166,23 @@ pub fn init(
     } else {
         None
     };
+
+    // Always log a settings-load failure. The GUI additionally surfaces this
+    // via a banner/footer, but headless surfaces (e.g. the TUI) have no such
+    // UI, so the log is the baseline signal. Final user-facing UX is TBD.
+    if let Some(err) = &settings_file_error {
+        match err {
+            super::SettingsFileError::FileParseFailed(detail) => {
+                log::error!("Settings file could not be parsed: {detail}");
+            }
+            super::SettingsFileError::InvalidSettings(keys) => {
+                log::warn!(
+                    "Settings file has invalid values (using defaults for): {}",
+                    keys.join(", ")
+                );
+            }
+        }
+    }
 
     let user_defaults_on_startup = UserDefaultsOnStartup {
         should_restore_session,
@@ -405,6 +423,13 @@ pub fn init_public_user_preferences() -> (user_preferences::Model, Option<user_p
 /// 3. The migration-complete marker is absent from the native store
 ///    (handles the case where a user deletes `settings.toml` to reset).
 fn needs_settings_file_migration(ctx: &AppContext) -> bool {
+    // Migration only applies to the GUI surface, which is the one with legacy
+    // native-store settings to move into its TOML file. Other surfaces (e.g.
+    // the TUI) have nothing to migrate and must never run migration or touch
+    // the shared migration-complete marker.
+    if !settings::settings_mode().should_migrate_native_settings() {
+        return false;
+    }
     needs_settings_file_migration_for_path(ctx, &super::user_preferences_toml_file_path())
 }
 

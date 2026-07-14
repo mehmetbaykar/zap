@@ -7,11 +7,11 @@ use super::*;
 use crate::proto::{
     client_message, delete_file_response, host_scoped_request, read_file_chunk_response,
     resolve_path_response, run_command_response, save_buffer_response, server_message,
-    session_scoped_request, write_file_chunk_response, BundledSkillsSnapshot, ClientMessage,
-    CodebaseIndexStatus, CodebaseIndexStatusState, CodebaseIndexStatusUpdated,
-    CodebaseIndexStatusesSnapshot, DeleteFileResponse, DeleteFileSuccess, ErrorCode,
-    FileSystemEntryKind, GetDiffStateResponse, InitializeResponse, OpenBufferResponse,
-    ReadFileChunkResponse, ReadFileChunkSuccess, ResolvePathResponse, ResolvePathSuccess,
+    session_scoped_request, write_file_chunk_response, ClientMessage, CodebaseIndexStatus,
+    CodebaseIndexStatusState, CodebaseIndexStatusUpdated, CodebaseIndexStatusesSnapshot,
+    DeleteFileResponse, DeleteFileSuccess, ErrorCode, FileSystemEntryKind, GetDiffStateResponse,
+    InitializeResponse, OpenBufferResponse, ReadFileChunkResponse, ReadFileChunkSuccess,
+    RemoteAgentContextSnapshot, RemoteContextFileProto, ResolvePathResponse, ResolvePathSuccess,
     RunCommandResponse, RunCommandSuccess, SaveBufferResponse, SaveBufferSuccess, ServerMessage,
     WriteFile, WriteFileChunkResponse, WriteFileChunkSuccess,
 };
@@ -72,7 +72,7 @@ async fn mock_server_with<F>(
 }
 
 #[tokio::test]
-async fn bundled_skills_snapshot_push_becomes_client_event() {
+async fn remote_agent_context_snapshot_push_becomes_client_event() {
     let (client_stream, server_stream) = tokio::io::duplex(4096);
     let (server_read, server_write) = tokio::io::split(server_stream);
     let (client_read, client_write) = tokio::io::split(client_stream);
@@ -87,15 +87,20 @@ async fn bundled_skills_snapshot_push_becomes_client_event() {
         &mut writer,
         &ServerMessage {
             request_id: String::new(),
-            message: Some(server_message::Message::BundledSkillsSnapshot(
-                BundledSkillsSnapshot {
-                    skills: vec![crate::proto::BundledSkillProto {
-                        id: "test-skill".to_string(),
-                        name: "test-skill".to_string(),
-                        description: "A test skill".to_string(),
-                        path: "/remote/SKILL.md".to_string(),
-                        content: "body".to_string(),
-                        requires_mcp: None,
+            message: Some(server_message::Message::RemoteAgentContextSnapshot(
+                RemoteAgentContextSnapshot {
+                    revision: 7,
+                    home_dir: "/home/user".to_string(),
+                    skills: vec![crate::proto::RemoteSkillProto {
+                        path: "/home/user/.agents/skills/test/SKILL.md".to_string(),
+                        content: "skill content".to_string(),
+                        source: Some(crate::proto::remote_skill_proto::Source::Home(
+                            crate::proto::HomeSkillMetadata {},
+                        )),
+                    }],
+                    global_rules: vec![RemoteContextFileProto {
+                        path: "/home/user/.agents/AGENTS.md".to_string(),
+                        content: "rule content".to_string(),
                     }],
                 },
             )),
@@ -106,11 +111,12 @@ async fn bundled_skills_snapshot_push_becomes_client_event() {
     writer.flush().await.unwrap();
 
     match event_rx.recv().await.unwrap() {
-        ClientEvent::BundledSkillsSnapshotReceived { skills } => {
-            assert_eq!(skills.len(), 1);
-            assert_eq!(skills[0].id, "test-skill");
+        ClientEvent::RemoteAgentContextSnapshotReceived { snapshot } => {
+            assert_eq!(snapshot.revision, 7);
+            assert_eq!(snapshot.skills[0].content, "skill content");
+            assert_eq!(snapshot.global_rules[0].content, "rule content");
         }
-        other => panic!("Expected BundledSkillsSnapshotReceived, got {other:?}"),
+        other => panic!("Expected RemoteAgentContextSnapshotReceived, got {other:?}"),
     }
 }
 

@@ -140,11 +140,6 @@ impl TryFrom<StaticQueryType> for api::request::input::query_with_canned_respons
                     api::request::input::query_with_canned_response::SomethingElse {},
                 ),
             ),
-            StaticQueryType::CustomOnboardingRequest => Ok(
-                api::request::input::query_with_canned_response::Type::CustomOnboardingRequest(
-                    api::request::input::query_with_canned_response::CustomOnboardingRequest {},
-                ),
-            ),
             StaticQueryType::EvaluationSuite => {
                 Err(anyhow::anyhow!("EvaluationSuite StaticQueryType not yet supported").into())
             }
@@ -753,8 +748,10 @@ impl TryFrom<AIAgentActionResult> for api::request::input::user_inputs::user_inp
             AIAgentActionResultType::RequestComputerUse(request_computer_use_result) => Some(
                 convert_request_computer_use_result(request_computer_use_result)?,
             ),
-            // Local child-agent orchestration is not represented by the fork's pinned proto.
-            AIAgentActionResultType::StartAgent(_)
+            // Local-only tools are not represented by the fork's pinned proto.
+            AIAgentActionResultType::SearchCodebase(_)
+            | AIAgentActionResultType::FetchConversation(_)
+            | AIAgentActionResultType::StartAgent(_)
             | AIAgentActionResultType::SendMessageToAgent(_)
             | AIAgentActionResultType::RunAgents(_)
             | AIAgentActionResultType::WaitForEvents(_) => None,

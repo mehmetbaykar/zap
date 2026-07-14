@@ -27,8 +27,8 @@ use crate::ai::agent::api::{self, ServerConversationToken};
 use crate::ai::agent::conversation::{AIConversation, ConversationStatus};
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::{
-    AIAgentActionResult, CancellationReason, PassiveSuggestionResultType, PassiveSuggestionTrigger,
-    PassiveSuggestionTriggerType, RunningCommand,
+    AIAgentActionResult, CancellationOutcome, CancellationReason, PassiveSuggestionResultType,
+    PassiveSuggestionTrigger, PassiveSuggestionTriggerType, RunningCommand,
 };
 use crate::ai::agent::{DocumentContentAttachmentSource, FileContext};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
@@ -478,7 +478,7 @@ impl BlocklistAIController {
         terminal_view_id: EntityId,
         ctx: &mut ModelContext<Self>,
     ) -> Self {
-        ctx.subscribe_to_model(&action_model, move |me, event, ctx| {
+        ctx.subscribe_to_model(&action_model, move |me, _, event, ctx| {
             let BlocklistAIActionEvent::FinishedAction {
                 conversation_id,
                 cancellation_reason,
@@ -487,6 +487,14 @@ impl BlocklistAIController {
             else {
                 return;
             };
+            let cancellation_outcome =
+                cancellation_reason.map(|reason| reason.conversation_outcome());
+            if matches!(
+                cancellation_outcome,
+                Some(CancellationOutcome::FinalizedExternally)
+            ) {
+                return;
+            }
             let action_model = me.action_model.as_ref(ctx);
             if action_model.has_unfinished_actions_for_conversation(*conversation_id) {
                 return;
@@ -523,15 +531,21 @@ impl BlocklistAIController {
                 });
             let has_manual_follow_up = me.pending_passive_follow_ups.contains(conversation_id);
 
-            let is_lrc_command_completed =
-                cancellation_reason.is_some_and(|reason| reason.is_lrc_command_completed());
+            let treat_as_success =
+                matches!(cancellation_outcome, Some(CancellationOutcome::Succeeded));
             let should_trigger_follow_up_request = (!is_passive_code_diff
-                && !is_lrc_command_completed
+                && !treat_as_success
                 && finished_action_results
                     .iter()
                     .any(|result| result.result.should_trigger_request_upon_completion()))
                 || has_manual_follow_up;
             if !should_trigger_follow_up_request {
+                if matches!(
+                    cancellation_outcome,
+                    Some(CancellationOutcome::KeepInProgress)
+                ) {
+                    return;
+                }
                 // We also check if there's an in-flight req, because it's possible that this
                 // subscription callback was queued in response to auto-cancelling pending actions
                 // in the process of constructing a request. In such cases, we don't want to update
@@ -559,7 +573,7 @@ impl BlocklistAIController {
                     let updated_conversation_status = if finished_action_results
                         .iter()
                         .all(|result| result.result.is_successful())
-                        || is_lrc_command_completed
+                        || treat_as_success
                     {
                         ConversationStatus::Success
                     } else {
@@ -597,7 +611,7 @@ impl BlocklistAIController {
             me.send_follow_up_for_conversation(*conversation_id, trigger, ctx);
         });
 
-        ctx.subscribe_to_model(&agent_view_controller, |me, event, ctx| {
+        ctx.subscribe_to_model(&agent_view_controller, |me, _, event, ctx| {
             let AgentViewControllerEvent::ExitedAgentView {
                 conversation_id,
                 final_exchange_count,
@@ -3092,7 +3106,7 @@ impl BlocklistAIController {
         let input_contains_user_query = request_input
             .all_inputs()
             .any(|input| input.is_user_query());
-        ctx.subscribe_to_model(&response_stream, move |me, event, ctx| {
+        ctx.subscribe_to_model(&response_stream, move |me, _, event, ctx| {
             me.handle_response_stream_event(
                 input_contains_user_query,
                 event,
@@ -3249,7 +3263,7 @@ impl BlocklistAIController {
         ctx: &mut ModelContext<Self>,
     ) {
         let stream_for_subscription = stream.clone();
-        ctx.subscribe_to_model(&stream, move |controller, event, ctx| {
+        ctx.subscribe_to_model(&stream, move |controller, _, event, ctx| {
             controller.handle_response_stream_event(false, event, &stream_for_subscription, ctx);
         });
         self.in_flight_response_streams.register_new_stream(
@@ -3285,6 +3299,67 @@ impl BlocklistAIController {
                 action_model.cancel_all_pending_actions(conversation_id, Some(reason), ctx);
             });
             self.set_input_mode_for_cancellation(ctx);
+        }
+    }
+
+    /// Finalizes a conversation as a terminal failure because an agent-issued
+    /// command caused the shell process to exit.
+    pub fn fail_conversation_due_to_shell_exit(
+        &mut self,
+        conversation_id: AIConversationId,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let terminal_view_id = self.terminal_view_id;
+        let history_model = BlocklistAIHistoryModel::handle(ctx);
+
+        let is_in_progress = history_model
+            .as_ref(ctx)
+            .conversation(&conversation_id)
+            .is_some_and(|conversation| conversation.status().is_in_progress());
+        if !is_in_progress {
+            return;
+        }
+
+        let stream_ids = self
+            .in_flight_response_streams
+            .stream_ids_for_conversation(conversation_id, ctx);
+        let had_in_flight_stream = !stream_ids.is_empty();
+        for stream_id in &stream_ids {
+            history_model.update(ctx, |history_model, ctx| {
+                history_model.mark_response_stream_completed_with_error(
+                    RenderableAIError::AgentExitedShell,
+                    false,
+                    stream_id,
+                    conversation_id,
+                    terminal_view_id,
+                    ctx,
+                );
+            });
+            self.try_cancel_pending_response_stream(
+                stream_id,
+                CancellationReason::AgentExitedShell,
+                ctx,
+            );
+        }
+
+        self.action_model.update(ctx, |action_model, ctx| {
+            action_model.cancel_all_pending_actions(
+                conversation_id,
+                Some(CancellationReason::AgentExitedShell),
+                ctx,
+            );
+        });
+
+        if !had_in_flight_stream {
+            history_model.update(ctx, |history_model, ctx| {
+                history_model.update_conversation_status_with_error(
+                    terminal_view_id,
+                    conversation_id,
+                    ConversationStatus::Error,
+                    Some(RenderableAIError::AgentExitedShell),
+                    ctx,
+                );
+            });
         }
     }
 
@@ -3349,7 +3424,7 @@ impl BlocklistAIController {
                         ) {
                             Ok(()) => {
                                 ctx.emit(BlocklistAIHistoryEvent::UpdatedConversationMetadata {
-                                    terminal_view_id: Some(terminal_view_id),
+                                    terminal_surface_id: Some(terminal_view_id),
                                     conversation_id,
                                 });
                             }

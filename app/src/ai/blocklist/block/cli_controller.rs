@@ -23,7 +23,7 @@ use crate::server::telemetry::{CLISubagentControlState, TelemetryEvent};
 use crate::terminal::model::block::BlockId;
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
 use crate::terminal::TerminalModel;
-use crate::BlocklistAIHistoryModel;
+use crate::{report_error, BlocklistAIHistoryModel};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum UserTakeOverReason {
@@ -208,7 +208,7 @@ impl CLISubagentController {
         let history_model = BlocklistAIHistoryModel::handle(ctx);
         ctx.subscribe_to_model(&history_model, Self::handle_history_model_event);
 
-        ctx.subscribe_to_model(action_model, |me, event, ctx| match event {
+        ctx.subscribe_to_model(action_model, |me, _, event, ctx| match event {
             BlocklistAIActionEvent::ActionBlockedOnUserConfirmation(_) => {
                 let mut terminal_model = me.terminal_model.lock();
                 let active_block = terminal_model.block_list_mut().active_block_mut();
@@ -401,7 +401,7 @@ impl CLISubagentController {
             _ => (),
         });
 
-        ctx.subscribe_to_model(model_event_dispatcher, |me, event, ctx| {
+        ctx.subscribe_to_model(model_event_dispatcher, |me, _, event, ctx| {
             if let ModelEvent::BlockCompleted(block_completed_event) = event {
                 let terminal_model = me.terminal_model.lock();
                 let Some(block) = terminal_model
@@ -440,7 +440,7 @@ impl CLISubagentController {
                             me.controller.update(ctx, |controller, ctx| {
                                 controller.cancel_conversation_progress(
                                     conversation_id,
-                                    CancellationReason::OptimisticCLISubagentCompletion,
+                                    CancellationReason::CommandFinishedDuringInlineAgentView,
                                     ctx,
                                 );
                             });
@@ -519,10 +519,14 @@ impl CLISubagentController {
         let interaction_mode_debug = format!("{:?}", active_block.interaction_mode());
         let lrc_state_debug = format!("{:?}", active_block.long_running_control_state());
         if let Err(e) = active_block.take_over_control_for_user(reason.clone()) {
-            log::error!(
-                "Failed to take control for user: {e:?}, reason={reason:?}, \
-                 block_id={block_id:?}, interaction_mode={interaction_mode_debug}, \
-                 lrc_state={lrc_state_debug}"
+            report_error!(
+                anyhow::Error::new(e).context("Failed to take control for user"),
+                extra: {
+                    "reason" => ?reason,
+                    "block_id" => ?block_id,
+                    "interaction_mode" => %interaction_mode_debug,
+                    "lrc_state" => %lrc_state_debug
+                }
             );
             return;
         }
@@ -582,9 +586,9 @@ impl CLISubagentController {
             .and_then(|state| state.user_take_over_reason())
             .is_some_and(|reason| reason.is_transfer_from_agent());
         if let Err(e) = active_block.handoff_control_to_agent() {
-            log::error!(
-                "Failed to handoff control to agent: {e:?}, \
-                 block_id={block_id:?}, lrc_state={lrc_state_debug}"
+            report_error!(
+                anyhow::Error::new(e).context("Failed to handoff control to agent"),
+                extra: { "block_id" => ?block_id, "lrc_state" => %lrc_state_debug }
             );
             return;
         }
@@ -603,7 +607,8 @@ impl CLISubagentController {
                         AgentViewEntryOrigin::LongRunningCommand,
                         ctx,
                     ) {
-                        log::error!("Failed to enter inline agent view for LRC handoff: {e}");
+                        report_error!(anyhow::Error::new(e)
+                            .context("Failed to enter inline agent view for LRC handoff"));
                     }
                 }
             });
@@ -682,11 +687,12 @@ impl CLISubagentController {
 
     fn handle_history_model_event(
         &mut self,
+        _: ModelHandle<BlocklistAIHistoryModel>,
         event: &BlocklistAIHistoryEvent,
         ctx: &mut ModelContext<Self>,
     ) {
         if event
-            .terminal_view_id()
+            .terminal_surface_id()
             .is_some_and(|id| id != self.terminal_view_id)
         {
             return;
@@ -719,7 +725,8 @@ impl CLISubagentController {
                     task_id,
                     *conversation_id,
                 ) {
-                    log::error!("Could not update interaction mode to agent-monitored: {e:?}",);
+                    report_error!(anyhow::Error::new(e)
+                        .context("Could not update interaction mode to agent-monitored"));
                     return;
                 };
 
@@ -749,7 +756,7 @@ impl CLISubagentController {
             }
             BlocklistAIHistoryEvent::UpgradedTask {
                 optimistic_id: old_id,
-                confirmed_task_id: new_id,
+                server_id: new_id,
                 ..
             } => {
                 let block_id =
@@ -772,9 +779,9 @@ impl CLISubagentController {
                                 }
                             }
                             Err(e) => {
-                                log::error!(
-                                    "Tried to upgrade CLISubagent task ID for non-existent block: {e:?}"
-                                );
+                                report_error!(e.context(
+                                    "Tried to upgrade CLISubagent task ID for non-existent block"
+                                ));
                             }
                         }
                     }

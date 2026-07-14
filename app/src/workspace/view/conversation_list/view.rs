@@ -1061,7 +1061,7 @@ impl TypedActionView for ConversationListView {
                 // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed); resolve the
                 // owning terminal view from the local history model instead.
                 let terminal_view_id = BlocklistAIHistoryModel::as_ref(ctx)
-                    .terminal_view_id_for_conversation(&ai_conversation_id);
+                    .terminal_surface_id_for_conversation(&ai_conversation_id);
                 let conversation_title = entry.display.title;
                 ctx.emit(Event::ShowDeleteConfirmationDialog {
                     conversation_id: ai_conversation_id,

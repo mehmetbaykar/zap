@@ -18,7 +18,9 @@ pub(super) mod suggest_prompt;
 pub(super) mod use_computer;
 pub(super) mod wait_for_events;
 
-use ai::agent::action_result::{InsertReviewCommentsResult, RequestCommandOutputResult};
+use ai::agent::action_result::{
+    FetchConversationResult, InsertReviewCommentsResult, RequestCommandOutputResult,
+};
 pub use ask_user_question::AskUserQuestionExecutor;
 pub(crate) use call_mcp_tool::coerce_integer_args;
 use call_mcp_tool::CallMCPToolExecutor;
@@ -81,7 +83,7 @@ use crate::{
         agent::{
             conversation::AIConversationId, AIAgentAction, AIAgentActionId, AIAgentActionResult,
             AIAgentActionResultType, AIAgentActionType, CancellationReason, FileContext,
-            FileLocations, ServerOutputId,
+            FileLocations, SearchCodebaseFailureReason, SearchCodebaseResult, ServerOutputId,
         },
         ambient_agents::AmbientAgentTaskId,
     },
@@ -340,6 +342,22 @@ impl BlocklistAIActionExecutor {
             .map(|running| &running.action)
     }
 
+    /// Returns the action ID of any running WaitForEvents action for the
+    /// given conversation. There is at most one because WaitForEvents is
+    /// exclusive within a turn.
+    pub(super) fn find_running_wait_for_events(
+        &self,
+        conversation_id: AIConversationId,
+    ) -> Option<AIAgentActionId> {
+        self.async_executing_actions
+            .iter()
+            .find_map(|(action_id, running)| {
+                (running.conversation_id == conversation_id
+                    && matches!(&running.action.action, AIAgentActionType::WaitForEvents(_)))
+                .then(|| action_id.clone())
+            })
+    }
+
     pub fn shell_command_executor(&self) -> &ModelHandle<ShellCommandExecutor> {
         &self.shell_command_executor
     }
@@ -368,7 +386,9 @@ impl BlocklistAIActionExecutor {
 
     pub fn action_phase(&self, action: &AIAgentAction, ctx: &AppContext) -> RunningActionPhase {
         match &action.action {
-            AIAgentActionType::ReadFiles(..) | AIAgentActionType::ReadSkill(_) => {
+            AIAgentActionType::ReadFiles(..)
+            | AIAgentActionType::SearchCodebase(..)
+            | AIAgentActionType::ReadSkill(_) => {
                 RunningActionPhase::Parallel(ParallelExecutionPolicy::ReadOnlyLocalContext)
             }
             AIAgentActionType::Grep { .. }
@@ -426,6 +446,9 @@ impl BlocklistAIActionExecutor {
             AIAgentActionType::ReadFiles(..) => self
                 .read_files_executor
                 .update(ctx, |executor, ctx| executor.preprocess_action(input, ctx)),
+            AIAgentActionType::SearchCodebase(_)
+            | AIAgentActionType::InitProject
+            | AIAgentActionType::FetchConversation { .. } => futures::future::ready(()).boxed(),
             AIAgentActionType::Grep { .. } => self
                 .grep_executor
                 .update(ctx, |executor, ctx| executor.preprocess_action(input, ctx)),
@@ -601,6 +624,25 @@ impl BlocklistAIActionExecutor {
                 .read_files_executor
                 .update(ctx, |executor, ctx| executor.execute(input, ctx))
                 .into(),
+            AIAgentActionType::SearchCodebase(_) => ActionExecution::<()>::Sync(
+                AIAgentActionResultType::SearchCodebase(SearchCodebaseResult::Failed {
+                    reason: SearchCodebaseFailureReason::CodebaseNotIndexed,
+                    message: "Local codebase search is unavailable because no local index is configured. Use file glob, grep, or read files instead."
+                        .to_owned(),
+                }),
+            )
+            .into(),
+            AIAgentActionType::InitProject => {
+                ActionExecution::<()>::Sync(AIAgentActionResultType::InitProject).into()
+            }
+            AIAgentActionType::FetchConversation { conversation_id } => {
+                ActionExecution::<()>::Sync(AIAgentActionResultType::FetchConversation(
+                    FetchConversationResult::Error(format!(
+                        "Conversation {conversation_id} is not available from local history"
+                    )),
+                ))
+                .into()
+            }
             AIAgentActionType::Grep { .. } => self
                 .grep_executor
                 .update(ctx, |executor, ctx| executor.execute(input, ctx))
@@ -806,6 +848,17 @@ impl BlocklistAIActionExecutor {
         }
     }
 
+    /// Drops executor-held per-action state after an action reaches a terminal result.
+    pub(super) fn discard_action_state(
+        &mut self,
+        action_id: &AIAgentActionId,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.request_file_edits_executor.update(ctx, |executor, _| {
+            executor.discard_pending(action_id);
+        });
+    }
+
     pub fn cancel_all_running_async_actions_for_conversation(
         &mut self,
         conversation_id: AIConversationId,
@@ -835,6 +888,9 @@ impl BlocklistAIActionExecutor {
             AIAgentActionType::ReadFiles(_) => self
                 .read_files_executor
                 .update(ctx, |executor, ctx| executor.should_autoexecute(input, ctx)),
+            AIAgentActionType::SearchCodebase(_)
+            | AIAgentActionType::InitProject
+            | AIAgentActionType::FetchConversation { .. } => true,
             AIAgentActionType::RequestFileEdits { .. } => self
                 .request_file_edits_executor
                 .update(ctx, |executor, ctx| executor.should_autoexecute(input, ctx)),

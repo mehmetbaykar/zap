@@ -2,9 +2,7 @@
 //! For now this provides a simple runner that echoes the received command.
 
 use std::fmt::Write;
-use std::future::Future;
 use std::path::Path;
-use std::pin::Pin;
 
 use crate::ai::agent_sdk::driver::harness::{harness_kind, HarnessKind};
 use crate::ai::agent_sdk::driver::{AgentDriverOptions, AgentRunPrompt, Task};
@@ -15,9 +13,7 @@ use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::workflows::workflow::Workflow;
 use anyhow::Context;
 use warp_cli::{
-    agent::{AgentCommand, AgentProfileCommand, OutputFormat},
-    mcp::MCPCommand,
-    model::ModelCommand,
+    agent::{AgentCommand, OutputFormat},
     CliCommand, GlobalOptions,
 };
 use warp_core::features::FeatureFlag;
@@ -26,10 +22,7 @@ use warp_logging::log_file_path;
 use warpui::ModelSpawner;
 use warpui::{platform::TerminationMode, AppContext, SingletonEntity};
 
-use crate::{
-    ai::ambient_agents::task::HarnessConfig, ai::ambient_agents::AgentConfigSnapshot,
-    auth::AuthStateProvider,
-};
+use crate::{ai::ambient_agents::task::HarnessConfig, ai::ambient_agents::AgentConfigSnapshot};
 use driver::AgentDriverError;
 
 use crate::ai::skills::{
@@ -283,20 +276,6 @@ impl AgentDriverRunner {
         args: RunAgentArgs,
         output_format: OutputFormat,
     ) -> Result<(), AgentDriverError> {
-        // Ensure we've synced team state before starting the driver.
-        Self::refresh_team_metadata(&foreground).await?;
-
-        // Wait for Zap Drive to sync before building the task config, since
-        // prompt resolution (SavedPrompt -> workflow lookup) depends on it.
-        if foreground
-            .spawn(|_, ctx| common::refresh_warp_drive(ctx))
-            .await?
-            .await
-            .is_err()
-        {
-            return Err(AgentDriverError::WarpDriveSyncFailed);
-        }
-
         let result: Result<(), AgentDriverError> = async {
             let (driver_options, task) =
                 Self::build_driver_options_and_task(&foreground, args).await?;
@@ -339,20 +318,6 @@ impl AgentDriverRunner {
         .await;
 
         result
-    }
-
-    async fn refresh_team_metadata(
-        foreground: &ModelSpawner<Self>,
-    ) -> Result<(), AgentDriverError> {
-        foreground
-            .spawn(
-                |_, ctx| -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-                    Box::pin(common::refresh_workspace_metadata(ctx))
-                },
-            )
-            .await?
-            .await
-            .map_err(|_| AgentDriverError::TeamMetadataRefreshTimeout)
     }
 
     /// Resolve the skill spec from args, if one was provided.
@@ -487,49 +452,11 @@ impl AgentDriverRunner {
     }
 }
 
-/// Returns `true` if the given CLI command requires authentication.
-fn command_requires_auth(command: &CliCommand) -> bool {
-    match command {
-        CliCommand::Agent(agent_cmd) => match agent_cmd {
-            AgentCommand::Run { .. } => true,
-            AgentCommand::Profile(sub) => match sub {
-                AgentProfileCommand::List => true,
-            },
-            AgentCommand::List(_) => true,
-        },
-        CliCommand::MCP(mcp_cmd) => match mcp_cmd {
-            MCPCommand::List => true,
-        },
-        CliCommand::Model(model_cmd) => match model_cmd {
-            ModelCommand::List => true,
-        },
-        CliCommand::Whoami => true,
-        CliCommand::Provider(_) => true,
-    }
-}
-
-/// Launch a CLI command, checking authentication first if needed.
-///
-/// If auth is not required, dispatches the command immediately.
-/// If auth is required and the local user is available, dispatches immediately.
 fn launch_command(
     ctx: &mut AppContext,
     command: CliCommand,
     global_options: GlobalOptions,
 ) -> anyhow::Result<()> {
-    let requires_auth = command_requires_auth(&command);
-
-    if !requires_auth {
-        return dispatch_command(ctx, command, global_options);
-    }
-
-    let auth_state = AuthStateProvider::handle(ctx).as_ref(ctx).get();
-    if !auth_state.is_logged_in() {
-        return Err(anyhow::anyhow!(
-            "No local user is available. Restart Zap and try again."
-        ));
-    }
-
     dispatch_command(ctx, command, global_options)
 }
 

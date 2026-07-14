@@ -986,7 +986,7 @@ impl BlockList {
         let gap_height = if let Some(height) = self.next_gap_height() {
             height
         } else {
-            log::error!("Expected gap height to be set before clear");
+            report_error!("Expected gap height to be set before clear");
             // Since the gap was removed from the block_heights tree, clear active_gap.
             // We do not expect to be in this state, but if we are, we shouldn't
             // leave the model inconsistent.
@@ -1269,7 +1269,7 @@ impl BlockList {
     }
 
     /// Takes and clears the set of dirty rich content view IDs.
-    pub(in crate::terminal) fn take_dirty_rich_content_items(&mut self) -> HashSet<EntityId> {
+    pub fn take_dirty_rich_content_items(&mut self) -> HashSet<EntityId> {
         std::mem::take(&mut self.dirty_rich_content_items)
     }
 
@@ -1717,6 +1717,11 @@ impl BlockList {
         &self.agent_view_state
     }
 
+    /// Returns the selected conversation cached in the terminal render snapshot.
+    pub fn active_conversation_id(&self) -> Option<AIConversationId> {
+        self.agent_view_state.active_conversation_id()
+    }
+
     /// Sets the agent view state for this blocklist.
     ///
     /// With `FeatureFlag::AgentView` enabled, if the state is active, only blocks corresponding to
@@ -1909,8 +1914,9 @@ impl BlockList {
         let block_height = if let Some(block) = self.block_at(block_index) {
             block.height(&self.agent_view_state).into()
         } else {
-            log::error!(
-                "Tried to update height of block at {block_index:?}, but no such block exists"
+            report_error!(
+                "Tried to update height of block, but no such block exists",
+                extra: { "block_index" => ?block_index }
             );
             return;
         };
@@ -1968,7 +1974,7 @@ impl BlockList {
 
                 Some(tree_before_gap)
             } else {
-                log::error!("a gap is not contained at the active gap index");
+                report_error!("a gap is not contained at the active gap index");
                 None
             }
         });
@@ -2241,7 +2247,7 @@ impl BlockList {
     fn update_blocks_and_sumtree<F, G>(
         &mut self,
         subshell_separator_height: Option<f32>,
-        rich_content_heights: Option<&HashMap<EntityId, f64>>,
+        rich_content_heights: Option<&HashMap<EntityId, BlockHeight>>,
         block_update_fn: F,
         gap_update_fn: G,
     ) where
@@ -2269,7 +2275,7 @@ impl BlockList {
                                 block.height(agent_view_state).into(),
                             ));
                         } else {
-                            log::error!("invalid block index in block heights");
+                            report_error!("invalid block index in block heights");
                         }
                     }
                     BlockHeightItem::Gap(_) => {
@@ -2311,16 +2317,10 @@ impl BlockList {
                             should_hide: false,
                         }
                         .should_hide_for_agent_view_state(agent_view_state);
-                        let updated_height = if let Some(updated_height) =
-                            rich_content_heights.and_then(|heights| heights.get(view_id))
-                        {
-                            updated_height
-                                .into_pixels()
-                                .to_lines(self.size().cell_height_px())
-                                .into()
-                        } else {
-                            *last_laid_out_height
-                        };
+                        let updated_height = rich_content_heights
+                            .and_then(|heights| heights.get(view_id))
+                            .copied()
+                            .unwrap_or(*last_laid_out_height);
 
                         new_sum_tree.push(BlockHeightItem::RichContent(RichContentItem {
                             content_type: *content_type,
@@ -2435,7 +2435,28 @@ impl BlockList {
         );
     }
 
+    /// Updates rich-content heights from GUI pixel measurements, converting to
+    /// the canonical line unit at the boundary.
     pub fn update_rich_content_heights(&mut self, updated_heights: &HashMap<EntityId, f64>) {
+        let cell_height_px = self.size().cell_height_px();
+        let updated_heights = updated_heights
+            .iter()
+            .map(|(view_id, height)| {
+                (
+                    *view_id,
+                    height.into_pixels().to_lines(cell_height_px).into(),
+                )
+            })
+            .collect::<HashMap<EntityId, BlockHeight>>();
+        self.update_rich_content_heights_in_lines(&updated_heights);
+    }
+
+    /// Updates rich-content heights already measured in the canonical line unit
+    /// (used by the TUI, whose layout is row-based).
+    pub fn update_rich_content_heights_in_lines(
+        &mut self,
+        updated_heights: &HashMap<EntityId, BlockHeight>,
+    ) {
         self.update_blocks_and_sumtree(None, Some(updated_heights), |_| {}, |_| {});
     }
 
@@ -3322,7 +3343,6 @@ impl BlockList {
             self.event_proxy
                 .send_terminal_event(TerminalEvent::BootstrapPrecmdDone);
         }
-
         // If a previous Ctrl+L was deferred (the active block's prompt had not arrived at the
         // time) and the remote prompt has now been repainted, we can actually clear the screen
         // once. If the active block is still unsuitable (e.g. consecutive in-band commands are
@@ -3681,7 +3701,7 @@ impl BlockList {
 
 impl ansi::Handler for BlockList {
     fn set_title(&mut self, _: Option<String>) {
-        log::error!("Handler method BlockList::set_title should never be called. This should be handled by TerminalModel.");
+        report_error!("Handler method BlockList::set_title should never be called. This should be handled by TerminalModel.");
     }
 
     fn set_cursor_style(&mut self, style: Option<CursorStyle>) {
@@ -3959,11 +3979,11 @@ impl ansi::Handler for BlockList {
     }
 
     fn push_title(&mut self) {
-        log::error!("Handler method BlockList::push_title should never be called. This should be handled by TerminalModel.");
+        report_error!("Handler method BlockList::push_title should never be called. This should be handled by TerminalModel.");
     }
 
     fn pop_title(&mut self) {
-        log::error!("Handler method BlockList::pop_title should never be called. This should be handled by TerminalModel.");
+        report_error!("Handler method BlockList::pop_title should never be called. This should be handled by TerminalModel.");
     }
 
     fn text_area_size_pixels<W: io::Write>(&mut self, writer: &mut W) {
@@ -4189,3 +4209,4 @@ impl ToTotalIndex for BlockIndex {
 mod tests;
 #[cfg(test)]
 pub use self::tests::insert_block;
+use crate::report_error;

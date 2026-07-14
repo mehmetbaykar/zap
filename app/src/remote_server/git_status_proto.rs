@@ -10,7 +10,6 @@
 use super::proto;
 use crate::code_review::diff_state::DiffStats;
 use crate::code_review::git_repo_model::GitStatusMetadata;
-#[cfg(feature = "local_fs")]
 use crate::context_chips::display_chip::GitBranchTrackingStatus;
 use crate::util::git::RepositoryInfo;
 
@@ -38,6 +37,10 @@ impl From<&GitStatusMetadata> for proto::GitStatusMetadata {
             current_branch_name: metadata.current_branch_name.clone(),
             main_branch_name: metadata.main_branch_name.clone(),
             stats_against_head: Some((&metadata.stats_against_head).into()),
+            tracking_upstream: metadata.branch_tracking_status.upstream.clone(),
+            tracking_ahead: metadata.branch_tracking_status.ahead,
+            tracking_behind: metadata.branch_tracking_status.behind,
+            tracking_counts_available: metadata.branch_tracking_status.counts_available,
         }
     }
 }
@@ -54,11 +57,19 @@ impl TryFrom<&proto::GitStatusMetadata> for GitStatusMetadata {
             current_branch_name: metadata.current_branch_name.clone(),
             main_branch_name: metadata.main_branch_name.clone(),
             stats_against_head: DiffStats::from(stats),
-            #[cfg(feature = "local_fs")]
-            branch_tracking_status: GitBranchTrackingStatus::without_counts(
-                metadata.current_branch_name.clone(),
-                None,
-            ),
+            branch_tracking_status: if metadata.tracking_counts_available {
+                GitBranchTrackingStatus::new(
+                    metadata.current_branch_name.clone(),
+                    metadata.tracking_upstream.clone(),
+                    metadata.tracking_ahead,
+                    metadata.tracking_behind,
+                )
+            } else {
+                GitBranchTrackingStatus::without_counts(
+                    metadata.current_branch_name.clone(),
+                    metadata.tracking_upstream.clone(),
+                )
+            },
         })
     }
 }

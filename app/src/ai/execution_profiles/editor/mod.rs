@@ -632,7 +632,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.base_model.clone(),
                         |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetBaseModel { id },
-                        |prefs| prefs.get_default_base_model().id.clone(),
+                        |prefs, _| prefs.get_default_base_model().id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -646,7 +646,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.cli_agent_model.clone(),
                         |prefs| prefs.get_cli_agent_llm_choices().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetFullTerminalUseModel { id },
-                        |prefs| prefs.get_default_cli_agent_model().id.clone(),
+                        |prefs, app| prefs.get_default_cli_agent_model(app).id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -655,7 +655,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.title_model.clone(),
                         |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetTitleModel { id },
-                        |prefs| prefs.get_default_base_model().id.clone(),
+                        |prefs, _| prefs.get_default_base_model().id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -664,7 +664,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.active_ai_model.clone(),
                         |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetActiveAiModel { id },
-                        |prefs| prefs.get_default_base_model().id.clone(),
+                        |prefs, _| prefs.get_default_base_model().id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -673,7 +673,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.next_command_model.clone(),
                         |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetNextCommandModel { id },
-                        |prefs| prefs.get_default_base_model().id.clone(),
+                        |prefs, _| prefs.get_default_base_model().id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -682,7 +682,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.computer_use_model.clone(),
                         |prefs| prefs.get_computer_use_llm_choices().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetComputerUseModel { id },
-                        |prefs| prefs.get_default_computer_use_model().id.clone(),
+                        |prefs, app| prefs.get_default_computer_use_model(app).id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -693,7 +693,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.base_model.clone(),
                         |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetBaseModel { id },
-                        |prefs| prefs.get_default_base_model().id.clone(),
+                        |prefs, _| prefs.get_default_base_model().id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -703,7 +703,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.title_model.clone(),
                         |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetTitleModel { id },
-                        |prefs| prefs.get_default_base_model().id.clone(),
+                        |prefs, _| prefs.get_default_base_model().id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -712,7 +712,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.active_ai_model.clone(),
                         |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetActiveAiModel { id },
-                        |prefs| prefs.get_default_base_model().id.clone(),
+                        |prefs, _| prefs.get_default_base_model().id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -721,7 +721,7 @@ impl ExecutionProfileEditorView {
                         current_permissions.next_command_model.clone(),
                         |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                         |id| ExecutionProfileEditorViewAction::SetNextCommandModel { id },
-                        |prefs| prefs.get_default_base_model().id.clone(),
+                        |prefs, _| prefs.get_default_base_model().id.clone(),
                         &me.upgrade_footer_mouse_state,
                         ctx,
                     );
@@ -749,7 +749,7 @@ impl ExecutionProfileEditorView {
                     current_permissions.base_model.clone(),
                     |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                     |id| ExecutionProfileEditorViewAction::SetBaseModel { id },
-                    |prefs| prefs.get_default_base_model().id.clone(),
+                    |prefs, _| prefs.get_default_base_model().id.clone(),
                     &me.upgrade_footer_mouse_state,
                     ctx,
                 );
@@ -758,7 +758,7 @@ impl ExecutionProfileEditorView {
                     current_permissions.title_model.clone(),
                     |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                     |id| ExecutionProfileEditorViewAction::SetTitleModel { id },
-                    |prefs| prefs.get_default_base_model().id.clone(),
+                    |prefs, _| prefs.get_default_base_model().id.clone(),
                     &me.upgrade_footer_mouse_state,
                     ctx,
                 );
@@ -767,7 +767,7 @@ impl ExecutionProfileEditorView {
                     current_permissions.active_ai_model.clone(),
                     |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                     |id| ExecutionProfileEditorViewAction::SetActiveAiModel { id },
-                    |prefs| prefs.get_default_base_model().id.clone(),
+                    |prefs, _| prefs.get_default_base_model().id.clone(),
                     &me.upgrade_footer_mouse_state,
                     ctx,
                 );
@@ -776,7 +776,7 @@ impl ExecutionProfileEditorView {
                     current_permissions.next_command_model.clone(),
                     |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
                     |id| ExecutionProfileEditorViewAction::SetNextCommandModel { id },
-                    |prefs| prefs.get_default_base_model().id.clone(),
+                    |prefs, _| prefs.get_default_base_model().id.clone(),
                     &me.upgrade_footer_mouse_state,
                     ctx,
                 );
@@ -875,7 +875,7 @@ impl ExecutionProfileEditorView {
             current_permissions.base_model.clone(),
             |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
             |id| ExecutionProfileEditorViewAction::SetBaseModel { id },
-            |prefs| prefs.get_default_base_model().id.clone(),
+            |prefs, _| prefs.get_default_base_model().id.clone(),
             &self.upgrade_footer_mouse_state,
             ctx,
         );
@@ -889,7 +889,7 @@ impl ExecutionProfileEditorView {
             current_permissions.cli_agent_model.clone(),
             |prefs| prefs.get_cli_agent_llm_choices().collect_vec(),
             |id| ExecutionProfileEditorViewAction::SetFullTerminalUseModel { id },
-            |prefs| prefs.get_default_cli_agent_model().id.clone(),
+            |prefs, app| prefs.get_default_cli_agent_model(app).id.clone(),
             &self.upgrade_footer_mouse_state,
             ctx,
         );
@@ -898,7 +898,7 @@ impl ExecutionProfileEditorView {
             current_permissions.title_model.clone(),
             |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
             |id| ExecutionProfileEditorViewAction::SetTitleModel { id },
-            |prefs| prefs.get_default_base_model().id.clone(),
+            |prefs, _| prefs.get_default_base_model().id.clone(),
             &self.upgrade_footer_mouse_state,
             ctx,
         );
@@ -907,7 +907,7 @@ impl ExecutionProfileEditorView {
             current_permissions.active_ai_model.clone(),
             |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
             |id| ExecutionProfileEditorViewAction::SetActiveAiModel { id },
-            |prefs| prefs.get_default_base_model().id.clone(),
+            |prefs, _| prefs.get_default_base_model().id.clone(),
             &self.upgrade_footer_mouse_state,
             ctx,
         );
@@ -916,7 +916,7 @@ impl ExecutionProfileEditorView {
             current_permissions.next_command_model.clone(),
             |prefs| prefs.get_base_llm_choices_for_agent_mode().collect_vec(),
             |id| ExecutionProfileEditorViewAction::SetNextCommandModel { id },
-            |prefs| prefs.get_default_base_model().id.clone(),
+            |prefs, _| prefs.get_default_base_model().id.clone(),
             &self.upgrade_footer_mouse_state,
             ctx,
         );
@@ -925,7 +925,7 @@ impl ExecutionProfileEditorView {
             current_permissions.computer_use_model.clone(),
             |prefs| prefs.get_computer_use_llm_choices().collect_vec(),
             |id| ExecutionProfileEditorViewAction::SetComputerUseModel { id },
-            |prefs| prefs.get_default_computer_use_model().id.clone(),
+            |prefs, app| prefs.get_default_computer_use_model(app).id.clone(),
             &self.upgrade_footer_mouse_state,
             ctx,
         );
@@ -1102,7 +1102,7 @@ impl ExecutionProfileEditorView {
     ) where
         G: for<'a> FnOnce(&'a LLMPreferences) -> Vec<&'a LLMInfo>,
         A: Fn(LLMId) -> ExecutionProfileEditorViewAction,
-        D: FnOnce(&LLMPreferences) -> LLMId,
+        D: FnOnce(&LLMPreferences, &AppContext) -> LLMId,
     {
         menu.update(ctx, |dropdown, ctx| {
             let disabled_by_ai_toggle = !AISettings::as_ref(ctx).is_any_ai_enabled(ctx);
@@ -1133,7 +1133,7 @@ impl ExecutionProfileEditorView {
 
             let llm_prefs = LLMPreferences::handle(ctx);
             let llm_prefs = llm_prefs.as_ref(ctx);
-            let model_to_select = profile_model.unwrap_or_else(|| get_default_id(llm_prefs));
+            let model_to_select = profile_model.unwrap_or_else(|| get_default_id(llm_prefs, ctx));
             dropdown.set_selected_by_action(create_action(model_to_select), ctx);
             ctx.notify();
         });
@@ -1175,7 +1175,7 @@ impl ExecutionProfileEditorView {
 
             let model_to_select = profile_coding_model.unwrap_or_else(|| {
                 LLMPreferences::as_ref(ctx)
-                    .get_default_coding_model()
+                    .get_default_coding_model(ctx)
                     .id
                     .clone()
             });

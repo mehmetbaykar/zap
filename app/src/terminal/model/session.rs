@@ -67,6 +67,8 @@ pub enum ReadHistoryContentsError {
 // SessionId is defined in warp_core and re-exported here for backward compatibility.
 pub use warp_core::SessionId;
 
+use crate::report_error;
+
 /// Information about the sessions within a given terminal pane/top-level
 /// shell.
 ///
@@ -140,7 +142,7 @@ impl Sessions {
         #[cfg(feature = "local_tty")]
         if FeatureFlag::SshRemoteServer.is_enabled() {
             let mgr = RemoteServerManager::handle(ctx);
-            ctx.subscribe_to_model(&mgr, |sessions, event, ctx| match event {
+            ctx.subscribe_to_model(&mgr, |sessions, _, event, ctx| match event {
                 RemoteServerManagerEvent::SessionConnected {
                     session_id: sid,
                     host_id,
@@ -169,7 +171,7 @@ impl Sessions {
                 | RemoteServerManagerEvent::SessionConnectionFailed { .. }
                 | RemoteServerManagerEvent::HostConnected { .. }
                 | RemoteServerManagerEvent::HostDisconnected { .. }
-                | RemoteServerManagerEvent::BundledSkillsSnapshot { .. }
+                | RemoteServerManagerEvent::RemoteAgentContextSnapshot { .. }
                 | RemoteServerManagerEvent::NavigatedToDirectory { .. }
                 | RemoteServerManagerEvent::RepoMetadataSnapshot { .. }
                 | RemoteServerManagerEvent::RepoMetadataUpdated { .. }
@@ -229,7 +231,7 @@ impl Sessions {
             .unwrap_or(false)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn new_for_test() -> Self {
         let (executor_command_tx, _executor_command_rx) = async_channel::unbounded();
         Self {
@@ -488,9 +490,9 @@ impl Sessions {
         if let Some(in_band_command_output_tx) = self.in_band_command_output_tx_map.get(&session_id)
         {
             if let Err(e) = in_band_command_output_tx.try_send(event) {
-                log::error!(
-                    "Failed to send ExecutedExecutorCommandEvent to InBandCommandExecutor: {e:?}"
-                );
+                report_error!(anyhow::Error::new(e).context(
+                    "Failed to send ExecutedExecutorCommandEvent to InBandCommandExecutor"
+                ));
             }
         }
     }
@@ -727,7 +729,10 @@ impl SessionInfo {
         let shell_type = match ShellType::from_name(bootstrapped_value.shell.as_str()) {
             Some(value) => {
                 if value != self.shell.shell_type() {
-                    log::error!("Received ShellType {:?} in BootstrappedValue that conflicts with pending ShellType {:?}", value, self.shell.shell_type());
+                    report_error!(
+                        "Received ShellType in BootstrappedValue that conflicts with pending ShellType",
+                        extra: { "value" => ?value, "pending" => ?self.shell.shell_type() }
+                    );
                 }
                 value
             }
@@ -1374,7 +1379,8 @@ impl Session {
                 {
                     Ok(contents) => contents,
                     Err(e) => {
-                        log::error!("Failed to read history contents for file: {e:?}");
+                        report_error!(anyhow::Error::new(e)
+                            .context("Failed to read history contents for file"));
                         continue;
                     }
                 };
@@ -1533,7 +1539,7 @@ impl Session {
                 )
             }
             CommandExitStatus::Failure => {
-                log::error!("Failed to parse history file from file");
+                report_error!("Failed to parse history file from file");
                 None
             }
         }

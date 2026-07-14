@@ -282,7 +282,7 @@ impl AIDocumentModel {
         let editor = Self::create_editor_model(content, file_link_resolution_context, ctx);
 
         // Subscribe to editor content changes
-        ctx.subscribe_to_model(&editor, move |me, event, ctx| {
+        ctx.subscribe_to_model(&editor, move |me, _, event, ctx| {
             me.handle_editor_event(&id, event, ctx);
         });
 

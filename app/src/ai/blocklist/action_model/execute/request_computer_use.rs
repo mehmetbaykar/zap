@@ -1,6 +1,7 @@
 use ai::agent::action_result::{AIAgentActionResultType, RequestComputerUseResult};
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use warp_core::features::FeatureFlag;
 use warpui::{Entity, EntityId, ModelContext, SingletonEntity};
 
 use super::{ActionExecution, AnyActionExecution, ExecuteActionInput, PreprocessActionInput};
@@ -46,7 +47,13 @@ impl RequestComputerUseExecutor {
         ActionExecution::new_async(
             async move {
                 let result = actor
-                    .perform_actions(&[], computer_use::Options { screenshot_params })
+                    .perform_actions(
+                        &[],
+                        computer_use::Options {
+                            screenshot_params,
+                            background_enabled: FeatureFlag::BackgroundComputerUse.is_enabled(),
+                        },
+                    )
                     .await;
                 (result, platform)
             },

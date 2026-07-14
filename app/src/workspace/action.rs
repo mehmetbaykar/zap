@@ -175,6 +175,10 @@ pub enum WorkspaceAction {
     ToggleTabGroupCollapsed(TabGroupId),
     /// Opens an inline editor over the given group's header for renaming.
     RenameTabGroup(TabGroupId),
+    /// Cancels any active rename (tab, pane, or group) without committing the
+    /// new name. Dispatched when clicking on the vtab panel background while a
+    /// rename editor is open.
+    CancelActiveRename,
     /// Creates a new tab group containing the tab at the given index.
     NewTabGroupFromTab(usize),
     /// Moves the tab at `tab_index` into `group_id`, appending it to the
@@ -199,12 +203,20 @@ pub enum WorkspaceAction {
     ClearTabMultiSelection,
     /// Creates a new tab group from the current tab multi-selection.
     NewTabGroupFromSelectedTabs,
+    /// Context-aware "create group" entry point for the keybinding: groups
+    /// the multi-selection when 2+ tabs are selected, otherwise groups the
+    /// active tab.
+    NewTabGroupFromActiveOrSelectedTabs,
     /// Moves every selected tab into `group_id`.
     MoveSelectedTabsToGroup {
         group_id: TabGroupId,
     },
     /// Removes every selected tab from its group (requires a single shared group).
     RemoveSelectedTabsFromGroup,
+    /// Context-aware "remove from group" entry point for the keybinding:
+    /// removes the multi-selection from its shared group when 2+ tabs are
+    /// selected, otherwise removes the active tab.
+    RemoveActiveOrSelectedTabsFromGroup,
     ToggleTabGroupRightClickMenu {
         group_id: TabGroupId,
         anchor: TabContextMenuAnchor,
@@ -221,12 +233,20 @@ pub enum WorkspaceAction {
     PinTab(usize),
     /// Unpins the tab at the given index.
     UnpinTab(usize),
+    /// Pins the active tab.
+    PinActiveTab,
+    /// Unpins the active tab.
+    UnpinActiveTab,
     /// Pins the entire tab group: sets the group as pinned
     /// and moves the group block to the end of the pinned region.
     PinTabGroup(TabGroupId),
     /// Unpins the entire tab group: clears the pinned flag on the group
     /// and moves the group block to the start of the unpinned region.
     UnpinTabGroup(TabGroupId),
+    /// Pins the active tab's group.
+    PinActiveTabGroup,
+    /// Unpins the active tab's group.
+    UnpinActiveTabGroup,
     AddDefaultTab,
     AddTerminalTab {
         hide_homepage: bool,
@@ -318,6 +338,12 @@ pub enum WorkspaceAction {
         color: AnsiColorIdentifier,
         tab_index: usize,
     },
+    /// Toggles the color for a tab group. Clears the color if it was already
+    /// set to `color`; otherwise applies `color` as the uniform group color.
+    ToggleTabGroupColor {
+        color: AnsiColorIdentifier,
+        group_id: TabGroupId,
+    },
     OpenLaunchConfigSaveModal,
     SelectTabConfig(TabConfig),
     DispatchToSettingsTab(SettingsTabAction),
@@ -345,7 +371,10 @@ pub enum WorkspaceAction {
     StartGroupDrag(TabGroupId),
     DragGroup {
         group_id: TabGroupId,
+        /// The dragged group's painted rect.
         position: RectF,
+        /// The position of the cursor while dragging a group.
+        cursor_position: Vector2F,
     },
     DropGroup,
     /// Toggles the left panel. In Code Mode V1 this toggles Zap Drive.
@@ -586,6 +615,12 @@ pub enum WorkspaceAction {
     /// Uninstall the Zap CLI command from /usr/local/bin
     #[cfg(target_os = "macos")]
     UninstallCLI,
+    /// Install the Warp Control CLI command to /usr/local/bin
+    #[cfg(target_os = "macos")]
+    InstallWarpctrl,
+    /// Uninstall the Warp Control CLI command from /usr/local/bin
+    #[cfg(target_os = "macos")]
+    UninstallWarpctrl,
     UndoRevertInCodeReviewPane {
         window_id: WindowId,
         view_id: EntityId,
@@ -787,8 +822,10 @@ impl WorkspaceAction {
             | MoveTabToGroup { .. }
             | RemoveTabFromGroup(_)
             | NewTabGroupFromSelectedTabs
+            | NewTabGroupFromActiveOrSelectedTabs
             | MoveSelectedTabsToGroup { .. }
             | RemoveSelectedTabsFromGroup
+            | RemoveActiveOrSelectedTabsFromGroup
             | UngroupTabs(_)
             | NewTabInGroup(_)
             | MoveTabGroupUp(_)
@@ -798,9 +835,14 @@ impl WorkspaceAction {
             | CloseTabsBelowGroup(_)
             | PinTab(_)
             | UnpinTab(_)
+            | PinActiveTab
+            | UnpinActiveTab
             | PinTabGroup(_)
             | UnpinTabGroup(_)
+            | PinActiveTabGroup
+            | UnpinActiveTabGroup
             | ToggleTabColor { .. }
+            | ToggleTabGroupColor { .. }
             | AddDefaultTab
             | AddTerminalTab { .. }
             | OpenSshTerminal { .. }
@@ -961,6 +1003,7 @@ impl WorkspaceAction {
             | ShiftSelectTabRange { .. }
             | ToggleTabMultiSelection { .. }
             | ClearTabMultiSelection
+            | CancelActiveRename
             | StartNewConversation { .. }
             | UndoRevertInCodeReviewPane { .. }
             | JumpToLatestToast
@@ -1013,6 +1056,8 @@ impl WorkspaceAction {
             SampleProcess => false,
             #[cfg(target_os = "macos")]
             InstallCLI | UninstallCLI => false,
+            #[cfg(target_os = "macos")]
+            InstallWarpctrl | UninstallWarpctrl => false,
             #[cfg(feature = "local_fs")]
             FileRenamed { .. } => false, // File rename doesn't change workspace state
             #[cfg(feature = "local_fs")]

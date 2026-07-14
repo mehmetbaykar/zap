@@ -6,6 +6,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
+    sync::Arc,
     time::Duration,
 };
 
@@ -105,7 +106,7 @@ pub enum LocalCodeEditorEvent {
     },
     FileSaved,
     FailedToSave {
-        error: Rc<FileSaveError>,
+        error: Arc<FileSaveError>,
     },
     DiffAccepted,
     DiffRejected,
@@ -165,6 +166,7 @@ struct LoadedFileMetadata {
 }
 
 pub use super::diff_viewer::DisplayMode;
+use crate::report_error;
 
 type TerminalTargetFn = dyn Fn(WindowId, &AppContext) -> Option<ViewHandle<TerminalView>>;
 
@@ -317,7 +319,7 @@ impl LocalCodeEditorView {
         });
 
         ctx.subscribe_to_view(&editor, |me, _, event, ctx| match event {
-            CodeEditorEvent::UnifiedDiffComputed(_) => {
+            CodeEditorEvent::UnifiedDiffComputed => {
                 ctx.emit(LocalCodeEditorEvent::DiffAccepted);
             }
             CodeEditorEvent::ContentChanged { origin, .. } => {
@@ -528,7 +530,7 @@ impl LocalCodeEditorView {
         {
             Ok(future) => future,
             Err(e) => {
-                log::error!("Failed to call lsp.goto_definition: {e}");
+                report_error!(e.context("Failed to call lsp.goto_definition"));
                 return false;
             }
         };
@@ -1122,9 +1124,9 @@ impl LocalCodeEditorView {
         };
 
         if let Err(err) = result {
-            log::error!("Failed to save file: {err:?}");
+            report_error!(&err);
             ctx.emit(LocalCodeEditorEvent::FailedToSave {
-                error: Rc::new(err),
+                error: Arc::new(err),
             });
         }
     }
@@ -1708,9 +1710,9 @@ impl LocalCodeEditorView {
             .update(ctx, move |model, ctx| {
                 model.save(file_id, content, buffer_version, ctx)
             }) {
-            log::error!("Failed to save file to new path: {err:?}");
+            report_error!(&err);
             ctx.emit(LocalCodeEditorEvent::FailedToSave {
-                error: Rc::new(err),
+                error: Arc::new(err),
             });
             SaveOutcome::Failed
         } else {
@@ -2089,22 +2091,6 @@ impl DiffViewer for LocalCodeEditorView {
         self.was_edited
     }
 
-    /// Automatically accept and save this diff. Unlike [`Self::accept_diff`] and [`Self::save_local`], this
-    /// waits for the initial file contents to be loaded.
-    fn accept_and_save_diff(&self, ctx: &mut ViewContext<Self>) {
-        ctx.spawn(self.file_loaded.wait(), move |me, _, ctx| {
-            me.accept_diff(ctx);
-            if let Err(err) = me.save_local(ctx) {
-                log::error!("{err:?}");
-                if let ImmediateSaveError::FailedToSave(err) = err {
-                    ctx.emit(LocalCodeEditorEvent::FailedToSave {
-                        error: Rc::new(err),
-                    });
-                }
-            }
-        });
-    }
-
     fn reject_diff(&mut self, ctx: &mut ViewContext<Self>) {
         ctx.emit(LocalCodeEditorEvent::DiffRejected);
     }
@@ -2118,7 +2104,7 @@ impl DiffViewer for LocalCodeEditorView {
             }
             if let Some(path) = self.file_path().map(|p| p.to_path_buf()) {
                 if let Err(e) = std::fs::remove_file(&path) {
-                    log::error!("Failed to delete file after save: {e}");
+                    report_error!(anyhow::Error::new(e).context("Failed to delete file after save"));
                 } else {
                     // This will close tabs with the file open
                     ctx.dispatch_typed_action(&WorkspaceAction::FileDeleted { path });
@@ -2310,9 +2296,9 @@ impl TypedActionView for LocalCodeEditorView {
             }
             LocalCodeEditorAction::SaveFile => {
                 if let Err(ImmediateSaveError::FailedToSave(err)) = self.save_local(ctx) {
-                    log::error!("Failed to save file {err:?}");
+                    report_error!(&err);
                     ctx.emit(LocalCodeEditorEvent::FailedToSave {
-                        error: Rc::new(err),
+                        error: Arc::new(err),
                     });
                 };
             }

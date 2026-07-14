@@ -634,10 +634,7 @@ pub fn test_set_current_working_directory_updates_pwd_and_emits_cwd_event() {
 pub fn test_elapsed_duration_rounds_down_to_whole_seconds() {
     let mut block = TestBlockBuilder::new().build();
     // Move the block into the Executing state so `elapsed_duration` returns a value.
-    block.precmd_with_completion_metadata(PrecmdValue {
-        completion_metadata: CompletionMetadata::default(),
-        prompt_metadata: PromptMetadata::default(),
-    });
+    block.prompt_only_precmd(PromptMetadata::default());
     block.preexec(Default::default());
 
     let start = chrono::Local.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
@@ -681,10 +678,7 @@ pub fn test_elapsed_duration_requires_executing_state() {
     assert!(!block.is_duration_live());
 
     // `precmd` alone leaves the block in `BeforeExecution`; the duration is not yet live.
-    block.precmd_with_completion_metadata(PrecmdValue {
-        completion_metadata: CompletionMetadata::default(),
-        prompt_metadata: PromptMetadata::default(),
-    });
+    block.prompt_only_precmd(PromptMetadata::default());
     block.override_start_ts(start);
     assert_eq!(block.elapsed_duration_whole_secs_at(now), None);
     assert!(!block.is_duration_live());

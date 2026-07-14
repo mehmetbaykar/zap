@@ -23,6 +23,7 @@ use crate::ai::mcp::templatable::TemplatableMCPServerObject;
 use crate::ai::mcp::{MCPServerState, TemplatableMCPServerManager};
 use crate::appearance::Appearance;
 use crate::cloud_object::StoredObject;
+use crate::report_error;
 use crate::settings_view::mcp_servers::{style, ServerCardItemId};
 use crate::ui_components::avatar::{Avatar, AvatarContent, StatusElementTypes};
 use crate::ui_components::blended_colors;
@@ -979,7 +980,7 @@ impl TypedActionView for ServerCardView {
                         new_state,
                     ));
                 } else {
-                    log::error!("Server card: Tried to toggle a switch that does not exist.")
+                    report_error!("Server card: Tried to toggle a switch that does not exist.")
                 }
                 ctx.notify();
             }

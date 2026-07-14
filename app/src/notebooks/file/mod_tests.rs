@@ -152,7 +152,7 @@ fn test_load_jupyter_notebook_renders_cells() {
             );
 
             // The Rendered/Raw toggle is exposed for .ipynb, the same way it is
-            // for markdown files.
+            // for markdown files (PRODUCT invariant 14).
             assert!(
                 handle.as_ref(ctx).shows_markdown_toggle(),
                 "rendered notebook should expose the Rendered/Raw toggle"
@@ -173,7 +173,7 @@ fn test_malformed_jupyter_notebook_falls_back_to_raw() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("broken.ipynb");
         // Invalid notebook JSON that also contains Markdown which must NOT be
-        // rendered as Markdown (fall back to raw text).
+        // rendered as Markdown (PRODUCT invariant 11: fall back to raw text).
         std::fs::write(&path, "{ \"nbformat\": 4, broken json # Heading").unwrap();
 
         let (_, handle) = app.add_window(WindowStyle::NotStealFocus, FileNotebookView::new);

@@ -2,6 +2,7 @@
 //! Zap (including Agent Mode).
 //!
 //! The side panel Zap AI implementation lives in `super::ai_assistant`.
+pub(crate) mod active_agent_views_model;
 pub(crate) mod agent;
 pub(crate) mod agent_conversations_model;
 pub(crate) mod agent_events;
@@ -27,6 +28,8 @@ pub(crate) mod conversation_navigation;
 pub(crate) mod conversation_rename;
 pub(crate) mod conversation_status_ui;
 pub(crate) mod conversation_utils;
+pub(crate) mod custom_model_router_editor;
+pub(crate) mod custom_model_routers;
 pub(crate) mod document;
 pub(crate) mod harness_display;
 pub(crate) mod llms;
@@ -36,6 +39,8 @@ pub mod onboarding;
 pub(crate) mod persisted_workspace;
 pub(crate) mod predict;
 pub(crate) mod project_rules_persister;
+pub(crate) mod remote_agent_context;
+pub(crate) mod remote_context_files;
 pub mod request_usage_model;
 pub(crate) mod restored_conversations;
 pub(crate) mod skills;

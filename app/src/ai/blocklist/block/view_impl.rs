@@ -1083,6 +1083,9 @@ impl View for AIBlock {
         let is_conversation_transcript_viewer = terminal_model.is_conversation_transcript_viewer();
         drop(terminal_model);
 
+        #[cfg(not(target_family = "wasm"))]
+        let is_cloud_agent_context = false;
+
         contents.add_child(output::render(
             output::Props {
                 model: self.model.as_ref(),
@@ -1133,6 +1136,8 @@ impl View for AIBlock {
                 shared_session_status: &shared_session_status,
                 terminal_view_id: self.terminal_view_id,
                 is_conversation_transcript_viewer,
+                #[cfg(not(target_family = "wasm"))]
+                is_cloud_agent_context,
                 aws_bedrock_credentials_error_view: self
                     .aws_bedrock_credentials_error_view
                     .as_ref(),

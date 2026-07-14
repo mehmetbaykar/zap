@@ -28,6 +28,7 @@ use crate::ai::predict::generate_am_query_suggestions::{
 };
 use crate::ai_assistant::execution_context::WarpAiExecutionContext;
 use crate::network::NetworkStatus;
+use crate::report_error;
 use crate::server::telemetry::PromptSuggestionFallbackReason;
 use crate::settings::AISettings;
 use crate::terminal::event::{BlockType, UserBlockCompleted};
@@ -88,10 +89,10 @@ impl PassiveSuggestionsModel {
         terminal_view_id: EntityId,
         ctx: &mut ModelContext<Self>,
     ) -> Self {
-        ctx.subscribe_to_model(model_event_dispatcher, |me, event, ctx| {
+        ctx.subscribe_to_model(model_event_dispatcher, |me, _, event, ctx| {
             me.handle_model_event(event, ctx);
         });
-        ctx.subscribe_to_model(&ai_controller, |me, event, _ctx| {
+        ctx.subscribe_to_model(&ai_controller, |me, _, event, _ctx| {
             me.handle_controller_event(event, _ctx);
         });
 
@@ -605,9 +606,9 @@ fn build_prompt_suggestions_request(
         let terminal_width = model.block_list().size().columns();
         let Some(current_block) = model.block_list().block_with_id(&block.serialized_block.id)
         else {
-            log::error!(
-                "Failed to fetch prompt suggestions, could not find block with ID: {:?}",
-                block.serialized_block.id
+            report_error!(
+                "Failed to fetch prompt suggestions, could not find block with ID",
+                extra: { "block_id" => ?block.serialized_block.id }
             );
             return None;
         };

@@ -238,6 +238,17 @@ pub static PLAN: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
     argument: Some(Argument::optional().with_hint_text(t_static!("slash-cmd-plan-hint"))),
 });
 
+pub const ORCHESTRATE_NAME: &str = "/orchestrate";
+
+pub static ORCHESTRATE: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
+    name: ORCHESTRATE_NAME,
+    description: "Break a task into subtasks and run them in parallel with multiple agents",
+    icon_path: "bundled/svg/oz.svg",
+    availability: Availability::LOCAL | Availability::AI_ENABLED,
+    auto_enter_ai_mode: true,
+    argument: Some(Argument::optional().with_hint_text("<describe your task>")),
+});
+
 /// If `query` starts with the given command `name` followed by a space,
 /// returns the remainder of the query. Otherwise returns `None`.
 pub fn strip_command_prefix(query: &str, name: &str) -> Option<String> {
@@ -434,6 +445,7 @@ fn all_commands() -> Vec<StaticCommand> {
         AGENT.clone(),
         NEW.clone(),
         PLAN.clone(),
+        ORCHESTRATE.clone(),
         RENAME_TAB.clone(),
         CONVERSATIONS.clone(),
         EXPORT_TO_CLIPBOARD.clone(),

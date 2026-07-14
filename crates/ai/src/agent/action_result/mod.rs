@@ -32,6 +32,9 @@ pub enum AIAgentActionResultType {
     /// The output of a read files action.
     ReadFiles(ReadFilesResult),
 
+    /// The result of searching a local codebase.
+    SearchCodebase(SearchCodebaseResult),
+
     /// The output of a grep action.
     Grep(GrepResult),
 
@@ -80,6 +83,9 @@ pub enum AIAgentActionResultType {
 
     /// The output of requesting computer use.
     RequestComputerUse(RequestComputerUseResult),
+
+    /// The result of fetching a conversation's tasks.
+    FetchConversation(FetchConversationResult),
 
     /// The result of starting a local child agent.
     StartAgent(StartAgentResult),
@@ -137,6 +143,7 @@ impl Display for AIAgentActionResultType {
             AIAgentActionResultType::WriteToLongRunningShellCommand(result) => result.fmt(f),
             AIAgentActionResultType::RequestFileEdits(result) => result.fmt(f),
             AIAgentActionResultType::ReadFiles(result) => result.fmt(f),
+            AIAgentActionResultType::SearchCodebase(result) => result.fmt(f),
             AIAgentActionResultType::Grep(result) => result.fmt(f),
             AIAgentActionResultType::FileGlob(result) => result.fmt(f),
             AIAgentActionResultType::FileGlobV2(result) => result.fmt(f),
@@ -152,6 +159,7 @@ impl Display for AIAgentActionResultType {
             AIAgentActionResultType::UseComputer(result) => result.fmt(f),
             AIAgentActionResultType::InsertReviewComments(result) => result.fmt(f),
             AIAgentActionResultType::RequestComputerUse(result) => result.fmt(f),
+            AIAgentActionResultType::FetchConversation(result) => result.fmt(f),
             AIAgentActionResultType::StartAgent(result) => result.fmt(f),
             AIAgentActionResultType::SendMessageToAgent(result) => result.fmt(f),
             AIAgentActionResultType::TransferShellCommandControlToUser(result) => result.fmt(f),
@@ -509,6 +517,42 @@ impl Display for CreateDocumentsResult {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum SearchCodebaseFailureReason {
+    CodebaseNotIndexed,
+    InvalidFilePaths,
+    GetRelevantFilesError,
+    ClientError,
+    MissingCurrentWorkingDirectory,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum SearchCodebaseResult {
+    Success {
+        files: Vec<FileContext>,
+    },
+    Failed {
+        reason: SearchCodebaseFailureReason,
+        /// The message sent back to the LLM when the local search fails.
+        message: String,
+    },
+    Cancelled,
+}
+
+impl Display for SearchCodebaseResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SearchCodebaseResult::Success { files } => {
+                write!(f, "Codebase search found: {}", files.iter().format(", "))
+            }
+            SearchCodebaseResult::Failed { reason, message } => {
+                write!(f, "Codebase search failed ({reason:?}): {message}")
+            }
+            SearchCodebaseResult::Cancelled => write!(f, "Codebase search cancelled"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ReadShellCommandOutputResult {
     CommandFinished {
@@ -659,6 +703,7 @@ impl AIAgentActionResultType {
                 "The diff from editing the last file in Agent Mode"
             }
             AIAgentActionResultType::ReadFiles(_) => "The requested file content",
+            AIAgentActionResultType::SearchCodebase(_) => "The codebase search results",
             AIAgentActionResultType::Grep(_) => "The results of the grep operation",
             AIAgentActionResultType::FileGlob(_) => "The results of the file glob operation",
             AIAgentActionResultType::FileGlobV2(_) => "The results of the file glob operation",
@@ -678,6 +723,7 @@ impl AIAgentActionResultType {
             AIAgentActionResultType::ReadShellCommandOutput(_) => "The shell command output",
             AIAgentActionResultType::UseComputer(_) => "The computer use result",
             AIAgentActionResultType::RequestComputerUse(_) => "The computer use request result",
+            AIAgentActionResultType::FetchConversation(_) => "The fetched conversation tasks",
             AIAgentActionResultType::StartAgent(_) => "The result of starting a child agent",
             AIAgentActionResultType::SendMessageToAgent(_) => "The result of sending a message",
             AIAgentActionResultType::TransferShellCommandControlToUser(_) => {
@@ -700,6 +746,7 @@ impl AIAgentActionResultType {
             Self::RequestCommandOutput(r) => r.is_successful(),
             Self::RequestFileEdits(RequestFileEditsResult::Success { .. })
             | Self::ReadFiles(ReadFilesResult::Success { .. })
+            | Self::SearchCodebase(SearchCodebaseResult::Success { .. })
             | Self::Grep(GrepResult::Success { .. })
             | Self::FileGlob(FileGlobResult::Success { .. })
             | Self::FileGlobV2(FileGlobV2Result::Success { .. })
@@ -717,6 +764,7 @@ impl AIAgentActionResultType {
             | Self::UseComputer(UseComputerResult::Success(_))
             | Self::InsertReviewComments(InsertReviewCommentsResult::Success { .. })
             | Self::RequestComputerUse(RequestComputerUseResult::Approved { .. })
+            | Self::FetchConversation(FetchConversationResult::Success { .. })
             | Self::OpenCodeReview
             | Self::ReadSkill(ReadSkillResult::Success { .. })
             | Self::StartAgent(StartAgentResult::Success { .. })
@@ -737,6 +785,7 @@ impl AIAgentActionResultType {
             Self::RequestCommandOutput(r) => r.failed(),
             Self::RequestFileEdits(RequestFileEditsResult::DiffApplicationFailed { .. })
             | Self::ReadFiles(ReadFilesResult::Error(_))
+            | Self::SearchCodebase(SearchCodebaseResult::Failed { .. })
             | Self::Grep(GrepResult::Error(_))
             | Self::FileGlob(FileGlobResult::Error(_))
             | Self::FileGlobV2(FileGlobV2Result::Error(_))
@@ -748,6 +797,7 @@ impl AIAgentActionResultType {
             | Self::UseComputer(UseComputerResult::Error(_))
             | Self::InsertReviewComments(InsertReviewCommentsResult::Error { .. })
             | Self::RequestComputerUse(RequestComputerUseResult::Error(_))
+            | Self::FetchConversation(FetchConversationResult::Error(_))
             | Self::StartAgent(StartAgentResult::Error { .. })
             | Self::SendMessageToAgent(SendMessageToAgentResult::Error(_))
             | Self::AskUserQuestion(AskUserQuestionResult::Error(_))
@@ -771,6 +821,7 @@ impl AIAgentActionResultType {
             }) if exit_code.value() == 130 => true,
             Self::RequestFileEdits(RequestFileEditsResult::Cancelled)
             | Self::ReadFiles(ReadFilesResult::Cancelled)
+            | Self::SearchCodebase(SearchCodebaseResult::Cancelled)
             | Self::Grep(GrepResult::Cancelled)
             | Self::FileGlob(FileGlobResult::Cancelled)
             | Self::FileGlobV2(FileGlobV2Result::Cancelled)
@@ -785,6 +836,7 @@ impl AIAgentActionResultType {
             | Self::UseComputer(UseComputerResult::Cancelled)
             | Self::InsertReviewComments(InsertReviewCommentsResult::Cancelled)
             | Self::RequestComputerUse(RequestComputerUseResult::Cancelled)
+            | Self::FetchConversation(FetchConversationResult::Cancelled)
             | Self::TransferShellCommandControlToUser(
                 TransferShellCommandControlToUserResult::Cancelled,
             )
@@ -1094,6 +1146,30 @@ impl Display for InsertReviewCommentsResult {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchConversationResult {
+    Success { directory_path: String },
+    Error(String),
+    Cancelled,
+}
+
+impl Display for FetchConversationResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FetchConversationResult::Success { directory_path } => {
+                write!(f, "Fetched conversation to {directory_path}")
+            }
+            FetchConversationResult::Error(error) => {
+                write!(f, "Fetch conversation error: {error}")
+            }
+            FetchConversationResult::Cancelled => write!(f, "Fetch conversation cancelled"),
+        }
+    }
+}
+
+// TODO(QUALITY-788): Delete legacy start_agent/start_agent_v2 result support once
+// old preview orchestration history no longer needs parse/display/result compatibility.
+// Linear issue: QUALITY-788.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StartAgentResult {
     Success {

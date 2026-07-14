@@ -18,6 +18,12 @@ use crate::terminal::input::inline_menu::styles as inline_styles;
 const CORNER_RADIUS: f32 = 4.0;
 const ROW_SPACING: f32 = 12.0;
 
+pub const MODEL_SPECS_TITLE: &str = "Model Specs";
+pub const MODEL_SPECS_DESCRIPTION: &str =
+    "Benchmarks for how well a model performs in the local harness and its task speed.";
+
+pub const REASONING_LEVEL_TITLE: &str = "Reasoning level";
+pub const REASONING_LEVEL_DESCRIPTION: &str = "Increased reasoning levels have higher latency, but can improve performance for complicated tasks.";
 pub enum CostRow {
     Bar {
         value: Option<f32>,
@@ -280,7 +286,7 @@ fn render_score_row(
                 .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_child(render_provider_label(label, appearance))
-                .with_child(manage_button)
+                .with_child(Container::new(manage_button).with_margin_left(8.).finish())
                 .finish(),
         )
         .finish(),

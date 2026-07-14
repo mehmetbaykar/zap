@@ -55,6 +55,7 @@ pub fn is_agent_supported(agent: &CLIAgent) -> bool {
             | CLIAgent::Codex
             | CLIAgent::Gemini
             | CLIAgent::Auggie
+            | CLIAgent::Droid
             | CLIAgent::Pi
             | CLIAgent::DeepSeek
             | CLIAgent::Antigravity
@@ -68,18 +69,20 @@ fn create_handler(agent: &CLIAgent) -> Option<Box<dyn CLIAgentSessionHandler>> {
         // (https://github.com/augmentmoogi/auggie-warp,
         // https://github.com/badlogic/pi-mono), which emit the same
         // structured OSC 777 events as the first-party Claude/OpenCode/Gemini
-        // plugins. We don't ship install flows for them — we just listen.
+        // plugins. Droid can be supported by user-configured hooks or future
+        // integrations that emit the same structured OSC 777 events. We don't
+        // ship install flows for these agents here — we just listen.
         CLIAgent::Claude
         | CLIAgent::OpenCode
         | CLIAgent::Gemini
         | CLIAgent::Auggie
+        | CLIAgent::Droid
         | CLIAgent::Pi
         | CLIAgent::Antigravity => Some(Box::new(DefaultSessionListener)),
         CLIAgent::Codex => Some(Box::new(CodexSessionHandler)),
         CLIAgent::DeepSeek => Some(Box::new(DeepSeekSessionHandler)),
         CLIAgent::Hermes
         | CLIAgent::Amp
-        | CLIAgent::Droid
         | CLIAgent::Copilot
         | CLIAgent::CursorCli
         | CLIAgent::Goose
@@ -261,7 +264,7 @@ impl CLIAgentSessionListener {
         // Subscribe to subsequent OSC events from this terminal's PTY.
         // Parsing is delegated to the handler's `try_parse`; the handler's
         // `handle_event` then filters/transforms the result.
-        ctx.subscribe_to_model(model_event_dispatcher, move |me, event, ctx| {
+        ctx.subscribe_to_model(model_event_dispatcher, move |me, _, event, ctx| {
             if let ModelEvent::PluggableNotification { title, body } = event {
                 let view_id = me.terminal_view_id;
                 let plugin_already_active = CLIAgentSessionsModel::as_ref(ctx)

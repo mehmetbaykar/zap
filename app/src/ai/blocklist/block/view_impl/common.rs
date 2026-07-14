@@ -96,9 +96,8 @@ use crate::ui_components::blended_colors;
 use crate::ui_components::buttons::icon_button;
 use crate::ui_components::icons::Icon;
 use crate::util::link_detection::{add_link_detection_mouse_interactions, DetectedLinksState};
+use crate::util::time_format::format_elapsed_seconds;
 use crate::workspace::WorkspaceAction;
-use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::workspaces::workspace::CustomerType;
 
 pub const STATUS_ICON_SIZE_DELTA: f32 = 4.;
 pub const STATUS_FOOTER_VERTICAL_PADDING: f32 = 4.;
@@ -677,16 +676,6 @@ pub fn render_warping_indicator_base(
         }
 
         container.finish()
-    }
-}
-
-/// Formats elapsed time as a human-readable string with proper singular/plural.
-pub fn format_elapsed_seconds(elapsed: std::time::Duration) -> String {
-    let total_seconds = elapsed.as_secs();
-    if total_seconds == 1 {
-        "1 second".to_string()
-    } else {
-        format!("{total_seconds} seconds")
     }
 }
 
@@ -3126,6 +3115,9 @@ pub fn render_failed_output(props: FailedOutputProps, app: &AppContext) -> Box<d
                 format!("{ERROR_APOLOGY_TEXT}\n\n{error_message}")
             }
         }
+        RenderableAIError::AgentExitedShell => {
+            format!("{ERROR_APOLOGY_TEXT}\n\n{}", props.error)
+        }
         RenderableAIError::TransientNetworkError { .. } => {
             // Recovering transient errors are handled by the early return above; once we
             // reach here recovery has failed. These carry their own complete user-facing
@@ -3358,12 +3350,9 @@ pub(crate) fn render_debug_footer<V: View>(
         .to_string()
     };
 
-    // Check if we should show the submit button (hide for dogfood and enterprise users)
+    // Hide the submit button on dogfood builds.
     let is_dogfood = ChannelState::channel().is_dogfood();
-    let is_enterprise_user = UserWorkspaces::as_ref(app)
-        .current_team()
-        .is_some_and(|team| team.billing_metadata.customer_type == CustomerType::Enterprise);
-    let submit_button = if !is_dogfood && !is_enterprise_user {
+    let submit_button = if !is_dogfood {
         let submit_button_style = UiComponentStyles {
             font_color: Some(
                 appearance

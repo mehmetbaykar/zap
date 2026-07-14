@@ -39,6 +39,7 @@ use crate::pane_group::pane::view::header::PANE_HEADER_HEIGHT;
 use crate::pane_group::{
     Event as PaneGroupEvent, PaneGroup, WorkingDirectoriesEvent, WorkingDirectoriesModel,
 };
+use crate::report_error;
 use crate::settings::{AISettings, AISettingsChangedEvent};
 use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
 use crate::terminal::input::MenuPositioning;
@@ -458,7 +459,7 @@ impl RightPanelView {
         {
             Some(handle) => handle,
             None => {
-                log::error!("Couldn't retrieve Right panel resizable state handle.");
+                report_error!("Couldn't retrieve Right panel resizable state handle.");
                 resizable_state_handle(600.0)
             }
         };
@@ -1373,7 +1374,7 @@ impl RightPanelView {
         };
 
         if let Err(err) = &result {
-            log::error!("Failed to submit review comments to terminal: {err}");
+            report_error!(err);
         }
 
         let submission_result = if result.is_ok() {

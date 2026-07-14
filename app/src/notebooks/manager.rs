@@ -15,7 +15,7 @@ use crate::drive::ZapDriveObjectSettings;
 use crate::pane_group::{NotebookPane, PaneContent};
 use crate::server::ids::SyncId;
 use crate::workspace::PaneViewLocator;
-use crate::{safe_debug, safe_warn};
+use crate::{report_error, safe_debug, safe_warn};
 
 #[cfg(test)]
 #[path = "manager_tests.rs"]
@@ -70,10 +70,9 @@ pub enum NotebookSource {
 impl NotebookManager {
     /// Create a new [`NotebookManager`] singleton.
     pub fn new(cached_notebooks: Vec<NotebookObject>, ctx: &mut ModelContext<Self>) -> Self {
-        ctx.subscribe_to_model(
-            &ObjectStoreModel::handle(ctx),
-            Self::handle_object_store_event,
-        );
+        ctx.subscribe_to_model(&ObjectStoreModel::handle(ctx), |me, _, event, ctx| {
+            me.handle_object_store_event(event, ctx)
+        });
 
         let mut raw_text_by_hashed_id: HashMap<String, NotebookRawTextStatus> = HashMap::new();
         // Parse all the cached notebook raw text
@@ -111,7 +110,7 @@ impl NotebookManager {
                     manager
                         .raw_text_by_hashed_id
                         .insert(hashed_id, NotebookRawTextStatus::ParseError);
-                    log::error!("Cached Notebook raw text failed to parse: {err}.");
+                    report_error!(err.context("Cached Notebook raw text failed to parse"));
                 }
             },
         )

@@ -1214,7 +1214,7 @@ impl NewCursorDirection {
                     }
                 }
                 Err(err) => {
-                    log::error!("Error calling map#up {err:?}");
+                    report_error!(err.context("Error calling map#up"));
                     None
                 }
             },
@@ -1227,7 +1227,7 @@ impl NewCursorDirection {
                     }
                 }
                 Err(err) => {
-                    log::error!("Error calling map#down {err:?}");
+                    report_error!(err.context("Error calling map#down"));
                     None
                 }
             },
@@ -1429,6 +1429,7 @@ pub enum BaselinePositionComputationMethod {
 }
 
 // Re-export voice transcription types for backwards compatibility
+use crate::report_error;
 pub use crate::voice::transcriber::{Transcriber, VoiceTranscriber};
 
 /// Similar to [`ImageContext`], but contains un-processed and un-resized image data.
@@ -3271,6 +3272,23 @@ impl EditorView {
         ctx.emit(Event::BufferReinitialized);
     }
 
+    /// Exits the ephemeral loading state created by `set_buffer_text_ignoring_undo`
+    /// without touching the CRDT buffer or emitting any `UpdatePeers` operations.
+    /// The editor switches back to displaying the regular collaborative buffer.
+    pub fn exit_ephemeral_loading_state(&mut self, ctx: &mut ViewContext<Self>) {
+        self.editor_model.update(ctx, |model, ctx| {
+            model.exit_ephemeral_loading_state(ctx);
+        });
+    }
+
+    /// Shows an empty display-only ephemeral overlay for immediate visual feedback.
+    /// See [`EditorModel::show_display_only_empty_buffer`] for the full contract.
+    pub fn show_display_only_empty_buffer(&mut self, ctx: &mut ViewContext<Self>) {
+        self.editor_model.update(ctx, |model, ctx| {
+            model.show_display_only_empty_buffer(ctx);
+        });
+    }
+
     pub fn register_remote_peer(
         &mut self,
         replica_id: ReplicaId,
@@ -3898,7 +3916,7 @@ impl EditorView {
                                             .anchor_before(Point::new(position.row(), end_col))
                                             .expect("Anchor should exist")
                                     }
-                                    Err(_) => log::error!(
+                                    Err(_) => report_error!(
                                         "Update selection is called with invalid position"
                                     ),
                                 }
@@ -3963,7 +3981,7 @@ impl EditorView {
 
                 editor_model.change_selections(new_selections, ctx);
             } else {
-                log::error!("update_selection dispatched with no pending selection");
+                report_error!("update_selection dispatched with no pending selection");
             }
         });
 
@@ -4018,7 +4036,7 @@ impl EditorView {
                 new_selections.insert(ix, pending_selection.selection);
                 editor_model.change_selections(new_selections, ctx);
             } else {
-                log::error!("end_selection dispatched with no pending selection");
+                report_error!("end_selection dispatched with no pending selection");
             }
         });
     }
@@ -4062,7 +4080,7 @@ impl EditorView {
                     );
                 }
                 Err(_) => {
-                    log::error!("select_line is called with invalid position");
+                    report_error!("select_line is called with invalid position");
                 }
             }
         });
@@ -4848,15 +4866,20 @@ impl EditorView {
                 |editor_model, ctx| {
                     // Convert ByteOffset to CharOffset properly to handle multi-byte characters
                     let buffer = editor_model.buffer(ctx);
-                    match (range.start.to_char_offset(buffer), range.end.to_char_offset(buffer)) {
+                    match (
+                        range.start.to_char_offset(buffer),
+                        range.end.to_char_offset(buffer),
+                    ) {
                         (Ok(start_char), Ok(end_char)) => {
                             let char_range = start_char..end_char;
                             if let Err(error) = editor_model.buffer_edit([char_range], "", ctx) {
-                                log::error!("error performing system delete: {error}");
+                                report_error!(error.context("error performing system delete"));
                             }
                         }
                         (Err(error), _) | (_, Err(error)) => {
-                            log::error!("error converting byte offset to char offset for system delete: {error}");
+                            report_error!(error.context(
+                                "error converting byte offset to char offset for system delete"
+                            ));
                         }
                     }
                 },
@@ -6233,7 +6256,10 @@ impl EditorView {
                             "",
                             ctx,
                         ) {
-                            log::error!("error deleting all (direction {direction:?}): {error}");
+                            report_error!(
+                                error.context("error deleting all"),
+                                extra: { "direction" => ?direction }
+                            );
                         };
                     },
                 ),
@@ -6312,7 +6338,7 @@ impl EditorView {
                         "",
                         ctx,
                     ) {
-                        log::error!("error clearing lines: {error}");
+                        report_error!(error.context("error clearing lines"));
                     }
                 },
             ),
@@ -6832,7 +6858,7 @@ impl EditorView {
                                 result.point_and_clamp_direction.clamp_direction;
                         }
                         Err(err) => {
-                            log::error!("Failed to call DisplayMap#up {err:?}");
+                            report_error!(err.context("Failed to call DisplayMap#up"));
                         }
                     }
                 }
@@ -6980,7 +7006,9 @@ impl EditorView {
                             selection.clamp_direction =
                                 result.point_and_clamp_direction.clamp_direction;
                         }
-                        Err(err) => log::error!("Failed to call DisplayMap#down {err:?}"),
+                        Err(err) => {
+                            report_error!(err.context("Failed to call DisplayMap#down"))
+                        }
                     }
                 }
                 editor_model.change_selections(new_selections, ctx);
