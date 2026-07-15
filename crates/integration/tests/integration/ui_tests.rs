@@ -200,10 +200,8 @@ integration_tests! {
     #[ignore = "Affected by agent_view feature flag UI changes"]
     test_up_arrow_history_enters_shift_tab_for_workflow,
 
-    test_websocket_begins_on_startup,
-    test_websocket_does_not_begin_on_startup,
-    test_websocket_begins_after_joining_a_team,
-    test_websocket_begins_after_creating_an_object,
+    // Zap: the four test_websocket_* Warp-cloud websocket lifecycle tests were
+    // removed with the cloud websocket subsystem (SPEC.md: no Warp-cloud tests).
 
     test_secret_is_obfuscated_on_copy,
     test_secret_tooltip_respects_safe_mode_setting,
@@ -240,7 +238,8 @@ integration_tests! {
 
     test_open_workflow_in_pane,
     test_create_personal_workflow_pane_from_command_palette,
-    test_create_team_workflow_pane_from_command_palette,
+    // Zap: test_create_team_workflow_pane_from_command_palette removed — team
+    // workflows are a Warp-cloud (teams) feature (SPEC.md: no Warp-cloud tests).
 
     // TODO(alokedesai): Fix this on the latest version of Bash.
     #[ignore]
