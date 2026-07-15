@@ -17,7 +17,6 @@
 use std::collections::HashMap;
 
 use warp_core::features::FeatureFlag;
-use warp_core::send_telemetry_from_ctx;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, ViewHandle};
 
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
@@ -27,7 +26,6 @@ use crate::notifications::item::{
     NotificationCategory, NotificationId, NotificationItem, NotificationItems, NotificationOrigin,
     NotificationSourceAgent,
 };
-use crate::server::telemetry::TelemetryEvent;
 use crate::settings::AISettings;
 use crate::terminal::cli_agent_sessions::{
     CLIAgentSessionStatus, CLIAgentSessionsModel, CLIAgentSessionsModelEvent,
@@ -467,12 +465,6 @@ impl NotificationsModel {
             terminal_view_id,
             artifacts,
             branch,
-        );
-        send_telemetry_from_ctx!(
-            TelemetryEvent::AgentNotificationShown {
-                agent_variant: agent.into(),
-            },
-            ctx
         );
 
         let id = item.id;

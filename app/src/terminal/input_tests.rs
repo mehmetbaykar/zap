@@ -7159,6 +7159,67 @@ input_mode_prefix_tests! {
 }
 
 #[test]
+#[test]
+fn test_terminal_prefix_sets_shell_prefix_decision_source() {
+    App::test((), |mut app| async move {
+        let _am_flag = FeatureFlag::AgentMode.override_enabled(true);
+        let _agent_view_flag = FeatureFlag::AgentView.override_enabled(true);
+
+        initialize_app(&mut app);
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+        enter_fullscreen_agent_view_for_test(&terminal, &mut app);
+
+        input.update(&mut app, |input, ctx| {
+            input.user_insert(TERMINAL_INPUT_PREFIX, ctx);
+        });
+
+        input.read(&app, |input, ctx| {
+            assert!(input.buffer_text(ctx).is_empty());
+            app.read_model(input.ai_input_model(), |input_model, _| {
+                assert_eq!(input_model.input_type(), InputType::Shell);
+                assert!(input_model.is_input_type_locked());
+                assert_eq!(
+                    input_model.last_ai_autodetection_source(),
+                    Some(InputTypeAutoDetectionSource::ShellPrefix)
+                );
+            });
+        });
+    });
+}
+
+#[test]
+fn test_source_less_locked_config_clears_decision_source() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+
+        input.update(&mut app, |input, ctx| {
+            input.ai_input_model().update(ctx, |input_model, ctx| {
+                let locked_shell_config = InputConfig {
+                    input_type: InputType::Shell,
+                    is_locked: true,
+                };
+                input_model.set_input_config(
+                    locked_shell_config,
+                    true,
+                    Some(InputTypeAutoDetectionSource::ShellPrefix),
+                    ctx,
+                );
+                input_model.set_input_config(locked_shell_config, true, None, ctx);
+            });
+        });
+
+        input.read(&app, |input, _| {
+            app.read_model(input.ai_input_model(), |input_model, _| {
+                assert_eq!(input_model.last_ai_autodetection_source(), None);
+            });
+        });
+    });
+}
+
+#[test]
 fn test_image_attachment_preserves_lock_state() {
     App::test((), |mut app| async move {
         initialize_app(&mut app);

@@ -36,6 +36,7 @@ pub use crate::ai::blocklist::diff_types::{changed_lines_from_op, DiffSessionTyp
 pub use crate::ai::blocklist::history_model::{
     BlocklistAIHistoryEvent, BlocklistAIHistoryModel, ConversationStatusUpdate,
 };
+pub use crate::ai::blocklist::view_util::format_credits;
 pub use crate::ai::blocklist::{
     AIActionStatus, BlocklistAIActionEvent, BlocklistAIActionModel, BlocklistAIContextModel,
     BlocklistAIController, BlocklistAIInputModel, InputConfig, InputModePolicy,
