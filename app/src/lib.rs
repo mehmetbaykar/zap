@@ -872,6 +872,12 @@ fn init_common(launch_mode: &LaunchMode, timer: Option<&mut IntervalTimer>) -> R
 fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
     let mut timer = IntervalTimer::new();
 
+    // i18n must be initialized before any t!() call. `run()` initializes it
+    // for the normal app path, but integration tests and the TUI enter here
+    // directly; without this their UI strings (e.g. command palette action
+    // names) stay raw fluent keys. OnceLock-backed, so double init is fine.
+    i18n::init(None);
+
     init_common(&launch_mode, Some(&mut timer))?;
 
     // SQLite prewarm: start init_db() (connection + migration) on a background thread before
