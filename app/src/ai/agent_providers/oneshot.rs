@@ -21,8 +21,10 @@ use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent};
 use warpui::{AppContext, EntityId, SingletonEntity as _};
 
 use super::chat_stream;
+use crate::ai::agent::redaction;
 use crate::ai::llms::LLMPreferences;
 use crate::settings::{AgentProviderApiType, ReasoningEffortSetting};
+use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
 
 /// The provider/model information needed for a BYOP one-shot request.
 #[derive(Debug, Clone)]
@@ -32,6 +34,11 @@ pub struct OneshotConfig {
     pub model_id: String,
     pub api_type: AgentProviderApiType,
     pub reasoning_effort: ReasoningEffortSetting,
+    /// Safe Mode snapshot taken at resolve time. One-shot prompts embed terminal
+    /// content (block outputs, history, diffs), and BYOP has no backend-side
+    /// redaction, so detected secrets must be masked here before send — the same
+    /// contract `RequestParams::new` enforces for the main conversation stream.
+    pub should_redact_secrets: bool,
 }
 
 /// Optional parameters for a one-shot call.
@@ -81,12 +88,27 @@ fn build_oneshot_request(
     }
 
     let max_chars = opts.max_chars.unwrap_or(DEFAULT_MAX_CHARS);
-    let user_truncated = truncate_chars(user, max_chars);
+    let mut user_truncated = truncate_chars(user, max_chars);
+    let mut system = system.to_owned();
+    if cfg.should_redact_secrets {
+        redaction::redact_secrets(&mut system);
+        redaction::redact_secrets(&mut user_truncated);
+    }
 
-    let chat_req = ChatRequest::from_messages(vec![ChatMessage::user(user_truncated)])
-        .with_system(system.to_owned());
+    let chat_req =
+        ChatRequest::from_messages(vec![ChatMessage::user(user_truncated)]).with_system(system);
 
     (chat_req, chat_opts)
+}
+
+/// Flattens a genai error into a bounded message: provider HTTP errors embed
+/// the response body in their Display, which can echo request content into
+/// callers' default-level logs (title generation, active AI, code review).
+fn bounded_oneshot_err(e: genai::Error) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{}",
+        super::openai_compatible::bounded_provider_body(e.to_string())
+    )
 }
 
 /// Sends one BYOP non-streaming chat completion, returning the plain text of the model's reply.
@@ -104,6 +126,7 @@ pub async fn byop_oneshot_completion(
     let resp = client
         .exec_chat(&cfg.model_id, chat_req, Some(&chat_opts))
         .await
+        .map_err(bounded_oneshot_err)
         .with_context(|| format!("byop oneshot exec_chat failed (model={})", cfg.model_id))?;
 
     Ok(resp.first_text().unwrap_or("").to_owned())
@@ -124,6 +147,7 @@ pub async fn byop_oneshot_streaming_completion(
     let mut resp = client
         .exec_chat_stream(&cfg.model_id, chat_req, Some(&chat_opts))
         .await
+        .map_err(bounded_oneshot_err)
         .with_context(|| {
             format!(
                 "byop oneshot exec_chat_stream failed (model={})",
@@ -134,7 +158,7 @@ pub async fn byop_oneshot_streaming_completion(
 
     let mut text = String::new();
     while let Some(event) = resp.next().await {
-        match event.with_context(|| {
+        match event.map_err(bounded_oneshot_err).with_context(|| {
             format!(
                 "byop oneshot exec_chat_stream event failed (model={})",
                 cfg.model_id
@@ -174,6 +198,7 @@ pub fn resolve_active_ai_oneshot(
         model_id,
         api_type: provider.api_type,
         reasoning_effort,
+        should_redact_secrets: get_secret_obfuscation_mode(app).should_redact_secret(),
     })
 }
 
@@ -197,5 +222,61 @@ pub fn resolve_next_command_oneshot(
         model_id,
         api_type: provider.api_type,
         reasoning_effort,
+        should_redact_secrets: get_secret_obfuscation_mode(app).should_redact_secret(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal::model::secrets::set_user_and_enterprise_secret_regexes;
+
+    fn test_cfg(should_redact_secrets: bool) -> OneshotConfig {
+        OneshotConfig {
+            base_url: "http://localhost".to_string(),
+            api_key: "key".to_string(),
+            model_id: "model".to_string(),
+            api_type: AgentProviderApiType::OpenAi,
+            reasoning_effort: ReasoningEffortSetting::default(),
+            should_redact_secrets,
+        }
+    }
+
+    // Guards the one-shot Safe Mode chokepoint: every proactive-AI request
+    // (next command, input suggestions, titles, code-review summaries) funnels
+    // through `build_oneshot_request`, and BYOP has no backend to redact
+    // server-side, so detected secrets must be masked here before send.
+    #[test]
+    fn build_oneshot_request_redacts_secrets_when_safe_mode_on() {
+        let re = regex::Regex::new(r"SECRET-\d+").expect("valid regex");
+        let none: [&regex::Regex; 0] = [];
+        set_user_and_enterprise_secret_regexes([&re], none);
+
+        let opts = OneshotOptions::default();
+        let (req, _) = build_oneshot_request(
+            &test_cfg(true),
+            "system with SECRET-11111",
+            "user with SECRET-22222",
+            &opts,
+        );
+        let system = req.system.clone().unwrap_or_default();
+        assert!(!system.contains("SECRET-11111"), "system: {system}");
+        assert!(system.contains('*'), "system should be masked: {system}");
+        let user = req.messages[0].content.first_text().unwrap_or_default();
+        assert!(!user.contains("SECRET-22222"), "user: {user}");
+
+        let (req, _) = build_oneshot_request(
+            &test_cfg(false),
+            "system with SECRET-11111",
+            "user with SECRET-22222",
+            &opts,
+        );
+        assert!(
+            req.system
+                .clone()
+                .unwrap_or_default()
+                .contains("SECRET-11111"),
+            "safe mode off must not alter the prompt"
+        );
+    }
 }

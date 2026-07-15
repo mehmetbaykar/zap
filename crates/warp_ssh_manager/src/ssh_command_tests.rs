@@ -98,12 +98,10 @@ fn test_connection_requires_password_for_password_auth() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let result = rt.block_on(test_connection(&s, None));
     assert_eq!(result.status, ConnectionStatus::Offline);
-    assert!(
-        result
-            .error_message
-            .unwrap()
-            .contains("Password not provided")
-    );
+    assert!(result
+        .error_message
+        .unwrap()
+        .contains("Password not provided"));
 }
 
 #[test]
@@ -113,12 +111,10 @@ fn test_connection_requires_password_for_onekey_auth() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let result = rt.block_on(test_connection(&s, None));
     assert_eq!(result.status, ConnectionStatus::Offline);
-    assert!(
-        result
-            .error_message
-            .unwrap()
-            .contains("Password not provided")
-    );
+    assert!(result
+        .error_message
+        .unwrap()
+        .contains("Password not provided"));
 }
 
 #[test]
@@ -324,7 +320,7 @@ fn key_auth_args_destination_comes_after_options() {
         "-o".into(),
         "ConnectTimeout=5".into(),
         "-o".into(),
-        "StrictHostKeyChecking=no".into(),
+        "StrictHostKeyChecking=accept-new".into(),
         "-o".into(),
         "LogLevel=ERROR".into(),
     ]);

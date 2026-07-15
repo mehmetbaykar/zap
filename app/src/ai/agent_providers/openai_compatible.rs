@@ -47,6 +47,18 @@ pub enum OpenAiCompatibleError {
     Other(String),
 }
 
+/// Provider error bodies can echo request fragments (prompt text, tool
+/// arguments), and these errors flow into default-level logs and the UI.
+/// Bound them so a failing provider can't dump whole payloads into zap.log.
+pub(crate) fn bounded_provider_body(body: String) -> String {
+    const MAX_CHARS: usize = 300;
+    if body.chars().count() <= MAX_CHARS {
+        return body;
+    }
+    let truncated: String = body.chars().take(MAX_CHARS).collect();
+    format!("{truncated}…[truncated]")
+}
+
 /// Normalizes the user-entered base_url into an absolute URL form,
 /// tolerating a trailing `/`, a missing `/v1`, `/openai/v1`, etc.
 pub(crate) fn normalize_base_url(input: &str) -> Result<String, OpenAiCompatibleError> {
@@ -87,7 +99,7 @@ pub async fn fetch_openai_compatible_models(
         let body = response.text().await.unwrap_or_default();
         return Err(OpenAiCompatibleError::Status {
             status: status.as_u16(),
-            body,
+            body: bounded_provider_body(body),
         });
     }
 

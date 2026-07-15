@@ -181,6 +181,7 @@ fn pending_title_generation_from_byop(
             model_id: title_gen.model_id.clone(),
             api_type: title_gen.api_type,
             reasoning_effort: title_gen.reasoning_effort,
+            should_redact_secrets: params.should_redact_secrets(),
         },
         user_query,
         task_id: byop.root_task_id.clone(),

@@ -104,7 +104,7 @@ async fn test_key_auth(server: &SshServerInfo) -> Result<(), String> {
         "-o".into(),
         "ConnectTimeout=5".into(),
         "-o".into(),
-        "StrictHostKeyChecking=no".into(),
+        "StrictHostKeyChecking=accept-new".into(),
         "-o".into(),
         "LogLevel=ERROR".into(),
     ]);
@@ -278,8 +278,10 @@ fn build_password_auth_stdin(password: &Zeroizing<String>) -> Zeroizing<Vec<u8>>
 ///   kbd-int can still proceed. Setting both switches is defense in depth.
 /// - `NumberOfPasswordPrompts=1`: the password sub-method is allowed only 1 retry.
 /// - `ConnectTimeout=5`: timeout for a single TCP connection.
-/// - `StrictHostKeyChecking=no`: do not block on known_hosts (in the test scenario this avoids false reports from host key
-///   changes; real terminal connections take a different path).
+/// - `StrictHostKeyChecking=accept-new`: record unknown hosts into known_hosts, but refuse a host
+///   whose key has changed — this test transmits the real password, so a changed key (potential
+///   MITM) must fail the test instead of silently proceeding; real terminal connections take a
+///   different path with normal interactive prompting.
 /// - `LogLevel=ERROR`: suppress host key prompts / banner and other noise.
 ///
 /// `echo ok` is the remote command; success is decided by strictly matching stdout (to avoid a banner / motd
@@ -305,7 +307,7 @@ fn build_password_auth_cmd_args(server: &SshServerInfo) -> Vec<String> {
         "-o".into(),
         "ConnectTimeout=5".into(),
         "-o".into(),
-        "StrictHostKeyChecking=no".into(),
+        "StrictHostKeyChecking=accept-new".into(),
         "-o".into(),
         "LogLevel=ERROR".into(),
     ]);

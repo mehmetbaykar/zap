@@ -1779,6 +1779,25 @@ fn should_replace_tool_response(existing: &ToolResponse, candidate: &ToolRespons
         || !is_placeholder_tool_response_content(&candidate.content)
 }
 
+/// Strips userinfo and query/fragment from a user-configured URL before it
+/// reaches the log: self-hosted proxies sometimes embed keys there.
+fn url_for_log(raw: &str) -> String {
+    let no_query = raw
+        .split(|c: char| c == '?' || c == '#')
+        .next()
+        .unwrap_or(raw);
+    match no_query.split_once("://") {
+        Some((scheme, rest)) => {
+            let host_part = rest.split_once('@').map_or(rest, |(_, host)| host);
+            format!("{scheme}://{host_part}")
+        }
+        None => no_query
+            .split_once('@')
+            .map_or(no_query, |(_, host)| host)
+            .to_string(),
+    }
+}
+
 fn snippet_for_log(s: &str, max_chars: usize) -> String {
     use std::fmt::Write as _;
 
@@ -2952,7 +2971,10 @@ pub(super) fn build_client(
     api_key: String,
 ) -> Client {
     let endpoint_url = normalize_endpoint_url(api_type, base_url);
-    log::info!("[byop] build_client: api_type={api_type:?} endpoint_url={endpoint_url}");
+    log::info!(
+        "[byop] build_client: api_type={api_type:?} endpoint_url={}",
+        url_for_log(&endpoint_url)
+    );
     let key_for_resolver = api_key.clone();
     let resolver = ServiceTargetResolver::from_resolver_fn(
         move |service_target: ServiceTarget| -> Result<ServiceTarget, genai::resolver::Error> {
@@ -3023,7 +3045,7 @@ pub(super) fn build_client(
                 ) {
                     log::warn!(
                         "[byop] proxy URL '{}' is invalid; skipping proxy config: {err}",
-                        proxy_cfg.url
+                        url_for_log(&proxy_cfg.url)
                     );
                 }
             }
@@ -3286,11 +3308,11 @@ fn map_genai_error(err: genai::Error) -> OpenAiCompatibleError {
             canonical_reason,
         } => OpenAiCompatibleError::Status {
             status: status.as_u16(),
-            body: if canonical_reason.is_empty() {
+            body: super::openai_compatible::bounded_provider_body(if canonical_reason.is_empty() {
                 body
             } else {
                 format!("{canonical_reason}: {body}")
-            },
+            }),
         },
 
         // Everything else (request construction, authentication, capability unsupported, etc.) is grouped as a generic error, to avoid misleading it as a "parse failure"
@@ -3310,6 +3332,9 @@ pub struct TitleGenInput {
     pub model_id: String,
     pub api_type: AgentProviderApiType,
     pub reasoning_effort: crate::settings::ReasoningEffortSetting,
+    /// Safe Mode snapshot from the originating request; the title prompt embeds
+    /// the user query, so it must honor the same redaction decision.
+    pub should_redact_secrets: bool,
 }
 
 pub struct ByopOutputInput {
@@ -3342,8 +3367,8 @@ pub struct ByopOutputInput {
 /// `~/.../Logs/zap.log` on every request and every stream error. Set the
 /// `ZAP_BYOP_DIAG` environment variable to enable it when debugging BYOP
 /// request-encoding issues. Length/metadata summaries are always logged.
-fn byop_full_request_diag_enabled() -> bool {
-    std::env::var_os("ZAP_BYOP_DIAG").is_some()
+pub(crate) fn byop_full_request_diag_enabled() -> bool {
+    std::env::var("ZAP_BYOP_DIAG").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
 pub async fn generate_byop_output(
@@ -3476,6 +3501,11 @@ pub async fn generate_byop_output(
     // A `\n` / `\r` / `\t` in the source string is output by serde_json as a single backslash +
     // letter, which is itself a legal JSON escape; the proxy will not restore it a second time, so it is not suspicious.
     fn scan_suspicious_backslash(label: &str, s: &str) {
+        // The hit snippets below are raw slices of request content; only scan
+        // (and log) when BYOP diagnostics are explicitly enabled.
+        if !byop_full_request_diag_enabled() {
+            return;
+        }
         let bytes = s.as_bytes();
         let mut bs_hits: Vec<(usize, String)> = Vec::new();
         let mut ctrl_hits: Vec<(usize, u8)> = Vec::new();
@@ -4125,12 +4155,12 @@ pub async fn generate_byop_output(
                 break;
             }
             if tool_bufs.is_empty() && parsed_any_text {
-                let preview: String = streamed_assistant_text.chars().take(240).collect();
                 log::info!(
                     "[byop] content_tool_extract: no tools parsed (streamed={}B captured={}B) \
-                     preview={preview:?}",
+                     preview={}",
                     streamed_assistant_text.len(),
                     captured_assistant_text.as_ref().map(|t| t.len()).unwrap_or(0),
+                    snippet_for_log(&streamed_assistant_text, BYOP_DIAG_SNIPPET_CHARS),
                 );
             } else if tool_bufs.is_empty() {
                 log::warn!(
@@ -4585,6 +4615,7 @@ pub(crate) async fn generate_title_via_byop(
         model_id: tg.model_id.clone(),
         api_type: tg.api_type,
         reasoning_effort: tg.reasoning_effort,
+        should_redact_secrets: tg.should_redact_secrets,
     };
     let system = include_str!("prompts/tasks/title_system.md");
     let user_prompt = format!(
@@ -4902,8 +4933,10 @@ fn parse_incoming_tool_call(
                     }
                     Err(e2) => {
                         log::warn!(
-                            "[byop] from_args failed (after coerce): tool={} err={e2:#} original_err={e:#} coerced_args={coerced} args_str={args_str}",
-                            call.fn_name
+                            "[byop] from_args failed (after coerce): tool={} err={e2:#} original_err={e:#} coerced_args={} args_str={}",
+                            call.fn_name,
+                            snippet_for_log(&coerced, BYOP_DIAG_SNIPPET_CHARS),
+                            snippet_for_log(&args_str, BYOP_DIAG_SNIPPET_CHARS),
                         );
                         return Err(e2);
                     }
@@ -4915,8 +4948,9 @@ fn parse_incoming_tool_call(
             //   2. whether escaping went wrong in the genai Value→string conversion
             //   3. whether fn_arguments as a whole was stringified (should be an object but is a string)
             log::warn!(
-                "[byop] from_args failed: tool={} err={e:#} args_str={args_str}",
-                call.fn_name
+                "[byop] from_args failed: tool={} err={e:#} args_str={}",
+                call.fn_name,
+                snippet_for_log(&args_str, BYOP_DIAG_SNIPPET_CHARS)
             );
             Err(e)
         }

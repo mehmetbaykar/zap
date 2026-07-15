@@ -3410,7 +3410,7 @@ impl BlocklistAIController {
             },
             move |_me, (task_id, result), ctx| match result {
                 Ok(Some(title)) => {
-                    log::info!("[byop] title generated: {title:?}");
+                    log::info!("[byop] title generated ({} chars)", title.chars().count());
                     let client_actions = vec![ClientAction {
                         action: Some(Action::UpdateTaskDescription(UpdateTaskDescription {
                             task_id,

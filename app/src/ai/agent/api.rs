@@ -454,6 +454,12 @@ impl RequestParams {
             }
         }
     }
+
+    /// Safe Mode snapshot captured in `new()`; lets satellite BYOP requests
+    /// (e.g. title generation) inherit the same redaction decision.
+    pub(crate) fn should_redact_secrets(&self) -> bool {
+        self.should_redact_secrets
+    }
 }
 
 #[cfg(test)]
