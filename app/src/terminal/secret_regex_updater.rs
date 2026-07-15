@@ -11,6 +11,17 @@ pub struct CustomSecretRegexUpdater;
 impl CustomSecretRegexUpdater {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
         let updater = CustomSecretRegexUpdater;
+        // Seed the recommended default secret patterns once. Upstream does this
+        // from `handle_warp_drive_objects_loaded` after its cloud prefs finish
+        // loading; the fork has no cloud-load phase, so the local equivalent is
+        // here at startup, before the first sync into the secret matcher.
+        // Without this, a fresh install has an empty pattern list and Safe Mode
+        // detects nothing. `initialize_default_regexes_once` is guarded by the
+        // persisted HasInitializedDefaultSecretRegexes flag, so users who
+        // already customized (or cleared) their list are left untouched.
+        PrivacySettings::handle(ctx).update(ctx, |settings, ctx| {
+            settings.initialize_default_regexes_once(ctx);
+        });
         // Initialize with current custom regexes (will be empty until safe mode is enabled)
         updater.update_custom_secret_regex_list(ctx);
 

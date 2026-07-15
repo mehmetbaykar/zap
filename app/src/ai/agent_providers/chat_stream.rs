@@ -1781,7 +1781,7 @@ fn should_replace_tool_response(existing: &ToolResponse, candidate: &ToolRespons
 
 /// Strips userinfo and query/fragment from a user-configured URL before it
 /// reaches the log: self-hosted proxies sometimes embed keys there.
-fn url_for_log(raw: &str) -> String {
+pub(crate) fn url_for_log(raw: &str) -> String {
     let no_query = raw
         .split(|c: char| c == '?' || c == '#')
         .next()

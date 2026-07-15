@@ -316,7 +316,11 @@ fn validate_fetch_response_metadata(
     url: &str,
 ) -> Result<()> {
     if !status.is_success() {
-        bail!("HTTP {} fetching {url}", status.as_u16());
+        bail!(
+            "HTTP {} fetching {}",
+            status.as_u16(),
+            crate::ai::agent_providers::chat_stream::url_for_log(url)
+        );
     }
     if let Some(len) = content_length {
         if len > MAX_RESPONSE_SIZE {
@@ -399,7 +403,13 @@ async fn send_fetch(
         .timeout(timeout)
         .send()
         .await
-        .with_context(|| format!("HTTP GET {url}"))
+        .map_err(reqwest::Error::without_url)
+        .with_context(|| {
+            format!(
+                "HTTP GET {}",
+                crate::ai::agent_providers::chat_stream::url_for_log(url)
+            )
+        })
 }
 
 fn is_image_mime(mime: &str) -> bool {
@@ -645,11 +655,13 @@ pub async fn run_websearch(
     endpoint_override: Option<&str>,
 ) -> Result<SearchOutput> {
     let (query, request) = build_websearch_request(client, args, api_key, endpoint_override)?;
-    let url = request.url().clone();
+    // The Exa URL carries the API key in its querystring; keep it out of every
+    // error path (reqwest embeds the full URL in its Display output).
     let resp = client
         .execute(request)
         .await
-        .with_context(|| format!("Exa POST {url}"))?;
+        .map_err(reqwest::Error::without_url)
+        .context("Exa POST failed")?;
 
     let status = resp.status();
     if !status.is_success() {
@@ -681,7 +693,7 @@ fn build_websearch_request(
         .timeout(Duration::from_secs(SEARCH_TIMEOUT_SECS))
         .json(&body)
         .build()
-        .with_context(|| format!("build Exa POST {url}"))?;
+        .context("build Exa POST request")?;
     Ok((query, request))
 }
 
