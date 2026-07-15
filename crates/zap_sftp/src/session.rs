@@ -93,6 +93,13 @@ impl SftpSession {
             }
         })?;
 
+        // Verify the server's host key against ~/.ssh/known_hosts BEFORE sending
+        // any credentials. Without this, a password sent right after the
+        // handshake could be handed to a man-in-the-middle. Uses trust-on-first-
+        // use (OpenSSH `StrictHostKeyChecking=accept-new`): unknown hosts are
+        // recorded, but a later key change is rejected.
+        verify_host_key(&session, host, port)?;
+
         match &auth {
             AuthMethod::Password { password } => {
                 session.userauth_password(username, password).map_err(|e| {
@@ -168,4 +175,83 @@ impl Drop for SftpSession {
 fn is_timeout_error(error: &ssh2::Error) -> bool {
     // ssh2 error code Session(-37) corresponds to LIBSSH2_ERROR_SOCKET_TIMEOUT
     error.code() == ssh2::ErrorCode::Session(-37)
+}
+
+/// Verify the server's host key against `~/.ssh/known_hosts` before
+/// authenticating, using trust-on-first-use semantics (equivalent to OpenSSH's
+/// `StrictHostKeyChecking=accept-new`):
+///
+/// - key matches a known entry -> proceed;
+/// - key differs from a known entry -> reject (possible MITM);
+/// - host is unknown -> record the key and proceed, so a later change is caught.
+///
+/// The known_hosts entry is keyed on `host` for the standard port and
+/// `[host]:port` otherwise, matching OpenSSH's on-disk format.
+fn verify_host_key(session: &ssh2::Session, host: &str, port: u16) -> Result<(), SftpError> {
+    use ssh2::{CheckResult, KnownHostFileKind, KnownHostKeyFormat};
+
+    let (key, key_type) = session.host_key().ok_or_else(|| {
+        SftpError::HostKeyVerificationFailed("server did not present a host key".into())
+    })?;
+
+    let mut known_hosts = session.known_hosts().map_err(|e| {
+        SftpError::HostKeyVerificationFailed(format!("failed to initialize known_hosts: {e}"))
+    })?;
+
+    let known_hosts_path = dirs::home_dir()
+        .map(|h| h.join(".ssh").join("known_hosts"))
+        .ok_or_else(|| {
+            SftpError::HostKeyVerificationFailed("could not determine home directory".into())
+        })?;
+
+    // An absent known_hosts file is fine — every host is then trust-on-first-use.
+    if known_hosts_path.exists() {
+        known_hosts
+            .read_file(&known_hosts_path, KnownHostFileKind::OpenSSH)
+            .map_err(|e| {
+                SftpError::HostKeyVerificationFailed(format!(
+                    "failed to read {}: {e}",
+                    known_hosts_path.display()
+                ))
+            })?;
+    }
+
+    match known_hosts.check_port(host, port, key) {
+        CheckResult::Match => Ok(()),
+        CheckResult::Mismatch => Err(SftpError::HostKeyVerificationFailed(format!(
+            "host key for {host}:{port} does not match the entry in {} — possible \
+             man-in-the-middle attack; refusing to connect. If the host key legitimately \
+             changed, remove the stale entry from known_hosts and reconnect.",
+            known_hosts_path.display()
+        ))),
+        CheckResult::NotFound => {
+            let host_entry = if port == 22 {
+                host.to_string()
+            } else {
+                format!("[{host}]:{port}")
+            };
+            let fmt: KnownHostKeyFormat = key_type.into();
+            known_hosts
+                .add(&host_entry, key, "zap-sftp (trust on first use)", fmt)
+                .and_then(|()| {
+                    if let Some(parent) = known_hosts_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    known_hosts.write_file(&known_hosts_path, KnownHostFileKind::OpenSSH)
+                })
+                .map_err(|e| {
+                    SftpError::HostKeyVerificationFailed(format!(
+                        "failed to record new host key for {host}:{port}: {e}"
+                    ))
+                })?;
+            log::info!(
+                "zap_sftp: recorded new host key for {host}:{port} in {} (trust on first use)",
+                known_hosts_path.display()
+            );
+            Ok(())
+        }
+        CheckResult::Failure => Err(SftpError::HostKeyVerificationFailed(
+            "libssh2 failed to check the host key against known_hosts".into(),
+        )),
+    }
 }

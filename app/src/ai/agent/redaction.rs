@@ -390,3 +390,38 @@ fn redact_attachment(attachment: &mut AIAgentAttachment) {
         AIAgentAttachment::FilePathReference { .. } => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::redact_inputs;
+    use crate::ai::agent::AIAgentInput;
+    use crate::terminal::model::secrets::set_user_and_enterprise_secret_regexes;
+
+    // End-to-end guard for the BYOP Safe Mode wiring: `redact_inputs` must
+    // actually mask detected secrets in the query text. This protects the
+    // mechanism `RequestParams::new` invokes when `should_redact_secrets` is set;
+    // upstream Warp performs the same redaction before send (api/impl.rs).
+    #[test]
+    fn redact_inputs_masks_detected_secret_in_query() {
+        let re = regex::Regex::new(r"SECRET-\d+").expect("valid regex");
+        let none: [&regex::Regex; 0] = [];
+        set_user_and_enterprise_secret_regexes([&re], none);
+
+        let mut inputs = vec![AIAgentInput::AutoCodeDiffQuery {
+            query: "please review SECRET-12345 in this diff".to_string(),
+            context: Arc::from(Vec::new()),
+        }];
+        redact_inputs(&mut inputs);
+
+        let AIAgentInput::AutoCodeDiffQuery { query, .. } = &inputs[0] else {
+            panic!("variant changed");
+        };
+        assert!(
+            !query.contains("SECRET-12345"),
+            "secret should be redacted, got: {query}"
+        );
+        assert!(query.contains('*'), "redaction should insert mask chars: {query}");
+    }
+}

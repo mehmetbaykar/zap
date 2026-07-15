@@ -184,15 +184,17 @@ define_settings_group!(TerminalSettings, settings: [
     },
     osc52_clipboard_access: Osc52ClipboardAccessSetting {
         type: Osc52ClipboardAccess,
-        // Fork default: ReadWrite preserves the previous always-on OSC 52 clipboard
-        // behavior (no surprise breakage). Users can set write_only or deny to restrict.
-        default: Osc52ClipboardAccess::ReadWrite,
+        // Default to Deny, matching upstream Warp's fix for CVE-2026-48725
+        // (GHSA-wgqj-4c26-7c4g): terminal output must not silently read or write
+        // the system clipboard via OSC 52 unless the user opts in. Users can set
+        // write_only or read_write to relax.
+        default: Osc52ClipboardAccess::default(),
         supported_platforms: SupportedPlatforms::ALL,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
         surface: settings::SettingSurfaces::GUI,
         private: false,
         toml_path: "terminal.osc52_clipboard_access",
-        description: "Controls whether terminal programs can access the system clipboard via OSC 52 escape sequences. Options: deny, write_only, read_write (default).",
+        description: "Controls whether terminal programs can access the system clipboard via OSC 52 escape sequences. Options: deny (default), write_only, read_write.",
     },
     // Opt-in toggle for running terminal find on a background thread. Only consulted on
     // channels where `FeatureFlag::AsyncFind` is off; channels with the flag on force the

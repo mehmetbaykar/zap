@@ -25,6 +25,9 @@ pub enum SftpError {
     #[error("Operation timed out")]
     Timeout,
 
+    #[error("Host key verification failed: {0}")]
+    HostKeyVerificationFailed(String),
+
     #[error("File not found: {0}")]
     NoSuchFile(String),
 

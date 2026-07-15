@@ -372,8 +372,19 @@ impl RequestParams {
             .data()
             .context_window_limit_for_request(app);
 
+        // Safe Mode secret redaction. Upstream Warp redacts detected secrets from
+        // the request inputs at the send chokepoint (api/impl.rs) when this flag is
+        // set; the cloud never sees the raw secret. BYOP has no server to redact on
+        // our behalf, so we must do it locally here, before the inputs are handed to
+        // the provider stream — otherwise Safe Mode would only mask secrets in the UI
+        // while sending them raw to the model.
+        let mut input: Vec<AIAgentInput> = request_input.all_inputs().cloned().collect();
+        if should_redact_secrets {
+            super::redaction::redact_inputs(&mut input);
+        }
+
         Self {
-            input: request_input.all_inputs().cloned().collect(),
+            input,
             conversation_token: conversation.server_conversation_token,
             forked_from_conversation_token: conversation.forked_from_conversation_token,
             ambient_agent_task_id: conversation.ambient_agent_task_id,

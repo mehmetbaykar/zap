@@ -3328,6 +3328,16 @@ pub struct ByopOutputInput {
 /// `target_task_id`: the task id this turn's model output should be written into; equals root for ordinary conversations,
 /// and an existing subtask for CLI subagent later turns.
 /// `needs_create_task`: only the first turn (while root is still Optimistic) needs to emit `CreateTask`.
+/// Whether to dump the full BYOP request body (system prompt, conversation
+/// messages, source context, tool schemas) to the log. Off by default because
+/// that content is sensitive and would otherwise be written to
+/// `~/.../Logs/zap.log` on every request and every stream error. Set the
+/// `ZAP_BYOP_DIAG` environment variable to enable it when debugging BYOP
+/// request-encoding issues. Length/metadata summaries are always logged.
+fn byop_full_request_diag_enabled() -> bool {
+    std::env::var_os("ZAP_BYOP_DIAG").is_some()
+}
+
 pub async fn generate_byop_output(
     input: ByopOutputInput,
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
@@ -3445,7 +3455,12 @@ pub async fn generate_byop_output(
     }))
     .unwrap_or_default();
     log::info!("[byop] diag_body_approx_len={}", diag_body_json.len());
-    log::info!("[byop-diag] full_request_json={diag_body_json}");
+    // The full request body (system prompt, messages, source context, tool
+    // schemas) is sensitive; only dump it when BYOP diagnostics are explicitly
+    // enabled. The length/metadata summaries above stay always-on.
+    if byop_full_request_diag_enabled() {
+        log::info!("[byop-diag] full_request_json={diag_body_json}");
+    }
 
     // Proactively scan the raw text for "suspicious backslash sequences": serde_json serializes a literal
     // `\` in the source string as `\\`, so "two consecutive backslashes + u/x" appearing in the wire body means
@@ -3772,25 +3787,31 @@ pub async fn generate_byop_output(
                     let mapped = map_genai_error(e);
                     let err_text = format!("{mapped:#}");
                     log::error!("[byop] stream chunk error: {err_text}");
-                    log::error!("[byop-diag] full_request_json_on_error={diag_body_json}");
-                    // Parse "column N" from the error message, dump the ±200-char context at that position in diag_body_json + byte hex.
-                    if let Some(col) = err_text
-                        .split("column ")
-                        .nth(1)
-                        .and_then(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<usize>().ok())
-                    {
-                        let body = &diag_body_json;
-                        let byte_len = body.len();
-                        let start = col.saturating_sub(200).min(byte_len);
-                        let end = (col + 200).min(byte_len);
-                        let context = body.get(start..end).unwrap_or("(slice failed: not a char boundary)");
-                        log::error!(
-                            "[byop] error column={col} diag_body_len={byte_len} context[{start}..{end}]={context:?}"
-                        );
-                        let hex_start = col.saturating_sub(20).min(byte_len);
-                        let hex_end = (col + 20).min(byte_len);
-                        if let Some(slice) = body.as_bytes().get(hex_start..hex_end) {
-                            log::error!("[byop] error bytes[{hex_start}..{hex_end}] hex={slice:02x?}");
+                    // The error diagnostics below echo the full request body and
+                    // raw byte slices of it; gate them behind the same opt-in flag
+                    // as the success-path dump so secrets don't land in the log on
+                    // every failed stream.
+                    if byop_full_request_diag_enabled() {
+                        log::error!("[byop-diag] full_request_json_on_error={diag_body_json}");
+                        // Parse "column N" from the error message, dump the ±200-char context at that position in diag_body_json + byte hex.
+                        if let Some(col) = err_text
+                            .split("column ")
+                            .nth(1)
+                            .and_then(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<usize>().ok())
+                        {
+                            let body = &diag_body_json;
+                            let byte_len = body.len();
+                            let start = col.saturating_sub(200).min(byte_len);
+                            let end = (col + 200).min(byte_len);
+                            let context = body.get(start..end).unwrap_or("(slice failed: not a char boundary)");
+                            log::error!(
+                                "[byop] error column={col} diag_body_len={byte_len} context[{start}..{end}]={context:?}"
+                            );
+                            let hex_start = col.saturating_sub(20).min(byte_len);
+                            let hex_end = (col + 20).min(byte_len);
+                            if let Some(slice) = body.as_bytes().get(hex_start..hex_end) {
+                                log::error!("[byop] error bytes[{hex_start}..{hex_end}] hex={slice:02x?}");
+                            }
                         }
                     }
                     yield Err(Arc::new(AIApiError::Other(anyhow::anyhow!(

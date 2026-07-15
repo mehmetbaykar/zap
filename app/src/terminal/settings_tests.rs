@@ -8,6 +8,18 @@ fn osc52_default_is_deny() {
 }
 
 #[test]
+fn osc52_setting_effective_default_is_deny() {
+    // Regression guard for CVE-2026-48725: the *setting's* effective default —
+    // not just the enum's — must be Deny. A prior fork override set this to
+    // ReadWrite, re-opening the clipboard-access vulnerability upstream fixed.
+    use settings::Setting as _;
+    assert_eq!(
+        Osc52ClipboardAccessSetting::default_value(),
+        Osc52ClipboardAccess::Deny
+    );
+}
+
+#[test]
 fn osc52_deny_blocks_read_and_write() {
     let access = Osc52ClipboardAccess::Deny;
     assert!(!access.allows_read());
