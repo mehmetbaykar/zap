@@ -41,7 +41,6 @@ fn render_left_column(cwd: Option<&str>, builder: &TuiUiBuilder, app: &AppContex
     let header_style = builder.primary_text_style().add_modifier(Modifier::BOLD);
     let muted = builder.muted_text_style();
 
-    let version = ChannelState::app_version().unwrap_or("dev build");
     let mut column = TuiFlex::column()
         .child(
             TuiText::new("Warp Agent")
@@ -49,7 +48,7 @@ fn render_left_column(cwd: Option<&str>, builder: &TuiUiBuilder, app: &AppContex
                 .truncate()
                 .finish(),
         )
-        .child(TuiText::new(version).with_style(muted).truncate().finish());
+        .child(render_version_line(builder, app));
 
     let bullets = changelog_bullets(app);
     if !bullets.is_empty() {
@@ -75,6 +74,25 @@ fn render_left_column(cwd: Option<&str>, builder: &TuiUiBuilder, app: &AppContex
         column = render_project_section(cwd, column, builder, app);
     }
     column
+}
+
+/// The version line: the release version (or "dev build"), with the
+/// background auto-updater's status appended in parentheses. Dev builds
+/// never run the updater (and have no version), so they render plain; the
+/// `Idle` status (updater ineligible, or no stable check result yet) renders
+/// no suffix either.
+fn render_version_line(builder: &TuiUiBuilder, _app: &AppContext) -> Box<dyn TuiElement> {
+    let muted = builder.muted_text_style();
+    let Some(version) = ChannelState::app_version() else {
+        return TuiText::new("dev build")
+            .with_style(muted)
+            .truncate()
+            .finish();
+    };
+    // Zap: the TUI autoupdate status suffix is stripped with the
+    // warp_tui autoupdate module (fork updates via its own GUI updater);
+    // the zero state shows the plain version.
+    TuiText::new(version).with_style(muted).truncate().finish()
 }
 
 /// Appends the project section: the project root (or cwd) as a header, then

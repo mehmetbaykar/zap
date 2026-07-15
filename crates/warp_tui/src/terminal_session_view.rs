@@ -9,15 +9,17 @@ use parking_lot::FairMutex;
 use warp::editor::{CodeEditorModel, CodeEditorModelEvent};
 use warp::settings::{AISettings, AISettingsChangedEvent};
 use warp::tui_export::{
-    detect_possible_git_repo, throttle, AIAgentPtyWriteMode, ActiveSession, ActiveSessionEvent,
-    AgentInteractionMetadata, AgentViewController, AgentViewEntryOrigin, AmbientAgentViewModel,
-    BlocklistAIActionModel, BlocklistAIContextModel, BlocklistAIController,
-    BlocklistAIHistoryEvent, BlocklistAIHistoryModel, BlocklistAIInputModel, CancellationReason,
-    ChangelogModel, ChangelogModelEvent, ChangelogRequestType, CommandExecutionSource,
-    ConversationSelection, ConversationSelectionHandle, EphemeralMessageModel, ExecuteCommandEvent,
-    LLMPreferences, LLMPreferencesEvent, ModelEvent, PtyIntent, PtyIntentEvent,
-    RepoDetectionSessionType, RepoDetectionSource, ShellCommandExecutorEvent, TerminalModel,
-    TerminalSurface, TerminalSurfaceInit, WAKEUP_THROTTLE_PERIOD,
+    build_slash_command_mixer, detect_possible_git_repo, throttle, AIAgentPtyWriteMode,
+    ActiveSession, ActiveSessionEvent, AgentInteractionMetadata, AgentViewController,
+    AgentViewEntryOrigin, AmbientAgentViewModel, BlocklistAIActionModel, BlocklistAIContextModel,
+    BlocklistAIController, BlocklistAIHistoryEvent, BlocklistAIHistoryModel, BlocklistAIInputModel,
+    CLISubagentController, CancellationReason, ChangelogModel, ChangelogModelEvent,
+    ChangelogRequestType, CommandExecutionSource, ConversationSelection,
+    ConversationSelectionHandle, EphemeralMessageModel, ExecuteCommandEvent, LLMPreferences,
+    LLMPreferencesEvent, ModelEvent, PtyIntent, PtyIntentEvent, RepoDetectionSessionType,
+    RepoDetectionSource, ShellCommandExecutorEvent, TerminalModel, TerminalSurface,
+    TerminalSurfaceInit, TuiSlashCommandDataSource, TuiSlashCommandDataSourceArgs,
+    TuiZeroStateDataSource, WAKEUP_THROTTLE_PERIOD,
 };
 use warp_editor::model::CoreEditorModel;
 use warp_errors::report_error;
@@ -38,6 +40,7 @@ use crate::exit_confirmation::{ExitConfirmation, CTRL_C_EXIT_WINDOW};
 use crate::input::{TuiInputView, TuiInputViewEvent};
 use crate::input_mode_policy::{self, TuiInputModePolicy};
 use crate::keybindings::TUI_BINDING_GROUP;
+use crate::slash_commands::TuiSlashCommandModel;
 use crate::transcript_view::TuiTranscriptView;
 use crate::transient_hint::TransientHint;
 use crate::tui_builder::TuiUiBuilder;
@@ -93,6 +96,7 @@ pub(crate) enum TuiTerminalSessionAction {
 pub(crate) struct TuiTerminalSessionView {
     transcript: ViewHandle<TuiTranscriptView>,
     input_view: ViewHandle<TuiInputView>,
+    slash_commands: ModelHandle<TuiSlashCommandModel>,
     conversation_selection: ConversationSelectionHandle,
     ai_controller: ModelHandle<BlocklistAIController>,
     /// Read by the footer for the active session's working directory.
@@ -193,6 +197,17 @@ impl TuiTerminalSessionView {
                 ctx,
             )
         });
+        let cli_subagent_controller = ctx.add_model(|ctx| {
+            CLISubagentController::new(
+                &ai_controller,
+                &action_model,
+                None,
+                model.clone(),
+                &model_events,
+                terminal_surface_id,
+                ctx,
+            )
+        });
         let transcript = ctx.add_typed_action_tui_view(|ctx| {
             TuiTranscriptView::new(
                 terminal_surface_id,
@@ -204,6 +219,29 @@ impl TuiTerminalSessionView {
         });
         let input_editor_model =
             ctx.add_model(|ctx| CodeEditorModel::new_tui(INITIAL_INPUT_WIDTH, ctx));
+        let slash_commands_source = ctx.add_model(|ctx| {
+            TuiSlashCommandDataSource::new(
+                TuiSlashCommandDataSourceArgs {
+                    active_session: active_session.clone(),
+                    cli_subagent_controller,
+                    terminal_view_id: terminal_surface_id,
+                },
+                ctx,
+            )
+        });
+        let zero_state_source = TuiZeroStateDataSource::new(&slash_commands_source);
+        let slash_commands_mixer = ctx.add_model(|ctx| {
+            build_slash_command_mixer(slash_commands_source.clone(), zero_state_source, ctx)
+        });
+        let slash_commands = ctx.add_model(|ctx| {
+            TuiSlashCommandModel::new(
+                input_editor_model.clone(),
+                slash_commands_source,
+                slash_commands_mixer,
+                ctx,
+            )
+        });
+        ctx.subscribe_to_model(&slash_commands, |_, _, _, ctx| ctx.notify());
         // Typing after a ctrl-c press disarms the pending exit confirmation.
         // The ctrl-c buffer clear leaves the buffer empty, so the window it
         // arms survives its own clear.
@@ -358,6 +396,7 @@ impl TuiTerminalSessionView {
         Self {
             transcript,
             input_view,
+            slash_commands,
             conversation_selection,
             ai_controller,
             active_session,
@@ -700,6 +739,7 @@ impl TuiView for TuiTerminalSessionView {
     }
 
     fn render(&self, ctx: &AppContext) -> Box<dyn TuiElement> {
+        let _slash_commands_open = self.slash_commands.as_ref(ctx).is_open();
         // The border takes the shell-mode accent while in shell mode.
         let builder = TuiUiBuilder::from_app(ctx);
         let border_style = if self.is_shell_mode(ctx) {
