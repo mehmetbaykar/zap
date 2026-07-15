@@ -148,6 +148,10 @@ jobs:
     name: Build Release (macOS ${{ matrix.dmg_name_suffix }})
     runs-on: ${{ matrix.runner }}
     needs: prepare_metadata
+    # Bind the signing/notarization secrets to a deployment environment so
+    # GitHub can gate them behind protection rules (required reviewers etc.).
+    # Configure the rules under Settings -> Environments -> release.
+    environment: release
     # macos-26 (Pro standard) has no sccache, so the full cargo build + bundle + create-dmg
     # is slow; relaxed to the GitHub-hosted job 6h execution limit to be safe.
     timeout-minutes: 360
@@ -316,6 +320,7 @@ jobs:
   publish_release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
+    environment: release
     # Must wait for the builds to succeed before publishing; if any fails → this job is skipped → no empty Release appears.
     needs:
       - prepare_metadata

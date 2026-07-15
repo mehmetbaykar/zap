@@ -6,17 +6,19 @@
 # This script should be platform-agnostic (eg. no unix-only references like /dev/null).
 
 cargo_location=$(dirname "$(which cargo)")
-if test -f "$cargo_location/cargo-bundle"; then
-    echo "cargo-bundle already exists, not installing."
+# The bucket is mutable and this binary later runs inside the release job that
+# holds signing/notarization credentials, so pin both the downloaded zip and
+# the installed binary (a cached/pre-existing binary must match too). If the
+# cached zip is ever legitimately updated, recompute with `shasum -a 256`.
+expected_zip_sha256="6e14083d4b61dcd2f123c1518b51c2e4a0b345957ab2628012d4536fc84e51db"
+expected_bin_sha256="07cf75937a51f5e5189218c7eca9fe6eb34bcf92ac314afaee8b88357b16755b"
+if test -f "$cargo_location/cargo-bundle" && echo "$expected_bin_sha256  $cargo_location/cargo-bundle" | shasum -a 256 --check --status; then
+    echo "cargo-bundle already exists (hash verified), not installing."
 else
     set -e
     curl https://storage.googleapis.com/cached_crates/cargo-bundle.zip --output cargo-bundle.zip
-    # The bucket is mutable and this binary later runs inside the release job that
-    # holds signing/notarization credentials, so pin the exact artifact. If the
-    # cached zip is ever legitimately updated, recompute with `shasum -a 256`.
-    expected_sha256="6e14083d4b61dcd2f123c1518b51c2e4a0b345957ab2628012d4536fc84e51db"
-    if ! echo "$expected_sha256  cargo-bundle.zip" | shasum -a 256 --check --status; then
-        echo "cargo-bundle.zip SHA-256 mismatch (expected $expected_sha256); refusing to install." >&2
+    if ! echo "$expected_zip_sha256  cargo-bundle.zip" | shasum -a 256 --check --status; then
+        echo "cargo-bundle.zip SHA-256 mismatch (expected $expected_zip_sha256); refusing to install." >&2
         exit 1
     fi
     unzip -o cargo-bundle.zip
