@@ -703,7 +703,13 @@ fn search_output_from_response(
     body_text: &str,
 ) -> Result<SearchOutput> {
     if !status.is_success() {
-        bail!("Exa returned HTTP {} ({})", status.as_u16(), body_text);
+        bail!(
+            "Exa returned HTTP {} ({})",
+            status.as_u16(),
+            crate::ai::agent_providers::openai_compatible::bounded_provider_body(
+                body_text.to_owned()
+            )
+        );
     }
 
     let parsed = exa::parse_sse_body(body_text)?;
