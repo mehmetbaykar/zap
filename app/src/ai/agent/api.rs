@@ -425,6 +425,35 @@ impl RequestParams {
             byop_repair_state: Default::default(),
         }
     }
+
+    /// Re-run Safe Mode secret redaction over the long-running-command (LRC)
+    /// context. The controller injects the live PTY snapshot into
+    /// `lrc_running_command` and into `UserQuery.running_command` slots *after*
+    /// `new()` has already redacted the inputs, and BYOP renders that snapshot
+    /// (command line + terminal grid) straight into the outbound message via
+    /// `<attached_running_command>`. Without this second pass, Safe Mode would
+    /// mask secrets everywhere except the running-command block. The shared
+    /// `redaction::redact_inputs` deliberately leaves `running_command`
+    /// untouched (it matches upstream, whose backend handles that path), so the
+    /// BYOP-only redaction lives here. Idempotent: redacting already-masked text
+    /// is a no-op, so calling it more than once is safe.
+    pub(crate) fn redact_lrc_context_if_enabled(&mut self) {
+        if !self.should_redact_secrets {
+            return;
+        }
+        if let Some(rc) = self.lrc_running_command.as_mut() {
+            super::redaction::redact_running_command(rc);
+        }
+        for input in self.input.iter_mut() {
+            if let AIAgentInput::UserQuery {
+                running_command: Some(rc),
+                ..
+            } = input
+            {
+                super::redaction::redact_running_command(rc);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

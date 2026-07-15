@@ -1782,6 +1782,14 @@ fn should_replace_tool_response(existing: &ToolResponse, candidate: &ToolRespons
 fn snippet_for_log(s: &str, max_chars: usize) -> String {
     use std::fmt::Write as _;
 
+    // Every `[byop-diag]` snippet is a slice of request content (system prompt,
+    // message text, tool results, user query, provider URL). Keep it out of the
+    // log by default — the length/metadata around each call site stays — and
+    // only emit real content when BYOP diagnostics are explicitly enabled.
+    if !byop_full_request_diag_enabled() {
+        return "<hidden; set ZAP_BYOP_DIAG=1 to log content>".to_string();
+    }
+
     let mut out = String::new();
     for (idx, ch) in s.chars().enumerate() {
         if idx >= max_chars {

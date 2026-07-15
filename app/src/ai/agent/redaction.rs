@@ -6,8 +6,19 @@ use super::super::blocklist::block::secret_redaction::{
 use crate::ai::agent::{
     AIAgentActionResultType, AIAgentAttachment, AIAgentContext, AIAgentInput, AnyFileContent,
     AskUserQuestionAnswerItem, AskUserQuestionResult, BlockContext, PassiveSuggestionResultType,
-    PassiveSuggestionTrigger, RequestCommandOutputResult, TransferShellCommandControlToUserResult,
+    PassiveSuggestionTrigger, RequestCommandOutputResult, RunningCommand,
+    TransferShellCommandControlToUserResult,
 };
+
+/// Redact secrets in-place within a running-command snapshot (the live PTY
+/// command line and terminal grid). BYOP renders this into an
+/// `<attached_running_command>` block appended to the user message, so it is
+/// outbound content that Safe Mode must cover.
+pub(crate) fn redact_running_command(rc: &mut RunningCommand) {
+    redact_secrets(&mut rc.command);
+    redact_secrets(&mut rc.grid_contents);
+    redact_secrets(&mut rc.cursor);
+}
 
 /// Redact all detected secrets in-place within the given string.
 pub(crate) fn redact_secrets(input: &mut String) {
@@ -422,6 +433,44 @@ mod tests {
             !query.contains("SECRET-12345"),
             "secret should be redacted, got: {query}"
         );
-        assert!(query.contains('*'), "redaction should insert mask chars: {query}");
+        assert!(
+            query.contains('*'),
+            "redaction should insert mask chars: {query}"
+        );
+    }
+
+    // Guards the LRC Safe Mode fix: the running-command snapshot BYOP appends to
+    // the outbound message (command line + terminal grid + cursor) must have its
+    // secrets masked. This is the content `RequestParams::redact_lrc_context_if_enabled`
+    // redacts after the controller injects it post-construction.
+    #[test]
+    fn redact_running_command_masks_command_and_grid() {
+        use crate::ai::agent::RunningCommand;
+
+        let re = regex::Regex::new(r"SECRET-\d+").expect("valid regex");
+        let none: [&regex::Regex; 0] = [];
+        set_user_and_enterprise_secret_regexes([&re], none);
+
+        let mut rc = RunningCommand {
+            command: "curl -H 'Authorization: SECRET-11111'".to_string(),
+            block_id: Default::default(),
+            grid_contents: "output line with SECRET-22222 in it".to_string(),
+            cursor: "SECRET-33333".to_string(),
+            requested_command_id: None,
+            is_alt_screen_active: false,
+        };
+        super::redact_running_command(&mut rc);
+
+        assert!(
+            !rc.command.contains("SECRET-11111"),
+            "command: {}",
+            rc.command
+        );
+        assert!(
+            !rc.grid_contents.contains("SECRET-22222"),
+            "grid: {}",
+            rc.grid_contents
+        );
+        assert!(!rc.cursor.contains("SECRET-33333"), "cursor: {}", rc.cursor);
     }
 }
