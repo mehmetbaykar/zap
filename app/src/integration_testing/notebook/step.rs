@@ -96,8 +96,17 @@ pub fn enter_notebook_edit_mode_and_set_markdown(
     TestStep::new("Enter notebook edit mode and set Markdown").with_action(
         move |app, window_id, _| {
             let notebook = notebook_view(app, window_id, tab_index, pane_index);
-            notebook.update(app, |notebook, ctx| notebook.toggle_mode(ctx));
             let editor = notebook_editor(app, window_id, tab_index, pane_index);
+            // Zap's local object store completes its initial load immediately,
+            // so `NotebookView::load` eagerly grabs edit access (the same thing
+            // a connected upstream client does) and the notebook is usually
+            // already editable here. Only toggle when still in view mode; a
+            // blind toggle would flip an already-editing notebook back to
+            // read-only view.
+            let already_editable = editor.read(app, |editor, ctx| editor.is_editable(ctx));
+            if !already_editable {
+                notebook.update(app, |notebook, ctx| notebook.toggle_mode(ctx));
+            }
             editor.update(app, |editor, ctx| {
                 editor.reset_with_markdown(&markdown, ctx);
             });

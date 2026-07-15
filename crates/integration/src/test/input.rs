@@ -120,12 +120,39 @@ pub fn test_inline_model_selector_restores_prompt_on_dismissal() -> Builder {
         )
 }
 
+/// Seeds one BYOP agent provider with an "auto"-named model. Zap has no
+/// built-in cloud model catalog, so with zero providers the inline model
+/// selector has no rows and pressing enter can never select anything; upstream
+/// gets its "auto" row from the compiled-in cloud model list instead.
+fn seed_byop_provider_with_auto_model() -> TestStep {
+    TestStep::new("Seed a BYOP provider so the selector has a model").with_action(
+        move |app, _, _| {
+            use settings::Setting;
+            use warp::settings::{AISettings, AgentProvider, AgentProviderModel};
+            use warpui::SingletonEntity;
+            AISettings::handle(app).update(app, |settings, ctx| {
+                let provider = AgentProvider {
+                    id: "integration-test-provider".to_owned(),
+                    name: "Test Provider".to_owned(),
+                    kind: Default::default(),
+                    api_type: Default::default(),
+                    base_url: "http://localhost:11434".to_owned(),
+                    models: vec![AgentProviderModel::from_id("auto-test-model".to_owned())],
+                    extra_headers: Vec::new(),
+                };
+                let _ = settings.agent_providers.set_value(vec![provider], ctx);
+            });
+        },
+    )
+}
+
 pub fn test_inline_model_selector_restores_prompt_on_model_selection() -> Builder {
     FeatureFlag::RestorePromptOnInlineModelSelectorSearch.set_enabled(true);
 
     let original_prompt = "summarize this output without losing details";
     new_builder()
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
+        .with_step(seed_byop_provider_with_auto_model())
         .with_step(
             new_step_with_default_assertions("Type prompt before opening model selector")
                 .with_typed_characters(&[original_prompt])
