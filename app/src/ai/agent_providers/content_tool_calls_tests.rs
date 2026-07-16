@@ -93,9 +93,9 @@ fn prefers_run_shell_over_earlier_webfetch() {
 
 #[test]
 fn disallowed_websearch_filtered_leaves_echo_as_shell_call() {
-    // "websearch" is a real registered tool but isn't in `shell_tools()`'s allow-list,
-    // so it's dropped; "echo" normalizes to run_shell_command and survives as the
-    // only candidate. Not actually an ordering test (see below for that).
+    // "websearch" is not a registered tool, so it's dropped; "echo" normalizes to
+    // run_shell_command and survives as the only candidate. Not actually an ordering
+    // test (see below for that).
     let text = r#"{"name":"websearch","arguments":{"query":"x"}}
 {"name":"echo","arguments":{"message":"hi"}}"#;
     let calls = extract_tool_calls_from_assistant_text(text, &shell_tools());
@@ -108,10 +108,10 @@ fn last_valid_json_wins_when_no_shell_call_present() {
     // Real `pick_best_tool_call` policy: prefer run_shell_command; otherwise the
     // *last* valid candidate wins (not the first).
     let text = r#"{"type":"function","name":"webfetch","parameters":{"url":"https://example.com"}}
-{"type":"function","name":"websearch","parameters":{"query":"rust async"}}"#;
-    let tools = vec!["webfetch".to_owned(), "websearch".to_owned()];
+{"type":"function","name":"read_files","parameters":{"paths":["src/main.rs"]}}"#;
+    let tools = vec!["webfetch".to_owned(), "read_files".to_owned()];
     let calls = extract_tool_calls_from_assistant_text(text, &tools);
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].fn_name, "websearch");
-    assert_eq!(calls[0].fn_arguments["query"], "rust async");
+    assert_eq!(calls[0].fn_name, "read_files");
+    assert_eq!(calls[0].fn_arguments["paths"][0], "src/main.rs");
 }

@@ -2701,9 +2701,7 @@ pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
             if is_lrc && t.name == "run_shell_command" {
                 return false;
             }
-            if !web_enabled
-                && (t.name == tools::webfetch::TOOL_NAME || t.name == tools::websearch::TOOL_NAME)
-            {
+            if !web_enabled && t.name == tools::webfetch::TOOL_NAME {
                 return false;
             }
             if t.name == "suggest_new_conversation" {
@@ -2748,10 +2746,6 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
     // `suggest_new_conversation` is still filtered: the UX has no ready-made dialog component, and the executor has been changed to
     // fast-fail Cancelled (see `action_model/execute/suggest_new_conversation.rs`),
     // so the filter is redundant defense to avoid invalid-call noise.
-    // Dynamic placeholder replacement: some tool descriptions contain `{{year}}` (such as websearch, aligned with opencode
-    // websearch.ts:30-32's description getter), replaced with the current year at build time.
-    // The description the model sees always has the correct year and won't be polluted by an old year from training data.
-    let current_year = chrono::Local::now().format("%Y").to_string();
     let mut out: Vec<GenaiTool> = tools::REGISTRY
         .iter()
         .filter(|t| {
@@ -2760,9 +2754,7 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
             }
             // BYOP web tools are gated by profile.web_search_enabled (not exposed to the upstream model when the user has turned off the privacy
             // toggle, to avoid mistakenly invoking external network requests).
-            if !web_enabled
-                && (t.name == tools::webfetch::TOOL_NAME || t.name == tools::websearch::TOOL_NAME)
-            {
+            if !web_enabled && t.name == tools::webfetch::TOOL_NAME {
                 return false;
             }
             // suggest_new_conversation: no UI implementation; the executor in Zap is changed to
@@ -2781,13 +2773,8 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
             true
         })
         .map(|t| {
-            let description = if t.description.contains("{{year}}") {
-                t.description.replace("{{year}}", &current_year)
-            } else {
-                t.description.to_owned()
-            };
             GenaiTool::new(t.name)
-                .with_description(description)
+                .with_description(t.description.to_owned())
                 .with_schema((t.parameters)())
         })
         .collect();
@@ -3984,12 +3971,11 @@ pub async fn generate_byop_output(
                     // reducing view-tree reflow count.
                     // Already in the table (placeholder sent) and args have a new chunk → throttle to ≥ 200ms reparse + update_message
                     // to incrementally refresh args, so long-args tools (create_or_edit_document, long grep, etc.) feel continuous.
-                    // Web tools (webfetch/websearch) take their own loading-frame chain (the L2102 region),
+                    // The webfetch web tool takes its own loading-frame chain (the L2102 region),
                     // so skip here to avoid double cards.
                     // todowrite goes through the BYOP todo interceptor, synthesizing Message::UpdateTodos to trigger the chip,
                     // so also skip the placeholder here to avoid a meaningless "calling todowrite" card.
                     if call.fn_name != tools::webfetch::TOOL_NAME
-                        && call.fn_name != tools::websearch::TOOL_NAME
                         && call.fn_name != tools::todowrite::TOOL_NAME
                     {
                         if let Some(msg_id) = tool_msg_ids.get(&call.call_id).cloned() {
@@ -4374,87 +4360,56 @@ pub async fn generate_byop_output(
             // executor variant; they run local HTTP directly here, synthesizing a (carrier ToolCall,
             // ToolCallResult) pair of messages, bypassing parse_incoming_tool_call.
             //
-            // UI: aligned with cloud mode, emit a `Message::WebSearch` /
-            // `Message::WebFetch` status message before and after, triggering the inline_action `WebSearchView` /
-            // `WebFetchView` rendering: a Searching/Fetching loading card → a Success (URL list)
-            // / Error collapsed card. These two don't enter final_messages and are yielded directly for the UI to update in real time;
-            // the carrier + result still go through final_messages for the next turn's model reasoning.
-            if call.fn_name == tools::webfetch::TOOL_NAME
-                || call.fn_name == tools::websearch::TOOL_NAME
-            {
+            // UI: aligned with cloud mode, emit a `Message::WebFetch` status message before and after,
+            // triggering the inline_action `WebFetchView` rendering: a Fetching loading card → a Success
+            // (URL list) / Error collapsed card. These don't enter final_messages and are yielded directly for
+            // the UI to update in real time; the carrier + result still go through final_messages for the next
+            // turn's model reasoning.
+            if call.fn_name == tools::webfetch::TOOL_NAME {
                 let args_str = if call.fn_arguments.is_string() {
                     call.fn_arguments.as_str().unwrap_or("").to_owned()
                 } else {
                     call.fn_arguments.to_string()
                 };
-                let is_search = call.fn_name == tools::websearch::TOOL_NAME;
 
-                // Pre-parse args to extract query / url for the UI loading card. Even on args parse failure we still emit
+                // Pre-parse args to extract the url for the UI loading card. Even on args parse failure we still emit
                 // (falling back to empty fields), ensuring the UI sees at least one loading frame, and the later dispatch
                 // still returns invalid_arguments → switching to the Error card.
-                let preview_query = if is_search {
-                    serde_json::from_str::<tools::web_runtime::SearchToolArgs>(&args_str)
-                        .map(|a| a.query)
-                        .unwrap_or_default()
-                } else {
-                    String::new()
-                };
-                let preview_urls: Vec<String> = if !is_search {
+                let preview_urls: Vec<String> =
                     serde_json::from_str::<tools::web_runtime::FetchArgs>(&args_str)
                         .map(|a| vec![a.url])
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
+                        .unwrap_or_default();
 
-                // The Searching/Fetching loading frame and the final Success/Error frame must share the same
+                // The Fetching loading frame and the final Success/Error frame must share the same
                 // message.id —— `block.rs::handle_web_search_messages` reuses
-                // WebSearchView by id, and a different id creates two separate cards.
+                // the web-fetch view by id, and a different id creates two separate cards.
                 let web_msg_id = Uuid::new_v4().to_string();
-                let mut loading_msg = if is_search {
-                    make_web_search_searching_message(
-                        &current_task_id,
-                        &request_id,
-                        preview_query.clone(),
-                    )
-                } else {
-                    make_web_fetch_fetching_message(
-                        &current_task_id,
-                        &request_id,
-                        preview_urls.clone(),
-                    )
-                };
+                let mut loading_msg = make_web_fetch_fetching_message(
+                    &current_task_id,
+                    &request_id,
+                    preview_urls.clone(),
+                );
                 loading_msg.id = web_msg_id.clone();
                 yield Ok(make_add_messages_event(&current_task_id, vec![loading_msg]));
 
                 let result_json = dispatch_byop_web_tool(&call.fn_name, &args_str).await;
 
-                let mut done_msg = if is_search {
-                    make_web_search_status_from_result(
-                        &current_task_id,
-                        &request_id,
-                        &preview_query,
-                        &result_json,
-                    )
-                } else {
-                    make_web_fetch_status_from_result(
-                        &current_task_id,
-                        &request_id,
-                        &preview_urls,
-                        &result_json,
-                    )
-                };
+                let mut done_msg = make_web_fetch_status_from_result(
+                    &current_task_id,
+                    &request_id,
+                    &preview_urls,
+                    &result_json,
+                );
                 done_msg.id = web_msg_id;
                 // The second frame can't use AddMessagesToTask again —— that would append a second
-                // record with the same id to task.messages, and `output.rs::WebSearch`'s rendering branch adds children by message count,
+                // record with the same id to task.messages, and `output.rs::WebFetch`'s rendering branch adds children by message count,
                 // showing as two side-by-side cards. Use UpdateTaskMessage + FieldMask instead: `task::upsert_message`
                 // finds the existing message with the same id and merges in place via FieldMaskOperation::update,
                 // so task.messages still has only one → the UI has one card switching via set_status.
-                let mask_path = if is_search { "web_search" } else { "web_fetch" };
                 yield Ok(make_update_message_event(
                     &current_task_id,
                     done_msg,
-                    vec![mask_path.to_owned()],
+                    vec!["web_fetch".to_owned()],
                 ));
 
                 let result_content = serde_json::to_string(&result_json)
@@ -4847,7 +4802,7 @@ fn make_append_event(task_id: &str, message_id: &str, kind: AppendKind) -> api::
     }
 }
 
-/// The local dispatcher for the BYOP web tools (`webfetch` / `websearch`).
+/// The local dispatcher for the BYOP `webfetch` web tool.
 ///
 /// Doesn't go through the protobuf executor —— runs HTTP locally with reqwest directly, serializing the structured result
 /// into a JSON Value for the upstream LLM. Errors are also serialized as `{status:"error", ...}`,
@@ -4862,38 +4817,18 @@ async fn dispatch_byop_web_tool(tool_name: &str, args_str: &str) -> Value {
             return web_runtime::error_to_json(tool_name, &anyhow::anyhow!(e.to_string()));
         }
     };
-    if tool_name == tools::webfetch::TOOL_NAME {
-        match serde_json::from_str::<web_runtime::FetchArgs>(args_str) {
-            Ok(args) => match web_runtime::run_webfetch(&client, args).await {
-                Ok(out) => web_runtime::fetch_output_to_json(&out),
-                Err(e) => {
-                    log::warn!("[byop][webfetch] error: {e:#}");
-                    web_runtime::error_to_json(tool_name, &e)
-                }
-            },
-            Err(e) => web_runtime::error_to_json(
-                tool_name,
-                &anyhow::anyhow!(format!("invalid arguments: {e}")),
-            ),
-        }
-    } else {
-        // websearch
-        match serde_json::from_str::<web_runtime::SearchToolArgs>(args_str) {
-            Ok(args) => {
-                let api_key = std::env::var("EXA_API_KEY").ok();
-                match web_runtime::run_websearch(&client, args, api_key.as_deref(), None).await {
-                    Ok(out) => web_runtime::search_output_to_json(&out),
-                    Err(e) => {
-                        log::warn!("[byop][websearch] error: {e:#}");
-                        web_runtime::error_to_json(tool_name, &e)
-                    }
-                }
+    match serde_json::from_str::<web_runtime::FetchArgs>(args_str) {
+        Ok(args) => match web_runtime::run_webfetch(&client, args).await {
+            Ok(out) => web_runtime::fetch_output_to_json(&out),
+            Err(e) => {
+                log::warn!("[byop][webfetch] error: {e:#}");
+                web_runtime::error_to_json(tool_name, &e)
             }
-            Err(e) => web_runtime::error_to_json(
-                tool_name,
-                &anyhow::anyhow!(format!("invalid arguments: {e}")),
-            ),
-        }
+        },
+        Err(e) => web_runtime::error_to_json(
+            tool_name,
+            &anyhow::anyhow!(format!("invalid arguments: {e}")),
+        ),
     }
 }
 
@@ -5027,140 +4962,6 @@ fn make_user_query_message(
             query,
             context,
             ..Default::default()
-        })),
-        request_id: request_id.to_owned(),
-        timestamp: None,
-    }
-}
-
-/// When BYOP intercepts websearch, emit `Message::WebSearch(Searching{query})`, from which the UI renders
-/// a "Searching the web for \"query\"" loading card (`inline_action::web_search`).
-fn make_web_search_searching_message(
-    task_id: &str,
-    request_id: &str,
-    query: String,
-) -> api::Message {
-    api::Message {
-        id: Uuid::new_v4().to_string(),
-        task_id: task_id.to_owned(),
-        server_message_data: String::new(),
-        citations: vec![],
-        message: Some(api::message::Message::WebSearch(api::message::WebSearch {
-            status: Some(api::message::web_search::Status {
-                r#type: Some(api::message::web_search::status::Type::Searching(
-                    api::message::web_search::status::Searching { query },
-                )),
-            }),
-        })),
-        request_id: request_id.to_owned(),
-        timestamp: None,
-    }
-}
-
-/// Extracts (url, title) from the results string returned by the exa MCP.
-///
-/// The actual format is a line-based metadata block, with multiple results separated by `---`:
-/// ```
-/// Title: Announcing Rust 1.95.0 | Rust Blog
-/// URL: https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/
-/// Published: 2026-04-16T00:00:00.000Z
-/// Author: N/A
-/// Highlights:
-/// ...
-/// ---
-/// Title: ...
-/// ```
-/// On scanning `Title: X`, cache the candidate, and pair the first following `URL: Y` into (Y, X), enqueued and deduplicated.
-/// Compatibility fallback: also scan the `[title](url)` markdown link form (in case the exa template switches in the future).
-fn extract_search_pages_from_exa_results(s: &str) -> Vec<(String, String)> {
-    let mut pages = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    // Route 1: the Title:/URL: line form
-    let mut current_title: Option<String> = None;
-    for line in s.lines() {
-        let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("Title:") {
-            current_title = Some(rest.trim().to_owned());
-        } else if let Some(rest) = trimmed.strip_prefix("URL:") {
-            let url = rest.trim().to_owned();
-            let title = current_title.take().unwrap_or_default();
-            if (url.starts_with("http://") || url.starts_with("https://"))
-                && seen.insert(url.clone())
-            {
-                pages.push((url, title));
-            }
-        }
-    }
-
-    // Route 2: the markdown link `[title](url)` fallback (deduplication is already in effect, so no duplicates)
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'[' {
-            if let Some(rel_close_text) = s[i + 1..].find("](") {
-                let text_end = i + 1 + rel_close_text;
-                let url_start = text_end + 2;
-                if let Some(rel_close_url) = s[url_start..].find(')') {
-                    let url_end = url_start + rel_close_url;
-                    let title = s[i + 1..text_end].trim().to_owned();
-                    let url = s[url_start..url_end].trim().to_owned();
-                    if (url.starts_with("http://") || url.starts_with("https://"))
-                        && seen.insert(url.clone())
-                    {
-                        pages.push((url, title));
-                    }
-                    i = url_end + 1;
-                    continue;
-                }
-            }
-        }
-        i += 1;
-    }
-
-    pages
-}
-
-/// After BYOP websearch completes, decide the Success / Error status based on `result_json`.
-///
-/// `pages` is extracted by scanning `[title](url)` from the exa-assembled markdown in `result_json["results"]`.
-fn make_web_search_status_from_result(
-    task_id: &str,
-    request_id: &str,
-    query: &str,
-    result_json: &Value,
-) -> api::Message {
-    let is_error = result_json.get("status").and_then(|v| v.as_str()) == Some("error");
-    let r#type = if is_error {
-        api::message::web_search::status::Type::Error(())
-    } else {
-        let pages = result_json
-            .get("results")
-            .and_then(|v| v.as_str())
-            .map(extract_search_pages_from_exa_results)
-            .unwrap_or_default()
-            .into_iter()
-            .map(
-                |(url, title)| api::message::web_search::status::success::SearchedPage {
-                    url,
-                    title,
-                },
-            )
-            .collect();
-        api::message::web_search::status::Type::Success(api::message::web_search::status::Success {
-            query: query.to_owned(),
-            pages,
-        })
-    };
-    api::Message {
-        id: Uuid::new_v4().to_string(),
-        task_id: task_id.to_owned(),
-        server_message_data: String::new(),
-        citations: vec![],
-        message: Some(api::message::Message::WebSearch(api::message::WebSearch {
-            status: Some(api::message::web_search::Status {
-                r#type: Some(r#type),
-            }),
         })),
         request_id: request_id.to_owned(),
         timestamp: None,

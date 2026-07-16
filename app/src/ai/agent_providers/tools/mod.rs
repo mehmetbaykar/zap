@@ -23,7 +23,6 @@ pub mod ask;
 pub mod coerce;
 pub mod documents;
 pub mod edit;
-pub mod exa;
 pub mod files;
 pub mod long_shell;
 pub mod markers;
@@ -35,7 +34,6 @@ pub mod suggest;
 pub mod todowrite;
 pub mod web_runtime;
 pub mod webfetch;
-pub mod websearch;
 
 use anyhow::Result;
 use serde_json::Value;
@@ -95,11 +93,10 @@ pub const REGISTRY: &[&OpenAiTool] = &[
     &markers::TRANSFER_SHELL_CONTROL,
     // Local todo list (BYOP synthesizes Message::UpdateTodos itself, not going through the protobuf executor)
     &todowrite::TODOWRITE,
-    // BYOP-only network tools: not mapped to a protobuf executor variant; chat_stream
-    // intercepts them by name before parse_incoming_tool_call and calls web_runtime directly to run the HTTP.
-    // gating: when profile.web_search_enabled=false, build_tools_array filters them out.
+    // BYOP-only network tool: not mapped to a protobuf executor variant; chat_stream
+    // intercepts it by name before parse_incoming_tool_call and calls web_runtime directly to run the HTTP.
+    // gating: when profile.web_search_enabled=false, build_tools_array filters it out.
     &webfetch::WEBFETCH,
-    &websearch::WEBSEARCH,
 ];
 
 /// Reverse-looks up the registry by OpenAI function name.

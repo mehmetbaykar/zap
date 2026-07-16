@@ -1,6 +1,6 @@
-//! Local execution logic for the BYOP `webfetch` and `websearch` tools.
+//! Local execution logic for the BYOP `webfetch` tool.
 //!
-//! These two BYOP tools don't go through the protobuf executor (`warp_multi_agent_api` has no corresponding variant);
+//! This BYOP tool doesn't go through the protobuf executor (`warp_multi_agent_api` has no corresponding variant);
 //! `chat_stream.rs::handle_byop_web_tool_intercept` calls this module directly before `parse_incoming_tool_call`,
 //! synthesizing the result into a `(ToolCall carrier, ToolCallResult)` pair of messages pushed back into the stream.
 //!
@@ -12,10 +12,6 @@
 //!   * Content-Length pre-check + actual-byte double-check, 5 MB limit
 //!   * timeout defaults to 30s, capped at 120s
 //!   * image mime is automatically base64-encoded → output.attachments
-//! - `websearch` mirrors `packages/opencode/src/tool/{websearch,mcp-exa}.ts`:
-//!   * anonymous `https://mcp.exa.ai/mcp` by default; if the `EXA_API_KEY` environment variable exists it's appended to the querystring
-//!   * 25s timeout
-//!   * SSE response → `result.content[0].text`
 
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -29,8 +25,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::exa;
-
 // ---------------------------------------------------------------------------
 // Constants (aligned with opencode webfetch.ts:8-10)
 // ---------------------------------------------------------------------------
@@ -38,7 +32,6 @@ use super::exa;
 pub const MAX_RESPONSE_SIZE: usize = 5 * 1024 * 1024; // 5 MB
 pub const DEFAULT_FETCH_TIMEOUT_SECS: u64 = 30;
 pub const MAX_FETCH_TIMEOUT_SECS: u64 = 120;
-pub const SEARCH_TIMEOUT_SECS: u64 = 25;
 
 pub const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
      (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
@@ -599,137 +592,12 @@ fn unwrap_links(s: &str) -> String {
     out
 }
 
-// ---------------------------------------------------------------------------
-// websearch
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SearchToolArgs {
-    pub query: String,
-    #[serde(rename = "numResults", default)]
-    pub num_results: Option<u32>,
-    #[serde(default)]
-    pub livecrawl: Option<String>,
-    #[serde(rename = "type", default)]
-    pub search_type: Option<String>,
-    #[serde(rename = "contextMaxCharacters", default)]
-    pub context_max_characters: Option<u32>,
-}
-
-impl SearchToolArgs {
-    pub fn into_exa_args(self) -> exa::SearchArgs {
-        let mut a = exa::SearchArgs::with_defaults(self.query);
-        if let Some(n) = self.num_results {
-            a.num_results = n;
-        }
-        if let Some(s) = self.livecrawl {
-            a.livecrawl = s;
-        }
-        if let Some(t) = self.search_type {
-            a.search_type = t;
-        }
-        if let Some(c) = self.context_max_characters {
-            a.context_max_characters = Some(c);
-        }
-        a
-    }
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct SearchOutput {
-    pub query: String,
-    /// The human-readable / LLM-optimized context string returned by Exa.
-    pub results: String,
-}
-
-const EMPTY_FALLBACK: &str = "No search results found. Please try a different query.";
-
-/// Entry point: performs one Exa websearch.
-///
-/// `endpoint_override`: for tests; defaults to `exa::endpoint_url(api_key)`.
-/// `api_key`: `None` → anonymous; `Some(...)` → appended to the querystring.
-pub async fn run_websearch(
-    client: &reqwest::Client,
-    args: SearchToolArgs,
-    api_key: Option<&str>,
-    endpoint_override: Option<&str>,
-) -> Result<SearchOutput> {
-    let (query, request) = build_websearch_request(client, args, api_key, endpoint_override)?;
-    // The Exa URL carries the API key in its querystring; keep it out of every
-    // error path (reqwest embeds the full URL in its Display output).
-    let resp = client
-        .execute(request)
-        .await
-        .map_err(reqwest::Error::without_url)
-        .context("Exa POST failed")?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        return search_output_from_response(query, status, &body_text);
-    }
-    let body_text = resp.text().await.context("read Exa SSE body")?;
-    search_output_from_response(query, status, &body_text)
-}
-
-fn build_websearch_request(
-    client: &reqwest::Client,
-    args: SearchToolArgs,
-    api_key: Option<&str>,
-    endpoint_override: Option<&str>,
-) -> Result<(String, reqwest::Request)> {
-    let query = args.query.clone();
-    let exa_args = args.into_exa_args();
-    let body = exa::build_request_body(exa::SEARCH_TOOL_NAME, &exa_args);
-
-    let url = endpoint_override
-        .map(|s| s.to_owned())
-        .unwrap_or_else(|| exa::endpoint_url(api_key));
-
-    let request = client
-        .post(&url)
-        .header(ACCEPT, "application/json, text/event-stream")
-        .header(CONTENT_TYPE, "application/json")
-        .timeout(Duration::from_secs(SEARCH_TIMEOUT_SECS))
-        .json(&body)
-        .build()
-        .context("build Exa POST request")?;
-    Ok((query, request))
-}
-
-fn search_output_from_response(
-    query: String,
-    status: StatusCode,
-    body_text: &str,
-) -> Result<SearchOutput> {
-    if !status.is_success() {
-        bail!(
-            "Exa returned HTTP {} ({})",
-            status.as_u16(),
-            crate::ai::agent_providers::openai_compatible::bounded_provider_body(
-                body_text.to_owned()
-            )
-        );
-    }
-
-    let parsed = exa::parse_sse_body(body_text)?;
-    let results = parsed.unwrap_or_else(|| EMPTY_FALLBACK.to_owned());
-    Ok(SearchOutput { query, results })
-}
-
-/// Serializes the structured result of webfetch / websearch into a JSON Value (the string the upstream LLM sees).
+/// Serializes the structured result of the BYOP webfetch tool into a JSON Value (the string the upstream LLM sees).
 ///
 /// The tool_result of all BYOP local interception tools must carry the `"_byop_intercepted":true` sentinel,
 /// otherwise the controller (`controller.rs:2693+`) won't trigger auto-resume and the model gets stuck waiting for a result.
 /// See `chat_stream::dispatch_byop_web_tool` and the controller's `needs_byop_local_resume` detection.
 pub fn fetch_output_to_json(out: &FetchOutput) -> Value {
-    let mut v = serde_json::to_value(out).unwrap_or_else(|_| json!({"status": "serialize_error"}));
-    if let Some(obj) = v.as_object_mut() {
-        obj.insert("_byop_intercepted".to_owned(), Value::Bool(true));
-    }
-    v
-}
-pub fn search_output_to_json(out: &SearchOutput) -> Value {
     let mut v = serde_json::to_value(out).unwrap_or_else(|_| json!({"status": "serialize_error"}));
     if let Some(obj) = v.as_object_mut() {
         obj.insert("_byop_intercepted".to_owned(), Value::Bool(true));
@@ -748,6 +616,3 @@ pub fn error_to_json(tool: &str, e: &anyhow::Error) -> Value {
 #[cfg(test)]
 #[path = "webfetch_tests.rs"]
 mod webfetch_tests;
-#[cfg(test)]
-#[path = "websearch_tests.rs"]
-mod websearch_tests;

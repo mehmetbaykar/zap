@@ -3792,8 +3792,8 @@ impl BlocklistAIController {
                     // Zap BYOP: synthetic ToolCallResults that didn't enter the AIAgentAction queue
                     // need auto-resume, otherwise the exchange ends silently and the model hangs waiting for a result.
                     // 1. invalid_arguments — the from_args parse-failure fallback (original).
-                    // 2. _byop_intercepted — locally intercepted tool results like todowrite / webfetch /
-                    //    websearch. Such tools don't go through the protobuf executor; the result is
+                    // 2. _byop_intercepted — locally intercepted tool results like todowrite / webfetch.
+                    //    Such tools don't go through the protobuf executor; the result is
                     //    synthesized directly, with no AIAgentAction enqueued.
                     let needs_byop_local_resume = conversation.all_tasks().any(|task| {
                         task.messages().any(|msg| {
