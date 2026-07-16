@@ -1,0 +1,63 @@
+# Zap test gate — runs on every push/PR to catch regressions before release.
+#
+# Upstream Warp's full ci.yml (three-platform matrix, cloud/internal steps) was stripped from the
+# fork. This is the fork's own lightweight replacement: a single Linux job that mirrors the
+# reliably-green portion of `script/presubmit`.
+#
+# Scope note: the `integration` package's shell/SSH tests (e.g. test_ssh_into_*) need a live sshd
+# and interactive PTYs that a headless GitHub runner does not provide — they fail on CI the same way
+# they fail on a local machine without an SSH server, so they are intentionally NOT part of this gate.
+# The gate is `cargo check --workspace` (whole-workspace compile) plus the unit/view test packages
+# that are deterministic on a headless runner (`warp`, `warpui`, `warpui_core`) — exactly the local
+# pre-commit gate used during the upstream-merge waves.
+
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+      - merge/upstream-catchup
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save Actions minutes.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The fork builds on the inline `oss` channel config (app/src/bin/oss.rs); any other channel makes
+  # build.rs call the private warp-channel-config binary and fail. Matches zap_release.yml.
+  CHANNEL: oss
+
+jobs:
+  test:
+    name: Test (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Shared setup: rust toolchain (rust-toolchain.toml → 1.92.0), protoc, Git LFS payloads,
+      # cargo-nextest (via install_test_deps → script/install_cargo_test_deps), and the build cache.
+      - name: Prepare environment
+        uses: ./.github/actions/prepare_environment
+        with:
+          target_os: linux
+          is_self_hosted: "false"
+          install_test_deps: "true"
+
+      - name: Compile-check the whole workspace
+        run: cargo check --workspace --locked
+
+      - name: Check the TUI (non-default workspace member)
+        run: cargo check -p warp_tui --locked
+
+      # --profile ci: fail-fast=false (report every failure, not just the first) + retries=2 for
+      # the handful of load-sensitive view tests. See .config/nextest.toml.
+      - name: Run the deterministic test gate
+        run: cargo nextest run --profile ci -p warp -p warpui -p warpui_core
