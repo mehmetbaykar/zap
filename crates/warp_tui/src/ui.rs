@@ -1,6 +1,15 @@
 //! Small presentation helpers for the `warp-tui` front-end's TUI views.
+use std::time::Duration;
 
-use warpui_core::elements::tui::{Modifier, TuiElement, TuiFlex, TuiStyle, TuiText};
+use warpui_core::elements::animation::AnimationClock;
+use warpui_core::elements::tui::{
+    Modifier, TuiConstrainedBox, TuiElement, TuiFlex, TuiStyle, TuiText,
+};
+use warpui_core::elements::CrossAxisAlignment;
+use warpui_core::AppContext;
+
+use crate::tui_builder::TuiUiBuilder;
+use crate::warping_indicator::render_spinner;
 
 /// Abbreviates a leading home-directory prefix of `path` to `~`.
 pub(crate) fn abbreviate_home_prefix(path: &str) -> String {
@@ -45,8 +54,8 @@ pub(crate) fn compact_footer_path(path: &str) -> String {
     }
 }
 
-/// Vertically centers `content` by padding above and below with flex spacers.
-pub(crate) fn centered(content: TuiFlex) -> Box<dyn TuiElement> {
+/// Vertically centers `content` with its existing horizontal alignment.
+fn vertically_centered(content: TuiFlex) -> Box<dyn TuiElement> {
     TuiFlex::column()
         .flex_child(TuiFlex::column().finish())
         .child(content.finish())
@@ -57,7 +66,7 @@ pub(crate) fn centered(content: TuiFlex) -> Box<dyn TuiElement> {
 /// Placeholder shown while the terminal session is being created.
 pub(crate) fn terminal_starting() -> Box<dyn TuiElement> {
     let dim = TuiStyle::default().add_modifier(Modifier::DIM);
-    centered(
+    vertically_centered(
         TuiFlex::column().child(
             TuiText::new("Starting terminal…")
                 .with_style(dim)
@@ -66,3 +75,7 @@ pub(crate) fn terminal_starting() -> Box<dyn TuiElement> {
         ),
     )
 }
+
+#[cfg(test)]
+#[path = "ui_tests.rs"]
+mod tests;

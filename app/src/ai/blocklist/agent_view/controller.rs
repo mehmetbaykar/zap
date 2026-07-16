@@ -803,10 +803,11 @@ impl AgentViewController {
             display_mode,
             original_conversation_length: exchange_count,
         };
+        // Zap: the fork never runs cloud (ambient VM) conversations locally.
         self.terminal_model
             .lock()
             .block_list_mut()
-            .set_agent_view_state(self.agent_view_state.clone());
+            .enter_conversation_context(conversation_id, display_mode.is_inline(), false);
 
         if origin == AgentViewEntryOrigin::AmbientAgent {
             self.ambient_agent_view_model.update(ctx, |model, ctx| {
@@ -937,7 +938,7 @@ impl AgentViewController {
         self.terminal_model
             .lock()
             .block_list_mut()
-            .set_agent_view_state(self.agent_view_state.clone());
+            .exit_conversation_context();
 
         // Capture ambient agent status before resetting it
         let was_ambient_agent = self.ambient_agent_view_model.as_ref(ctx).is_ambient_agent();

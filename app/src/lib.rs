@@ -357,10 +357,9 @@ pub(crate) enum LaunchMode {
         /// this mode.
         mount: TuiMountFn,
         /// API key for server authentication, if provided via `--api-key` or
-        /// `WARP_API_KEY`. Populated by `run_internal` (after feature flags are
-        /// initialized), not by `run_tui`. Only used on dogfood channels
-        /// (mirrors `App`); lets the TUI log in non-interactively instead of the
-        /// device-auth flow.
+        /// `WARP_API_KEY`. Parsed by the TUI front-end and only used on dogfood
+        /// channels (mirrors `App`); lets the TUI log in non-interactively
+        /// instead of the device-auth flow.
         api_key: Option<String>,
     },
 }
@@ -784,15 +783,8 @@ pub fn run_integration_test(driver: TestDriver) -> Result<()> {
 /// view plus the window/driver bootstrap), so `warp` never has to depend on
 /// `warp_tui`.
 #[cfg(feature = "tui")]
-pub fn run_tui(mount: TuiMountFn) -> Result<()> {
-    // The `--api-key` / `WARP_API_KEY` value is parsed later in `run_internal`,
-    // after feature flags are initialized (`Args::from_env` checks feature flags
-    // while building its clap command). Parsing there rather than here avoids a
-    // redundant feature-flag init.
-    run_internal(LaunchMode::Tui {
-        mount,
-        api_key: None,
-    })
+pub fn run_tui(api_key: Option<String>, mount: TuiMountFn) -> Result<()> {
+    run_internal(LaunchMode::Tui { mount, api_key })
 }
 
 /// Dispatches a worker command when the current executable was re-invoked for one.

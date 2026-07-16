@@ -10,8 +10,8 @@ use parking_lot::FairMutex;
 use warp::editor::{CodeEditorModel, CodeEditorModelEvent};
 use warp::settings::{AISettings, AISettingsChangedEvent};
 use warp::tui_export::{
-    build_slash_command_mixer, detect_possible_git_repo, record_saved_prompt_accepted,
-    record_static_slash_command_accepted, saved_prompt_text_for_id,
+    build_slash_command_mixer, detect_possible_git_repo, prepare_conversation_block_restoration,
+    record_saved_prompt_accepted, record_static_slash_command_accepted, saved_prompt_text_for_id,
     slash_command_is_submitted_as_prompt, slash_command_selection_behavior, slash_commands,
     throttle, AIAgentActionId, AIAgentPtyWriteMode, AcceptSlashCommandOrSavedPrompt, ActiveSession,
     ActiveSessionEvent, AgentInteractionMetadata, AgentViewController, AgentViewEntryOrigin,
@@ -24,7 +24,7 @@ use warp::tui_export::{
     ParsedSlashCommandInput, PtyIntent, PtyIntentEvent, RepoDetectionSessionType,
     RepoDetectionSource, ShellCommandExecutorEvent, SkillReference, SlashCommandDataSource as _,
     SlashCommandSelectionBehavior, StaticCommand, TerminalModel, TerminalSurface,
-    TerminalSurfaceInit, TuiSlashCommandDataSource, TuiSlashCommandDataSourceArgs,
+    TerminalSurfaceInit, TranscriptScope, TuiSlashCommandDataSource, TuiSlashCommandDataSourceArgs,
     TuiZeroStateDataSource, COMMAND_REGISTRY, WAKEUP_THROTTLE_PERIOD,
 };
 use warp_editor::model::CoreEditorModel;
@@ -117,7 +117,6 @@ fn hide_agent_requested_command_from_top_level(
 fn raw_prompt_if_not_blank(input: &str) -> Option<&str> {
     (!input.trim().is_empty()).then_some(input)
 }
-
 /// Typed actions handled by [`TuiTerminalSessionView`].
 #[derive(Debug, Clone)]
 pub(crate) enum TuiTerminalSessionAction {
@@ -134,6 +133,7 @@ pub(crate) struct TuiTerminalSessionView {
     inline_menu: TuiInlineMenu,
     slash_commands_source: ModelHandle<TuiSlashCommandDataSource>,
     conversation_selection: ConversationSelectionHandle,
+    ai_action_model: ModelHandle<BlocklistAIActionModel>,
     ai_controller: ModelHandle<BlocklistAIController>,
     /// Read by the footer for the active session's working directory.
     active_session: ModelHandle<ActiveSession>,
@@ -169,7 +169,10 @@ pub(crate) fn init(app: &mut AppContext) {
 
 impl TuiTerminalSessionView {
     /// Builds the transcript-capable terminal surface for a manager-backed session.
-    pub(crate) fn new(surface_init: TerminalSurfaceInit, ctx: &mut ViewContext<Self>) -> Self {
+    pub(crate) fn new(
+        surface_init: TerminalSurfaceInit,
+        ctx: &mut ViewContext<Self>,
+    ) -> Self {
         let TerminalSurfaceInit {
             model,
             sessions,
@@ -177,13 +180,21 @@ impl TuiTerminalSessionView {
             wakeups_rx,
             ..
         } = surface_init;
+        model
+            .lock()
+            .block_list_mut()
+            .set_transcript_scope(TranscriptScope::Unfiltered);
 
         let terminal_surface_id: EntityId = ctx.view_id();
         let active_session =
             ctx.add_model(|ctx| ActiveSession::new(sessions.clone(), model_events.clone(), ctx));
+        let model_for_conversation_selection = model.clone();
         let conversation_selection = ctx.add_model(|ctx| {
-            Box::new(TuiConversationSelection::new(terminal_surface_id, ctx))
-                as Box<dyn ConversationSelection>
+            Box::new(TuiConversationSelection::new(
+                terminal_surface_id,
+                model_for_conversation_selection,
+                ctx,
+            )) as Box<dyn ConversationSelection>
         });
         let context_model = ctx.add_model(|ctx| {
             BlocklistAIContextModel::new(
@@ -375,7 +386,10 @@ impl TuiTerminalSessionView {
             &BlocklistAIHistoryModel::handle(ctx),
             |view, _, event, ctx| view.handle_history_event(event, ctx),
         );
-        ctx.subscribe_to_model(&conversation_selection, |_, _, _, ctx| ctx.notify());
+        ctx.subscribe_to_model(&conversation_selection, |view, _, _, ctx| {
+            let _ = view;
+            ctx.notify();
+        });
 
         // The zero state's "What's new" section: fetch the changelog once at
         // startup and re-render when it arrives. The model no-ops when a
@@ -498,6 +512,7 @@ impl TuiTerminalSessionView {
             inline_menu,
             slash_commands_source,
             conversation_selection,
+            ai_action_model: action_model,
             ai_controller,
             active_session,
             current_repo_path: None,
@@ -510,6 +525,7 @@ impl TuiTerminalSessionView {
             transient_hint: TransientHint::default(),
         }
     }
+
 
     /// Re-renders on history events that can change the warping indicator:
     /// the selected conversation's status changing, or an exchange starting
@@ -832,7 +848,7 @@ impl TuiTerminalSessionView {
         });
     }
 
-    /// Sends a prompt to the selected conversation, creating one if needed.
+    /// Sends a prompt to the selected conversation, creating one on first use.
     fn send_prompt(&mut self, prompt: String, ctx: &mut ViewContext<Self>) {
         let conversation_id = match self
             .conversation_selection

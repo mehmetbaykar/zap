@@ -1,3 +1,7 @@
+use warpui_core::elements::tui::{TuiBufferExt, TuiRect};
+use warpui_core::presenter::tui::TuiPresenter;
+use warpui_core::App;
+
 use super::compact_footer_path;
 
 #[test]
@@ -14,3 +18,4 @@ fn compact_footer_path_elides_middle_components() {
         r"C:\…\project"
     );
 }
+

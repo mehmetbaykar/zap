@@ -3,7 +3,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use chrono::{DateTime, Local};
+use chrono::Local;
 use vec1::Vec1;
 use warp_core::features::FeatureFlag;
 use warp_errors::report_error;
@@ -36,6 +36,9 @@ use crate::ai::blocklist::{
 use crate::ai::document::ai_document_model::AIDocumentModel;
 use crate::ai::restored_conversations::RestoredAgentConversations;
 use crate::persistence::model::AgentConversationData;
+use crate::terminal::conversation_restoration::{
+    command_block_indices_for_exchanges, prepare_conversation_block_restoration,
+};
 use crate::terminal::find::TerminalFindModel;
 use crate::terminal::input::message_bar::{Message as InputMessage, MessageItem};
 use crate::terminal::model::block::SerializedBlock;
@@ -48,7 +51,6 @@ use crate::terminal::view::{
     AIBlockMetadata, Event, RichContent, RichContentInsertionPosition, RichContentMetadata,
     TerminalView,
 };
-use crate::terminal::TerminalModel;
 use crate::util::bindings::keybinding_name_to_keystroke;
 
 /// Describes restore-context setup state for directory reconciliation and hinting.
@@ -353,40 +355,6 @@ impl TerminalView {
             .insert_restored_block(&block);
     }
 
-    fn restore_missing_cli_subagent_blocks_for_conversation(
-        &mut self,
-        conversation: &AIConversation,
-    ) {
-        let cli_subagent_block_ids = conversation
-            .all_tasks()
-            .filter(|task| task.is_cli_subagent())
-            .filter_map(|task| task.cli_subagent_block_id())
-            .collect::<HashSet<_>>();
-        if cli_subagent_block_ids.is_empty() {
-            return;
-        }
-
-        // Entering an existing terminal from the history list doesn't preload the conversation's
-        // block snapshots into the TerminalModel; here we only backfill the CLI subagent's persisted
-        // snapshots to avoid duplicating ordinary history commands.
-        let serialized_blocks = conversation.to_serialized_blocklist_items();
-        let mut terminal_model = self.model.lock();
-        for item in serialized_blocks {
-            let SerializedBlockListItem::Command { block } = item;
-            if !cli_subagent_block_ids.contains(&block.id)
-                || terminal_model
-                    .block_list()
-                    .block_with_id(&block.id)
-                    .is_some()
-            {
-                continue;
-            }
-
-            terminal_model
-                .block_list_mut()
-                .insert_restored_block(&block);
-        }
-    }
 
     /// Get AIConversations to restore given conversation IDs.
     pub(super) fn get_conversations_to_restore(
@@ -688,12 +656,13 @@ impl TerminalView {
         ctx: &mut ViewContext<Self>,
     ) {
         let conversation_id = restored.ai_conversation.id();
-        log::info!(
-            "Restoring conversation after view creation: {}",
-            conversation_id
-        );
+        log::info!("Restoring conversation after view creation: {conversation_id}",);
         let conversation_for_cli_subagent_restore = restored.ai_conversation.clone();
-        self.restore_missing_cli_subagent_blocks_for_conversation(&restored.ai_conversation);
+
+        let restoration_plan = {
+            let mut model = self.model.lock();
+            prepare_conversation_block_restoration(&restored.ai_conversation, &mut model)
+        };
 
         // Calculate height for AI blocks
         let size_info = *self.size_info;
@@ -701,20 +670,10 @@ impl TerminalView {
             .into_pixels()
             .to_lines(size_info.cell_height_px());
 
-        // Now compute block indices — the just-inserted command blocks will be found.
-        let exchanges = exchanges_for_blocklist(&restored.ai_conversation);
-        let command_block_indices = {
-            let terminal_model = self.model.lock();
-            command_block_indices_for_exchanges(
-                &terminal_model,
-                exchanges.iter().copied(),
-                exchanges.len(),
-            )
-        };
-
         // Process all exchanges for this conversation
         let mut all_ai_block_params = Vec::new();
-        for (exchange, command_block_index) in exchanges.into_iter().zip(command_block_indices) {
+        for restored_exchange in restoration_plan.into_exchanges() {
+            let exchange = restored_exchange.exchange().clone();
             let params = AIBlockCreationParams {
                 ai_controller: self.ai_controller.clone(),
                 ai_action_model: self.ai_action_model.clone(),
@@ -728,8 +687,8 @@ impl TerminalView {
                 conversation_id,
                 exchange_id: exchange.id,
                 working_directory: exchange.working_directory.clone(),
-                command_block_index,
-                exchange: (*exchange).clone(),
+                command_block_index: restored_exchange.command_block_index(),
+                exchange,
                 use_live_appearance,
                 is_restoring_on_startup: false,
             };
@@ -1227,91 +1186,3 @@ impl TerminalView {
         });
     }
 }
-
-/// Returns block indices where `AIBlock`s created for the given `exchanges` should be inserted.
-///
-/// For each exchange, finds the first command block whose timestamp is after the exchange's
-/// start time. The AI block should be inserted before that command block.
-///
-/// Blocks in the blocklist may not be sorted by timestamp (e.g. when `insert_restored_block`
-/// appends blocks at the end during `restore_conversation_after_view_creation`), so we scan
-/// all command blocks for each exchange rather than relying on a forward-only cursor.
-///
-/// The returned vec is guaranteed to have `exchange_count` len.
-fn command_block_indices_for_exchanges<'a>(
-    terminal_model: &TerminalModel,
-    exchanges: impl Iterator<Item = &'a AIAgentExchange>,
-    _exchange_count: usize,
-) -> Vec<Option<BlockIndex>> {
-    let blocks = terminal_model.block_list().blocks();
-
-    // Collect shell command blocks with their timestamps
-    let command_blocks: Vec<(BlockIndex, DateTime<Local>)> = blocks
-        .iter()
-        .enumerate()
-        .filter_map(|(index, block)| {
-            // Only consider shell command blocks (not background/rich content), and only if they have a start timestamp
-            if !block.is_background() {
-                block.start_ts().map(|ts| (BlockIndex::from(index), *ts))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let exchange_timestamps: Vec<DateTime<Local>> =
-        exchanges.map(|exchange| exchange.start_time).collect();
-    find_block_indices_for_exchange_timestamps(&command_blocks, &exchange_timestamps)
-}
-
-/// Pure implementation of the block-index search used by
-/// [`command_block_indices_for_exchanges`].
-///
-/// For each exchange timestamp, finds the command block with the smallest timestamp
-/// that is >= the exchange timestamp. Iterates the command block list backwards
-/// because `insert_restored_block` appends blocks at the end of the blocklist, so
-/// the tail is a sorted group of conversation blocks while the prefix contains
-/// pre-existing terminal blocks we don't want to match against. The backwards scan
-/// tracks the best candidate and stops as soon as it sees a block before the exchange
-/// timestamp — within the sorted tail, everything earlier is also <=.
-fn find_block_indices_for_exchange_timestamps(
-    command_blocks: &[(BlockIndex, DateTime<Local>)],
-    exchange_timestamps: &[DateTime<Local>],
-) -> Vec<Option<BlockIndex>> {
-    let mut result = Vec::with_capacity(exchange_timestamps.len());
-
-    for &exchange_timestamp in exchange_timestamps {
-        let mut best: Option<(BlockIndex, DateTime<Local>)> = None;
-        for &(idx, ts) in command_blocks.iter().rev() {
-            if ts >= exchange_timestamp {
-                // This block is at or after the exchange; remember it if it's
-                // the earliest such block we've seen. We use >= because a
-                // command block's start_ts comes from the tool call message
-                // timestamp, which is in the same exchange whose start_time
-                // we're comparing against.
-                // When timestamps tie, keep moving backwards so we pick the
-                // earliest inserted block for that timestamp.
-                if best.is_none_or(|(best_idx, best_ts)| {
-                    ts < best_ts || (ts == best_ts && idx < best_idx)
-                }) {
-                    best = Some((idx, ts));
-                }
-            } else {
-                // We've reached a block before the exchange timestamp.
-                // The tail (conversation blocks) is sorted, so all earlier
-                // blocks in the tail are also <= exchange_timestamp. Any
-                // blocks further back belong to the pre-existing prefix
-                // and should not be matched.
-                break;
-            }
-        }
-
-        result.push(best.map(|(idx, _)| idx));
-    }
-
-    result
-}
-
-#[cfg(test)]
-#[path = "load_ai_conversation_tests.rs"]
-mod tests;

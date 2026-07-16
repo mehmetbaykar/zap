@@ -45,7 +45,7 @@ pub fn run() -> Result<()> {
     if let Some(result) = warp::run_tui_worker_if_requested() {
         return result;
     }
-    warp::run_tui(Box::new(init))
+    warp::run_tui(None, Box::new(init))
 }
 
 /// Creates the TUI root and starts the headless draw + input driver.

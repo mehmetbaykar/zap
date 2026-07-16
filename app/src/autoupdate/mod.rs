@@ -33,7 +33,7 @@ use crate::features::FeatureFlag;
 use crate::server::telemetry::TelemetryEvent;
 use crate::settings::AutoupdateSettings;
 use crate::workspace::Workspace;
-use crate::{send_telemetry_sync_from_app_ctx, ChannelState};
+use crate::{send_telemetry_from_ctx, send_telemetry_sync_from_app_ctx, ChannelState};
 
 /// SHA-256 verification shared across all three platforms after an OSS download completes:
 /// 1. If no matching asset is found in the cached release, skip (degrade to no verification);
@@ -665,6 +665,7 @@ impl AutoupdateState {
                 })
             }
             Ok(DownloadReady::NeedsAuthorization) => {
+                send_telemetry_from_ctx!(TelemetryEvent::UnableToAutoUpdateToNewVersion, ctx);
                 self.stage = AutoupdateStage::UnableToUpdateToNewVersion { new_version };
                 Ok(UpdateReady::No)
             }
