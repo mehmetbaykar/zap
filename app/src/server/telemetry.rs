@@ -1242,10 +1242,6 @@ pub enum TelemetryEvent {
         duration_since_start: Duration,
     },
     BootstrappingSucceeded(BootstrappingInfo),
-    /// The user accepted a completion suggestion when it was the only one in the suggestions menu.
-    /// This event is named with 'Tab' to maintain backwards compatibility; the completion
-    /// suggestions menu may be triggered with a keybinding other than tab.
-    TabSingleResultAutocompletion,
     EditorUnhandledModifierKey(String),
     OpenThemeChooser,
     ThemeSelection {
@@ -1408,9 +1404,6 @@ pub enum TelemetryEvent {
         url: String,
     },
     ShowInFileExplorer,
-    CommandXRayTriggered {
-        trigger: CommandXRayTrigger,
-    },
     OpenLaunchConfigSaveModal,
     SaveLaunchConfig {
         state: SaveState,
@@ -2147,9 +2140,6 @@ pub enum TelemetryEvent {
         id: Option<WorkflowId>,
         selection_source: WorkflowSelectionSource,
     },
-    ImageReceived {
-        image_protocol: ImageProtocol,
-    },
     /// A file from the result of an AI Agent Action exceeded the context limit.
     FileExceededContextLimit {
         identifiers: AIIdentifiers,
@@ -2852,7 +2842,6 @@ impl TelemetryEvent {
                 Some(json!({"link_type": link, "open_with": open_with}))
             }
             TelemetryEvent::OpenChangelogLink { url } => Some(json!({ "url": url })),
-            TelemetryEvent::CommandXRayTriggered { trigger } => Some(json!({ "trigger": trigger })),
             TelemetryEvent::SaveLaunchConfig { state } => Some(json!({ "state": state })),
             TelemetryEvent::SaveAsWorkflowModal { source } => Some(json!({ "source": source })),
             TelemetryEvent::CommandCorrection { event } => Some(json!({ "event": event })),
@@ -3517,9 +3506,6 @@ impl TelemetryEvent {
                 "id": id,
                 "selection_source": selection_source,
             })),
-            TelemetryEvent::ImageReceived { image_protocol } => Some(json!({
-                "image_protocol": image_protocol,
-            })),
             TelemetryEvent::FileExceededContextLimit { identifiers } => Some(json!({
                 "server_output_id": identifiers.server_output_id,
                 "exchange_id": identifiers.client_exchange_id,
@@ -3644,7 +3630,6 @@ impl TelemetryEvent {
             | TelemetryEvent::ContextMenuInsertSelectedText
             | TelemetryEvent::ContextMenuCopySelectedText
             | TelemetryEvent::JumpToPreviousCommand
-            | TelemetryEvent::TabSingleResultAutocompletion
             | TelemetryEvent::OpenThemeChooser
             | TelemetryEvent::OpenThemeCreatorModal
             | TelemetryEvent::CreateCustomTheme
@@ -4266,7 +4251,6 @@ impl TelemetryEvent {
             | TelemetryEvent::BootstrappingSlow(_)
             | TelemetryEvent::SessionAbandonedBeforeBootstrap { .. }
             | TelemetryEvent::BootstrappingSucceeded(_)
-            | TelemetryEvent::TabSingleResultAutocompletion
             | TelemetryEvent::EditorUnhandledModifierKey(_)
             | TelemetryEvent::OpenThemeChooser
             | TelemetryEvent::ThemeSelection { .. }
@@ -4337,7 +4321,6 @@ impl TelemetryEvent {
             | TelemetryEvent::OpenLink { .. }
             | TelemetryEvent::OpenChangelogLink { .. }
             | TelemetryEvent::ShowInFileExplorer
-            | TelemetryEvent::CommandXRayTriggered { .. }
             | TelemetryEvent::OpenLaunchConfigSaveModal
             | TelemetryEvent::SaveLaunchConfig { .. }
             | TelemetryEvent::OpenLaunchConfigFile
@@ -4529,7 +4512,6 @@ impl TelemetryEvent {
             | TelemetryEvent::AISuggestedRuleEdited { .. }
             | TelemetryEvent::AISuggestedRuleContentChanged { .. }
             | TelemetryEvent::AttachedImagesToAgentModeQuery { .. }
-            | TelemetryEvent::ImageReceived { .. }
             | TelemetryEvent::FileExceededContextLimit { .. }
             | TelemetryEvent::AgentModeError { .. }
             | TelemetryEvent::AgentModeRequestRetrySucceeded { .. }

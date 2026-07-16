@@ -6,8 +6,9 @@ use string_offset::CharOffset;
 use warp::tui_export::{AcceptSlashCommandOrSavedPrompt, AgentConversationEntryId, LLMId};
 use warp_search_core::inline_menu::{InlineMenuResultsUpdate, InlineMenuSelection};
 use warpui_core::elements::tui::{
-    TuiBuffer, TuiConstrainedBox, TuiConstraint, TuiContainer, TuiElement, TuiFlex,
-    TuiLayoutContext, TuiPaintContext, TuiRect, TuiSize, TuiText,
+    TuiConstrainedBox, TuiConstraint, TuiContainer, TuiElement, TuiEvent, TuiEventContext, TuiFlex,
+    TuiLayoutContext, TuiPaintContext, TuiPaintSurface, TuiPresentationContext, TuiScreenPoint,
+    TuiScreenPosition, TuiSize, TuiText,
 };
 use warpui_core::elements::CrossAxisAlignment;
 use warpui_core::{AppContext, ModelHandle};
@@ -415,10 +416,44 @@ impl TuiElement for TuiInlineMenuElement {
         size
     }
 
-    fn render(&self, area: TuiRect, buffer: &mut TuiBuffer, ctx: &mut TuiPaintContext) {
-        if let Some(content) = &self.content {
-            content.render(area, buffer, ctx);
+    fn render(
+        &mut self,
+        origin: TuiScreenPosition,
+        surface: &mut TuiPaintSurface<'_>,
+        ctx: &mut TuiPaintContext,
+    ) {
+        if let Some(content) = self.content.as_mut() {
+            content.render(origin, surface, ctx);
         }
+    }
+
+    /// Returns the laid-out content size.
+    fn size(&self) -> Option<TuiSize> {
+        self.content.as_ref()?.size()
+    }
+
+    /// Returns the painted content origin.
+    fn origin(&self) -> Option<TuiScreenPoint> {
+        self.content.as_ref()?.origin()
+    }
+
+    /// Delegates child-view presentation to the laid-out content.
+    fn present(&mut self, ctx: &mut TuiPresentationContext<'_>) {
+        if let Some(content) = self.content.as_mut() {
+            content.present(ctx);
+        }
+    }
+
+    /// Delegates event dispatch to the laid-out content.
+    fn dispatch_event(
+        &mut self,
+        event: &TuiEvent,
+        event_ctx: &mut TuiEventContext<'_>,
+        app: &AppContext,
+    ) -> bool {
+        self.content
+            .as_mut()
+            .is_some_and(|content| content.dispatch_event(event, event_ctx, app))
     }
 }
 
