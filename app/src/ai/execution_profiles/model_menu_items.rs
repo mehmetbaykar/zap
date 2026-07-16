@@ -95,11 +95,8 @@ fn make_item_fields<A: Action + Clone>(
     } else {
         llm.provider.icon().unwrap_or(Icon::Oz)
     };
-    let trailing_credential_icon = if !is_using_bedrock && is_using_api_key {
-        Some(Icon::Key)
-    } else {
-        None
-    };
+    let is_using_cloud_host = is_using_bedrock;
+    let trailing_credential_icon = (!is_using_cloud_host && is_using_api_key).then_some(Icon::Key);
 
     let mut item = if let Some(position_id_fn) = position_id_fn {
         let position_id = position_id_fn(&llm.id);

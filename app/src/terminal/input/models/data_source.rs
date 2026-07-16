@@ -24,7 +24,8 @@ use crate::ai::agent_providers::{llm_id as byop_llm_id, lookup_byop};
 use crate::ai::custom_model_routers::is_custom_router_id;
 use crate::ai::execution_profiles::model_menu_items::is_auto;
 use crate::ai::llms::{
-    byo_key_source_for_model, should_show_bedrock_icon_for_model, should_show_key_icon_for_model,
+    byo_key_source_for_model, should_show_bedrock_icon_for_model,
+    should_show_key_icon_for_model,
     ByoKeySource, DisableReason, LLMId, LLMInfo, LLMPreferences, LLMProvider, LLMSpec,
 };
 use crate::features::FeatureFlag;
@@ -351,11 +352,9 @@ impl ModelSearchItem {
         } else {
             llm.provider.icon().unwrap_or(Icon::Oz)
         };
-        let credential_icon = if !is_using_bedrock && byo_key_source.is_some() {
-            Some(Icon::Key)
-        } else {
-            None
-        };
+        let is_using_cloud_host = is_using_bedrock;
+        let credential_icon =
+            (!is_using_cloud_host && byo_key_source.is_some()).then_some(Icon::Key);
         Self {
             id: llm.id.clone(),
             provider: llm.provider.clone(),
@@ -607,7 +606,8 @@ impl SearchItem for ModelSearchItem {
             }
         }
 
-        let cost_row = if self.is_using_bedrock || self.byo_key_source.is_some() {
+        let uses_external_inference = self.is_using_bedrock || self.byo_key_source.is_some();
+        let cost_row = if uses_external_inference {
             let search_query = if self.is_using_bedrock {
                 "bedrock"
             } else {
