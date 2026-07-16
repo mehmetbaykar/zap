@@ -21,6 +21,7 @@ use warpui::{
 };
 
 use crate::ai::agent_providers::{llm_id as byop_llm_id, lookup_byop};
+use crate::ai::custom_model_routers::is_custom_router_id;
 use crate::ai::execution_profiles::model_menu_items::is_auto;
 use crate::ai::llms::{
     byo_key_source_for_model, should_show_bedrock_icon_for_model, should_show_key_icon_for_model,
@@ -133,6 +134,78 @@ fn model_specs_width(app: &AppContext) -> f32 {
         appearance.monospace_font_size(),
     ) * 34.
 }
+/// Frontend-neutral model picker result shared by GUI and TUI surfaces.
+#[derive(Clone, Debug)]
+pub struct ModelPickerChoice {
+    pub llm: LLMInfo,
+    pub disable_reason: Option<DisableReason>,
+    pub name_match_result: Option<FuzzyMatchResult>,
+    pub score: OrderedFloat<f64>,
+}
+
+impl ModelPickerChoice {
+    pub fn is_selectable(&self) -> bool {
+        self.disable_reason.is_none()
+    }
+
+    fn priority_tier(&self) -> u8 {
+        if self.is_selectable() {
+            0
+        } else {
+            1
+        }
+    }
+}
+
+/// Applies the GUI model picker's ordering, fuzzy filtering, and effective disabled state.
+pub fn query_model_picker_choices<'a>(
+    llm_preferences: &LLMPreferences,
+    choices: impl IntoIterator<Item = &'a LLMInfo>,
+    query_text: &str,
+    app: &AppContext,
+) -> Vec<ModelPickerChoice> {
+    let choices = ModelSelectorDataSource::order_model_choices(
+        llm_preferences,
+        choices.into_iter().collect(),
+    );
+    let query_text = query_text.trim().to_lowercase();
+    let mut results = choices
+        .into_iter()
+        .filter_map(|llm| {
+            let name_match_result = if query_text.is_empty() {
+                None
+            } else {
+                let result = match_indices_case_insensitive(
+                    llm.display_name.to_lowercase().as_str(),
+                    query_text.as_str(),
+                )?;
+                if query_text.len() > 1 && result.score < 10 {
+                    return None;
+                }
+                Some(result)
+            };
+            let disable_reason = if llm.disable_reason == Some(DisableReason::RequiresUpgrade)
+                && should_show_key_icon_for_model(llm, app)
+            {
+                None
+            } else {
+                llm.disable_reason.clone()
+            };
+            Some(ModelPickerChoice {
+                llm: llm.clone(),
+                disable_reason,
+                score: OrderedFloat(
+                    name_match_result
+                        .as_ref()
+                        .map_or(f64::MIN, |result| result.score as f64),
+                ),
+                name_match_result,
+            })
+        })
+        .collect::<Vec<_>>();
+    results.sort_by_key(|choice| (choice.priority_tier(), choice.score));
+    results
+}
 
 pub struct ModelSelectorDataSource {
     terminal_view_id: EntityId,
@@ -167,19 +240,35 @@ impl ModelSelectorDataSource {
         ctx.notify();
     }
 
-    fn order_model_choices(choices: Vec<&LLMInfo>) -> Vec<&LLMInfo> {
+    fn order_model_choices<'a>(
+        llm_preferences: &LLMPreferences,
+        choices: Vec<&'a LLMInfo>,
+    ) -> Vec<&'a LLMInfo> {
         let mut auto_choices = Vec::new();
+        let mut custom_router_choices = Vec::new();
+        let mut custom_choices = Vec::new();
         let mut other_choices = Vec::new();
 
         for llm in choices {
-            if is_auto(llm) {
+            // Check custom router before is_auto because custom router ids contain
+            // "auto" and would otherwise land in auto_choices.
+            if is_custom_router_id(llm.id.as_str()) {
+                custom_router_choices.push(llm);
+            } else if is_auto(llm) {
                 auto_choices.push(llm);
+            } else if llm_preferences.custom_llm_info_for_id(&llm.id).is_some() {
+                custom_choices.push(llm);
             } else {
                 other_choices.push(llm);
             }
         }
 
-        auto_choices.into_iter().chain(other_choices).collect()
+        auto_choices
+            .into_iter()
+            .chain(custom_router_choices)
+            .chain(custom_choices)
+            .chain(other_choices)
+            .collect()
     }
 }
 
@@ -213,37 +302,12 @@ impl SyncDataSource for ModelSelectorDataSource {
                 .get_base_llm_choices_for_agent_mode()
                 .collect_vec()
         };
-        let choices = Self::order_model_choices(choices);
-
-        let query_text = query.text.trim().to_lowercase();
-
-        if query_text.is_empty() {
-            return Ok(choices
+        Ok(
+            query_model_picker_choices(llm_preferences, choices, &query.text, app)
                 .into_iter()
-                .map(|llm| QueryResult::from(ModelSearchItem::new(llm, &active_llm_id, app)))
-                .collect());
-        }
-
-        Ok(choices
-            .into_iter()
-            .filter_map(|llm| {
-                let match_result = match_indices_case_insensitive(
-                    llm.display_name.to_lowercase().as_str(),
-                    query_text.as_str(),
-                )?;
-
-                // Avoid spamming results with extremely weak matches.
-                if query_text.len() > 1 && match_result.score < 10 {
-                    return None;
-                }
-
-                Some(QueryResult::from(
-                    ModelSearchItem::new(llm, &active_llm_id, app)
-                        .with_name_match_result(Some(match_result.clone()))
-                        .with_score(OrderedFloat(match_result.score as f64)),
-                ))
-            })
-            .collect())
+                .map(|choice| QueryResult::from(ModelSearchItem::new(choice, &active_llm_id, app)))
+                .collect(),
+        )
     }
 }
 
@@ -261,6 +325,9 @@ struct ModelSearchItem {
     byo_key_source: Option<ByoKeySource>,
     display_text: String,
     is_selected: bool,
+    is_custom_router: bool,
+    /// Source/routing description for custom model routers (from `LLMInfo.description`).
+    description: Option<String>,
     disable_reason: Option<DisableReason>,
     is_auto: bool,
     is_using_bedrock: bool,
@@ -273,16 +340,9 @@ struct ModelSearchItem {
 }
 
 impl ModelSearchItem {
-    fn new(llm: &LLMInfo, active_llm_id: &LLMId, app: &AppContext) -> Self {
-        // If the model requires an upgrade but the user already has a BYOK key
-        // for this provider, treat it as enabled by clearing the disable reason.
-        let disable_reason = if llm.disable_reason == Some(DisableReason::RequiresUpgrade)
-            && should_show_key_icon_for_model(llm, app)
-        {
-            None
-        } else {
-            llm.disable_reason.clone()
-        };
+    fn new(choice: ModelPickerChoice, active_llm_id: &LLMId, app: &AppContext) -> Self {
+        let llm = &choice.llm;
+        let is_custom_router = is_custom_router_id(llm.id.as_str());
         let is_auto = is_auto(llm);
         let is_using_bedrock = should_show_bedrock_icon_for_model(llm, app);
         let byo_key_source = byo_key_source_for_model(llm, app);
@@ -305,26 +365,18 @@ impl ModelSearchItem {
             byo_key_source,
             display_text: llm.display_name.clone(),
             is_selected: &llm.id == active_llm_id,
-            disable_reason,
+            is_custom_router,
+            description: llm.description.clone(),
+            disable_reason: choice.disable_reason,
             is_auto,
             is_using_bedrock,
-            name_match_result: None,
-            score: OrderedFloat(f64::MIN),
+            name_match_result: choice.name_match_result,
+            score: choice.score,
             manage_api_key_mouse_state: Default::default(),
             cost_row_tooltip_mouse_state: Default::default(),
             reasoning_level: llm.reasoning_level(),
             discount_percentage: llm.discount_percentage,
         }
-    }
-
-    fn with_name_match_result(mut self, result: Option<FuzzyMatchResult>) -> Self {
-        self.name_match_result = result;
-        self
-    }
-
-    fn with_score(mut self, score: OrderedFloat<f64>) -> Self {
-        self.score = score;
-        self
     }
 }
 

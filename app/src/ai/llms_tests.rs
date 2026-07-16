@@ -6,6 +6,7 @@ use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::update_manager::UpdateManager;
+use crate::terminal::input::models::query_model_picker_choices;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::LaunchMode;
@@ -200,6 +201,13 @@ fn endpoint(
         url: url.into(),
         api_key: api_key.into(),
         models,
+    }
+}
+
+fn disabled_agent_llm(id: &str, display_name: &str) -> LLMInfo {
+    LLMInfo {
+        disable_reason: Some(DisableReason::Unavailable),
+        ..agent_llm(id, display_name)
     }
 }
 
@@ -461,6 +469,39 @@ fn active_models_fall_back_to_usable_choice_or_custom_endpoint_when_default_disa
     });
 }
 
+/// Runs picker-query assertions with searchable, selectable, and disabled model fixtures plus
+/// the app singletons consulted by model eligibility logic.
+fn with_model_picker_query_test_context(f: impl FnOnce(&LLMPreferences, &AppContext) + 'static) {
+    App::test((), |app| async move {
+        app.add_singleton_model(UserWorkspaces::default_mock);
+        app.read(|app_ctx| {
+            let agent_mode = AvailableLLMs::new(
+                "auto".into(),
+                vec![
+                    agent_llm("auto", "auto (cost-efficient)"),
+                    agent_llm("gpt-5", "GPT 5"),
+                    disabled_agent_llm("disabled-gpt", "GPT Disabled"),
+                ],
+                None,
+            )
+            .expect("choices are non-empty");
+            let preferences = LLMPreferences {
+                models_by_feature: ModelsByFeature {
+                    agent_mode,
+                    ..Default::default()
+                },
+                last_update: None,
+                base_llm_for_terminal_view: HashMap::new(),
+                custom_llms: Vec::new(),
+                custom_model_routers: Vec::new(),
+                last_used_reasoning: HashMap::new(),
+                reasoning_effort_per_terminal: HashMap::new(),
+            };
+            f(&preferences, app_ctx);
+        });
+    });
+}
+
 #[test]
 fn active_models_use_default_when_usable() {
     App::test((), |mut app| async move {
@@ -714,6 +755,38 @@ fn tui_agent_model_test(f: impl FnOnce(&LLMPreferences)) {
 fn tui_agent_model_auto_resolves_to_the_default_model() {
     tui_agent_model_test(|preferences| {
         assert_eq!(preferences.tui_agent_model_info("auto").id.as_str(), "auto");
+    });
+}
+
+#[test]
+fn shared_model_picker_query_orders_filters_and_marks_disabled_choices() {
+    with_model_picker_query_test_context(|preferences, app| {
+        let all = query_model_picker_choices(
+            preferences,
+            preferences.get_base_llm_choices_for_agent_mode(),
+            "",
+            app,
+        );
+        assert_eq!(
+            all.first().map(|choice| choice.llm.id.as_str()),
+            Some("auto")
+        );
+        assert_eq!(
+            all.last().map(|choice| choice.llm.id.as_str()),
+            Some("disabled-gpt")
+        );
+        assert!(!all.last().expect("disabled choice").is_selectable());
+
+        let filtered = query_model_picker_choices(
+            preferences,
+            preferences.get_base_llm_choices_for_agent_mode(),
+            "gpt 5",
+            app,
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].llm.id.as_str(), "gpt-5");
+        assert!(filtered[0].name_match_result.is_some());
+        assert!(filtered[0].is_selectable());
     });
 }
 
