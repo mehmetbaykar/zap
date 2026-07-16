@@ -15693,6 +15693,7 @@ dependencies = [
  "string-offset",
  "sum_tree",
  "thiserror 2.0.18",
+ "unicode-segmentation",
  "unicode-width 0.1.14",
  "urlocator",
  "vec1",
