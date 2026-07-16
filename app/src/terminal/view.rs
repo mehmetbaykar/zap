@@ -6517,7 +6517,8 @@ impl TerminalView {
                     ctx.notify();
                 }
             }
-            CLISubagentEvent::ToggledHideResponses => {}
+            CLISubagentEvent::ToggledHideResponses
+            | CLISubagentEvent::UpdatedInstruction { .. } => {}
             CLISubagentEvent::UpdatedLastSnapshot { .. } => {
                 // Only update the in-memory last_snapshot_at (already done inside the controller);
                 // don't trigger a full flush to disk. Flushing is handled by the low-frequency

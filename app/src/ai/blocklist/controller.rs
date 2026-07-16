@@ -1061,14 +1061,15 @@ impl BlocklistAIController {
         );
     }
 
-    /// Sends the given user query to the AI model.
+    /// Sends the given user query to the AI model, returning whether it
+    /// reached the shared request dispatch path.
     pub fn send_user_query_in_conversation(
         &mut self,
         query: String,
         conversation_id: AIConversationId,
         participant_id: Option<ParticipantId>,
         ctx: &mut ModelContext<Self>,
-    ) {
+    ) -> bool {
         self.send_user_query_in_conversation_internal(
             query,
             conversation_id,
@@ -1079,7 +1080,7 @@ impl BlocklistAIController {
             /*is_queued_prompt*/ false,
             /*queued_query_id*/ None,
             ctx,
-        );
+        )
     }
 
     /// Sends the first submission of a previously queued user prompt into an existing conversation.
@@ -1165,7 +1166,7 @@ impl BlocklistAIController {
         is_queued_prompt: bool,
         queued_query_id: Option<QueuedQueryId>,
         ctx: &mut ModelContext<Self>,
-    ) {
+    ) -> bool {
         let is_viewer = self
             .terminal_model
             .lock()
@@ -1214,7 +1215,7 @@ impl BlocklistAIController {
                     Ok(task_id) => (task_id, Some(running_command)),
                     Err(e) => {
                         log::error!("Could not create CLI subagent task optimistically: {e:?}");
-                        return;
+                        return false;
                     }
                 }
             } else if let Some(task_id) = active_block
@@ -1231,7 +1232,7 @@ impl BlocklistAIController {
                     log::error!(
                         "Tried to send follow-up query for non-existent conversation: {conversation_id:?}"
                     );
-                    return;
+                    return false;
                 };
 
                 (conversation.get_root_task_id().clone(), None)
@@ -1278,6 +1279,7 @@ impl BlocklistAIController {
             is_queued_prompt,
             ctx,
         );
+        true
     }
 
     /// Sends a request triggered by a zero-state prompt suggestion.
