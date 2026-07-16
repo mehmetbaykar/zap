@@ -607,6 +607,7 @@ default = [
     "configurable_context_window",
     "orchestration_v2",
     "orchestration_pill_bar",
+    "run_agents_tool",
     "pending_user_query_indicator",
     "queue_slash_command",
     "queued_prompts_v2",

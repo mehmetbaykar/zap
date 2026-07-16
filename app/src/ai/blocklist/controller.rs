@@ -1381,6 +1381,11 @@ impl BlocklistAIController {
         reason
     }
 
+    /// Starts the create-project agent flow with the supplied project description.
+    pub fn send_create_new_project_request(&mut self, query: String, ctx: &mut ModelContext<Self>) {
+        self.send_slash_command_request(SlashCommandRequest::CreateNewProject { query }, ctx);
+    }
+
     /// Resolves a skill reference against this controller's active execution host.
     pub(crate) fn resolve_skill_for_invocation(
         &self,

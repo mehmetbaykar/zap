@@ -586,6 +586,11 @@ pub enum FeatureFlag {
     /// `OrchestrationV2`; has no effect when v2 is off.
     RunAgentsTool,
 
+    /// On `wait_for_events`, confirms parent status against the server and
+    /// registers an orchestrator for the owner-side ancestor stream so it
+    /// receives events for children created out-of-band (Oz CLI / web API).
+    WaitForEventsParentRegistration,
+
     /// Shows a pending user query indicator during summarization when a follow-up
     /// prompt is queued via `/fork-and-compact` or `/compact-and`.
     PendingUserQueryIndicator,

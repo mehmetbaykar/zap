@@ -220,38 +220,23 @@ use crate::ai::blocklist::agent_view::AgentInputFooterEvent;
 use crate::ai::blocklist::agent_view::AgentViewController;
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::ai::blocklist::agent_view::EphemeralMessageModel;
-use crate::ai::blocklist::ai_indicator_height;
 use crate::ai::blocklist::block::cli_controller::{CLISubagentController, CLISubagentEvent};
 use crate::ai::blocklist::block::status_bar::BlocklistAIStatusBar;
 use crate::ai::blocklist::drive_object_attachment_for_reference;
 use crate::ai::blocklist::plan_attachment_for_reference;
-use crate::ai::blocklist::render_ai_agent_mode_icon;
-use crate::ai::blocklist::render_ai_follow_up_icon;
 use crate::ai::blocklist::telemetry_banner::should_collect_ai_ugc_telemetry;
-use crate::ai::blocklist::AttachmentType;
-use crate::ai::blocklist::BlocklistAIActionModel;
-use crate::ai::blocklist::BlocklistAIContextEvent;
-use crate::ai::blocklist::BlocklistAIContextModel;
-use crate::ai::blocklist::BlocklistAIController;
-use crate::ai::blocklist::BlocklistAIControllerEvent;
-use crate::ai::blocklist::BlocklistAIHistoryEvent;
-use crate::ai::blocklist::BlocklistAIHistoryModel;
-use crate::ai::blocklist::BlocklistAIInputEvent;
-use crate::ai::blocklist::BlocklistAIInputModel;
-use crate::ai::blocklist::InputConfig;
-use crate::ai::blocklist::InputType;
-use crate::ai::blocklist::InputTypeAutoDetectionSource;
-use crate::ai::blocklist::QueuedQuery;
-use crate::ai::blocklist::QueuedQueryEvent;
-use crate::ai::blocklist::QueuedQueryId;
-use crate::ai::blocklist::QueuedQueryModel;
-use crate::ai::blocklist::QueuedQueryOrigin;
-use crate::ai::blocklist::SlashCommandRequest;
-use crate::ai::blocklist::BLOCK_CONTEXT_ATTACHMENT_REGEX;
-use crate::ai::blocklist::DIFF_HUNK_ATTACHMENT_REGEX;
-use crate::ai::blocklist::DRIVE_OBJECT_ATTACHMENT_REGEX;
-use crate::ai::document::ai_document_model::AIDocumentId;
-use crate::ai::document::ai_document_model::AIDocumentVersion;
+use crate::ai::blocklist::{
+    ai_indicator_height, render_ai_agent_mode_icon, render_ai_follow_up_icon, AttachmentType,
+    BlocklistAIActionModel, BlocklistAIContextEvent, BlocklistAIContextModel,
+    BlocklistAIController, BlocklistAIControllerEvent, BlocklistAIHistoryEvent,
+    BlocklistAIHistoryModel, BlocklistAIInputEvent, BlocklistAIInputModel, InputConfig, InputType,
+    InputTypeAutoDetectionSource, QueuedQuery, QueuedQueryEvent, QueuedQueryId, QueuedQueryModel,
+    QueuedQueryOrigin, SlashCommandRequest, BLOCK_CONTEXT_ATTACHMENT_REGEX,
+    DIFF_HUNK_ATTACHMENT_REGEX, DRIVE_OBJECT_ATTACHMENT_REGEX,
+};
+#[cfg(not(target_family = "wasm"))]
+use crate::ai::conversation_export::export_conversation_markdown;
+use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::llms::LLMPreferences;
 use crate::ai::llms::LLMPreferencesEvent;
@@ -4813,11 +4798,6 @@ impl Input {
         filename_arg: Option<String>,
         ctx: &mut ViewContext<Self>,
     ) {
-        use std::fs;
-        use std::path::PathBuf;
-
-        use chrono::Local;
-
         let history = BlocklistAIHistoryModel::handle(ctx);
         let Some(conversation) = history
             .as_ref(ctx)
@@ -4832,114 +4812,44 @@ impl Input {
             });
             return;
         };
-
-        // Determine the filename
-        let filename = if let Some(name) = filename_arg.as_ref().filter(|s| !s.trim().is_empty()) {
-            name.trim().to_string()
-        } else {
-            // Generate default filename: timestamp-conversation_title.md
-            let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-            let title = conversation
-                .title()
-                .unwrap_or_else(|| "conversation".to_string())
-                .chars()
-                .map(|c| {
-                    // Replace spaces with underscores, keep alphanumeric, underscores, and hyphens
-                    if c.is_whitespace() {
-                        '_'
-                    } else if c.is_alphanumeric() || c == '_' || c == '-' {
-                        c
-                    } else {
-                        '_'
-                    }
-                })
-                .collect::<String>();
-            format!("{timestamp}-{title}.md")
-        };
-
-        // Ensure the filename has .md extension
-        let filename = if !filename.ends_with(".md") {
-            format!("{filename}.md")
-        } else {
-            filename
-        };
-
-        let current_dir = self
+        let current_directory = self
             .active_block_metadata
             .as_ref()
             .and_then(|metadata| metadata.current_working_directory())
-            .map(PathBuf::from)
-            .or_else(|| {
-                log::debug!(
-                    "No CWD from active_block_metadata, falling back to std::env::current_dir()"
-                );
-                std::env::current_dir().ok()
-            })
-            .unwrap_or_else(|| {
-                log::warn!("Failed to determine current directory, using '.'");
-                PathBuf::from(".")
-            });
-
-        let file_path = current_dir.join(&filename);
+            .map(str::to_owned);
+        let conversation_title = conversation.title();
 
         let action_model = self.ai_action_model.as_ref(ctx);
         let conversation_text = conversation.export_to_markdown(Some(action_model));
-
-        // Check if file already exists and warn user
-        let file_exists = file_path.exists();
-        if file_exists {
-            let window_id = ctx.window_id();
-            let display_path = file_path.display().to_string();
-            ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                let toast = DismissibleToast::default(format!(
-                    "File {display_path} already exists and will be overwritten"
-                ));
-                toast_stack.add_ephemeral_toast(toast, window_id, ctx);
-            });
-        }
-
-        // Write to file
-        match fs::write(&file_path, conversation_text) {
-            Ok(_) => {
-                // Show success toast
+        match export_conversation_markdown(
+            current_directory.as_deref(),
+            filename_arg.as_deref(),
+            conversation_title.as_deref(),
+            &conversation_text,
+        ) {
+            Ok(export) => {
                 let window_id = ctx.window_id();
-                let display_path = file_path.display().to_string();
+                let display_path = export.path().display().to_string();
                 ToastStack::handle(ctx).update(ctx, move |toast_stack, ctx| {
+                    if export.overwrote_existing() {
+                        let toast = DismissibleToast::default(format!(
+                            "File {display_path} already exists and will be overwritten"
+                        ));
+                        toast_stack.add_ephemeral_toast(toast, window_id, ctx);
+                    }
                     let toast = DismissibleToast::default(format!(
                         "Conversation exported to {display_path}"
                     ));
                     toast_stack.add_ephemeral_toast(toast, window_id, ctx);
                 });
             }
-            Err(e) => {
-                // Show error toast with user-friendly message
-                let user_message = match e.kind() {
-                    std::io::ErrorKind::PermissionDenied => {
-                        format!(
-                            "Permission denied writing to {}. Check file permissions.",
-                            file_path.display()
-                        )
-                    }
-                    std::io::ErrorKind::NotFound => {
-                        format!(
-                            "Directory not found: {}",
-                            file_path
-                                .parent()
-                                .map(|p| p.display().to_string())
-                                .unwrap_or_default()
-                        )
-                    }
-                    std::io::ErrorKind::AlreadyExists => {
-                        format!("File {} already exists", file_path.display())
-                    }
-                    _ => {
-                        format!("Failed to export to {}: {}", file_path.display(), e)
-                    }
-                };
+            Err(error) => {
+                let user_message = error.user_message();
+                let path = error.path().to_path_buf();
 
                 report_error!(
-                    anyhow::Error::new(e).context("Failed to write conversation to file"),
-                    extra: { "path" => %file_path.display() }
+                    anyhow::Error::new(error).context("Failed to write conversation to file"),
+                    extra: { "path" => %path.display() }
                 );
                 let window_id = ctx.window_id();
                 ToastStack::handle(ctx).update(ctx, move |toast_stack, ctx| {
@@ -4948,8 +4858,6 @@ impl Input {
                 });
             }
         }
-
-        // Clear the buffer after execution
         self.editor.update(ctx, |editor, ctx| {
             editor.clear_buffer(ctx);
         });
@@ -12021,10 +11929,7 @@ impl Input {
             });
         }
         self.ai_controller.update(ctx, move |controller, ctx| {
-            controller.send_slash_command_request(
-                SlashCommandRequest::CreateNewProject { query: ai_query },
-                ctx,
-            )
+            controller.send_create_new_project_request(ai_query, ctx)
         });
     }
 

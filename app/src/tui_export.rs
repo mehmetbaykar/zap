@@ -14,7 +14,7 @@ pub use crate::ai::agent::{
     AskUserQuestionResult, CancellationReason, FileGlobV2Result, GrepResult, MessageId,
     RequestCommandOutputResult, RunAgentsAgentOutcomeKind, RunAgentsResult,
     SearchCodebaseFailureReason, SearchCodebaseResult, ServerOutputId, Shared,
-    StartAgentExecutionMode, SuggestNewConversationResult, UserQueryMode,
+    StartAgentExecutionMode, SuggestNewConversationResult, SummarizationType, UserQueryMode,
 };
 pub use crate::ai::blocklist::agent_view::{
     AgentViewController, AgentViewDisplayMode, AgentViewEntryOrigin, EnterAgentViewError,
@@ -42,6 +42,10 @@ pub use crate::ai::blocklist::{
     BlocklistAIController, BlocklistAIInputModel, InputConfig, InputModePolicy,
     InputModePolicyHandle, InputType, InputTypeAutoDetectionSource, PolicyConfigUpdate,
     RequestFileEditsExecutor, ShellCommandExecutor, ShellCommandExecutorEvent,
+};
+#[cfg(feature = "local_fs")]
+pub use crate::ai::conversation_export::{
+    export_conversation_markdown, ConversationFileExport, ConversationFileExportError,
 };
 pub use crate::ai::llms::{LLMId, LLMInfo, LLMPreferences, LLMPreferencesEvent};
 pub use crate::ai::skills::{SkillManager, SkillReference};
@@ -75,7 +79,7 @@ pub use crate::terminal::input::slash_commands::{
     slash_command_is_submitted_as_prompt, slash_command_is_supported_in_tui, slash_command_query,
     slash_command_selection_behavior, AcceptSlashCommandOrSavedPrompt, InlineItem,
     SlashCommandDataSource, SlashCommandMixer, SlashCommandSelectionBehavior,
-    TuiDataSourceArgs as TuiSlashCommandDataSourceArgs, TuiSlashCommandDataSource,
+    TuiDataSourceArgs as TuiSlashCommandDataSourceArgs, TuiSlashCommand, TuiSlashCommandDataSource,
     TuiZeroStateDataSource, UpdatedActiveCommands,
 };
 pub use crate::terminal::input::CommandExecutionSource;
