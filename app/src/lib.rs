@@ -89,6 +89,8 @@ mod throttle;
 mod tips;
 mod tracing;
 #[cfg(feature = "tui")]
+mod tui;
+#[cfg(feature = "tui")]
 pub mod tui_export;
 mod ui_components;
 mod undo_close;
@@ -354,6 +356,12 @@ pub(crate) enum LaunchMode {
         /// (rather than as a `run_internal` parameter) so it stays scoped to
         /// this mode.
         mount: TuiMountFn,
+        /// API key for server authentication, if provided via `--api-key` or
+        /// `WARP_API_KEY`. Populated by `run_internal` (after feature flags are
+        /// initialized), not by `run_tui`. Only used on dogfood channels
+        /// (mirrors `App`); lets the TUI log in non-interactively instead of the
+        /// device-auth flow.
+        api_key: Option<String>,
     },
 }
 
@@ -777,7 +785,14 @@ pub fn run_integration_test(driver: TestDriver) -> Result<()> {
 /// `warp_tui`.
 #[cfg(feature = "tui")]
 pub fn run_tui(mount: TuiMountFn) -> Result<()> {
-    run_internal(LaunchMode::Tui { mount })
+    // The `--api-key` / `WARP_API_KEY` value is parsed later in `run_internal`,
+    // after feature flags are initialized (`Args::from_env` checks feature flags
+    // while building its clap command). Parsing there rather than here avoids a
+    // redundant feature-flag init.
+    run_internal(LaunchMode::Tui {
+        mount,
+        api_key: None,
+    })
 }
 
 /// Dispatches a worker command when the current executable was re-invoked for one.
@@ -1159,7 +1174,7 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
         // then mounts directly instead of taking the GUI/CLI `launch()` path.
         match launch_mode {
             #[cfg(feature = "tui")]
-            LaunchMode::Tui { mount } => mount(ctx),
+            LaunchMode::Tui { mount, .. } => crate::tui::init(mount, ctx),
             #[cfg(not(feature = "tui"))]
             LaunchMode::Tui { .. } => {
                 unreachable!("the `tui` launch mode requires the `tui` feature")
