@@ -1097,6 +1097,12 @@ impl LLMPreferences {
         self.custom_llms.iter().find(|info| info.id == *id)
     }
 
+    fn custom_llm_info_for_id_if_enabled(&self, id: &LLMId, _app: &AppContext) -> Option<&LLMInfo> {
+        // Zap: custom endpoints are always enabled — the fork has no Warp
+        // entitlement gate around custom inference.
+        self.custom_llm_info_for_id(id)
+    }
+
     pub fn custom_endpoint_usage_display_label(&self, config_key: &str) -> String {
         self.custom_llm_info_for_id(&LLMId::from(config_key))
             .map(|info| info.display_name.clone())
@@ -1534,6 +1540,13 @@ impl LLMPreferences {
     ///
     /// Called both when the model list is refreshed from the server and when
     /// BYOK API keys change (since `RequiresUpgrade` usability is BYOK-aware).
+    ///
+    /// Note: model selections are only cleared when the model ID is *recognized*
+    /// on this device (present in the server catalog or the local custom endpoints).
+    /// An unrecognized ID is silently preserved so that cross-device profiles —
+    /// where a custom endpoint was configured on device A but not yet on device B —
+    /// are not erroneously reset and synced back to cloud, which would destroy the
+    /// user's settings on their primary device.
     fn reconcile_disabled_model_preferences(&self, ctx: &mut ModelContext<Self>) {
         let profiles_model = AIExecutionProfilesModel::handle(ctx);
         profiles_model.update(ctx, |profiles, ctx| {
@@ -1544,6 +1557,22 @@ impl LLMPreferences {
                     let effective_base_model_id = preferred_base_model
                         .as_ref()
                         .unwrap_or(&self.models_by_feature.agent_mode.default_id);
+
+                    // Only reconcile a preferred model when this device recognizes its ID.
+                    // If neither the server catalog nor local custom endpoints know it, the ID
+                    // likely belongs to a custom endpoint configured on another device. Clearing
+                    // it here would sync the removal back to cloud and erase the user's setting
+                    // on every other device.
+                    let preferred_base_model_is_recognized = preferred_base_model.is_none()
+                        || self
+                            .models_by_feature
+                            .agent_mode
+                            .info_for_id(effective_base_model_id)
+                            .is_some()
+                        || self
+                            .custom_llm_info_for_id(effective_base_model_id)
+                            .is_some();
+
                     let effective_base_model_usable = self
                         .models_by_feature
                         .agent_mode
@@ -1554,31 +1583,54 @@ impl LLMPreferences {
                         .is_some_and(|info| info.context_window.is_configurable);
                     let has_context_window_limit = profile_data.context_window_limit.is_some();
 
-                    if preferred_base_model.is_some() && effective_base_model_unusable {
+                    if preferred_base_model.is_some()
+                        && preferred_base_model_is_recognized
+                        && effective_base_model_unusable
+                    {
                         profiles.set_base_model(profile_id, None, ctx);
                     }
                     if has_context_window_limit
+                        && preferred_base_model_is_recognized
                         && (effective_base_model_unusable || !effective_base_model_is_configurable)
                     {
                         profiles.set_context_window_limit(profile_id, None, ctx);
                     }
                     if let Some(preferred_llm_id) = &profile.data().coding_model {
-                        if self
+                        // Same guard: only clear recognized IDs.
+                        let is_recognized = self
                             .models_by_feature
                             .coding
-                            .usable_info_for_id(preferred_llm_id, ctx)
-                            .or_else(|| self.custom_llm_info_for_id(preferred_llm_id))
-                            .is_none()
+                            .info_for_id(preferred_llm_id)
+                            .is_some()
+                            || self.custom_llm_info_for_id(preferred_llm_id).is_some();
+                        if is_recognized
+                            && self
+                                .models_by_feature
+                                .coding
+                                .usable_info_for_id(preferred_llm_id, ctx)
+                                .or_else(|| {
+                                    self.custom_llm_info_for_id_if_enabled(preferred_llm_id, ctx)
+                                })
+                                .is_none()
                         {
                             profiles.set_coding_model(profile_id, None, ctx);
                         }
                     }
                     if let Some(preferred_llm_id) = &profile.data().cli_agent_model {
-                        if self
+                        // Same guard: only clear recognized IDs.
+                        let is_recognized = self
                             .get_cli_agent_available()
-                            .usable_info_for_id(preferred_llm_id, ctx)
-                            .or_else(|| self.custom_llm_info_for_id(preferred_llm_id))
-                            .is_none()
+                            .info_for_id(preferred_llm_id)
+                            .is_some()
+                            || self.custom_llm_info_for_id(preferred_llm_id).is_some();
+                        if is_recognized
+                            && self
+                                .get_cli_agent_available()
+                                .usable_info_for_id(preferred_llm_id, ctx)
+                                .or_else(|| {
+                                    self.custom_llm_info_for_id_if_enabled(preferred_llm_id, ctx)
+                                })
+                                .is_none()
                         {
                             profiles.set_cli_agent_model(profile_id, None, ctx);
                         }
