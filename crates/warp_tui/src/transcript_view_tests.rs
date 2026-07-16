@@ -3,10 +3,11 @@ use std::sync::Arc;
 
 use parking_lot::FairMutex;
 use warp::tui_export::{
-    AIAgentExchangeId, AIAgentInput, AIBlockModel, AIBlockOutputStatus, AIConversationId,
-    AIRequestType, Appearance, BlockHeightItem, BlocklistAIHistoryEvent, LLMId,
-    OutputStatusUpdateCallback, RichContentItem, RichContentType, ServerOutputId, TerminalModel,
-    UserQueryMode,
+    AIAgentExchangeId, AIAgentInput, AIAgentOutput, AIAgentOutputMessage, AIAgentOutputMessageType,
+    AIAgentTodo, AIBlockModel, AIBlockOutputStatus, AIConversationId, AIRequestType, Appearance,
+    BlockHeightItem, BlocklistAIHistoryEvent, ConversationStatus, ConversationStatusUpdate, LLMId,
+    MessageId, OutputStatusUpdateCallback, RichContentItem, RichContentType, ServerOutputId,
+    Shared, TerminalModel, TodoOperation, UserQueryMode,
 };
 use warpui::event::ModifiersState;
 use warpui::platform::WindowStyle;
@@ -133,13 +134,14 @@ fn transcript_clear_event_removes_only_named_conversations() {
 
 struct FakeAgentBlockModel {
     inputs: Vec<AIAgentInput>,
+    status: AIBlockOutputStatus,
 }
 
 impl AIBlockModel for FakeAgentBlockModel {
     type View = TuiAIBlock;
 
     fn status(&self, _app: &AppContext) -> AIBlockOutputStatus {
-        AIBlockOutputStatus::Pending
+        self.status.clone()
     }
 
     fn server_output_id(&self, _app: &AppContext) -> Option<ServerOutputId> {
@@ -247,6 +249,128 @@ fn transcript_agent_block_lifecycle_updates_canonical_rich_content() {
     });
 }
 
+#[test]
+fn todo_and_conversation_status_events_dirty_affected_agent_blocks() {
+    App::test((), |mut app| async move {
+        let terminal_surface_id = EntityId::new();
+        let terminal_model = Arc::new(FairMutex::new(TerminalModel::mock(None, None)));
+        let model_for_view = terminal_model.clone();
+        let (action_model, model_events) = add_test_action_model_and_events(&mut app);
+        let (_, transcript) = app.update(|ctx| {
+            ctx.add_tui_window(
+                AddWindowOptions {
+                    window_style: WindowStyle::NotStealFocus,
+                    ..Default::default()
+                },
+                |ctx| {
+                    TuiTranscriptView::new(
+                        terminal_surface_id,
+                        model_for_view,
+                        action_model,
+                        &model_events,
+                        ctx,
+                    )
+                },
+            )
+        });
+        let first_conversation_id = AIConversationId::new();
+        let second_conversation_id = AIConversationId::new();
+
+        // Only the first block renders todo content; the second is plain.
+        let (todo_block_id, _plain_block_id) = transcript.update(&mut app, |view, ctx| {
+            (
+                append_test_agent_block(
+                    view,
+                    first_conversation_id,
+                    AIAgentExchangeId::new(),
+                    todo_output_status(),
+                    ctx,
+                ),
+                append_test_agent_block(
+                    view,
+                    second_conversation_id,
+                    AIAgentExchangeId::new(),
+                    AIBlockOutputStatus::Pending,
+                    ctx,
+                ),
+            )
+        });
+        // Drain append invalidations so each event's effects are isolated.
+        take_dirty_rich_content_items(&terminal_model);
+
+        transcript.update(&mut app, |view, ctx| {
+            view.handle_history_event(
+                &BlocklistAIHistoryEvent::UpdatedTodoList {
+                    terminal_surface_id,
+                },
+                ctx,
+            );
+        });
+        assert_eq!(
+            take_dirty_rich_content_items(&terminal_model),
+            [todo_block_id].into_iter().collect(),
+            "a todo update restyles todo-rendering blocks only; plain blocks keep their layout"
+        );
+
+        transcript.update(&mut app, |view, ctx| {
+            view.handle_history_event(
+                &BlocklistAIHistoryEvent::UpdatedConversationStatus {
+                    conversation_id: first_conversation_id,
+                    terminal_surface_id,
+                    update: ConversationStatusUpdate::Changed {
+                        prev_status: ConversationStatus::InProgress,
+                    },
+                    new_status: ConversationStatus::Success,
+                },
+                ctx,
+            );
+        });
+        assert_eq!(
+            take_dirty_rich_content_items(&terminal_model),
+            [todo_block_id].into_iter().collect(),
+            "a status update should only dirty todo-rendering blocks from that conversation"
+        );
+
+        transcript.update(&mut app, |view, ctx| {
+            view.handle_history_event(
+                &BlocklistAIHistoryEvent::UpdatedConversationStatus {
+                    conversation_id: second_conversation_id,
+                    terminal_surface_id,
+                    update: ConversationStatusUpdate::Changed {
+                        prev_status: ConversationStatus::InProgress,
+                    },
+                    new_status: ConversationStatus::Success,
+                },
+                ctx,
+            );
+        });
+        assert!(
+            take_dirty_rich_content_items(&terminal_model).is_empty(),
+            "a status update for a conversation without todo blocks dirties nothing"
+        );
+    });
+}
+
+/// A completed output whose only message is an `UpdateTodos` operation, so
+/// the owning block renders todo content.
+fn todo_output_status() -> AIBlockOutputStatus {
+    AIBlockOutputStatus::Complete {
+        output: Shared::new(AIAgentOutput {
+            messages: vec![AIAgentOutputMessage {
+                id: MessageId::new("todo-1".to_owned()),
+                message: AIAgentOutputMessageType::TodoOperation(TodoOperation::UpdateTodos {
+                    todos: vec![AIAgentTodo::new(
+                        "t1".to_owned().into(),
+                        "task".to_owned(),
+                        String::new(),
+                    )],
+                }),
+                citations: Vec::new(),
+            }],
+            ..Default::default()
+        }),
+    }
+}
 #[test]
 fn transcript_view_scrolls_only_with_the_mouse_wheel() {
     App::test((), |mut app| async move {
@@ -378,7 +502,10 @@ fn insert_test_agent_block(
             TuiAIBlock::new(
                 conversation_id,
                 exchange_id,
-                Rc::new(FakeAgentBlockModel { inputs }),
+                Rc::new(FakeAgentBlockModel {
+                    inputs,
+                    status: AIBlockOutputStatus::Pending,
+                }),
                 action_model,
                 &model_events,
                 terminal_model,
@@ -461,6 +588,39 @@ fn dispatch_event(
         event_ctx.set_origin_view(Some(EntityId::new()));
         element.dispatch_event(event, area, &mut event_ctx, &mut layout_ctx, app)
     })
+}
+
+fn append_test_agent_block(
+    view: &mut TuiTranscriptView,
+    conversation_id: AIConversationId,
+    exchange_id: AIAgentExchangeId,
+    status: AIBlockOutputStatus,
+    ctx: &mut ViewContext<TuiTranscriptView>,
+) -> EntityId {
+    let action_model = view.action_model.clone();
+    let model_events = view.model_events.clone();
+    let terminal_model = view.model.clone();
+    let agent_block = ctx.add_tui_view(|ctx| {
+        TuiAIBlock::new(
+            conversation_id,
+            exchange_id,
+            Rc::new(FakeAgentBlockModel {
+                inputs: Vec::new(),
+                status,
+            }),
+            action_model,
+            &model_events,
+            terminal_model,
+            ctx,
+        )
+    });
+    let view_id = agent_block.id();
+    view.agent_blocks.borrow_mut().insert(view_id, agent_block);
+    view.model.lock().block_list_mut().append_rich_content(
+        RichContentItem::new(Some(RichContentType::AIBlock), view_id, None, false),
+        false,
+    );
+    view_id
 }
 fn rich_content_count(model: &Arc<FairMutex<TerminalModel>>) -> usize {
     model

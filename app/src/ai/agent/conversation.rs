@@ -3351,6 +3351,13 @@ impl AIConversation {
         &self.todo_lists
     }
 
+    /// Replaces the conversation's todo lists directly, bypassing the normal
+    /// todo-operation replay, for projection tests.
+    #[cfg(test)]
+    pub(crate) fn set_todo_lists_for_test(&mut self, todo_lists: Vec<AIAgentTodoList>) {
+        self.todo_lists = todo_lists;
+    }
+
     pub fn active_todo_list(&self) -> Option<&AIAgentTodoList> {
         self.todo_lists.last()
     }
