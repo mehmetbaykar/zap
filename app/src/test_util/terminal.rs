@@ -39,7 +39,7 @@ use crate::experiments;
 use crate::network::NetworkStatus;
 use crate::pricing::PricingInfoModel;
 use crate::search::files::model::FileSearchModel;
-use crate::settings::{CloudSyncTokenStore, PrivacySettings};
+use crate::settings::PrivacySettings;
 use crate::settings_view::keybindings::KeybindingChangedNotifier;
 use crate::suggestions::ignored_suggestions_model::IgnoredSuggestionsModel;
 use crate::system::{SystemInfo, SystemStats};
@@ -97,7 +97,6 @@ pub fn initialize_app_for_terminal_view(app: &mut App) {
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
     app.add_singleton_model(AuthManager::new_for_test);
     app.add_singleton_model(AgentProviderSecrets::new);
-    app.add_singleton_model(CloudSyncTokenStore::new);
     app.add_singleton_model(LLMPreferences::new);
     app.add_singleton_model(|ctx| AITipModel::new_for_agent_tips(ctx));
     app.add_singleton_model(DirectoryWatcher::new);

@@ -10,7 +10,6 @@ use warpui_extras::user_preferences;
 use super::app_icon::AppIconSettings;
 use super::app_installation_detection::UserAppInstallDetectionSettings;
 use super::cloud_preferences::PreferencesSettings;
-use super::cloud_sync::CloudSyncSettings;
 use super::initializer::SettingsInitializer;
 use super::language::LanguageSettings;
 use super::native_preference::NativePreferenceSettings;
@@ -98,7 +97,6 @@ pub fn register_all_settings(ctx: &mut AppContext) {
     VimBannerSettings::register(ctx);
     SharedSessionSettings::register(ctx);
     WarpDriveSettings::register(ctx);
-    CloudSyncSettings::register(ctx);
     WorkflowAliases::register(ctx);
     EmacsBindingsSettings::register(ctx);
     SameLinePromptBlockSettings::register(ctx);

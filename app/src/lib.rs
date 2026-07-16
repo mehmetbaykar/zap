@@ -1450,7 +1450,6 @@ pub(crate) fn initialize_app(
     ctx.add_singleton_model(AntivirusInfo::new);
 
     // The cloud sync token goes through the OS keychain, not TOML.
-    ctx.add_singleton_model(crate::settings::CloudSyncTokenStore::new);
 
     cfg_if::cfg_if! {
         if #[cfg(feature = "crash_reporting")] {

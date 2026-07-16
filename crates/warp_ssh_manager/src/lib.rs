@@ -7,7 +7,6 @@ pub mod repository;
 pub mod secrets;
 pub mod ssh_command;
 pub mod ssh_config_parser;
-pub mod sync_provider;
 pub mod types;
 
 pub use db::{set_database_path, with_conn};
@@ -19,9 +18,6 @@ pub use ssh_command::{
 pub use ssh_config_parser::{
     LoadOutcome, LoadResult, SshConfigCandidate, default_ssh_config_path, load_candidates,
     load_candidates_from, parse_ssh_config,
-};
-pub use sync_provider::{
-    DbVersionStore, SshSyncData, SshSyncProvider, SyncNode, SyncOneKeyCredential, SyncServer,
 };
 pub use types::ConnectionStatus;
 pub use types::{

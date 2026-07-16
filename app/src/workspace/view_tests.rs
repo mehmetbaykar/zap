@@ -82,7 +82,6 @@ pub(crate) fn initialize_app(app: &mut App) {
     app.add_singleton_model(crate::terminal::cli_agent::CLIAgentInstallModel::new);
     app.add_singleton_model(|_| crate::ai::active_agent_views_model::ActiveAgentViewsModel::new());
     app.add_singleton_model(crate::settings::network_secrets::ProxyCredentials::new);
-    app.add_singleton_model(crate::settings::CloudSyncTokenStore::new);
     // The SSH manager needs a SQLite path; use a temp file so MRU/pane flows that
     // touch the SSH tree don't panic.
     let _ =

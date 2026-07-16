@@ -29,7 +29,6 @@ use warpui::{Action, AppContext, SingletonEntity, ViewContext, ViewHandle};
 use super::about_page::AboutPageView;
 use super::ai_page::{AISettingsPageAction, AISettingsPageView};
 use super::appearance_page::AppearanceSettingsPageView;
-use super::cloud_sync_page::CloudSyncPageView;
 use super::code_page::CodeSettingsPageView;
 use super::features_page::FeaturesPageView;
 use super::keybindings::KeybindingsView;
@@ -109,8 +108,6 @@ pub enum SettingsPageViewHandle {
     ZapDrive(ViewHandle<WarpDriveSettingsPageView>),
     /// Global HTTP proxy settings page.
     Network(ViewHandle<NetworkPageView>),
-    /// Cloud sync settings page.
-    CloudSync(ViewHandle<CloudSyncPageView>),
 }
 
 impl SettingsPageViewHandle {
@@ -131,7 +128,6 @@ impl SettingsPageViewHandle {
             MCPServers(view_handle) => ChildView::new(view_handle).finish(),
             ZapDrive(view_handle) => ChildView::new(view_handle).finish(),
             Network(view_handle) => ChildView::new(view_handle).finish(),
-            CloudSync(view_handle) => ChildView::new(view_handle).finish(),
         }
     }
 }
@@ -142,11 +138,6 @@ impl From<ViewHandle<MCPServersSettingsPageView>> for SettingsPageViewHandle {
     }
 }
 
-impl From<ViewHandle<CloudSyncPageView>> for SettingsPageViewHandle {
-    fn from(view_handle: ViewHandle<CloudSyncPageView>) -> Self {
-        SettingsPageViewHandle::CloudSync(view_handle)
-    }
-}
 
 impl SettingsPage {
     pub fn new<V>(view_handle: ViewHandle<V>) -> Self
