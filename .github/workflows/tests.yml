@@ -1,15 +1,14 @@
 # Zap test gate — runs on every push/PR to catch regressions before release.
 #
-# Upstream Warp's full ci.yml (three-platform matrix, cloud/internal steps) was stripped from the
-# fork. This is the fork's own lightweight replacement: a single Linux job that mirrors the
-# reliably-green portion of `script/presubmit`.
+# Mirrors the OS matrix of upstream Warp's ci.yml (macOS / Linux / Windows, fail-fast off,
+# command-signatures-v2 excluded everywhere, warp_js additionally excluded on Windows) on free
+# GitHub-hosted runners. The pieces of upstream's pipeline that need infrastructure this fork
+# doesn't have are intentionally absent: self-hosted/large runners, trunk.io analytics upload,
+# and the `integration` package's shell/SSH suites (they need a live sshd + GCP-tunneled test VMs;
+# upstream itself skips the SSH ones on fork PRs).
 #
-# Scope note: the `integration` package's shell/SSH tests (e.g. test_ssh_into_*) need a live sshd
-# and interactive PTYs that a headless GitHub runner does not provide — they fail on CI the same way
-# they fail on a local machine without an SSH server, so they are intentionally NOT part of this gate.
-# The gate is `cargo check --workspace` (whole-workspace compile) plus the unit/view test packages
-# that are deterministic on a headless runner (`warp`, `warpui`, `warpui_core`) — exactly the local
-# pre-commit gate used during the upstream-merge waves.
+# The nextest compile step doubles as the whole-workspace build gate; `warp_tui` is a non-default
+# workspace member so it gets its own check (one OS is enough — it's platform-generic).
 
 name: Tests
 
@@ -31,33 +30,68 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # The fork builds on the inline `oss` channel config (app/src/bin/oss.rs); any other channel makes
-  # build.rs call the private warp-channel-config binary and fail. Matches zap_release.yml.
+  # The fork builds on the inline `oss` channel config (app/src/bin/zap_oss.rs); any other channel
+  # makes build.rs call the private warp-channel-config binary and fail. Matches zap_release.yml.
   CHANNEL: oss
+  # Same exclusion set as upstream ci.yml: command-signatures-v2 needs its own feature setup and is
+  # tested separately by script/presubmit locally.
+  WORKSPACE_TEST_ARGS: --workspace --locked --exclude command-signatures-v2
 
 jobs:
   test:
-    name: Test (linux)
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.name }})
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: linux
+            runner: ubuntu-latest
+            extra_test_args: ""
+
+          - name: macOS
+            os: macos
+            runner: macos-latest
+            extra_test_args: ""
+
+          - name: Windows
+            os: windows
+            runner: windows-latest
+            # Upstream excludes warp_js on Windows as well.
+            extra_test_args: "--exclude warp_js"
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # Shared setup: rust toolchain (rust-toolchain.toml → 1.92.0), protoc, Git LFS payloads,
-      # cargo-nextest (via install_test_deps → script/install_cargo_test_deps), and the build cache.
+      # node/corepack, and the build cache. On Linux install_test_deps also provisions nextest;
+      # macOS/Windows get nextest from the dedicated step below (same as upstream ci.yml).
       - name: Prepare environment
         uses: ./.github/actions/prepare_environment
         with:
-          target_os: linux
+          target_os: ${{ matrix.os }}
           is_self_hosted: "false"
           install_test_deps: "true"
 
-      - name: Compile-check the whole workspace
-        run: cargo check --workspace --locked
+      - name: Install cargo nextest
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+        with:
+          tool: nextest
+
+      # Compiling every test binary is the whole-workspace build gate (strictly stronger than
+      # `cargo check`), mirroring upstream's "Compile tests" step.
+      - name: Compile tests
+        run: cargo nextest run ${{ env.WORKSPACE_TEST_ARGS }} ${{ matrix.extra_test_args }} --profile ci --no-run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check the TUI (non-default workspace member)
+        if: ${{ matrix.os == 'linux' }}
         run: cargo check -p warp_tui --locked
 
-      # --profile ci: fail-fast=false (report every failure, not just the first) + retries=2 for
-      # the handful of load-sensitive view tests. See .config/nextest.toml.
-      - name: Run the deterministic test gate
-        run: cargo nextest run --profile ci -p warp -p warpui -p warpui_core
+      # --profile ci: fail-fast off + per-test failure output (see .config/nextest.toml).
+      # --retries 2 absorbs the handful of load-sensitive view tests on shared runners.
+      - name: Run unit tests
+        if: success()
+        run: cargo nextest run ${{ env.WORKSPACE_TEST_ARGS }} ${{ matrix.extra_test_args }} --profile ci --retries 2 -E "not package(integration)"
