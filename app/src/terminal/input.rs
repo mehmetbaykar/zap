@@ -372,7 +372,9 @@ use crate::terminal::input::profiles::{InlineProfileSelectorEvent, InlineProfile
 use crate::terminal::input::prompts::{InlinePromptsMenuEvent, InlinePromptsMenuView};
 use crate::terminal::input::repos::{InlineReposMenuEvent, InlineReposMenuView};
 use crate::terminal::input::rewind::{RewindMenuEvent, RewindMenuView};
-use crate::terminal::input::skills::{InlineSkillSelectorEvent, InlineSkillSelectorView};
+use crate::terminal::input::skills::{
+    InlineSkillSelectorEvent, InlineSkillSelectorView, LOCAL_SKILLS_REMOTE_EXECUTION_ERROR_MESSAGE,
+};
 use crate::terminal::input::slash_command_model::{SlashCommandEntryState, SlashCommandModel};
 use crate::terminal::input::slash_commands::{
     slash_command_is_submitted_as_prompt, GuiSlashCommandDataSource, InlineSlashCommandView,

@@ -24,6 +24,7 @@ mod inline_menu;
 mod input_mode_policy;
 mod keybindings;
 mod model_menu;
+mod skills_menu;
 mod slash_commands;
 mod terminal_background;
 mod terminal_block;
