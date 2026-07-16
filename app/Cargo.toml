@@ -536,6 +536,7 @@ default = [
     "inline_code_review",
     "web_search_ui",
     "code_review_find",
+    "async_find",
     "mcp_grouped_server_context",
     "fork_from_command",
     "context_window_usage_v2",
