@@ -772,6 +772,11 @@ pub enum FeatureFlag {
     /// Shows a warning in the agent view when the active conversation's
     /// provider-side prompt cache has expired.
     PromptCacheExpiryWarning,
+
+    /// Renders supported solid box-drawing characters (`U+2500..=U+257F`)
+    /// procedurally as cell-filling rectangles instead of from the font,
+    /// eliminating seams between adjacent box-drawing cells in the terminal.
+    BoxDrawingGlyphs,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -845,6 +850,8 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::PromptCacheExpiryWarning,
     FeatureFlag::BackgroundComputerUse,
     FeatureFlag::ContextWindowUsageBreakdown,
+    FeatureFlag::WaitForEventsParentRegistration,
+    FeatureFlag::BoxDrawingGlyphs,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Zap).
