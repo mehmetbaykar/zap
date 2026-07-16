@@ -2,6 +2,7 @@
 
 pub use repo_metadata::repositories::RepoDetectionSource;
 pub use warp_cli::agent::Harness;
+use warpui::SingletonEntity as _;
 
 pub use crate::ai::agent::api::ServerConversationToken;
 pub use crate::ai::agent::conversation::{
@@ -21,8 +22,10 @@ pub use crate::ai::agent::{
     UserQueryMode,
 };
 pub use crate::ai::agent_conversations_model::{
-    AgentConversationEntry, AgentConversationListEntryState, AgentConversationListPolicy,
-    AgentRunDisplayStatus,
+    query_conversation_entries, AgentConversationEntry, AgentConversationEntryId,
+    AgentConversationListEntryState, AgentConversationListPolicy, AgentConversationsModel,
+    AgentConversationsModelEvent, AgentManagementFilters, AgentRunDisplayStatus, HarnessFilter,
+    OwnerFilter,
 };
 pub use crate::ai::blocklist::agent_view::{
     AgentViewController, AgentViewDisplayMode, AgentViewEntryOrigin, EnterAgentViewError,
@@ -43,6 +46,7 @@ pub use crate::ai::blocklist::diff_storage::{
 pub use crate::ai::blocklist::diff_types::{changed_lines_from_op, DiffSessionType, FileDiff};
 pub use crate::ai::blocklist::history_model::{
     BlocklistAIHistoryEvent, BlocklistAIHistoryModel, ConversationStatusUpdate,
+    LoadedConversationData,
 };
 pub use crate::ai::blocklist::view_util::format_credits;
 pub use crate::ai::blocklist::{
@@ -120,3 +124,9 @@ pub use crate::themes::default_themes::{dark_theme, light_theme};
 pub use crate::throttle::throttle;
 pub use crate::util::repo_detection::{detect_possible_git_repo, RepoDetectionSessionType};
 pub use crate::util::time_format::format_elapsed_seconds;
+
+/// Returns whether cloud conversation metadata failed to load.
+pub fn agent_conversations_cloud_metadata_load_failed(app: &warpui::AppContext) -> bool {
+    crate::ai::agent_conversations_model::AgentConversationsModel::as_ref(app)
+        .cloud_conversation_metadata_load_failed()
+}

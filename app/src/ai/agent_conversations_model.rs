@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 pub mod entry;
+mod query;
 
 use std::collections::{HashMap, HashSet};
 
@@ -9,6 +10,8 @@ pub use entry::{
     AgentConversationEntry, AgentConversationEntryId, AgentConversationNavigationSubject,
     AgentConversationProvenance,
 };
+use fuzzy_match::FuzzyMatchResult;
+pub use query::query_conversation_entries;
 use itertools::Itertools;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use warp_cli::agent::Harness;
@@ -804,6 +807,13 @@ impl Entity for AgentConversationsModel {
 impl SingletonEntity for AgentConversationsModel {}
 
 impl AgentConversationsModel {
+    /// Zap: cloud conversation metadata is never fetched, so it can never
+    /// fail to load.
+    #[cfg_attr(not(feature = "tui"), allow(dead_code))]
+    pub(crate) fn cloud_conversation_metadata_load_failed(&self) -> bool {
+        false
+    }
+
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
         // Zap (localization, Phase 3b-1 / Wave 6-6): AgentConversationsModel originally polled/probed
         // remote ambient agent tasks and conversation metadata. In the localized scenario:
@@ -1284,6 +1294,13 @@ impl AgentConversationsModel {
         // Reset the initial load flag so that we can retry the initial sync with the new logged in user
         self.has_finished_initial_load = false;
     }
+}
+
+
+/// A normalized conversation entry paired with optional title-match metadata.
+pub struct AgentConversationQueryResult {
+    pub entry: AgentConversationEntry,
+    pub title_match: Option<FuzzyMatchResult>,
 }
 
 #[cfg(test)]
