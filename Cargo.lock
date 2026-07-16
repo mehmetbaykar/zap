@@ -15951,6 +15951,7 @@ dependencies = [
  "ai",
  "anyhow",
  "async-channel",
+ "async-fs",
  "base64 0.22.1",
  "channel_versions",
  "clap",
