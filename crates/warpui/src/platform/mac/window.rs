@@ -744,6 +744,12 @@ impl Window {
     }
 
     pub fn open_url(url: &str) {
+        // An empty URL means "no destination" (e.g. the de-clouded fork's placeholder docs/privacy
+        // links). Passing "" to NSWorkspace resolves to a nil/invalid NSURL and LaunchServices shows
+        // a "can't be opened" error, so treat it as a silent no-op instead.
+        if url.trim().is_empty() {
+            return;
+        }
         // SAFETY: `open_url` reads the string for the duration of the call.
         unsafe {
             open_url(&NSString::from_str(url));

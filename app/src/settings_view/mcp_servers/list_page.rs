@@ -1098,7 +1098,10 @@ impl MCPServersListPageView {
                 "{} ",
                 crate::t!("settings-mcp-list-description")
             )),
-            FormattedTextFragment::hyperlink(crate::t!("settings-mcp-list-learn-more"), ""),
+            FormattedTextFragment::hyperlink(
+                crate::t!("settings-mcp-list-learn-more"),
+                crate::util::links::USER_DOCS_URL,
+            ),
         ];
 
         let description = FormattedTextElement::new(

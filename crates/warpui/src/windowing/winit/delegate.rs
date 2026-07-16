@@ -56,6 +56,13 @@ static MAIN_THREAD_ID: OnceLock<thread::ThreadId> = OnceLock::new();
 
 /// Open a URL using the platform's default handler.
 pub fn open_url_in_system(url: &str) {
+    // Callers (notably the de-clouded fork's placeholder docs/privacy/community links) may pass an
+    // empty URL, meaning "no destination". Treat that as a silent no-op instead of handing "" to the
+    // platform opener, which surfaces a user-visible "can't be opened" error.
+    if url.trim().is_empty() {
+        return;
+    }
+
     #[cfg(target_family = "wasm")]
     if let Some(window) = web_sys::window() {
         if let Some(safe_url) = crate::browser::safe_browser_open_url(url) {

@@ -6616,7 +6616,10 @@ impl AIFactWidget {
                 "{} ",
                 crate::t!("settings-ai-rules-description")
             )),
-            FormattedTextFragment::hyperlink(crate::t!("settings-ai-learn-more"), ""),
+            FormattedTextFragment::hyperlink(
+                crate::t!("settings-ai-learn-more"),
+                crate::util::links::USER_DOCS_URL,
+            ),
         ];
         let description = Container::new(
             FormattedTextElement::new(

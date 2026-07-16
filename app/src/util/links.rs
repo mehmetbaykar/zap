@@ -1,10 +1,10 @@
 use crate::channel::ChannelState;
 
-// Upstream Warp's docs site/Slack/privacy policy no longer apply to the Zap fork,
-// so these constants are kept as placeholder empty strings, to be filled in once
-// Zap's own channels are in place.
-// `ctx.open_url("")` is a harmless no-op on the UI caller side.
-pub const USER_DOCS_URL: &str = "";
+// Upstream Warp's docs site/Slack/privacy policy no longer apply to the Zap fork. The fork's own
+// GitHub repository is its documentation home, so docs/help links point there. The channels that
+// have no fork equivalent stay empty; the platform `open_url` treats an empty URL as a silent no-op
+// (see `warpui` platform/mac/window.rs and windowing/winit/delegate.rs) so such links never error.
+pub const USER_DOCS_URL: &str = "https://github.com/mehmetbaykar/zap";
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const GITHUB_ISSUES_URL: &str = "https://github.com/mehmetbaykar/zap/issues";
 pub const SLACK_URL: &str = "";
