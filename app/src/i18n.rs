@@ -163,9 +163,17 @@ fn fallback_language() -> LanguageIdentifier {
     "en".parse().expect("en is a valid language identifier")
 }
 
-/// Get the global loader. Returns `None` if `init()` was never called (early/test code can use
-/// [`t_or`] as a fallback).
+/// Get the global loader, lazily running [`init`] with the system locale on first use.
+///
+/// Both product boot paths call `init(None)` explicitly, so in the app this is a no-op. The lazy
+/// path exists for everything else that reaches a `t!()`/`t_static!` before (or without) boot —
+/// notably test binaries in other crates (e.g. `warp_tui` unit tests exercising `StaticCommand`
+/// hint texts) — which would otherwise get the raw fluent key back. Returns an `Option` only for
+/// the unreachable set-failure case, keeping the `t!` fallback as belt-and-braces.
 pub fn loader() -> Option<&'static FluentLanguageLoader> {
+    if LANGUAGE_LOADER.get().is_none() {
+        init(None);
+    }
     LANGUAGE_LOADER.get()
 }
 
