@@ -71,24 +71,6 @@ use crate::{experiments, workspace, GlobalResourceHandlesProvider, ObjectActions
 
 // Zap (localization, Phase 5): `PreferencesSyncer` has been physically removed.
 
-#[test]
-fn query_for_rewind_prefill_uses_custom_display_query_inputs() {
-    let context: std::sync::Arc<[crate::ai::agent::AIAgentContext]> = Vec::new().into();
-    let input = crate::ai::agent::AIAgentInput::FetchReviewComments {
-        repo_path: "/repo".to_string(),
-        context,
-    };
-
-    assert_eq!(
-        query_for_rewind_prefill(&[input]),
-        Some(
-            crate::search::slash_command_menu::static_commands::commands::PR_COMMENTS
-                .name
-                .to_string()
-        )
-    );
-}
-
 pub(crate) fn initialize_app(app: &mut App) {
     initialize_settings_for_tests(app);
 

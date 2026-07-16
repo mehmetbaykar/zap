@@ -278,14 +278,6 @@ pub(super) fn convert_input(
                     )),
                 });
             }
-            AIAgentInput::FetchReviewComments { repo_path, context } => {
-                return Ok(api::request::Input {
-                    context: Some(convert_context(context.as_ref())),
-                    r#type: Some(api::request::input::Type::FetchReviewComments(
-                        api::request::input::FetchReviewComments { repo_path },
-                    )),
-                });
-            }
             AIAgentInput::SummarizeConversation {
                 prompt,
                 overflow: _,
@@ -519,7 +511,6 @@ fn convert_input_to_user_input(
         AIAgentInput::ResumeConversation { .. } => Err(ConvertToAPITypeError::Ignore),
         AIAgentInput::InitProjectRules { .. } => Err(ConvertToAPITypeError::Ignore),
         AIAgentInput::CodeReview { .. } => Err(ConvertToAPITypeError::Ignore),
-        AIAgentInput::FetchReviewComments { .. } => Err(ConvertToAPITypeError::Ignore),
         AIAgentInput::InvokeSkill { .. } => Err(ConvertToAPITypeError::Ignore),
         invalid_input => Err(anyhow!(
             "Cannot convert non user query or action result input into API UserInput: {invalid_input:?}"

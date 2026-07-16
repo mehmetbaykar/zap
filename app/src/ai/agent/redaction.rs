@@ -254,10 +254,6 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
                     | AIAgentActionResultType::WaitForEvents(_) => {}
                 }
             }
-            AIAgentInput::FetchReviewComments { repo_path, context } => {
-                redact_secrets(repo_path);
-                redact_context(Arc::make_mut(context));
-            }
             AIAgentInput::InvokeSkill {
                 context,
                 skill,

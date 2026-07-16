@@ -948,7 +948,6 @@ pub enum AIAgentInput {
     CreateNewProject { query: String },
     CloneRepository { url: String },
     CodeReview,
-    FetchReviewComments,
     SummarizeConversation,
     InvokeSkill { skill_name: String },
     StartFromAmbientRunPrompt,
@@ -978,7 +977,6 @@ impl From<FullAIAgentInput> for AIAgentInput {
                 url: clone_repo_url.into_url(),
             },
             FullAIAgentInput::CodeReview { .. } => Self::CodeReview,
-            FullAIAgentInput::FetchReviewComments { .. } => Self::FetchReviewComments,
             FullAIAgentInput::SummarizeConversation { .. } => Self::SummarizeConversation,
             FullAIAgentInput::InvokeSkill { skill, .. } => Self::InvokeSkill {
                 skill_name: skill.name.clone(),

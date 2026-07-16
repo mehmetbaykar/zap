@@ -496,12 +496,6 @@ fn all_commands() -> Vec<StaticCommand> {
         commands.push(INVOKE_SKILL.clone());
     }
 
-    if FeatureFlag::PRCommentsSlashCommand.is_enabled()
-        && !FeatureFlag::PRCommentsSkill.is_enabled()
-    {
-        commands.push(PR_COMMENTS.clone());
-    }
-
     if FeatureFlag::InlineProfileSelector.is_enabled() {
         commands.push(PROFILE.clone());
     }

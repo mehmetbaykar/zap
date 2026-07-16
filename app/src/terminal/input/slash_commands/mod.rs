@@ -714,27 +714,6 @@ impl Input {
             rewind if command.name == commands::REWIND.name => {
                 self.open_rewind_menu(ctx);
             }
-            pr_comments if command.name == commands::PR_COMMENTS.name => {
-                if !FeatureFlag::PRCommentsSlashCommand.is_enabled() {
-                    return false;
-                }
-
-                let Some(repo_path) = self
-                    .active_session_path_if_local(ctx)
-                    .map(|path| path.to_path_buf())
-                    .map(|path| path.to_string_lossy().to_string())
-                else {
-                    log::error!("Expected a valid working directory since /pr-comments is only available from the terminal");
-                    return false;
-                };
-
-                self.ai_controller.update(ctx, move |controller, ctx| {
-                    controller.send_slash_command_request(
-                        SlashCommandRequest::FetchReviewComments { repo_path },
-                        ctx,
-                    )
-                });
-            }
             fork if command.name == commands::FORK.name => {
                 let Some(conversation_id) = self
                     .ai_context_model

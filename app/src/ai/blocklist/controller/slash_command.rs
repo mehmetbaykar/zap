@@ -41,9 +41,6 @@ pub enum SlashCommandRequest {
         /// False when triggered manually via /compact /compact-and; true on the auto-trigger path.
         overflow: bool,
     },
-    FetchReviewComments {
-        repo_path: String,
-    },
     /// Invoke a skill.
     InvokeSkill {
         skill: ai::skills::ParsedSkill,
@@ -221,9 +218,7 @@ impl SlashCommandRequest {
         app: &AppContext,
     ) -> Option<AIConversationId> {
         match self {
-            Self::Summarize { .. }
-            | Self::InvokeSkill { .. }
-            | Self::FetchReviewComments { .. } => controller
+            Self::Summarize { .. } | Self::InvokeSkill { .. } => controller
                 .context_model
                 .as_ref(app)
                 .selected_conversation_id(app),
@@ -266,9 +261,6 @@ impl SlashCommandRequest {
                     context,
                 }]
             }
-            SlashCommandRequest::FetchReviewComments { repo_path } => {
-                vec![AIAgentInput::FetchReviewComments { repo_path, context }]
-            }
             SlashCommandRequest::InvokeSkill { skill, user_query } => {
                 let user_query = if FeatureFlag::SkillArguments.is_enabled() {
                     let user_query = user_query
@@ -301,7 +293,6 @@ impl SlashCommandRequest {
             SlashCommandRequest::InitProjectRules { .. } => EntrypointType::InitProjectRules,
             SlashCommandRequest::CreateNewProject { .. }
             | SlashCommandRequest::Summarize { .. }
-            | SlashCommandRequest::FetchReviewComments { .. }
             | SlashCommandRequest::InvokeSkill { .. } => EntrypointType::UserInitiated,
         }
     }

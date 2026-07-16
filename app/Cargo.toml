@@ -578,8 +578,6 @@ default = [
     "blocklist_markdown_table_rendering",
     "markdown_mermaid",
     "blocklist_markdown_images",
-    "blocklist_markdown_table_rendering",
-    "pr_comments_slash_command",
     "pr_comments_v2",
     "pr_comments_skill",
     "revert_to_checkpoints",
@@ -806,7 +804,6 @@ linked_code_blocks = []
 tabbed_editor_view = []
 selection_as_context = []
 multi_profile = []
-pr_comments_slash_command = []
 pr_comments_v2 = []
 pr_comments_skill = []
 conversation_artifacts = []
