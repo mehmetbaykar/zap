@@ -12,6 +12,7 @@ use pathfinder_color::ColorU;
 use pathfinder_geometry::rect::RectF;
 use warp_core::features::FeatureFlag;
 use warp_core::ui::theme::color::internal_colors;
+use warpui::clipboard::ClipboardContent;
 use warpui::elements::new_scrollable::{NewScrollable, ScrollableAppearance, SingleAxisConfig};
 use warpui::elements::{
     Border, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox, Container, CornerRadius,
@@ -100,6 +101,9 @@ fn build_row_state(
                 ctx.dispatch_typed_action(QueuedPromptsPanelAction::DeleteRow(query_id));
             })
     });
+    // Zap: upstream's Copy button exists only for the locked initial
+    // cloud-mode prompt; the fork has no cloud mode, so no row grows one.
+    let copy_button = None;
 
     QueuedPromptRowState {
         preview_text: truncate_from_end(
@@ -110,6 +114,7 @@ fn build_row_state(
         send_now_button,
         edit_button,
         delete_button,
+        copy_button,
         draggable_state: DraggableState::default(),
     }
 }
@@ -122,6 +127,7 @@ struct QueuedPromptRowState {
     send_now_button: ViewHandle<ActionButton>,
     edit_button: ViewHandle<ActionButton>,
     delete_button: ViewHandle<ActionButton>,
+    copy_button: Option<ViewHandle<ActionButton>>,
     draggable_state: DraggableState,
 }
 
@@ -169,6 +175,7 @@ pub enum QueuedPromptsPanelAction {
     SendNow(QueuedQueryId),
     StartEditingRow(QueuedQueryId),
     DeleteRow(QueuedQueryId),
+    CopyRow(QueuedQueryId),
     StartDrag(QueuedQueryId),
     DragMoved { rect: RectF },
     DropEnd,
@@ -724,6 +731,17 @@ impl TypedActionView for QueuedPromptsPanelView {
                     model.enter_edit_mode(conv_id, query_id, ctx);
                 });
             }
+            QueuedPromptsPanelAction::CopyRow(query_id) => {
+                let query_id = *query_id;
+                let text = QueuedQueryModel::as_ref(ctx)
+                    .queue(conv_id)
+                    .iter()
+                    .find(|row| row.id() == query_id)
+                    .map(|row| row.text().to_owned());
+                if let Some(text) = text {
+                    ctx.clipboard().write(ClipboardContent::plain_text(text));
+                }
+            }
             QueuedPromptsPanelAction::DeleteRow(query_id) => {
                 let query_id = *query_id;
                 let removed = QueuedQueryModel::handle(ctx)
@@ -1086,6 +1104,7 @@ fn render_row(props: RenderRowProps<'_>, app: &AppContext) -> Box<dyn Element> {
         send_now_button,
         edit_button,
         delete_button,
+        copy_button,
         draggable_state,
     } = row_state;
 
@@ -1213,7 +1232,11 @@ fn render_row(props: RenderRowProps<'_>, app: &AppContext) -> Box<dyn Element> {
             if !is_in_edit_mode {
                 buttons.add_child(ChildView::new(&edit_button).finish());
             }
-            buttons.add_child(ChildView::new(&delete_button).finish());
+            if let Some(copy_button) = &copy_button {
+                buttons.add_child(ChildView::new(copy_button).finish());
+            } else {
+                buttons.add_child(ChildView::new(&delete_button).finish());
+            }
             buttons.finish()
         } else {
             let count = if is_in_edit_mode { 2. } else { 3. };

@@ -7,7 +7,6 @@
 //! shell blocks.
 
 use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use parking_lot::FairMutex;
@@ -17,7 +16,7 @@ use warp::tui_export::{
 };
 use warpui_core::elements::tui::{tui_collapsible, Modifier, TuiElement};
 use warpui_core::elements::MouseStateHandle;
-use warpui_core::{AppContext, Entity, ModelHandle, TuiView};
+use warpui_core::{AppContext, Entity, ModelHandle, TuiView, TypedActionView, ViewContext};
 
 use crate::agent_block_sections::{
     render_fallback_tool_call_section, tool_call_glyph_style, tool_call_label_style,
@@ -29,24 +28,21 @@ use crate::tool_call_labels::{
 };
 use crate::tui_builder::TuiUiBuilder;
 
-#[derive(Clone)]
 struct ShellCommandViewState {
-    collapsed: Rc<Cell<bool>>,
+    collapsed: bool,
 }
 
 impl ShellCommandViewState {
     fn new_collapsed() -> Self {
-        Self {
-            collapsed: Rc::new(Cell::new(true)),
-        }
+        Self { collapsed: true }
     }
 
     fn is_collapsed(&self) -> bool {
-        self.collapsed.get()
+        self.collapsed
     }
 
-    fn toggle(&self) {
-        self.collapsed.set(!self.collapsed.get());
+    fn toggle(&mut self) {
+        self.collapsed = !self.collapsed;
     }
 }
 
@@ -62,9 +58,20 @@ pub(super) struct TuiShellCommandView {
     action_model: ModelHandle<BlocklistAIActionModel>,
     terminal_model: Arc<FairMutex<TerminalModel>>,
     state: ShellCommandViewState,
+    command_running: Cell<bool>,
     header_mouse_state: MouseStateHandle,
 }
 
+/// Events emitted to the owning agent block.
+pub(super) enum TuiShellCommandViewEvent {
+    LayoutChanged,
+}
+
+/// User interactions handled by the shell-command view.
+#[derive(Clone, Debug)]
+pub(super) enum TuiShellCommandViewAction {
+    ToggleExpanded,
+}
 impl TuiShellCommandView {
     pub(super) fn new(
         action: AIAgentAction,
@@ -82,6 +89,7 @@ impl TuiShellCommandView {
             action_model,
             terminal_model,
             state: ShellCommandViewState::new_collapsed(),
+            command_running: Cell::new(false),
             header_mouse_state: MouseStateHandle::default(),
         }
     }
@@ -90,6 +98,10 @@ impl TuiShellCommandView {
     pub(super) fn update_action(&mut self, action: AIAgentAction, output_streaming: bool) {
         self.action = action;
         self.output_streaming = output_streaming;
+    }
+    /// Whether expanded command output can still grow between layout events.
+    pub(super) fn needs_continuous_height_measurement(&self) -> bool {
+        !self.state.is_collapsed() && self.command_running.get()
     }
 
     /// Resolves the shared terminal block exactly as the GUI requested-command
@@ -132,7 +144,7 @@ impl TuiShellCommandView {
 }
 
 impl Entity for TuiShellCommandView {
-    type Event = ();
+    type Event = TuiShellCommandViewEvent;
 }
 
 impl TuiView for TuiShellCommandView {
@@ -146,6 +158,7 @@ impl TuiView for TuiShellCommandView {
             .as_ref(app)
             .get_action_status(&self.action.id);
         let Some(block) = self.resolved_block(status.as_ref()) else {
+            self.command_running.set(false);
             return render_fallback_tool_call_section(
                 &self.action,
                 status.as_ref(),
@@ -154,6 +167,8 @@ impl TuiView for TuiShellCommandView {
                 app,
             );
         };
+        self.command_running
+            .set(matches!(block.details.state, CommandBlockState::Running));
 
         let builder = TuiUiBuilder::from_app(app);
         let display_state =
@@ -170,7 +185,6 @@ impl TuiView for TuiShellCommandView {
             (format!("{label} "), label_style),
         ];
 
-        let state = self.state.clone();
         tui_collapsible(
             collapsed,
             header_spans,
@@ -178,13 +192,24 @@ impl TuiView for TuiShellCommandView {
             self.header_mouse_state.clone(),
             || TerminalBlockElement::content(self.terminal_model.clone(), block.block_id).finish(),
             move |event_ctx, _app| {
-                state.toggle();
-                event_ctx.notify();
+                event_ctx.dispatch_typed_action(TuiShellCommandViewAction::ToggleExpanded);
             },
         )
     }
 }
+impl TypedActionView for TuiShellCommandView {
+    type Action = TuiShellCommandViewAction;
 
+    fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
+        match action {
+            TuiShellCommandViewAction::ToggleExpanded => {
+                self.state.toggle();
+                ctx.emit(TuiShellCommandViewEvent::LayoutChanged);
+                ctx.notify();
+            }
+        }
+    }
+}
 #[cfg(test)]
 #[path = "tui_shell_command_view_tests.rs"]
 mod tests;

@@ -13,10 +13,10 @@ use warp::tui_export::TotalIndex;
 use warp::tui_export::{BlockHeight, BlockHeightItem, BlockHeightSummary, BlockId, TerminalModel};
 use warpui::{EntityId, ViewHandle};
 use warpui_core::elements::tui::{
-    TuiElement, TuiLayoutContext, TuiRowResize, TuiViewportContent, TuiViewportWindow,
-    TuiViewportedElement, TuiVisibleViewportItem,
+    TuiChildView, TuiElement, TuiLayoutContext, TuiRowResize, TuiViewportContent,
+    TuiViewportWindow, TuiViewportedElement, TuiVisibleViewportItem,
 };
-use warpui_core::{AppContext, TuiView};
+use warpui_core::AppContext;
 
 use super::agent_block::TuiAIBlock;
 use super::terminal_block::{should_render_terminal_block, TerminalBlockElement};
@@ -69,11 +69,24 @@ impl TuiBlockListViewportSource {
     }
 
     /// Collects the agent-block view ids to measure this frame: the drained
-    /// dirty set (measured wherever they sit) plus every non-dirty agent block
-    /// whose row range intersects the viewport window padded by [`OVERHANG_ROWS`].
-    /// The overhang band catches reflow of near-off-screen blocks that were
-    /// never dirtied, so their heights are fresh before the window is computed.
-    fn agent_heights_to_measure(&self, window: TuiViewportWindow) -> HashSet<EntityId> {
+    /// dirty set (measured wherever they sit) plus, from the viewport window
+    /// padded by [`OVERHANG_ROWS`], the non-dirty agent blocks whose cached
+    /// height could be stale.
+    ///
+    /// A non-dirty band block is re-measured only when its cached height cannot
+    /// be trusted: its last measurement was at a different width (reflow), it
+    /// has never been measured (no recorded width), or it is still streaming
+    /// (its height can grow without a per-update invalidation — e.g. an
+    /// expanded, still-running shell command). At a stable width with no
+    /// dynamic height, nothing extra is measured and the cached
+    /// `last_laid_out_height` is reused. Off-band blocks keep their cached
+    /// height until they scroll into the band.
+    fn agent_heights_to_measure(
+        &self,
+        window: TuiViewportWindow,
+        available_width: u16,
+        app: &AppContext,
+    ) -> HashSet<EntityId> {
         let mut model = self.model.lock();
         let mut view_ids = model.block_list_mut().take_dirty_rich_content_items();
 
@@ -96,9 +109,15 @@ impl TuiBlockListViewportSource {
             let item_bottom = item_top.saturating_add(item.height().as_f64().ceil() as usize);
             if item_bottom > band_top {
                 if let BlockHeightItem::RichContent(rich_content) = item {
-                    if !rich_content.should_hide && agent_blocks.contains_key(&rich_content.view_id)
-                    {
-                        view_ids.insert(rich_content.view_id);
+                    if !rich_content.should_hide {
+                        if let Some(view) = agent_blocks.get(&rich_content.view_id) {
+                            if view
+                                .as_ref(app)
+                                .needs_height_measurement(available_width, app)
+                            {
+                                view_ids.insert(rich_content.view_id);
+                            }
+                        }
                     }
                 }
             }
@@ -121,19 +140,15 @@ impl TuiBlockListViewportSource {
             .into_iter()
             .filter_map(|view_id| {
                 let view = agent_blocks.get(&view_id)?;
-                Some((
-                    view_id,
-                    BlockHeight::from(
-                        view.as_ref(app).desired_height(width, ctx, app).max(1) as f64
-                    ),
-                ))
+                let view = view.as_ref(app);
+                let height = view.desired_height(width, ctx, app).max(1);
+                view.record_height_measurement(width);
+                Some((view_id, BlockHeight::from(height as f64)))
             })
             .collect()
     }
 
     /// Writes measured rich-content heights back to the canonical block list.
-    /// Heights are already in the block list's native line unit (one line per
-    /// terminal row), so no pixel round-trip is needed.
     fn write_line_heights(&self, line_heights: &HashMap<EntityId, BlockHeight>) {
         if line_heights.is_empty() {
             return;
@@ -265,12 +280,11 @@ impl TuiBlockListViewportSource {
         &self,
         window: TuiViewportWindow,
         available_width: u16,
-        app: &AppContext,
     ) -> TuiViewportContent {
         let (content_height, visible_items) = self.visible_items_in_window(window);
         let items = visible_items
             .into_iter()
-            .map(|item| item.render(&self.model, window, available_width, app))
+            .map(|item| item.render(&self.model, window, available_width))
             .collect();
         TuiViewportContent {
             content_height,
@@ -326,22 +340,23 @@ impl TuiViewportedElement for TuiBlockListViewportSource {
         ctx: &mut TuiLayoutContext,
         app: &AppContext,
     ) -> TuiViewportContent {
-        // Refresh cached heights before windowing: the dirty set plus a band of
-        // near-off-screen agent blocks (see `agent_heights_to_measure`).
-        let view_ids_to_measure = self.agent_heights_to_measure(window);
+        // Refresh cached heights before windowing: the dirty set plus any band
+        // agent blocks whose cached height is stale (see
+        // `agent_heights_to_measure`).
+        let view_ids_to_measure = self.agent_heights_to_measure(window, available_width, app);
         let heights = self.measured_agent_heights(view_ids_to_measure, available_width, ctx, app);
         self.write_line_heights(&heights);
 
-        self.read_only_content(window, available_width, app)
+        self.read_only_content(window, available_width)
     }
 
     fn selection_content(
         &self,
         window: TuiViewportWindow,
         available_width: u16,
-        app: &AppContext,
+        _app: &AppContext,
     ) -> Option<TuiViewportContent> {
-        Some(self.read_only_content(window, available_width, app))
+        Some(self.read_only_content(window, available_width))
     }
 
     fn take_selection_row_resizes(&self) -> Vec<TuiRowResize> {
@@ -367,7 +382,6 @@ impl TuiBlockListVisibleItem {
         model: &Arc<FairMutex<TerminalModel>>,
         window: TuiViewportWindow,
         available_width: u16,
-        app: &AppContext,
     ) -> TuiVisibleViewportItem {
         let visible_rows = self.visible_rows(window);
         // Terminal blocks get pre-sliced below; rich content stays whole and lets `TuiClipped`
@@ -380,7 +394,7 @@ impl TuiBlockListVisibleItem {
         };
         TuiVisibleViewportItem {
             origin_y,
-            element: self.render_element(model, visible_rows, available_width, app),
+            element: self.render_element(model, visible_rows, available_width),
         }
     }
 
@@ -389,7 +403,6 @@ impl TuiBlockListVisibleItem {
         model: &Arc<FairMutex<TerminalModel>>,
         visible_rows: Range<usize>,
         width: u16,
-        app: &AppContext,
     ) -> Box<dyn TuiElement> {
         match self.kind {
             TuiBlockListVisibleItemKind::TerminalBlock(block_id) => {
@@ -397,7 +410,7 @@ impl TuiBlockListVisibleItem {
                 TerminalBlockElement::visible_rows(model.clone(), block_id, visible_rows, width)
                     .finish()
             }
-            TuiBlockListVisibleItemKind::AgentBlock(view) => view.as_ref(app).render(app),
+            TuiBlockListVisibleItemKind::AgentBlock(view) => TuiChildView::new(&view).finish(),
         }
     }
 }
