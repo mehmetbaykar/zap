@@ -276,6 +276,8 @@ use workspace::sync_inputs::SyncedInputState;
 
 use warpui::{App, Event};
 
+const TUI_SECURE_STORAGE_SERVICE_SUFFIX: &str = ".tui";
+
 use self::features::FeatureFlag;
 use crate::app_state::AppState;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
@@ -402,6 +404,24 @@ impl LaunchMode {
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
             | LaunchMode::RemoteServerDaemon { .. } => ::settings::SettingsMode::Gui,
+        }
+    }
+    /// The platform secure-storage service name for this launch mode.
+    ///
+    /// The TUI uses a separate namespace so it never attempts to read secrets
+    /// created by the GUI. On macOS, those items' Keychain ACLs trust the GUI's
+    /// distinct code-signing identity and would otherwise prompt for the user's
+    /// login password when the TUI accesses them.
+    fn secure_storage_service_name<'a>(&self, data_domain: &'a str) -> Cow<'a, str> {
+        match self {
+            LaunchMode::Tui { .. } => {
+                Cow::Owned(format!("{data_domain}{TUI_SECURE_STORAGE_SERVICE_SUFFIX}"))
+            }
+            LaunchMode::App { .. }
+            | LaunchMode::CommandLine { .. }
+            | LaunchMode::Test { .. }
+            | LaunchMode::RemoteServerProxy
+            | LaunchMode::RemoteServerDaemon { .. } => Cow::Borrowed(data_domain),
         }
     }
 
@@ -1191,6 +1211,7 @@ pub(crate) fn initialize_app(
     // Only crash-reporting dependencies should be initialized here; other work that fails should be
     // written into pre_init_errors.
     let data_domain = ChannelState::data_domain();
+    let secure_storage_service_name = launch_mode.secure_storage_service_name(&data_domain);
 
     // The daemon is headless, so avoid platform keychains that may require an interactive unlock
     // prompt. Other headless modes still use secure storage for persisted BYO provider credentials.
@@ -1200,13 +1221,13 @@ pub(crate) fn initialize_app(
         // Register an implementation of the secure storage service.
         cfg_if::cfg_if! {
             if #[cfg(feature = "integration_tests")] {
-                warpui_extras::secure_storage::register_noop(&data_domain, ctx);
+                warpui_extras::secure_storage::register_noop(&secure_storage_service_name, ctx);
             } else if #[cfg(any(target_os = "linux", target_os = "freebsd"))] {
-                warpui_extras::secure_storage::register_with_fallback(&data_domain, warp_core::paths::state_dir(), ctx)
+                warpui_extras::secure_storage::register_with_fallback(&secure_storage_service_name, warp_core::paths::state_dir(), ctx)
             } else if #[cfg(target_os = "windows")] {
-                warpui_extras::secure_storage::register_with_dir(&data_domain, warp_core::paths::state_dir(), ctx)
+                warpui_extras::secure_storage::register_with_dir(&secure_storage_service_name, warp_core::paths::state_dir(), ctx)
             } else {
-                warpui_extras::secure_storage::register(&data_domain, ctx);
+                warpui_extras::secure_storage::register(&secure_storage_service_name, ctx);
             }
         }
     }
@@ -3029,3 +3050,6 @@ const UNSTABLE_FEATURES: &[(&str, FeatureFlag)] = &[
         FeatureFlag::WindowsHighPerformanceGpuDefault,
     ),
 ];
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;
