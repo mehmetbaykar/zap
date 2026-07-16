@@ -616,6 +616,7 @@ default = [
     "supergrok",
     "remote_code_review",
     "git_operations_in_code_review",
+    "terminal_lifecycle_recovery",
 ]
 # Enable this feature to automatically perform heap profiling.  NOTE: This will
 # substantially slow down program execution.
@@ -744,6 +745,7 @@ prompt_suggestions_via_maa = []
 voice_input = ["dep:voice_input"]
 system_theme = []
 tab_close_button_on_left = []
+terminal_lifecycle_recovery = []
 toggle_bootstrap_block = []
 # Feature enabled only when app is compiled for integration tests.
 integration_tests = [

@@ -3093,14 +3093,14 @@ impl ansi::Handler for TerminalModel {
             }
 
             // Zap diverges from upstream by not starting the WarpInput block at
-            // creation, so shell-less sessions (cloud mode) never look like a
-            // long-running command. `InitShell` is definitive evidence a real
-            // shell is attached, and upstream's lifecycle coordinator relies on
-            // the bootstrap block being started: an unstarted block reconciles
-            // the phase to `Unknown`, which recovery-gates the bootstrap's own
-            // `CommandFinished`/`Precmd` pair into a no-op when
-            // `TerminalLifecycleRecovery` is disabled (the release default),
-            // leaving the terminal stuck mid-bootstrap. Start it here instead.
+            // creation. `InitShell` is definitive evidence a real shell is
+            // attached, so start the block here to restore upstream's
+            // invariant that the bootstrap block is already started when its
+            // `CommandFinished`/`Precmd` pair arrives. Upstream ships
+            // `TerminalLifecycleRecovery` on (as does the fork since #13788),
+            // and recovery would also reconcile an unstarted block — but that
+            // path is meant for genuine recoveries, not every startup, so the
+            // guarded start keeps the common path identical to upstream's.
             if !self.block_list().active_block().started() {
                 self.block_list_mut().start_active_block();
             }
