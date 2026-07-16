@@ -229,7 +229,6 @@ fn single_block_at_same_time_as_exchange() {
 /// the restored exchange picks up that working directory.
 fn user_query_with_pwd(id: &str, request_id: &str, query: &str, pwd: &str) -> api::Message {
     api::Message {
-        fetched_memories: vec![],
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),
@@ -255,7 +254,6 @@ fn user_query_with_pwd(id: &str, request_id: &str, query: &str, pwd: &str) -> ap
 
 fn agent_output(id: &str, request_id: &str) -> api::Message {
     api::Message {
-        fetched_memories: vec![],
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),

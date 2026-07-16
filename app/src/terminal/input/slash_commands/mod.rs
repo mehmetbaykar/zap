@@ -50,10 +50,11 @@ use crate::terminal::input::{
 use crate::terminal::model::session::Session;
 use crate::terminal::view::TerminalAction;
 use crate::view_components::DismissibleToast;
+use crate::workflows::command_parser::compute_workflow_display_data;
 use crate::workspace::{ForkedConversationDestination, ToastStack, WorkspaceAction};
 use crate::{report_error, TelemetryEvent};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcceptSlashCommandOrSavedPrompt {
     SlashCommand {
         id: SlashCommandId,
@@ -69,6 +70,49 @@ pub enum AcceptSlashCommandOrSavedPrompt {
 }
 impl InlineMenuAction for AcceptSlashCommandOrSavedPrompt {
     const MENU_TYPE: InlineMenuType = InlineMenuType::SlashCommands;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlashCommandSelectionBehavior {
+    InsertCommandText(String),
+    Execute,
+}
+
+/// Shared menu-selection policy for static slash commands.
+///
+/// GUI and TUI both first decide whether accepting a menu row should insert the
+/// slash command text for further argument entry, or execute the command
+/// immediately. Surface-specific execution remains in `Input::execute_slash_command`
+/// for GUI and in `TuiTerminalSessionView::execute_tui_slash_command` for TUI.
+pub fn slash_command_selection_behavior(command: &StaticCommand) -> SlashCommandSelectionBehavior {
+    if command
+        .argument
+        .as_ref()
+        .is_some_and(|argument| !argument.should_execute_on_selection)
+    {
+        SlashCommandSelectionBehavior::InsertCommandText(format!("{} ", command.name))
+    } else {
+        SlashCommandSelectionBehavior::Execute
+    }
+}
+/// Returns whether TUI can execute or otherwise handle the static slash command today.
+///
+/// GUI-only actions such as opening settings panes or inline menus should stay hidden until the
+/// TUI has equivalent flows.
+pub fn slash_command_is_supported_in_tui(command: &StaticCommand) -> bool {
+    command.name == commands::AGENT.name
+        || command.name == commands::NEW.name
+        || command.name == commands::COMPACT.name
+        || command.name == commands::PLAN.name
+}
+
+/// Zap: upstream resolves saved prompts via its cloud model; the fork reads
+/// the same workflow objects from the local object store.
+pub fn saved_prompt_text_for_id(id: &SyncId, ctx: &AppContext) -> Option<String> {
+    let workflow = ObjectStoreModel::as_ref(ctx).get_workflow(id).cloned()?;
+    workflow.model().data.is_agent_mode_workflow().then(|| {
+        compute_workflow_display_data(&workflow.model().data).command_with_replaced_arguments
+    })
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -197,7 +241,7 @@ impl Input {
         }
 
         match self.slash_command_model.as_ref(ctx).state().clone() {
-            SlashCommandEntryState::None | SlashCommandEntryState::DisabledUntilEmptyBuffer => {
+            SlashCommandEntryState::None => {
                 if self.suggestions_mode_model.as_ref(ctx).is_slash_commands() {
                     self.close_slash_commands_menu(ctx);
                 }
@@ -941,9 +985,7 @@ impl Input {
                 let user_query = detected_skill.argument.clone();
                 self.execute_skill_command(reference, user_query, None, None, ctx)
             }
-            SlashCommandEntryState::None
-            | SlashCommandEntryState::Composing { .. }
-            | SlashCommandEntryState::DisabledUntilEmptyBuffer => false,
+            SlashCommandEntryState::None | SlashCommandEntryState::Composing { .. } => false,
         }
     }
     /// Executes a slash command on `enter` keypress.
@@ -990,9 +1032,7 @@ impl Input {
                 let user_query = detected_skill.argument.clone();
                 self.execute_skill_command(reference, user_query, None, None, ctx)
             }
-            SlashCommandEntryState::None
-            | SlashCommandEntryState::Composing { .. }
-            | SlashCommandEntryState::DisabledUntilEmptyBuffer => false,
+            SlashCommandEntryState::None | SlashCommandEntryState::Composing { .. } => false,
         }
     }
 
@@ -1038,7 +1078,7 @@ impl Input {
 
 /// Whether executing `command` submits its text as an AI prompt instead of handling it as an
 /// immediate local action.
-pub(crate) fn slash_command_is_submitted_as_prompt(command: &StaticCommand) -> bool {
+pub fn slash_command_is_submitted_as_prompt(command: &StaticCommand) -> bool {
     command.name == commands::COMPACT.name
         || command.name == commands::PLAN.name
         || command.name == commands::ORCHESTRATE.name

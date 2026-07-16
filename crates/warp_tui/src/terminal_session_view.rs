@@ -10,18 +10,20 @@ use parking_lot::FairMutex;
 use warp::editor::{CodeEditorModel, CodeEditorModelEvent};
 use warp::settings::{AISettings, AISettingsChangedEvent};
 use warp::tui_export::{
-    build_slash_command_mixer, detect_possible_git_repo, throttle, AIAgentPtyWriteMode,
-    ActiveSession, ActiveSessionEvent, AgentInteractionMetadata, AgentViewController,
-    AgentViewEntryOrigin, AmbientAgentViewModel, BlocklistAIActionModel, BlocklistAIContextModel,
-    BlocklistAIController, BlocklistAIHistoryEvent, BlocklistAIHistoryModel, BlocklistAIInputModel,
-    CLISubagentController, CancellationReason, ChangelogModel, ChangelogModelEvent,
-    ChangelogRequestType, CommandExecutionSource, ConversationSelection,
-    ConversationSelectionHandle, EphemeralMessageModel, ExecuteCommandEvent, GitRepoModels,
-    GitRepoStatusModel, GitStatusMetadata, LLMPreferences, LLMPreferencesEvent, ModelEvent,
-    PtyIntent, PtyIntentEvent, RepoDetectionSessionType, RepoDetectionSource,
-    ShellCommandExecutorEvent, TerminalModel, TerminalSurface, TerminalSurfaceInit,
-    TuiSlashCommandDataSource, TuiSlashCommandDataSourceArgs, TuiZeroStateDataSource,
-    WAKEUP_THROTTLE_PERIOD,
+    build_slash_command_mixer, detect_possible_git_repo, saved_prompt_text_for_id,
+    slash_command_is_submitted_as_prompt, slash_command_selection_behavior, slash_commands,
+    throttle, AIAgentPtyWriteMode, AcceptSlashCommandOrSavedPrompt, ActiveSession,
+    ActiveSessionEvent, AgentInteractionMetadata, AgentViewController, AgentViewEntryOrigin,
+    AmbientAgentViewModel, BlocklistAIActionModel, BlocklistAIContextModel, BlocklistAIController,
+    BlocklistAIHistoryEvent, BlocklistAIHistoryModel, BlocklistAIInputModel, CLISubagentController,
+    CancellationReason, ChangelogModel, ChangelogModelEvent, ChangelogRequestType,
+    CommandExecutionSource, ConversationSelection, ConversationSelectionHandle,
+    EphemeralMessageModel, ExecuteCommandEvent, GitRepoModels, GitRepoStatusModel,
+    GitStatusMetadata, LLMPreferences, LLMPreferencesEvent, ModelEvent, PtyIntent, PtyIntentEvent,
+    RepoDetectionSessionType, RepoDetectionSource, ShellCommandExecutorEvent,
+    SlashCommandDataSource as _, SlashCommandSelectionBehavior, StaticCommand, TerminalModel,
+    TerminalSurface, TerminalSurfaceInit, TuiSlashCommandDataSource, TuiSlashCommandDataSourceArgs,
+    TuiZeroStateDataSource, COMMAND_REGISTRY, WAKEUP_THROTTLE_PERIOD,
 };
 use warp_editor::model::CoreEditorModel;
 use warp_errors::report_error;
@@ -38,14 +40,16 @@ use warpui_core::{
     AppContext, Entity, EntityId, ModelHandle, TuiView, TypedActionView, ViewContext, ViewHandle,
 };
 
+use crate::clipboard::copy_to_clipboard;
 use crate::conversation_selection::TuiConversationSelection;
 use crate::exit_confirmation::{ExitConfirmation, CTRL_C_EXIT_WINDOW};
+use crate::inline_menu::TuiInlineMenu;
 use crate::input::{TuiInputView, TuiInputViewEvent};
 use crate::input_mode_policy::{self, TuiInputModePolicy};
 use crate::keybindings::TUI_BINDING_GROUP;
 use crate::slash_commands::TuiSlashCommandModel;
-use crate::transcript_view::TuiTranscriptView;
-use crate::transient_hint::TransientHint;
+use crate::transcript_view::{TuiTranscriptView, TuiTranscriptViewEvent};
+use crate::transient_hint::{TransientHint, TransientHintTone};
 use crate::tui_builder::TuiUiBuilder;
 use crate::ui::compact_footer_path;
 use crate::warping_indicator::{render_response_summary, render_warping_indicator};
@@ -54,6 +58,7 @@ use crate::zero_state::render_zero_state;
 /// Width used before the first layout pass pushes the real terminal width into the editor.
 const INITIAL_INPUT_WIDTH: u16 = 80;
 const MAX_INPUT_TEXT_ROWS: u16 = 6;
+const MAX_INLINE_MENU_ROWS: u16 = 10;
 
 /// The footer hint shown while the ctrl-c exit confirmation is armed.
 const CTRL_C_EXIT_HINT: &str = "ctrl-c again to exit";
@@ -82,9 +87,12 @@ impl PtyIntentEvent for TuiTerminalSessionEvent {
 /// Transient hint shown when a shell command is rejected because the PTY is
 /// already running a command.
 const COMMAND_ALREADY_RUNNING_HINT: &str = "cannot run — command already running";
+const NEW_CONVERSATION_COMMAND_RUNNING_HINT: &str =
+    "cannot start new conversation while terminal command is running";
 
 /// Footer hint shown while the input is in `!` shell mode.
 const SHELL_MODE_HINT: &str = "shell mode · esc to exit";
+const COPY_SELECTION_HINT: &str = "copied to clipboard";
 
 /// Typed actions handled by [`TuiTerminalSessionView`].
 #[derive(Debug, Clone)]
@@ -99,7 +107,8 @@ pub(crate) enum TuiTerminalSessionAction {
 pub(crate) struct TuiTerminalSessionView {
     transcript: ViewHandle<TuiTranscriptView>,
     input_view: ViewHandle<TuiInputView>,
-    slash_commands: ModelHandle<TuiSlashCommandModel>,
+    inline_menu: TuiInlineMenu,
+    slash_commands_source: ModelHandle<TuiSlashCommandDataSource>,
     conversation_selection: ConversationSelectionHandle,
     ai_controller: ModelHandle<BlocklistAIController>,
     /// Read by the footer for the active session's working directory.
@@ -114,6 +123,7 @@ pub(crate) struct TuiTerminalSessionView {
     /// Armed by a ctrl-c press; a second press while armed exits the TUI.
     /// The footer shows [`CTRL_C_EXIT_HINT`] while armed.
     exit_confirmation: ExitConfirmation,
+    ai_context_model: ModelHandle<BlocklistAIContextModel>,
     ai_input_model: ModelHandle<BlocklistAIInputModel>,
     terminal_model: Arc<FairMutex<TerminalModel>>,
     /// Transient notice shown in the footer's hint slot (e.g. a rejected
@@ -195,7 +205,7 @@ impl TuiTerminalSessionView {
         let ai_controller = ctx.add_model(|ctx| {
             BlocklistAIController::new(
                 ai_input_model.clone(),
-                context_model,
+                context_model.clone(),
                 action_model.clone(),
                 active_session.clone(),
                 agent_view_controller.clone(),
@@ -243,7 +253,7 @@ impl TuiTerminalSessionView {
         let slash_commands = ctx.add_model(|ctx| {
             TuiSlashCommandModel::new(
                 input_editor_model.clone(),
-                slash_commands_source,
+                slash_commands_source.clone(),
                 slash_commands_mixer,
                 ctx,
             )
@@ -266,12 +276,54 @@ impl TuiTerminalSessionView {
                 ctx.notify();
             }
         });
-        let input_mode_for_input_view = ai_input_model.clone();
-        let input_view = ctx.add_typed_action_tui_view(move |ctx| {
-            TuiInputView::new(input_editor_model, input_mode_for_input_view, ctx)
+
+        let editor_for_selection = input_editor_model.clone();
+        let transcript_for_selection = transcript.clone();
+        ctx.subscribe_to_model(&input_editor_model, move |_, _, event, ctx| {
+            if !matches!(event, CodeEditorModelEvent::SelectionChanged) {
+                return;
+            }
+
+            let has_selection = !editor_for_selection
+                .as_ref(ctx)
+                .buffer_selection_model()
+                .as_ref(ctx)
+                .first_selection_is_single_cursor();
+            if has_selection {
+                transcript_for_selection.update(ctx, |transcript, ctx| {
+                    transcript.clear_selection(ctx);
+                });
+            }
         });
+
+        let input_mode_for_input_view = ai_input_model.clone();
+        let inline_menu = TuiInlineMenu::SlashCommands(slash_commands.clone());
+        let inline_menu_for_input = inline_menu.clone();
+        let input_view = ctx.add_typed_action_tui_view(move |ctx| {
+            TuiInputView::new(
+                input_editor_model,
+                input_mode_for_input_view,
+                Some(inline_menu_for_input),
+                ctx,
+            )
+        });
+
+        ctx.subscribe_to_view(&transcript, |view, _, event, ctx| match event {
+            TuiTranscriptViewEvent::SelectionStarted => {
+                view.input_view
+                    .update(ctx, |input, ctx| input.clear_selection(ctx));
+            }
+            TuiTranscriptViewEvent::SelectionEnded(text) => {
+                copy_to_clipboard(text);
+                view.show_copy_hint(ctx);
+            }
+        });
+
         ctx.subscribe_to_view(&input_view, |view, _, event, ctx| match event {
             TuiInputViewEvent::Submitted(text) => view.handle_submitted(text.clone(), ctx),
+            TuiInputViewEvent::AcceptedSlashCommand(action) => {
+                view.handle_accepted_slash_command(action, ctx);
+            }
         });
         // The input box border color and the footer's shell-mode hint depend
         // on the input mode.
@@ -404,7 +456,8 @@ impl TuiTerminalSessionView {
         Self {
             transcript,
             input_view,
-            slash_commands,
+            inline_menu,
+            slash_commands_source,
             conversation_selection,
             ai_controller,
             active_session,
@@ -412,6 +465,7 @@ impl TuiTerminalSessionView {
             git_repo_status: None,
             terminal_surface_id,
             exit_confirmation: ExitConfirmation::default(),
+            ai_context_model: context_model,
             ai_input_model,
             terminal_model: model,
             transient_hint: TransientHint::default(),
@@ -446,6 +500,14 @@ impl TuiTerminalSessionView {
     fn show_transient_hint(&mut self, text: String, ctx: &mut ViewContext<Self>) {
         self.transient_hint
             .show(text, ctx, |view| &mut view.transient_hint);
+    }
+
+    /// Displays success-colored feedback in the transient footer slot.
+    fn show_copy_hint(&mut self, ctx: &mut ViewContext<Self>) {
+        self.transient_hint
+            .show_success(COPY_SELECTION_HINT.to_owned(), ctx, |view| {
+                &mut view.transient_hint
+            });
     }
 
     /// Handles a ctrl-c press: a second press within [`CTRL_C_EXIT_WINDOW`]
@@ -515,12 +577,16 @@ impl TuiTerminalSessionView {
         // replaces the other hints in place.
         let hint = if self.exit_confirmation.is_armed() {
             Some((CTRL_C_EXIT_HINT.to_owned(), muted))
-        } else if let Some(transient) = self.transient_hint.current() {
-            Some((transient.to_owned(), muted))
+        } else if let Some((transient, tone)) = self.transient_hint.current() {
+            let style = match tone {
+                TransientHintTone::Muted => muted,
+                TransientHintTone::Success => builder.success_glyph_style(),
+            };
+            Some((transient.to_owned(), style))
         } else if self.is_shell_mode(ctx) {
             Some((
                 SHELL_MODE_HINT.to_owned(),
-                TuiUiBuilder::from_app(ctx).shell_mode_accent_style(),
+                builder.shell_mode_accent_style(),
             ))
         } else {
             None
@@ -649,13 +715,10 @@ impl TuiTerminalSessionView {
         if self.is_shell_mode(ctx) {
             self.execute_user_command(&text, ctx);
         } else {
-            let prompt = text.trim().to_owned();
             self.input_view.update(ctx, |input_view, ctx| {
                 input_view.clear(ctx);
             });
-            if !prompt.is_empty() {
-                self.send_prompt(prompt, ctx);
-            }
+            self.handle_submitted_input(&text, ctx);
         }
         ctx.notify();
     }
@@ -758,6 +821,122 @@ impl TuiTerminalSessionView {
         });
     }
 
+    fn handle_submitted_input(&mut self, prompt: &str, ctx: &mut ViewContext<Self>) {
+        let prompt = prompt.trim();
+        if prompt.is_empty() {
+            return;
+        }
+
+        let detected_command = self
+            .slash_commands_source
+            .as_ref(ctx)
+            .parse_slash_command(prompt);
+        if let Some(detected_command) = detected_command {
+            self.execute_tui_slash_command(
+                &detected_command.command,
+                detected_command.argument.as_ref(),
+                ctx,
+            );
+        } else {
+            self.send_prompt(prompt.to_owned(), ctx);
+        }
+    }
+
+    fn handle_accepted_slash_command(
+        &mut self,
+        action: &AcceptSlashCommandOrSavedPrompt,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        match action {
+            AcceptSlashCommandOrSavedPrompt::SlashCommand { id } => {
+                let Some(command) = COMMAND_REGISTRY.get_command(id) else {
+                    log::debug!("TUI slash command selection is not supported yet: {id:?}");
+                    ctx.notify();
+                    return;
+                };
+                self.select_tui_slash_command(command, ctx);
+            }
+            AcceptSlashCommandOrSavedPrompt::SavedPrompt { id } => {
+                let Some(prompt) = saved_prompt_text_for_id(id, ctx) else {
+                    log::warn!("Tried to insert saved prompt for id {id:?} but it does not exist");
+                    return;
+                };
+                self.input_view.update(ctx, |input, ctx| {
+                    input.set_text(&prompt, ctx);
+                });
+            }
+            AcceptSlashCommandOrSavedPrompt::Skill { name, .. } => {
+                self.input_view.update(ctx, |input, ctx| {
+                    input.set_text(&format!("/{name} "), ctx);
+                });
+            }
+        }
+        ctx.notify();
+    }
+
+    fn select_tui_slash_command(&mut self, command: &StaticCommand, ctx: &mut ViewContext<Self>) {
+        match slash_command_selection_behavior(command) {
+            SlashCommandSelectionBehavior::InsertCommandText(text) => {
+                self.input_view.update(ctx, |input, ctx| {
+                    input.set_text(&text, ctx);
+                });
+            }
+            SlashCommandSelectionBehavior::Execute => {
+                self.execute_tui_slash_command(command, None, ctx);
+            }
+        }
+    }
+
+    fn execute_tui_slash_command(
+        &mut self,
+        command: &StaticCommand,
+        argument: Option<&String>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if command.name == slash_commands::AGENT.name || command.name == slash_commands::NEW.name {
+            if !self
+                .ai_context_model
+                .as_ref(ctx)
+                .can_start_new_conversation()
+            {
+                self.show_transient_hint(NEW_CONVERSATION_COMMAND_RUNNING_HINT.to_owned(), ctx);
+                return;
+            }
+            self.cancel_active_conversation(ctx);
+            let terminal_surface_id = ctx.view_id();
+            BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
+                history.clear_conversations_for_terminal_surface(terminal_surface_id, ctx);
+            });
+            self.conversation_selection.update(ctx, |selection, ctx| {
+                selection.select_new_conversation(AgentViewEntryOrigin::Tui, ctx);
+            });
+            if let Some(prompt) = argument
+                .map(|argument| argument.trim())
+                .filter(|argument| !argument.is_empty())
+            {
+                self.send_prompt(prompt.to_owned(), ctx);
+            }
+            self.input_view.update(ctx, |input, ctx| input.clear(ctx));
+        } else if slash_command_is_submitted_as_prompt(command) {
+            self.input_view.update(ctx, |input, ctx| input.clear(ctx));
+            let prompt = argument
+                .map(|argument| {
+                    if argument.is_empty() {
+                        command.name.to_owned()
+                    } else {
+                        format!("{} {}", command.name, argument)
+                    }
+                })
+                .unwrap_or_else(|| command.name.to_owned());
+            self.send_prompt(prompt, ctx);
+        } else {
+            log::debug!(
+                "TUI slash command selection is not supported yet: {}",
+                command.name
+            );
+        }
+    }
+
     /// Bridges shared shell-tool executor events into terminal-manager PTY intents.
     fn handle_shell_command_executor_event(
         &mut self,
@@ -826,7 +1005,7 @@ impl TuiView for TuiTerminalSessionView {
     }
 
     fn render(&self, ctx: &AppContext) -> Box<dyn TuiElement> {
-        let _slash_commands_open = self.slash_commands.as_ref(ctx).is_open();
+        let inline_menu = self.inline_menu.render(ctx);
         // The border takes the shell-mode accent while in shell mode.
         let builder = TuiUiBuilder::from_app(ctx);
         let border_style = if self.is_shell_mode(ctx) {
@@ -849,14 +1028,14 @@ impl TuiView for TuiTerminalSessionView {
         // While the transcript has nothing to show, the zero state fills its
         // slot; the first accepted submission produces a visible block, which
         // swaps the transcript back in.
-        let mut column = TuiFlex::column();
+        let mut content = TuiFlex::column();
         if self.transcript.as_ref(ctx).is_empty() {
-            column = column.flex_child(render_zero_state(
+            content = content.flex_child(render_zero_state(
                 self.current_working_directory(ctx).as_deref(),
                 ctx,
             ));
         } else {
-            column = column.flex_child(TuiChildView::new(&self.transcript).finish());
+            content = content.flex_child(TuiChildView::new(&self.transcript).finish());
         }
 
         // While the selected conversation is in progress (the GUI warping
@@ -878,7 +1057,7 @@ impl TuiView for TuiTerminalSessionView {
                     .latest_exchange()
                     .and_then(|exchange| exchange.time_since_start());
                 if let Some(elapsed) = warping_elapsed {
-                    column = column.child(
+                    content = content.child(
                         TuiContainer::new(render_warping_indicator(elapsed, ctx))
                             .with_padding_top(1)
                             .finish(),
@@ -895,7 +1074,7 @@ impl TuiView for TuiTerminalSessionView {
                     .and_then(|ms| u64::try_from(ms).ok())
                     .map(Duration::from_millis);
                 if let Some(duration) = wall_to_wall {
-                    column = column.child(
+                    content = content.child(
                         TuiContainer::new(render_response_summary(
                             duration,
                             conversation.credits_spent_for_last_block(),
@@ -907,16 +1086,22 @@ impl TuiView for TuiTerminalSessionView {
                 }
             }
         }
-
-        TuiContainer::new(
-            column
-                .child(input_box.finish())
-                .child(self.render_footer(ctx).finish())
+        if let Some(menu) = inline_menu {
+            content = content.child(
+                TuiConstrainedBox::new(menu)
+                    .with_max_rows(MAX_INLINE_MENU_ROWS)
+                    .finish(),
+            );
+        }
+        content = content.child(input_box.finish()).child(
+            TuiConstrainedBox::new(self.render_footer(ctx).finish())
+                .with_max_rows(1)
                 .finish(),
-        )
-        .with_padding_x(2)
-        .with_padding_top(2)
-        .finish()
+        );
+        TuiContainer::new(content.finish())
+            .with_padding_x(2)
+            .with_padding_top(2)
+            .finish()
     }
 }
 

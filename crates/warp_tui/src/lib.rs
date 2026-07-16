@@ -9,6 +9,7 @@
 
 mod agent_block;
 mod agent_block_sections;
+mod clipboard;
 pub mod input;
 pub mod root_view;
 pub mod session;
@@ -18,6 +19,7 @@ mod ui;
 mod conversation_selection;
 mod editor_element;
 mod exit_confirmation;
+mod inline_menu;
 mod input_mode_policy;
 mod keybindings;
 mod slash_commands;
@@ -32,6 +34,7 @@ mod transient_hint;
 mod tui_block_list_viewport_source;
 mod tui_diff_storage;
 mod tui_file_edits_view;
+mod tui_shell_command_view;
 mod warping_indicator;
 mod zero_state;
 

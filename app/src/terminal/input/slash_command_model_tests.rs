@@ -176,10 +176,7 @@ fn test_disabled_until_empty_buffer_ignores_non_slash_edits() {
         });
 
         input.read(&app, |input, ctx| {
-            assert!(matches!(
-                input.slash_command_model.as_ref(ctx).state(),
-                SlashCommandEntryState::DisabledUntilEmptyBuffer
-            ));
+            assert!(input.slash_command_model.as_ref(ctx).is_disabled());
         });
 
         input.update(&mut app, |input, ctx| {
@@ -187,10 +184,7 @@ fn test_disabled_until_empty_buffer_ignores_non_slash_edits() {
         });
 
         input.read(&app, |input, ctx| {
-            assert!(matches!(
-                input.slash_command_model.as_ref(ctx).state(),
-                SlashCommandEntryState::DisabledUntilEmptyBuffer
-            ));
+            assert!(input.slash_command_model.as_ref(ctx).is_disabled());
         });
     });
 }
