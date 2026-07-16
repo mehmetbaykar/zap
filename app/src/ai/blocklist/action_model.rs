@@ -46,6 +46,7 @@ use self::execute::{
     ask_user_question::AskUserQuestionExecutor, BlocklistAIActionExecutor,
     BlocklistAIActionExecutorEvent, NotExecutedReason, RunningActionPhase, TryExecuteResult,
 };
+#[cfg(not(target_family = "wasm"))]
 use super::BlocklistAIHistoryModel;
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::agent::{
@@ -1195,6 +1196,9 @@ impl BlocklistAIActionModel {
         self.executor.update(ctx, |executor, ctx| {
             executor.cancel_all_running_async_actions_for_conversation(conversation_id, reason, ctx)
         });
+        // Zap: upstream finalizes any in-flight computer-use recording here;
+        // the recording subsystem is stripped with the rest of the
+        // cloud-upload family, so there is nothing to finalize.
 
         let Some(actions_to_cancel) = self.pending_actions.get_mut(&conversation_id) else {
             return;
