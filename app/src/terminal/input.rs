@@ -224,6 +224,7 @@ use crate::ai::blocklist::block::cli_controller::{CLISubagentController, CLISuba
 use crate::ai::blocklist::block::status_bar::BlocklistAIStatusBar;
 use crate::ai::blocklist::drive_object_attachment_for_reference;
 use crate::ai::blocklist::plan_attachment_for_reference;
+use crate::ai::blocklist::conversation_selection::ConversationSelectionHandle;
 use crate::ai::blocklist::telemetry_banner::should_collect_ai_ugc_telemetry;
 use crate::ai::blocklist::{
     ai_indicator_height, render_ai_agent_mode_icon, render_ai_follow_up_icon, AttachmentType,
@@ -2166,6 +2167,7 @@ impl Input {
         ai_context_model: ModelHandle<BlocklistAIContextModel>,
         ai_input_model: ModelHandle<BlocklistAIInputModel>,
         ai_action_model: ModelHandle<BlocklistAIActionModel>,
+        conversation_selection: ConversationSelectionHandle,
         cli_subagent_controller: ModelHandle<CLISubagentController>,
         terminal_view_id: EntityId,
         current_repo_path: Option<PathBuf>,
@@ -3096,6 +3098,7 @@ impl Input {
             InlineConversationMenuView::new(
                 suggestions_mode_model.clone(),
                 agent_view_controller.clone(),
+                conversation_selection,
                 &buffer_model,
                 &inline_terminal_menu_positioner,
                 active_session.clone(),

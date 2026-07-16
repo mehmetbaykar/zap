@@ -30,6 +30,7 @@ pub enum InlineConversationMenuTab {
 #[derive(Clone, Debug)]
 pub struct AcceptConversation {
     pub item_id: AgentConversationEntryId,
+    pub is_open_elsewhere: bool,
 }
 
 impl InlineMenuAction for AcceptConversation {
@@ -44,11 +45,14 @@ impl InlineMenuAction for AcceptConversation {
         let mut items = Vec::new();
 
         if let Some(item) = inline_menu_model.selected_item() {
-            // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed); the
-            // "go to conversation" vs. "continue in this pane" distinction it powered
-            // is not shown.
-            let text = " continue in this pane";
+            let text = if item.is_open_elsewhere {
+                " go to conversation"
+            } else {
+                " continue in this pane"
+            };
+
             let item_id = item.item_id;
+            let is_open_elsewhere = item.is_open_elsewhere;
             items.push(MessageItem::clickable(
                 vec![
                     MessageItem::keystroke(Keystroke {
@@ -59,7 +63,10 @@ impl InlineMenuAction for AcceptConversation {
                 ],
                 move |ctx| {
                     ctx.dispatch_typed_action(InlineMenuRowAction::Accept {
-                        item: AcceptConversation { item_id },
+                        item: AcceptConversation {
+                            item_id,
+                            is_open_elsewhere,
+                        },
                         cmd_or_ctrl_enter: false,
                     });
                 },

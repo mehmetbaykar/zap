@@ -4,7 +4,7 @@ use fuzzy_match::FuzzyMatchResult;
 use ordered_float::OrderedFloat;
 use warp_core::ui::theme::Fill;
 use warpui::elements::{ConstrainedBox, Container, Highlight, ParentElement, Shrinkable, Text};
-use warpui::fonts::{Properties, Weight};
+use warpui::fonts::{Properties, Style, Weight};
 use warpui::prelude::{Align, CrossAxisAlignment, Flex, MainAxisAlignment, MainAxisSize};
 use warpui::text_layout::ClipConfig;
 use warpui::{AppContext, Element, SingletonEntity};
@@ -23,14 +23,16 @@ pub(super) struct ConversationSearchItem {
     entry: AgentConversationEntry,
     name_match_result: Option<FuzzyMatchResult>,
     score: OrderedFloat<f64>,
+    is_open_elsewhere: bool,
 }
 
 impl ConversationSearchItem {
-    pub fn new(entry: AgentConversationEntry) -> Self {
+    pub fn new(entry: AgentConversationEntry, is_open_elsewhere: bool) -> Self {
         Self {
             entry,
             name_match_result: None,
             score: OrderedFloat(f64::MIN),
+            is_open_elsewhere,
         }
     }
 
@@ -75,10 +77,13 @@ impl SearchItem for ConversationSearchItem {
         let primary_text_color = inline_styles::primary_text_color(theme, background_color.into());
         let secondary_text_color = theme.disabled_text_color(background_color.into());
 
-        // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed); the
-        // "open in different pane" indicator it powered is not shown.
+        let secondary_suffix = " open in different pane";
         let title = &self.entry.display.title;
-        let full_text = title.clone();
+        let full_text = if self.is_open_elsewhere {
+            format!("{title}{secondary_suffix}")
+        } else {
+            title.clone()
+        };
 
         let mut name_text = Text::new_inline(full_text, appearance.ui_font_family(), font_size)
             .with_color(primary_text_color.into())
@@ -93,7 +98,18 @@ impl SearchItem for ConversationSearchItem {
             }
         }
 
-        let _ = secondary_text_color;
+        if self.is_open_elsewhere {
+            let secondary_range = title.len()..(title.len() + secondary_suffix.len());
+            name_text = name_text.with_single_highlight(
+                Highlight::new()
+                    .with_properties(Properties {
+                        style: Style::Italic,
+                        ..Default::default()
+                    })
+                    .with_foreground_color(secondary_text_color.into()),
+                secondary_range.collect(),
+            );
+        }
 
         let mut primary_row = Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
@@ -139,6 +155,7 @@ impl SearchItem for ConversationSearchItem {
     fn accept_result(&self) -> Self::Action {
         AcceptConversation {
             item_id: self.entry.id,
+            is_open_elsewhere: self.is_open_elsewhere,
         }
     }
 
