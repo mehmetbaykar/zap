@@ -95,6 +95,46 @@ pub fn slash_command_selection_behavior(command: &StaticCommand) -> SlashCommand
         SlashCommandSelectionBehavior::Execute
     }
 }
+/// Whether an already-open slash command menu should close after the input becomes an exact
+/// static-command or skill match.
+///
+/// This preserves the GUI's existing behavior: exact input stays visible while multiple prior
+/// results remain, but a unique match or the start of argument entry closes the menu.
+pub fn should_close_slash_command_menu_for_exact_match(
+    result_count: usize,
+    argument_started: bool,
+) -> bool {
+    result_count < 2 || argument_started
+}
+
+/// Records a static slash command accepted from either the GUI or TUI surface.
+pub fn record_static_slash_command_accepted(
+    command_name: &str,
+    is_in_agent_view: bool,
+    ctx: &mut AppContext,
+) {
+    send_telemetry_from_ctx!(
+        TelemetryEvent::SlashCommandAccepted {
+            command_details: SlashCommandAcceptedDetails::StaticCommand {
+                command_name: command_name.to_owned(),
+            },
+            is_in_agent_view,
+        },
+        ctx
+    );
+}
+
+/// Records a saved prompt accepted from either the GUI or TUI slash menu.
+pub fn record_saved_prompt_accepted(is_in_agent_view: bool, ctx: &mut AppContext) {
+    send_telemetry_from_ctx!(
+        TelemetryEvent::SlashCommandAccepted {
+            command_details: SlashCommandAcceptedDetails::SavedPrompt,
+            is_in_agent_view,
+        },
+        ctx
+    );
+}
+
 /// Returns whether TUI can execute or otherwise handle the static slash command today.
 ///
 /// GUI-only actions such as opening settings panes or inline menus should stay hidden until the

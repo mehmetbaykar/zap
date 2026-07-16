@@ -10,7 +10,8 @@ use parking_lot::FairMutex;
 use warp::editor::{CodeEditorModel, CodeEditorModelEvent};
 use warp::settings::{AISettings, AISettingsChangedEvent};
 use warp::tui_export::{
-    build_slash_command_mixer, detect_possible_git_repo, saved_prompt_text_for_id,
+    build_slash_command_mixer, detect_possible_git_repo, record_saved_prompt_accepted,
+    record_static_slash_command_accepted, saved_prompt_text_for_id,
     slash_command_is_submitted_as_prompt, slash_command_selection_behavior, slash_commands,
     throttle, AIAgentActionId, AIAgentPtyWriteMode, AcceptSlashCommandOrSavedPrompt, ActiveSession,
     ActiveSessionEvent, AgentInteractionMetadata, AgentViewController, AgentViewEntryOrigin,
@@ -20,11 +21,11 @@ use warp::tui_export::{
     ChangelogRequestType, CommandExecutionSource, ConversationSelection,
     ConversationSelectionHandle, EphemeralMessageModel, ExecuteCommandEvent, GitRepoModels,
     GitRepoStatusModel, GitStatusMetadata, LLMPreferences, LLMPreferencesEvent, ModelEvent,
-    PtyIntent, PtyIntentEvent, RepoDetectionSessionType, RepoDetectionSource,
-    ShellCommandExecutorEvent, SlashCommandDataSource as _, SlashCommandSelectionBehavior,
-    StaticCommand, TerminalModel, TerminalSurface, TerminalSurfaceInit, TuiSlashCommandDataSource,
-    TuiSlashCommandDataSourceArgs, TuiZeroStateDataSource, COMMAND_REGISTRY,
-    WAKEUP_THROTTLE_PERIOD,
+    ParsedSlashCommandInput, PtyIntent, PtyIntentEvent, RepoDetectionSessionType,
+    RepoDetectionSource, ShellCommandExecutorEvent, SkillReference, SlashCommandDataSource as _,
+    SlashCommandSelectionBehavior, StaticCommand, TerminalModel, TerminalSurface,
+    TerminalSurfaceInit, TuiSlashCommandDataSource, TuiSlashCommandDataSourceArgs,
+    TuiZeroStateDataSource, COMMAND_REGISTRY, WAKEUP_THROTTLE_PERIOD,
 };
 use warp_editor::model::CoreEditorModel;
 use warp_errors::report_error;
@@ -111,6 +112,10 @@ fn hide_agent_requested_command_from_top_level(
         .block_list_mut()
         .set_visibility_of_block_for_ai_action(action_id, false);
     true
+}
+
+fn raw_prompt_if_not_blank(input: &str) -> Option<&str> {
+    (!input.trim().is_empty()).then_some(input)
 }
 
 /// Typed actions handled by [`TuiTerminalSessionView`].
@@ -749,9 +754,6 @@ impl TuiTerminalSessionView {
         if self.is_shell_mode(ctx) {
             self.execute_user_command(&text, ctx);
         } else {
-            self.input_view.update(ctx, |input_view, ctx| {
-                input_view.clear(ctx);
-            });
             self.handle_submitted_input(&text, ctx);
         }
         ctx.notify();
@@ -855,24 +857,50 @@ impl TuiTerminalSessionView {
         });
     }
 
-    fn handle_submitted_input(&mut self, prompt: &str, ctx: &mut ViewContext<Self>) {
-        let prompt = prompt.trim();
-        if prompt.is_empty() {
-            return;
-        }
-
-        let detected_command = self
+    fn handle_submitted_input(&mut self, input: &str, ctx: &mut ViewContext<Self>) {
+        match self
             .slash_commands_source
             .as_ref(ctx)
-            .parse_slash_command(prompt);
-        if let Some(detected_command) = detected_command {
-            self.execute_tui_slash_command(
-                &detected_command.command,
-                detected_command.argument.as_ref(),
-                ctx,
-            );
-        } else {
-            self.send_prompt(prompt.to_owned(), ctx);
+            .parse_input(input, ctx)
+        {
+            ParsedSlashCommandInput::SlashCommand(detected_command) => {
+                self.execute_tui_slash_command(
+                    &detected_command.command,
+                    detected_command.argument.as_ref(),
+                    ctx,
+                );
+            }
+            ParsedSlashCommandInput::SkillCommand(detected_skill) => {
+                self.execute_skill_command(detected_skill.reference, detected_skill.argument, ctx);
+            }
+            ParsedSlashCommandInput::None | ParsedSlashCommandInput::Composing { .. } => {
+                let prompt = raw_prompt_if_not_blank(input);
+                self.input_view.update(ctx, |input_view, ctx| {
+                    input_view.clear(ctx);
+                });
+                if let Some(prompt) = prompt {
+                    self.send_prompt(prompt.to_owned(), ctx);
+                }
+            }
+        }
+    }
+
+    fn execute_skill_command(
+        &mut self,
+        reference: SkillReference,
+        user_query: Option<String>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let result = self.ai_controller.update(ctx, |controller, ctx| {
+            controller.send_invoke_skill_request(reference, user_query, ctx)
+        });
+        match result {
+            Ok(()) => {
+                self.input_view.update(ctx, |input, ctx| input.clear(ctx));
+            }
+            Err(error) => {
+                self.show_transient_hint(error.to_string(), ctx);
+            }
         }
     }
 
@@ -898,6 +926,7 @@ impl TuiTerminalSessionView {
                 self.input_view.update(ctx, |input, ctx| {
                     input.set_text(&prompt, ctx);
                 });
+                record_saved_prompt_accepted(true, ctx);
             }
             AcceptSlashCommandOrSavedPrompt::Skill { name, .. } => {
                 self.input_view.update(ctx, |input, ctx| {
@@ -951,6 +980,7 @@ impl TuiTerminalSessionView {
                 self.send_prompt(prompt.to_owned(), ctx);
             }
             self.input_view.update(ctx, |input, ctx| input.clear(ctx));
+            record_static_slash_command_accepted(command.name, true, ctx);
         } else if slash_command_is_submitted_as_prompt(command) {
             self.input_view.update(ctx, |input, ctx| input.clear(ctx));
             let prompt = argument
@@ -963,6 +993,7 @@ impl TuiTerminalSessionView {
                 })
                 .unwrap_or_else(|| command.name.to_owned());
             self.send_prompt(prompt, ctx);
+            record_static_slash_command_accepted(command.name, true, ctx);
         } else {
             log::debug!(
                 "TUI slash command selection is not supported yet: {}",
