@@ -1,0 +1,108 @@
+# Zap Windows release flow — independent of zap_release.yml (macOS).
+#
+# Triggered by the same v* tag push. Builds the unsigned Windows installer
+# (ZapSetup.exe, via script/windows/bundle.ps1 + Inno Setup — same recipe as
+# zerx-lab/zap upstream, which also ships it unsigned) and UPLOADS it onto the
+# tag's GitHub Release once that release exists.
+#
+# Isolation contract:
+# - zap_release.yml is the release CREATOR (signed macOS DMG + CLI tarballs).
+#   This workflow never creates or edits the release body — it only attaches
+#   an asset with `gh release upload`. A failure here cannot block, delay, or
+#   dirty the macOS release; rerun via the Actions UI (workflow_dispatch takes
+#   the tag as input) to attach the asset late.
+# - The in-app Windows updater (app/src/autoupdate/windows.rs) looks the asset
+#   up by name in the release it already fetched and skips SHA verification if
+#   the asset is absent — a release temporarily without ZapSetup.exe is fine.
+
+name: Zap Release (Windows)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v* tag to build and attach the installer to"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CHANNEL: oss
+
+jobs:
+  release_windows:
+    name: Build Release (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${{ inputs.tag }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building Windows installer for $TAG"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - uses: ./.github/actions/prepare_environment
+        with:
+          target_os: windows
+          cache_key: windows-x64
+          is_self_hosted: "false"
+          install_release_deps: true
+
+      # Two-step build mirrors upstream: compile the binary first, then run
+      # Inno Setup packaging. No SIGN_TOOL_CMD → unsigned installer (SmartScreen
+      # will warn; acceptable for a personal fork, same as zerx upstream).
+      - name: Build binary (unsigned)
+        run: script/bundle -Channel $CHANNEL -skip_build_installer --arch x64
+        shell: bash
+        env:
+          GIT_RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+
+      - name: Bundle app (unsigned installer)
+        id: bundle_app
+        run: script/bundle -Channel $CHANNEL -skip_build_binary --arch x64
+        shell: bash
+        env:
+          GIT_RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+
+      # The macOS flow may still be signing/notarizing (~2-3h). Wait for the
+      # GitHub Release object to exist before attaching; timeout generously.
+      - name: Wait for the GitHub Release to exist
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          for i in $(seq 1 60); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release $TAG exists."
+              exit 0
+            fi
+            echo "Release $TAG not published yet; waiting (attempt $i/60)..."
+            sleep 300
+          done
+          echo "::error::Release $TAG never appeared. Re-run this workflow (workflow_dispatch) after it publishes."
+          exit 1
+
+      - name: Upload installer to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release upload "$TAG" "${{ steps.bundle_app.outputs.installer_path }}" \
+            --repo "$GITHUB_REPOSITORY" --clobber

@@ -1,0 +1,152 @@
+# Zap Linux GUI release flow — independent of zap_release.yml (macOS).
+#
+# Triggered by the same v* tag push. Builds the unsigned Linux desktop packages
+# (Zap-x86_64.AppImage + .deb + .rpm — the zerx-lab/zap upstream set minus their
+# flaky Docker-based Arch build) and UPLOADS them onto the tag's GitHub Release
+# once that release exists.
+#
+# NOTE: this is the GUI app only. The static-musl SSH CLI tarball
+# (zap-linux-x86_64.tar.gz) that `Install Zap's SSH extension` downloads onto
+# remotes is built by zap_release.yml's release_linux_cli job — it stays there
+# because publish_release must be able to attach it atomically with the DMG.
+#
+# Isolation contract: same as zap_release_windows.yml — never creates/edits the
+# release, only `gh release upload`s assets; rerunnable via workflow_dispatch.
+# The in-app AppImage updater (app/src/autoupdate/linux.rs) looks up
+# "Zap-x86_64.AppImage" by name in the fetched release and no-ops if absent.
+
+name: Zap Release (Linux)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v* tag to build and attach Linux packages to"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CHANNEL: oss
+
+jobs:
+  release_linux:
+    name: Build Release (Linux x86_64)
+    # ubuntu-22.04 (glibc 2.35) instead of ubuntu-latest: the AppImage links the
+    # host glibc, so building on the older base keeps it runnable on Debian 11 /
+    # Ubuntu 20.04+ era distros (same choice as zerx upstream).
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${{ inputs.tag }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building Linux packages for $TAG"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      # GitHub-hosted ubuntu runners have limited free disk; a full release-lto
+      # target plus cargo registry can exhaust it. Drop preinstalled toolchains
+      # this build never uses (~25GB back), mirroring zerx upstream.
+      - name: Free up disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift || true
+          df -h /
+
+      - uses: ./.github/actions/prepare_environment
+        with:
+          target_os: linux
+          cache_key: linux-gui-x86_64
+          is_self_hosted: "false"
+          install_release_deps: true
+
+      - name: Install extra dependencies for deb/rpm
+        shell: bash
+        run: |
+          sudo apt-get update
+          # `rpm` provides /usr/bin/rpmbuild for the RPM packaging step.
+          sudo apt-get install -y libdbus-1-dev fakeroot rpm
+
+      - name: Ensure rust target is installed
+        run: rustup target add x86_64-unknown-linux-gnu
+        shell: bash
+
+      # script/linux/install_linuxdeploy is not part of install_build_deps; it
+      # drops the linuxdeploy AppImage into ~/.local/bin.
+      - name: Install linuxdeploy
+        shell: bash
+        run: |
+          ./script/linux/install_linuxdeploy
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build AppImage + deb (unsigned)
+        id: bundle_app
+        run: script/bundle --channel "$CHANNEL" --arch x86_64 --packages appimage,deb
+        shell: bash
+        env:
+          GIT_RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          # ubuntu-22.04 ships libfuse2 but 24.04 doesn't; EXTRACT_AND_RUN makes
+          # linuxdeploy/appimagetool independent of the FUSE kernel module either way.
+          APPIMAGE_EXTRACT_AND_RUN: 1
+
+      # Reuses the already-built/stripped release-lto binary (--skip-build), so
+      # this only stages files and runs rpmbuild. continue-on-error: an rpm
+      # hiccup must not block the AppImage/deb upload.
+      - name: Build RPM package (reuse release-lto binary)
+        continue-on-error: true
+        run: script/bundle --skip-build --channel "$CHANNEL" --arch x86_64 --packages rpm
+        shell: bash
+        env:
+          GIT_RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+
+      # The macOS flow may still be signing/notarizing (~2-3h). Wait for the
+      # GitHub Release object to exist before attaching assets.
+      - name: Wait for the GitHub Release to exist
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          for i in $(seq 1 60); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release $TAG exists."
+              exit 0
+            fi
+            echo "Release $TAG not published yet; waiting (attempt $i/60)..."
+            sleep 300
+          done
+          echo "::error::Release $TAG never appeared. Re-run this workflow (workflow_dispatch) after it publishes."
+          exit 1
+
+      - name: Upload packages to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          files=("${{ steps.bundle_app.outputs.packages_dir }}"/*.AppImage \
+                 "${{ steps.bundle_app.outputs.packages_dir }}"/*.deb \
+                 "${{ steps.bundle_app.outputs.packages_dir }}"/*.rpm)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No packages found in ${{ steps.bundle_app.outputs.packages_dir }}"
+            exit 1
+          fi
+          ls -lh "${files[@]}"
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
