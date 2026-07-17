@@ -229,9 +229,7 @@ impl TerminalView {
             ClipConfig::start()
         };
 
-        let should_render_ambient_agent_indicator =
-            self.ambient_agent_task_id_for_details_panel(app).is_some()
-                || self.model.lock().is_shared_ambient_agent_session();
+        let should_render_ambient_agent_indicator = self.is_cloud_agent_session(app);
         let theme = appearance.theme();
         let render_agent_circle = |variant| {
             render_icon_with_status(
@@ -728,6 +726,27 @@ impl TerminalView {
 
     pub fn is_ambient_agent_session(&self, _ctx: &AppContext) -> bool {
         false
+    }
+
+    /// Whether this pane should be treated as an ambient agent conversation for display
+    /// purposes (e.g. the ambient agent icon in the pane header and vertical tab). This is the
+    /// single source of truth for that check; surfaces should call it rather than re-deriving
+    /// the condition, so they can't drift apart.
+    ///
+    /// Two signals are combined because they live in different places and neither subsumes the
+    /// other:
+    /// - [`Self::is_ambient_agent_session`] reads the pane's [`AmbientAgentViewModel`], which is
+    ///   how a cloud/ambient run composed or spawned *in this view* is recognized before it has
+    ///   any shared-session source.
+    /// - [`TerminalModel::is_cloud_agent_conversation`] reads model state — a shared *ambient*
+    ///   session or viewing an ambient conversation transcript — which the view model doesn't
+    ///   carry (e.g. a viewer that joined someone else's ambient session).
+    ///
+    /// It deliberately does NOT treat a manually shared *local* (`User`) session as a cloud
+    /// agent session even though it now carries an orchestrator task id on its `source_task_id`
+    /// sidecar (see QUALITY-726).
+    pub fn is_cloud_agent_session(&self, ctx: &AppContext) -> bool {
+        self.is_ambient_agent_session(ctx) || self.model.lock().is_cloud_agent_conversation()
     }
 
     fn selected_conversation_for_user_facing_chrome<'a>(

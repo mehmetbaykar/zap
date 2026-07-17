@@ -280,7 +280,7 @@ serde_bytes = "0.11"
 serde-bytes-repr = "0.3"
 serde_json = { version = "1.0", features = ["raw_value"] }
 serde_urlencoded = "0.7"
-serde_with = "2.0.1"
+serde_with = "^3.21"
 serde_yaml = "0.8"
 similar = { version = "2.7", features = ["inline"] }
 simplelog = "0.12.2"
@@ -404,7 +404,7 @@ aes-gcm = "0.10"
 sha2 = "0.10"
 shell-escape = "0.1.5"
 shellexpand = "3.1.1"
-warp-command-signatures = { git = "https://github.com/warpdotdev/command-signatures.git", rev = "ec1ae8e84277b0caf46bb028c21ee592a494dc97", default-features = false }
+warp-command-signatures = { git = "https://github.com/warpdotdev/command-signatures.git", rev = "29cd61c3a9a96d8bde92e90f926e89d340e74cb6", default-features = false }
 winit = { git = "https://github.com/chenx-dust/winit.git", rev = "7ef914a440ad203da05355e6c3f8c482766987ec" }
 x11rb = "0.13.0"
 mockito = "1.7.0"

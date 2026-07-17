@@ -145,9 +145,7 @@ use warp::integration_testing::view_getters::{
     single_terminal_pane_view_for_tab, single_terminal_view, single_terminal_view_for_tab,
     workspace_view,
 };
-use warp::integration_testing::warp_drive::{
-    assert_is_left_panel_open, assert_warp_drive_is_open,
-};
+use warp::integration_testing::warp_drive::{assert_is_left_panel_open, assert_warp_drive_is_open};
 use warp::integration_testing::window::{
     add_and_save_window, add_window, add_window_and_check_bounds, close_window,
     save_active_window_id,

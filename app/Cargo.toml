@@ -594,6 +594,7 @@ default = [
     "vertical_tabs_summary_mode",
     "tab_configs",
     "grouped_tabs",
+    "pinned_tabs",
     "agent_harness",
     "hoa_onboarding_flow",
     "codex_notifications",
@@ -895,6 +896,7 @@ codex_plugin = []
 configurable_context_window = []
 git_credential_refresh = []
 prompt_cache_expiry_warning = []
+osc_hyperlinks = []
 
 [package.metadata.bundle.bin.zap-oss]
 category = "public.app-category.developer-tools"

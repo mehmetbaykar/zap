@@ -1,4 +1,3 @@
-
 use warp::integration_testing::command_palette::{
     open_command_palette_and_run_action, TestStepsExt,
 };
@@ -9,8 +8,8 @@ use warp::integration_testing::terminal::{
 };
 use warp::integration_testing::window::save_active_window_id;
 use warp::integration_testing::workflow::{
-    assert_no_workflow_pane_open, assert_open_workflow_pane_count_equals,
-    assert_workflow_id, create_a_personal_workflow, open_workflow,
+    assert_no_workflow_pane_open, assert_open_workflow_pane_count_equals, assert_workflow_id,
+    create_a_personal_workflow, open_workflow,
 };
 use warp::integration_testing::{self, view_of_type};
 use warp::workflows::CategoriesView;

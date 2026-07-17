@@ -3138,7 +3138,7 @@ dependencies = [
  "objc2-core-graphics",
  "pathfinder_geometry",
  "serde",
- "serde_with 2.3.3",
+ "serde_with",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -5521,7 +5521,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
- "serde_with 3.21.0",
+ "serde_with",
  "strum 0.28.0",
  "tokio",
  "tokio-stream",
@@ -8170,6 +8170,7 @@ dependencies = [
  "anyhow",
  "async-channel",
  "async-trait",
+ "axum",
  "cfg-if",
  "futures",
  "http 1.4.2",
@@ -12523,22 +12524,6 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "2.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07ff71d2c147a7b57362cead5e22f772cd52f6ab31cfcd9edcd7f6aeb2a0afbe"
-dependencies = [
- "base64 0.13.1",
- "chrono",
- "hex",
- "indexmap 1.9.3",
- "serde",
- "serde_json",
- "serde_with_macros 2.3.3",
- "time",
-]
-
-[[package]]
-name = "serde_with"
 version = "3.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76a5c54c7310e7b8b9577c286d7e399ddd876c3e12b3ed917a8aabc4b96e9e8c"
@@ -12553,20 +12538,8 @@ dependencies = [
  "schemars 1.2.1",
  "serde_core",
  "serde_json",
- "serde_with_macros 3.21.0",
+ "serde_with_macros",
  "time",
-]
-
-[[package]]
-name = "serde_with_macros"
-version = "2.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "881b6f881b17d13214e5d494c939ebab463d01264ce1811e9d4ac3a882e7695f"
-dependencies = [
- "darling 0.20.11",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -15366,7 +15339,7 @@ dependencies = [
  "serde_json",
  "serde_regex",
  "serde_urlencoded",
- "serde_with 2.3.3",
+ "serde_with",
  "serde_yaml 0.8.26",
  "serial_test",
  "settings",
@@ -15464,7 +15437,7 @@ dependencies = [
 [[package]]
 name = "warp-command-signatures"
 version = "0.0.0"
-source = "git+https://github.com/warpdotdev/command-signatures.git?rev=ec1ae8e84277b0caf46bb028c21ee592a494dc97#ec1ae8e84277b0caf46bb028c21ee592a494dc97"
+source = "git+https://github.com/warpdotdev/command-signatures.git?rev=29cd61c3a9a96d8bde92e90f926e89d340e74cb6#29cd61c3a9a96d8bde92e90f926e89d340e74cb6"
 dependencies = [
  "cfg-if",
  "itertools 0.10.5",
@@ -15475,21 +15448,21 @@ dependencies = [
  "rust-embed 6.8.1",
  "serde",
  "serde_json",
- "serde_with 2.3.3",
+ "serde_with",
  "warp-completion-metadata",
 ]
 
 [[package]]
 name = "warp-completion-metadata"
 version = "0.0.0"
-source = "git+https://github.com/warpdotdev/command-signatures.git?rev=ec1ae8e84277b0caf46bb028c21ee592a494dc97#ec1ae8e84277b0caf46bb028c21ee592a494dc97"
+source = "git+https://github.com/warpdotdev/command-signatures.git?rev=29cd61c3a9a96d8bde92e90f926e89d340e74cb6#29cd61c3a9a96d8bde92e90f926e89d340e74cb6"
 dependencies = [
  "html-escape",
  "itertools 0.10.5",
  "log",
  "serde",
  "serde_json",
- "serde_with 2.3.3",
+ "serde_with",
 ]
 
 [[package]]
@@ -15628,7 +15601,7 @@ dependencies = [
  "schemars 1.2.1",
  "serde",
  "serde_json",
- "serde_with 2.3.3",
+ "serde_with",
  "serde_yaml 0.8.26",
  "settings",
  "settings_value",
