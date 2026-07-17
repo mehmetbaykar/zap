@@ -133,6 +133,21 @@ jobs:
             echo
             cat release-notes.md
           } > release-body.md
+          # GitHub rejects release bodies over 125k characters (422 "body is too
+          # long") — a big upstream-merge wave overflows it and kills the publish
+          # after hours of building (run 29574254287). Truncate at a line
+          # boundary with margin and point at the compare link for the rest.
+          python3 - <<'EOF'
+          LIMIT = 120_000
+          text = open("release-body.md", encoding="utf-8").read()
+          if len(text) > LIMIT:
+              notice = ("\n\n---\n*Changelog truncated (GitHub caps release "
+                        "notes at 125k characters). Full history: the compare "
+                        "link above.*\n")
+              cut = text.rfind("\n", 0, LIMIT - len(notice))
+              open("release-body.md", "w", encoding="utf-8").write(text[:cut] + notice)
+              print(f"release body truncated {len(text)} -> {cut + len(notice)} chars")
+          EOF
           echo "---- release-body.md ----"
           cat release-body.md
 
