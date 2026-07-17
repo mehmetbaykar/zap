@@ -6207,59 +6207,72 @@ impl PaneGroup {
             .collect()
     }
 
-    /// Get all terminal CWDs for this pane group.
+    /// Get all terminal CWDs (local and remote) for this pane group.
     /// This is used by the Workspace to refresh the active directories model.
+    ///
+    /// Remote SSH sessions must be included here (upstream #11026): the
+    /// working-directories refresh runs on every tab activation, and a
+    /// local-only collector would compute an empty set for SSH pane groups,
+    /// wiping their remote file-explorer roots on tab switch.
     pub fn terminal_view_working_directories<'a>(
         &'a self,
         ctx: &'a AppContext,
-    ) -> impl Iterator<Item = (EntityId, Option<String>)> + 'a {
+    ) -> impl Iterator<Item = (EntityId, Option<LocalOrRemotePath>)> + 'a {
         self.terminal_views(ctx).into_iter().map(|terminal_view| {
             let terminal_id = terminal_view.id();
-            let cwd = terminal_view.as_ref(ctx).pwd_if_local(ctx);
+            let cwd = terminal_view.as_ref(ctx).pwd_as_local_or_remote(ctx);
             (terminal_id, cwd)
         })
     }
 
-    /// Get all code CWDs for this pane group.
+    /// Get all code editor paths (local and remote) for this pane group.
     /// This is used by the Workspace to refresh the active directories model.
-    pub fn code_view_local_paths<'a>(
+    pub fn code_view_paths<'a>(
         &'a self,
         ctx: &'a AppContext,
-    ) -> impl Iterator<Item = (EntityId, Option<String>)> + 'a {
+    ) -> impl Iterator<Item = (EntityId, Option<LocalOrRemotePath>)> + 'a {
         self.code_views(ctx).into_iter().map(move |code_view| {
             let id = code_view.id();
-            let local_path = code_view
+            let location = code_view
                 .as_ref(ctx)
-                .local_path(ctx)
-                .map(|p| p.display().to_string());
-            (id, local_path)
+                .tab_at(code_view.as_ref(ctx).active_tab_index())
+                .and_then(|tab| tab.location().cloned())
+                .map(|loc| match loc {
+                    crate::code::buffer_location::BufferLocation::Local(path) => {
+                        LocalOrRemotePath::Local(path)
+                    }
+                    crate::code::buffer_location::BufferLocation::Remote(remote) => {
+                        LocalOrRemotePath::Remote(warp_util::remote_path::RemotePath::new(
+                            remote.host_id,
+                            remote.path,
+                        ))
+                    }
+                });
+            (id, location)
         })
     }
 
-    pub fn code_diff_view_local_paths<'a>(
+    pub fn code_diff_view_paths<'a>(
         &'a self,
         ctx: &'a AppContext,
-    ) -> impl Iterator<Item = (EntityId, Option<String>)> + 'a {
+    ) -> impl Iterator<Item = (EntityId, Option<LocalOrRemotePath>)> + 'a {
         self.code_diff_views(ctx).into_iter().map(move |diff_view| {
             let id = diff_view.id();
-            let local_path = diff_view.as_ref(ctx).primary_file_path(ctx);
-            (id, local_path)
+            let location = diff_view.as_ref(ctx).primary_file_location(ctx);
+            (id, location)
         })
     }
 
-    pub fn file_notebook_local_paths<'a>(
+    pub fn file_notebook_paths<'a>(
         &'a self,
         ctx: &'a AppContext,
-    ) -> impl Iterator<Item = (EntityId, Option<String>)> + 'a {
+    ) -> impl Iterator<Item = (EntityId, Option<LocalOrRemotePath>)> + 'a {
         self.file_notebook_views(ctx)
             .into_iter()
             .map(move |file_view| {
                 let id = file_view.id();
-                let local_path = file_view
-                    .as_ref(ctx)
-                    .local_path()
-                    .map(|p| p.display().to_string());
-                (id, local_path)
+                let path = file_view.as_ref(ctx).path().cloned();
+                (id, path)
             })
     }
 

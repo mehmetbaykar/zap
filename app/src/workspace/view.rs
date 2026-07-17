@@ -14195,27 +14195,27 @@ impl Workspace {
         let terminal_cwds: Vec<(EntityId, LocalOrRemotePath)> = pane_group
             .as_ref(ctx)
             .terminal_view_working_directories(ctx)
-            .filter_map(|(id, cwd)| cwd.map(|path| (id, LocalOrRemotePath::Local(path.into()))))
+            .filter_map(|(id, cwd)| cwd.map(|c| (id, c)))
             .collect();
-        let code_local_paths: Vec<(EntityId, LocalOrRemotePath)> = pane_group
+        let code_paths: Vec<(EntityId, LocalOrRemotePath)> = pane_group
             .as_ref(ctx)
-            .code_view_local_paths(ctx)
-            .filter_map(|(id, cwd)| cwd.map(|path| (id, LocalOrRemotePath::Local(path.into()))))
+            .code_view_paths(ctx)
+            .filter_map(|(id, cwd)| cwd.map(|c| (id, c)))
             .collect();
-        let code_diff_local_paths: Vec<(EntityId, LocalOrRemotePath)> = pane_group
+        let code_diff_paths: Vec<(EntityId, LocalOrRemotePath)> = pane_group
             .as_ref(ctx)
-            .code_diff_view_local_paths(ctx)
-            .filter_map(|(id, cwd)| cwd.map(|path| (id, LocalOrRemotePath::Local(path.into()))))
+            .code_diff_view_paths(ctx)
+            .filter_map(|(id, cwd)| cwd.map(|c| (id, c)))
             .collect();
-        let notebook_local_paths: Vec<(EntityId, LocalOrRemotePath)> = pane_group
+        let notebook_paths: Vec<(EntityId, LocalOrRemotePath)> = pane_group
             .as_ref(ctx)
-            .file_notebook_local_paths(ctx)
-            .filter_map(|(id, cwd)| cwd.map(|path| (id, LocalOrRemotePath::Local(path.into()))))
+            .file_notebook_paths(ctx)
+            .filter_map(|(id, path)| path.map(|p| (id, p)))
             .collect();
-        let local_paths: Vec<(EntityId, LocalOrRemotePath)> = code_local_paths
+        let local_paths: Vec<(EntityId, LocalOrRemotePath)> = code_paths
             .into_iter()
-            .chain(notebook_local_paths)
-            .chain(code_diff_local_paths)
+            .chain(notebook_paths)
+            .chain(code_diff_paths)
             .collect();
 
         // Get the focused terminal ID to prioritize it in the repo_to_terminal map
