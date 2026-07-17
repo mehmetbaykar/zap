@@ -84,17 +84,26 @@ jobs:
         with:
           apt: zsh
 
-      - name: Resolve test shell
-        id: test_shell
+      # Resolve the shell in its native interpreter: git-bash's `command -v pwsh` yields a
+      # unix-style /c/... path that the Rust harness rejects (shell.rs "$WARP_SHELL_PATH is
+      # invalid"), so Windows must resolve via pwsh itself — same as upstream ci.yml.
+      - name: Resolve test shell (unix)
+        id: test_shell_unix
+        if: ${{ matrix.os != 'windows' }}
         shell: bash
         run: |
-          if ${{ matrix.os == 'windows' }}; then
-            SHELL_PATH="$(command -v pwsh)"
-          else
-            SHELL_PATH="$(command -v zsh)"
-          fi
+          SHELL_PATH="$(command -v zsh)"
           echo "Using test shell '$SHELL_PATH'"
           echo "path=$SHELL_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve test shell (windows)
+        id: test_shell_windows
+        if: ${{ matrix.os == 'windows' }}
+        shell: pwsh
+        run: |
+          $ShellPath = (Get-Command pwsh).Source
+          Write-Output "Using test shell '$ShellPath'"
+          Write-Output "path=$ShellPath" >> $env:GITHUB_OUTPUT
 
       - name: Install cargo nextest
         uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
@@ -118,4 +127,4 @@ jobs:
         if: success()
         run: cargo nextest run ${{ env.WORKSPACE_TEST_ARGS }} ${{ matrix.extra_test_args }} --profile ci --retries 2 -E "not package(integration)"
         env:
-          WARP_SHELL_PATH: ${{ steps.test_shell.outputs.path }}
+          WARP_SHELL_PATH: ${{ matrix.os == 'windows' && steps.test_shell_windows.outputs.path || steps.test_shell_unix.outputs.path }}

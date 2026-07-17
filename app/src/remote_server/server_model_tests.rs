@@ -34,7 +34,15 @@ fn requested_repo_path_requires_a_path() {
 fn requested_repo_path_returns_a_canonical_local_path() {
     let repo = tempfile::tempdir().unwrap();
     let requested = requested_repo_path(repo.path().to_str().unwrap()).unwrap();
-    assert_eq!(requested, fs::canonicalize(repo.path()).unwrap());
+    // `requested_repo_path` yields a plain local path (StandardizedPath strips Windows'
+    // `\\?\` extended-length prefix that `fs::canonicalize` adds), so compare the two
+    // after canonicalizing both — this still proves symlinks were resolved (e.g. macOS
+    // tempdirs under /var -> /private/var) without asserting the platform prefix.
+    assert!(requested.is_absolute());
+    assert_eq!(
+        fs::canonicalize(&requested).unwrap(),
+        fs::canonicalize(repo.path()).unwrap()
+    );
 }
 
 #[test]

@@ -120,11 +120,11 @@ fn test_unique_skills_keeps_same_provider_skills_from_different_dirs() {
     let skill_paths = vec![
         (
             LocalOrRemotePath::Local(home_dir),
-            LocalOrRemotePath::Local(home_path),
+            LocalOrRemotePath::Local(home_path.clone()),
         ),
         (
             LocalOrRemotePath::Local(project_dir),
-            LocalOrRemotePath::Local(project_path),
+            LocalOrRemotePath::Local(project_path.clone()),
         ),
     ];
 
@@ -135,16 +135,17 @@ fn test_unique_skills_keeps_same_provider_skills_from_different_dirs() {
         "same name + same provider across directories should each be kept"
     );
     assert!(
-        result
-            .iter()
-            .any(|skill| skill.reference.to_string().contains("/home/user/.agents")),
+        result.iter().any(|skill| skill
+            .reference
+            .to_string()
+            .contains(home_path.to_str().expect("home path is valid utf-8"))),
         "should keep the same-named skill in the home directory, actual={result:?}"
     );
     assert!(
         result.iter().any(|skill| skill
             .reference
             .to_string()
-            .contains("/home/user/projects/repo/.agents")),
+            .contains(project_path.to_str().expect("project path is valid utf-8"))),
         "should keep the same-named skill in the project directory, actual={result:?}"
     );
 }

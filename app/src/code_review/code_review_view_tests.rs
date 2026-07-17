@@ -1047,8 +1047,15 @@ fn test_handle_edit_comment_scrolls_with_buffer() {
             .join("\n");
         let ctx = TestContext::new(&mut app, "test.txt", &content);
 
-        // Create a line comment targeting this file
-        let line_comment = create_line_comment("/repo/test.txt", 5, "line 5", "Review comment");
+        // Create a line comment targeting this file. handle_edit_comment routes the
+        // comment path through StandardizedPath::from_local_absolute, whose debug_assert
+        // requires a platform-absolute path — `/repo/...` is not absolute on Windows.
+        let comment_path = if cfg!(windows) {
+            "C:/repo/test.txt"
+        } else {
+            "/repo/test.txt"
+        };
+        let line_comment = create_line_comment(comment_path, 5, "line 5", "Review comment");
         let comment_id = line_comment.id;
 
         ctx.code_review_view.update(&mut app, |view, view_ctx| {

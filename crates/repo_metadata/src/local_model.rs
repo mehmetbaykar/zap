@@ -1860,9 +1860,13 @@ mod is_unsafe_watch_root_tests {
             home.display()
         );
 
+        // Derive the filesystem root portably (unix `/`, Windows `C:\`) instead of
+        // hardcoding `/`, which is not an ancestor of home on Windows.
+        let fs_root = home.ancestors().last().expect("home has a root ancestor");
         assert!(
-            is_unsafe_watch_root(Path::new("/")),
-            "filesystem root must be rejected",
+            is_unsafe_watch_root(fs_root),
+            "filesystem root ({}) must be rejected",
+            fs_root.display()
         );
 
         if let Some(parent) = home.parent() {
