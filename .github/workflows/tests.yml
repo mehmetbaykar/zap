@@ -74,6 +74,28 @@ jobs:
           is_self_hosted: "false"
           install_test_deps: "true"
 
+      # Shell-dependent unit tests (command decorations, zsh history behavior) need zsh present
+      # and selected. GitHub runners default $SHELL to bash, so mirror upstream ci.yml: install
+      # the shells, then pin WARP_SHELL_PATH (honored by the test harness, see
+      # app/src/terminal/local_tty/shell.rs) to zsh on unix / pwsh on Windows for the test step.
+      - name: Install shells
+        if: ${{ matrix.os == 'linux' }}
+        uses: ConorMacBride/install-package@3e7ad059e07782ee54fa35f827df52aae0626f30 # v1
+        with:
+          apt: zsh
+
+      - name: Resolve test shell
+        id: test_shell
+        shell: bash
+        run: |
+          if ${{ matrix.os == 'windows' }}; then
+            SHELL_PATH="$(command -v pwsh)"
+          else
+            SHELL_PATH="$(command -v zsh)"
+          fi
+          echo "Using test shell '$SHELL_PATH'"
+          echo "path=$SHELL_PATH" >> "$GITHUB_OUTPUT"
+
       - name: Install cargo nextest
         uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
@@ -95,3 +117,5 @@ jobs:
       - name: Run unit tests
         if: success()
         run: cargo nextest run ${{ env.WORKSPACE_TEST_ARGS }} ${{ matrix.extra_test_args }} --profile ci --retries 2 -E "not package(integration)"
+        env:
+          WARP_SHELL_PATH: ${{ steps.test_shell.outputs.path }}

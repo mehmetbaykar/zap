@@ -826,7 +826,6 @@ fn restored_cli_subagent_windows_ctrl_c_does_not_write_to_pty() {
                 view.view_id,
                 &CLISubagentViewEvent::WindowsCtrlC,
                 true,
-                RestoreConversationEntryBehavior::EnterRestoredConversation,
                 ctx,
             );
         });
