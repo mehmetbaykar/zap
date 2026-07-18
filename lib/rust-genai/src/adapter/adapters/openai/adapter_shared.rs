@@ -353,13 +353,21 @@ impl OpenAIAdapter {
 						match part {
 							ContentPart::Text(text) => texts.push(text),
 							ContentPart::ToolCall(tool_call) => {
-								//
+								// `arguments` must be the raw JSON text. When fn_arguments is
+								// already a String (the streamers' resilient fallback for
+								// unparseable accumulations), use it verbatim — `.to_string()`
+								// on a Value::String would JSON-quote it and double-encode the
+								// echo-back ("\"{...}\"").
+								let arguments = match &tool_call.fn_arguments {
+									Value::String(raw) => raw.clone(),
+									other => other.to_string(),
+								};
 								tool_calls.push(json!({
 									"type": "function",
 									"id": tool_call.call_id,
 									"function": {
 										"name": tool_call.fn_name,
-										"arguments": tool_call.fn_arguments.to_string(),
+										"arguments": arguments,
 									}
 								}))
 							}

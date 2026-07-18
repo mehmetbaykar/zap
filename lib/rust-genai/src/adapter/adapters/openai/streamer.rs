@@ -96,8 +96,18 @@ impl OpenAIStreamer {
 			}
 			existing_call.clone()
 		} else {
-			// New tool call - resize to handle potential gaps (though unlikely in streaming)
-			calls.resize(index + 1, tool_call.clone());
+			// New tool call. Fill any index gap with EMPTY placeholders — cloning the
+			// current call into the gap slots would poison them: when the real
+			// lower-index deltas later arrive they would merge onto this call's
+			// id/name/args and corrupt the accumulated arguments.
+			let placeholder = ToolCall {
+				call_id: String::new(),
+				fn_name: String::new(),
+				fn_arguments: Value::String(String::new()),
+				thought_signatures: None,
+			};
+			calls.resize(index + 1, placeholder);
+			calls[index] = tool_call.clone();
 			tool_call
 		}
 	}
@@ -145,10 +155,17 @@ impl futures::Stream for OpenAIStreamer {
 									// parse fn_arguments if needed
 									let fn_arguments = match fn_arguments {
 										Value::String(fn_arguments_string) => {
-											// NOTE: Here we are resilient for now, if we cannot parse, just return the original String
-											match serde_json::from_str::<Value>(&fn_arguments_string) {
-												Ok(fn_arguments) => fn_arguments,
-												Err(_) => Value::String(fn_arguments_string),
+											// A legitimately no-arg tool accumulates an empty string;
+											// normalize to `{}` (matching the Anthropic adapter) so
+											// strict serde tools don't reject a spurious "".
+											if fn_arguments_string.trim().is_empty() {
+												Value::Object(serde_json::Map::new())
+											} else {
+												// NOTE: Here we are resilient for now, if we cannot parse, just return the original String
+												match serde_json::from_str::<Value>(&fn_arguments_string) {
+													Ok(fn_arguments) => fn_arguments,
+													Err(_) => Value::String(fn_arguments_string),
+												}
 											}
 										}
 										_ => fn_arguments,
@@ -286,26 +303,34 @@ impl futures::Stream for OpenAIStreamer {
 						else if let Ok(delta_tool_calls) = first_choice.x_take::<Value>("/delta/tool_calls")
 							&& delta_tool_calls != Value::Null
 						{
-							// Check if there's a tool call in the delta
-							if let Some(delta_tool_calls) = delta_tool_calls.as_array()
-								&& let Some(tool_call_obj_val) = delta_tool_calls.first()
-							{
-								// Extract the first tool call object as a mutable value
-								let mut tool_call_obj = tool_call_obj_val.clone();
+							// Capture EVERY tool call in the delta array, not just the first.
+							// Standard OpenAI streams one tool_call per delta, but relays that
+							// batch parallel `tool_calls[]` into a single delta would otherwise
+							// silently lose all but index 0. Emit the first as the chunk event;
+							// the rest are still captured (the app accumulates by call_id and
+							// re-reads captured_tool_calls at [DONE]).
+							if let Some(delta_tool_calls) = delta_tool_calls.as_array() {
+								let mut first_tool_call_event: Option<ToolCall> = None;
+								for tool_call_obj_val in delta_tool_calls {
+									let mut tool_call_obj = tool_call_obj_val.clone();
+									if let (Ok(index), Ok(mut function)) = (
+										tool_call_obj.x_take::<u32>("index"),
+										tool_call_obj.x_take::<Value>("function"),
+									) {
+										let call_id = tool_call_obj
+											.x_take::<String>("id")
+											.unwrap_or_else(|_| format!("call_{index}"));
+										let fn_name = function.x_take::<String>("name").unwrap_or_default();
+										let arguments = function.x_take::<String>("arguments").unwrap_or_default();
 
-								// Extract tool call data
-								if let (Ok(index), Ok(mut function)) = (
-									tool_call_obj.x_take::<u32>("index"),
-									tool_call_obj.x_take::<Value>("function"),
-								) {
-									let call_id = tool_call_obj
-										.x_take::<String>("id")
-										.unwrap_or_else(|_| format!("call_{index}"));
-									let fn_name = function.x_take::<String>("name").unwrap_or_default();
-									let arguments = function.x_take::<String>("arguments").unwrap_or_default();
-
-									let tool_call = self.capture_tool_call(index as usize, call_id, fn_name, arguments);
-
+										let tool_call =
+											self.capture_tool_call(index as usize, call_id, fn_name, arguments);
+										if first_tool_call_event.is_none() {
+											first_tool_call_event = Some(tool_call);
+										}
+									}
+								}
+								if let Some(tool_call) = first_tool_call_event {
 									// Return the ToolCallChunk event
 									return Poll::Ready(Some(Ok(InterStreamEvent::ToolCallChunk(tool_call))));
 								}
