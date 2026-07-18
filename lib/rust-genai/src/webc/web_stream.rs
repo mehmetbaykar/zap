@@ -337,6 +337,19 @@ fn process_buff_string_delimited(
 		buff_string
 	};
 
+	// Normalize CRLF line endings before splitting. The SSE spec permits
+	// `\r\n`-terminated lines, and HTTP/1.1 proxies commonly re-emit them —
+	// a `\r\n\r\n` event separator contains no `\n\n` substring, so without
+	// this the whole response would accumulate into one blob flushed at EOF.
+	// SSE payload lines cannot contain raw newlines (JSON escapes them), so
+	// the replacement is safe. Chunk-boundary `\r`/`\n` splits are handled
+	// because the partial remainder is re-prepended and re-normalized above.
+	let full_string = if delimiter == "\n\n" && full_string.contains('\r') {
+		full_string.replace("\r\n", "\n")
+	} else {
+		full_string
+	};
+
 	let mut parts: Vec<String> = full_string.split(delimiter).map(|s| s.to_string()).collect();
 
 	// The last part is the new partial (what's after the last delimiter)

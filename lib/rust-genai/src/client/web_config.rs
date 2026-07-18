@@ -145,6 +145,13 @@ impl WebConfig {
 		// Performance optimizations
 		if self.gzip {
 			builder = builder.gzip(true);
+		} else {
+			// Reqwest compiled with the `gzip` feature auto-negotiates
+			// `Accept-Encoding: gzip` UNLESS explicitly disabled — merely not
+			// calling `.gzip(true)` does nothing. Without this, the whole
+			// SSE-through-gzip-proxy rationale above is defeated (streams get
+			// buffered into K-byte deflate bursts).
+			builder = builder.gzip(false);
 		}
 		if self.tcp_nodelay {
 			builder = builder.tcp_nodelay(true);
