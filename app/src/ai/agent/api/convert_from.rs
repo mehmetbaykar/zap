@@ -665,7 +665,19 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
                 create_standard_action(insert_review_comments.into())
             }
             api::message::tool_call::Tool::ReadSkill(read_skill) => {
-                create_standard_action(convert_read_skill(read_skill, params.skill_path_origin)?)
+                // Zap: never let a skill-reference conversion failure abort the whole
+                // exchange (per the tool:None policy above) — a hard error here used to
+                // cascade into `Action::AddMessagesToTask` dropping the entire task and
+                // blanking the conversation. Mirrors the `SuggestPrompt` arm.
+                match convert_read_skill(read_skill, params.skill_path_origin) {
+                    Ok(action) => create_standard_action(action),
+                    Err(error) => {
+                        log::warn!(
+                            "read_skill conversion failed; degrading to no client representation: {error:?}"
+                        );
+                        Ok(MaybeAIAgentAction::NoClientRepresentation)
+                    }
+                }
             }
             api::message::tool_call::Tool::AskUserQuestion(ask) => {
                 let questions = ask

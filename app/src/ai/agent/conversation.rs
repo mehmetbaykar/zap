@@ -2922,7 +2922,7 @@ impl AIConversation {
                 };
 
                 let current_comment_state = self.code_review.as_ref().cloned();
-                task.add_messages(
+                let add_result = task.add_messages(
                     messages,
                     exchange_id,
                     TaskMessageContext {
@@ -2936,9 +2936,16 @@ impl AIConversation {
                     // to mimic the normal conversation flow. (If this is not a shared session, the
                     // exchange inputs will already be populated).
                     self.is_viewing_shared_session,
-                )?;
+                );
 
+                // Zap: ALWAYS reinsert the task before propagating any error. The task was
+                // removed from the store above; bailing with `?` before this line dropped
+                // the entire task (in a normal session: the whole conversation), making
+                // every block render as Pending — a blank transcript with an endless
+                // "Warping..." spinner. Seen live when a ReadSkill conversion failed in an
+                // SSH session.
                 self.task_store.insert(task);
+                add_result?;
                 if !added_exchanges
                     .iter()
                     .any(|new_exchange_info| new_exchange_info.exchange_id == exchange_id)

@@ -240,3 +240,46 @@ fn read_skill_ref_with_remote_origin_preserves_host_identity() {
     assert_eq!(path.host_id, host_id);
     assert_eq!(path.path.as_str(), "/repo/.agents/skills/deploy/SKILL.md");
 }
+
+/// Regression: the BYOP `read_skill` tool sends the bare skill NAME in the
+/// `SkillPath` slot. In an SSH session (`SkillPathOrigin::Remote`) that name is
+/// not an absolute remote path; conversion used to fail with
+/// `RemotePathInvalid`, which cascaded into dropping the whole task and
+/// blanking the conversation. It must instead fall back to the
+/// display-compatible local identity so the card renders and the executor's
+/// name-based lookup can resolve the skill.
+#[test]
+fn read_skill_ref_with_bare_name_and_remote_origin_falls_back_to_display_identity() {
+    let host_id = HostId::new("remote-host".to_string());
+    let skill_reference = skill_reference_from_read_skill_ref(
+        api::message::tool_call::read_skill::SkillReference::SkillPath("5-steps".to_string()),
+        &SkillPathOrigin::Remote { host_id },
+    )
+    .expect("bare skill name must not fail conversion in remote sessions");
+
+    let SkillReference::Path(LocalOrRemotePath::Local(path)) = skill_reference else {
+        panic!("expected the display-compatible local identity fallback");
+    };
+    assert_eq!(path, std::path::PathBuf::from("5-steps"));
+}
+
+/// A genuinely absolute remote skill path must still resolve as remote.
+#[test]
+fn read_skill_ref_with_absolute_path_and_remote_origin_stays_remote() {
+    let host_id = HostId::new("remote-host".to_string());
+    let skill_reference = skill_reference_from_read_skill_ref(
+        api::message::tool_call::read_skill::SkillReference::SkillPath(
+            "/root/.agents/skills/deploy/SKILL.md".to_string(),
+        ),
+        &SkillPathOrigin::Remote {
+            host_id: host_id.clone(),
+        },
+    )
+    .expect("absolute remote skill path should convert");
+
+    let SkillReference::Path(LocalOrRemotePath::Remote(path)) = skill_reference else {
+        panic!("expected a remote skill path");
+    };
+    assert_eq!(path.host_id, host_id);
+    assert_eq!(path.path.as_str(), "/root/.agents/skills/deploy/SKILL.md");
+}

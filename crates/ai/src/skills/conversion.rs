@@ -67,12 +67,22 @@ impl SkillPathOrigin {
                 Ok(LocalOrRemotePath::Local(PathBuf::from(normalized)))
             }
             SkillPathOrigin::Remote { host_id } => {
-                let path = StandardizedPath::try_new(&path)
-                    .map_err(|_| SkillConversionError::RemotePathInvalid)?;
-                Ok(LocalOrRemotePath::Remote(RemotePath::new(
-                    host_id.clone(),
-                    path,
-                )))
+                match StandardizedPath::try_new(&path) {
+                    Ok(remote_path) => Ok(LocalOrRemotePath::Remote(RemotePath::new(
+                        host_id.clone(),
+                        remote_path,
+                    ))),
+                    // Zap: the BYOP `read_skill` tool sends the bare skill NAME in the
+                    // SkillPath slot, which is never an absolute remote path — erroring
+                    // here made every skill load in an SSH session fail conversion.
+                    // Fall back to the display-compatible local identity (the same
+                    // rationale as `RestoredDisplayOnly`): the card still renders, and
+                    // the ReadSkill executor's `find_skill_by_name` fallback resolves
+                    // the skill by name anyway.
+                    Err(_) => Ok(LocalOrRemotePath::Local(PathBuf::from(collapse_slashes(
+                        &path,
+                    )))),
+                }
             }
             SkillPathOrigin::Unavailable => Err(SkillConversionError::PathOriginUnavailable),
         }
