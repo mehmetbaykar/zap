@@ -134,7 +134,20 @@ pub fn config_local_dir() -> PathBuf {
 /// changed once established.
 #[cfg(target_os = "macos")]
 fn macos_tui_config_dir_name() -> String {
-    macos_config_dir_name().replacen(WARP_CONFIG_DIR, ".warp_cli", 1)
+    let gui_dir_name = macos_config_dir_name();
+    let tui_dir_name = gui_dir_name.replacen(WARP_CONFIG_DIR, ".warp_cli", 1);
+    if tui_dir_name != gui_dir_name {
+        return tui_dir_name;
+    }
+    // Zap: the Oss channel renames the GUI dir to `.zap`, which the upstream
+    // `.warp` → `.warp_cli` rewrite above doesn't match — without this the TUI
+    // would silently share the GUI directory (and its `.mcp.json`).
+    let zap_tui_dir_name = gui_dir_name.replacen(".zap", ".zap_cli", 1);
+    if zap_tui_dir_name != gui_dir_name {
+        return zap_tui_dir_name;
+    }
+    // Any future base rename must still keep the TUI isolated from the GUI.
+    format!("{gui_dir_name}_cli")
 }
 
 /// Returns the path to the directory where non-portable configuration files for
