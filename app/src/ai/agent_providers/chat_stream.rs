@@ -4525,7 +4525,13 @@ pub async fn generate_byop_output(
                         call.fn_name,
                         call.call_id
                     );
-                    let error_payload = if truncated_by_token_limit {
+                    // A stream that ended without ANY End event (no message_stop /
+                    // [DONE] — e.g. a relay dropped the connection cleanly after
+                    // cutting the output) is also a cut-off generation: the args are
+                    // incomplete because the stream stopped, not because the model
+                    // emitted schema-invalid JSON.
+                    let generation_cut_off = truncated_by_token_limit || end_count == 0;
+                    let error_payload = if generation_cut_off {
                         // Distinguish truncation from schema violations: telling the
                         // model its args were schema-invalid when they were cut off by
                         // max_tokens sends it into a fix-the-types loop; telling it the
@@ -4535,10 +4541,17 @@ pub async fn generate_byop_output(
                             "detail": e.to_string(),
                             "tool": call.fn_name,
                             "received_args": &args_str,
-                            "hint": "The generation hit the token limit mid tool call, so the \
-                                     arguments are incomplete. Re-emit the tool call with a \
-                                     smaller payload (e.g. shorter file content or fewer items), \
-                                     or split the work into multiple calls.",
+                            "hint": if truncated_by_token_limit {
+                                "The generation hit the token limit mid tool call, so the \
+                                 arguments are incomplete. Re-emit the tool call with a \
+                                 smaller payload (e.g. shorter file content or fewer items), \
+                                 or split the work into multiple calls."
+                            } else {
+                                "The response stream ended before the tool call finished, so \
+                                 the arguments are incomplete. Re-emit the tool call; if this \
+                                 repeats, use a smaller payload or split the work into \
+                                 multiple calls."
+                            },
                         })
                     } else {
                         serde_json::json!({
