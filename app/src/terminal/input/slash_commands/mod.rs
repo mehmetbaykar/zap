@@ -944,11 +944,19 @@ impl Input {
                 });
             }
             command_that_just_sends_ai_request_with_prefix
-                if command.name == commands::INIT.name || command.name == commands::PLAN.name =>
+                if command.name == commands::INIT.name
+                    || command.name == commands::PLAN.name
+                    || command.name == commands::ORCHESTRATE.name =>
             {
                 // These slash commands just send AI requests with the slash command text as a
                 // prefix, and special handling is done downstream as an implementation detail
                 // of handling user queries with specific slash command prefixes.
+                //
+                // `/orchestrate` is classified as submitted-as-prompt (see
+                // `slash_command_is_submitted_as_prompt`) but has no dedicated local action arm,
+                // so it must return false here rather than falling through to the no-handler
+                // `debug_assert!` below — the queued-prompt path calls `execute_slash_command`
+                // for every detected command, and orchestrate is meant to be sent as a prompt.
                 return false;
             }
             _ => {
