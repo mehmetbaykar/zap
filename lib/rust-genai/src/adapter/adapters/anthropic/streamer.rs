@@ -52,7 +52,19 @@ impl futures::Stream for AnthropicStreamer {
 			match event {
 				Some(Ok(Event::Open)) => return Poll::Ready(Some(Ok(InterStreamEvent::Start))),
 				Some(Ok(Event::Message(message))) => {
-					let message_type = message.event.as_str();
+					// Anthropic labels every frame with an SSE `event:` field AND a JSON
+					// `type` field carrying the same value. Some proxies (LiteLLM-style SSE
+					// normalizers) strip the `event:` line and forward only `data:`; the
+					// EventSourceStream then defaults the event name to "message". Fall back
+					// to the JSON `type` in that case so frames aren't silently skipped.
+					let sniffed_type: Option<String> = if message.event == "message" {
+						serde_json::from_str::<Value>(&message.data)
+							.ok()
+							.and_then(|v| v.get("type").and_then(|t| t.as_str().map(str::to_owned)))
+					} else {
+						None
+					};
+					let message_type = sniffed_type.as_deref().unwrap_or_else(|| message.event.as_str());
 
 					match message_type {
 						"message_start" => {
@@ -177,10 +189,26 @@ impl futures::Stream for AnthropicStreamer {
 									// ToolCallChunks were already emitted incrementally
 									// during content_block_start and content_block_delta.
 									// Here we only finalize capture with parsed arguments.
+									//
+									// Resilient on parse failure (mirrors the OpenAI streamer):
+									// a proxy-corrupted or max_tokens-truncated `partial_json`
+									// accumulation must not abort the whole stream — keep the raw
+									// string; the app layer surfaces a structured tool_result
+									// error the model can react to.
 									let fn_arguments = if input.is_empty() {
 										Value::Object(Map::new())
 									} else {
-										serde_json::from_str(&input)?
+										match serde_json::from_str(&input) {
+											Ok(parsed) => parsed,
+											Err(parse_err) => {
+												tracing::warn!(
+													"anthropic tool_use input not valid JSON at content_block_stop \
+													 (len={}, err={parse_err}); keeping raw string",
+													input.len()
+												);
+												Value::String(input)
+											}
+										}
 									};
 
 									let tc = ToolCall {
@@ -239,6 +267,20 @@ impl futures::Stream for AnthropicStreamer {
 						}
 
 						"ping" => continue, // Loop to the next event
+						// Anthropic streams mid-generation failures (overloaded_error,
+						// api_error, ...) as `event: error` frames. Surface them as a
+						// structured error instead of silently dropping them — otherwise
+						// the stream just ends and the turn looks truncated/empty.
+						"error" => {
+							let body = serde_json::from_str::<Value>(&message.data)
+								.ok()
+								.and_then(|mut v| v.x_take::<Value>("error").ok())
+								.unwrap_or_else(|| Value::String(message.data.clone()));
+							return Poll::Ready(Some(Err(Error::ChatResponse {
+								model_iden: self.options.model_iden.clone(),
+								body,
+							})));
+						}
 						other => tracing::warn!("UNKNOWN MESSAGE TYPE: {other}"),
 					}
 				}
