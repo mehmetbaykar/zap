@@ -3008,6 +3008,14 @@ pub(super) fn build_client(
     let mut web_config = WebConfig {
         gzip: false,
         default_headers: Some(headers),
+        // Connection must establish promptly; generation streams may pause for
+        // long stretches (reasoning models), but Anthropic pings every ~15s and
+        // OpenAI-compatible relays emit keepalives well inside 300s — a stream
+        // with no reads for 5 minutes is dead, not thinking. Without a read
+        // timeout a silently-stalled HTTP/1.1 proxy stream hangs the turn
+        // forever (HTTP/2 keep-alive doesn't cover h1 relays).
+        connect_timeout: Some(std::time::Duration::from_secs(20)),
+        read_timeout: Some(std::time::Duration::from_secs(300)),
         ..WebConfig::default()
     };
     let proxy_cfg = current_proxy_config();
@@ -3302,6 +3310,30 @@ fn map_genai_error(err: genai::Error) -> OpenAiCompatibleError {
 
         // Everything else (request construction, authentication, capability unsupported, etc.) is grouped as a generic error, to avoid misleading it as a "parse failure"
         other => OpenAiCompatibleError::Other(format!("{other}")),
+    }
+}
+
+/// Convert a mapped BYOP provider error into a structured `AIApiError` instead of
+/// flattening everything to `AIApiError::Other`.
+///
+/// This is what makes retry/resume classification work: `Other` is treated as
+/// retryable, so a deterministic provider 4xx (bad request, invalid model, context
+/// overflow) used to trigger the one-shot resume, fail identically, and only then
+/// surface. Preserving the HTTP status routes 4xx through
+/// `AIApiError::ErrorStatus` → `is_retryable()`'s status logic (4xx non-retryable
+/// except 408/429), while transient stream/parse failures stay retryable.
+fn byop_api_error(context: &'static str, mapped: OpenAiCompatibleError) -> AIApiError {
+    match mapped {
+        OpenAiCompatibleError::Status { status, body } => {
+            let status = http::StatusCode::from_u16(status)
+                .unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR);
+            AIApiError::ErrorStatus(status, format!("{context}: {body}"))
+        }
+        OpenAiCompatibleError::Stream(msg) => AIApiError::Stream {
+            stream_type: "byop",
+            source: anyhow::anyhow!("{context}: {msg}"),
+        },
+        other => AIApiError::Other(anyhow::anyhow!("{context}: {other}")),
     }
 }
 
@@ -3740,9 +3772,7 @@ pub async fn generate_byop_output(
             Err(e) => {
                 let mapped = map_genai_error(e);
                 log::error!("[byop] open stream failed: {mapped:#}");
-                yield Err(Arc::new(AIApiError::Other(anyhow::anyhow!(
-                    "BYOP open stream failed: {mapped}"
-                ))));
+                yield Err(Arc::new(byop_api_error("BYOP open stream failed", mapped)));
                 return;
             }
         };
@@ -3802,6 +3832,12 @@ pub async fn generate_byop_output(
         // stay 0.
         let mut captured_cache_read_tokens: i32 = 0;
         let mut captured_cache_create_tokens: i32 = 0;
+        // Whether the provider reported the generation was cut off by the token
+        // limit (Anthropic stop_reason "max_tokens" / OpenAI finish_reason
+        // "length"). Threaded into the invalid-arguments tool_result below so the
+        // model is told its output was TRUNCATED (and should retry smaller)
+        // rather than schema-invalid.
+        let mut truncated_by_token_limit = false;
 
         while let Some(item) = sdk_stream.next().await {
             let event = match item {
@@ -3837,9 +3873,7 @@ pub async fn generate_byop_output(
                             }
                         }
                     }
-                    yield Err(Arc::new(AIApiError::Other(anyhow::anyhow!(
-                        "BYOP stream error: {mapped}"
-                    ))));
+                    yield Err(Arc::new(byop_api_error("BYOP stream error", mapped)));
                     return;
                 }
             };
@@ -4042,6 +4076,17 @@ pub async fn generate_byop_output(
                 }
                 ChatStreamEvent::End(end) => {
                     end_count += 1;
+                    // Truncation detection (previously the stop reason was captured by
+                    // genai but never inspected here).
+                    if let Some(reason) = end.captured_stop_reason.as_ref() {
+                        if matches!(reason, genai::chat::StopReason::MaxTokens(_)) {
+                            truncated_by_token_limit = true;
+                            log::warn!(
+                                "[byop] generation truncated by token limit (stop_reason={reason:?}) — \
+                                 tool args / text may be incomplete"
+                            );
+                        }
+                    }
                     // genai >= 0.4.0's captured_content contains tool_calls.
                     // Prefer the tool_calls in captured_content (more complete),
                     // otherwise use the tool_bufs accumulated during streaming.
@@ -4480,15 +4525,32 @@ pub async fn generate_byop_output(
                         call.fn_name,
                         call.call_id
                     );
-                    let error_payload = serde_json::json!({
-                        "error": "invalid_arguments",
-                        "detail": e.to_string(),
-                        "tool": call.fn_name,
-                        "received_args": &args_str,
-                        "hint": "Arguments did not match the tool's JSON Schema. \
-                                 Re-emit the tool call with corrected types / required fields, \
-                                 or pick a different tool.",
-                    });
+                    let error_payload = if truncated_by_token_limit {
+                        // Distinguish truncation from schema violations: telling the
+                        // model its args were schema-invalid when they were cut off by
+                        // max_tokens sends it into a fix-the-types loop; telling it the
+                        // output was truncated lets it retry with a smaller payload.
+                        serde_json::json!({
+                            "error": "truncated_output",
+                            "detail": e.to_string(),
+                            "tool": call.fn_name,
+                            "received_args": &args_str,
+                            "hint": "The generation hit the token limit mid tool call, so the \
+                                     arguments are incomplete. Re-emit the tool call with a \
+                                     smaller payload (e.g. shorter file content or fewer items), \
+                                     or split the work into multiple calls.",
+                        })
+                    } else {
+                        serde_json::json!({
+                            "error": "invalid_arguments",
+                            "detail": e.to_string(),
+                            "tool": call.fn_name,
+                            "received_args": &args_str,
+                            "hint": "Arguments did not match the tool's JSON Schema. \
+                                     Re-emit the tool call with corrected types / required fields, \
+                                     or pick a different tool.",
+                        })
+                    };
                     let error_content = serde_json::to_string(&error_payload)
                         .unwrap_or_else(|_| r#"{"error":"invalid_arguments"}"#.to_owned());
                     final_messages.push(make_tool_call_carrier_message(
