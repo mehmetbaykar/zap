@@ -2194,7 +2194,7 @@ pub(crate) fn app_callbacks(is_integration_test: bool) -> warpui::platform::AppC
             );
 
             // Don't show dialog on integration test. Machine can't press buttons.
-            if !is_integration_test && summary.should_display_warning(ctx) {
+            if !is_integration_test && summary.save_unsaved_code_and_should_warn(ctx) {
                 let shown = summary
                     .dialog()
                     .on_confirm(move |ctx| {
@@ -2252,7 +2252,7 @@ pub(crate) fn app_callbacks(is_integration_test: bool) -> warpui::platform::AppC
 
             let summary = UnsavedStateSummary::for_app(ctx);
             // Don't show dialog on integration test. Machine can't press buttons.
-            if !is_integration_test && summary.should_display_warning(ctx) {
+            if !is_integration_test && summary.save_unsaved_code_and_should_warn(ctx) {
                 let shown = summary
                     .dialog()
                     .on_confirm(|ctx| ctx.terminate_app(TerminationMode::ForceTerminate, None))

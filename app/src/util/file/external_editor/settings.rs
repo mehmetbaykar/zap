@@ -123,6 +123,9 @@ define_settings_group!(EditorSettings, settings: [
         toml_path: "code.editor.open_file_layout",
         description: "The layout used when opening files in the editor.",
     },
+    // Zap: superseded by upstream's `code.editor.auto_save` (CodeSettings) as of the
+    // 2026-07-18 weekly merge; kept only so existing configs with this key keep
+    // deserializing. No behavior consumer remains.
     autosave: Autosave {
         type: AutosaveMode,
         default: AutosaveMode::AfterDelay,

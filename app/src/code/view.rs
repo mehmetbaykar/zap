@@ -79,6 +79,7 @@ use super::{
     local_code_editor::{LocalCodeEditorEvent, LocalCodeEditorView, ShowFindReferencesCard},
 };
 
+use crate::settings::CodeSettings;
 use crate::{send_telemetry_from_ctx, TelemetryEvent};
 
 // Read-only rendered Markdown preview for remote files reuses the notebook rich-text
@@ -779,10 +780,14 @@ impl CodeView {
                     ctx,
                 );
             }
-            LocalCodeEditorEvent::FileSaved => {
+            LocalCodeEditorEvent::FileSaved { auto_saved } => {
                 me.sync_active_tab_location(ctx);
                 me.set_title_after_content_update(ctx);
-                CodeView::display_save_success(ctx.window_id(), ctx);
+                // Only surface the success toast for manual (cmd-s) saves;
+                // auto-saves persist silently.
+                if !*auto_saved {
+                    CodeView::display_save_success(ctx.window_id(), ctx);
+                }
                 ctx.notify();
                 // Remote async Save completed: fire the deferred close-tab callback.
                 if let Some(cb) = me.pending_remote_save_callbacks.remove(&emitter.id()) {
@@ -1267,9 +1272,59 @@ impl CodeView {
         Self::has_unsaved_changes(tab, ctx)
     }
 
+    /// Whether the active tab should render the unsaved-changes indicator.
+    /// Auto-save-aware: see [`Self::show_unsaved_indicator`].
+    pub fn active_tab_shows_unsaved_indicator(&self, ctx: &AppContext) -> bool {
+        self.tab_at(self.active_tab_index)
+            .is_some_and(|tab| Self::show_unsaved_indicator(tab, ctx))
+    }
+
     fn has_unsaved_changes(tab: &TabData, ctx: &AppContext) -> bool {
         let local_editor = tab.editor_view.as_ref(ctx);
         local_editor.has_unsaved_changes(ctx)
+    }
+
+    /// Whether to render the transient "unsaved changes" indicator for a tab.
+    ///
+    /// When auto-save is enabled, edits are persisted automatically (debounced
+    /// while typing and on focus loss), so showing the dot would just make it
+    /// flicker on and off as the user types. It is only hidden for changes
+    /// auto-save can actually persist, though: untitled buffers and
+    /// disconnected remotes keep the indicator so unsaveable changes stay
+    /// visible.
+    fn show_unsaved_indicator(tab: &TabData, app: &AppContext) -> bool {
+        if !Self::has_unsaved_changes(tab, app) {
+            return false;
+        }
+        !*CodeSettings::as_ref(app).auto_save || !tab.editor_view.as_ref(app).can_auto_save(app)
+    }
+
+    /// Flush-saves every unsaved tab that has a backing file, marking each save
+    /// as an auto-save so it stays silent (no "File saved." toast). Returns
+    /// `true` if any unsaved tab could NOT be auto-saved (e.g. an untitled
+    /// buffer with no path), so callers can still warn before discarding those.
+    pub fn auto_save_all_unsaved_tabs(&mut self, ctx: &mut ViewContext<Self>) -> bool {
+        let mut unsaveable_changes_remain = false;
+        for index in self.unsaved_indices(ctx) {
+            // A tab can only be auto-saved if it has a backing file *and*, for
+            // remote files, its host is still connected. A disconnected remote
+            // buffer has a `file_id` but `save_local` would fail silently, so
+            // treat it as unsaveable and let the caller warn before discarding
+            // the edits.
+            let can_auto_save = self
+                .tab_at(index)
+                .is_some_and(|tab| tab.editor_view.as_ref(ctx).can_auto_save(ctx));
+            if can_auto_save {
+                if let Some(tab) = self.tab_at(index) {
+                    tab.editor_view
+                        .update(ctx, |editor, _| editor.mark_next_save_as_auto_save());
+                }
+                self.save_local(index, None, ctx);
+            } else {
+                unsaveable_changes_remain = true;
+            }
+        }
+        unsaveable_changes_remain
     }
 
     /// Check whether there are unsaved changes and reset the pane title accordingly.
@@ -1450,6 +1505,44 @@ impl CodeView {
             if summary.should_display_warning(ctx)
                 && ChannelState::channel() != Channel::Integration
             {
+                // With auto-save enabled, closing a file that has a backing path
+                // shouldn't block on the "unsaved changes" dialog just because
+                // the debounce hasn't fired yet — the edits will be persisted
+                // anyway. Flush them and close (mirroring the dialog's "Save
+                // changes" action), marking the saves as auto-saves so they stay
+                // silent. Untitled files (no path) still prompt, since auto-save
+                // can't persist them without a Save As.
+                let tab_has_backing_file = self
+                    .tab_at(index)
+                    .is_some_and(|tab| tab.editor_view.as_ref(ctx).file_id().is_some());
+                if *CodeSettings::as_ref(ctx).auto_save && tab_has_backing_file {
+                    if is_clearing_group {
+                        let unsaved_indices = self.unsaved_indices(ctx);
+                        for &unsaved_index in &unsaved_indices {
+                            if let Some(tab) = self.tab_group.get(unsaved_index) {
+                                if tab.editor_view.as_ref(ctx).file_id().is_some() {
+                                    tab.editor_view.update(ctx, |editor, _| {
+                                        editor.mark_next_save_as_auto_save()
+                                    });
+                                }
+                            }
+                        }
+                        self.clear_tab_group_with_intent(
+                            unsaved_indices,
+                            0,
+                            Some(PendingSaveIntent::Save),
+                            ctx,
+                        );
+                    } else {
+                        if let Some(tab) = self.tab_at(index) {
+                            tab.editor_view
+                                .update(ctx, |editor, _| editor.mark_next_save_as_auto_save());
+                        }
+                        self.remove_tab_with_intent(index, Some(PendingSaveIntent::Save), ctx);
+                    }
+                    return;
+                }
+
                 let handle_save_intent = |intent: PendingSaveIntent| {
                     let handle = ctx.handle().clone();
                     move |ctx: &mut AppContext| {
@@ -2075,7 +2168,7 @@ impl CodeView {
                             index,
                             is_active,
                             tab_handle.is_hovered(),
-                            Self::has_unsaved_changes(tab_data, app),
+                            Self::show_unsaved_indicator(tab_data, app),
                             appearance,
                         ))
                         .with_horizontal_margin(TAB_HORIZONTAL_MARGIN)
@@ -2288,7 +2381,7 @@ impl CodeView {
         let tab_handle = tab.map(|tab| tab.mouse_state_handles.tab_handle.clone());
 
         // Check unsaved changes for the active tab.
-        let has_unsaved = tab.is_some_and(|tab| Self::has_unsaved_changes(tab, app));
+        let has_unsaved = tab.is_some_and(|tab| Self::show_unsaved_indicator(tab, app));
 
         // Build the center title element, with a hover tooltip showing the full path.
         let title_element: Box<dyn Element> = match tab_handle {

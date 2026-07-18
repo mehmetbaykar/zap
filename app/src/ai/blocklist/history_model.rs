@@ -624,6 +624,10 @@ impl BlocklistAIHistoryModel {
         }
         conversation.set_pinned(pinned);
         conversation.write_updated_conversation_state(ctx);
+        ctx.emit(BlocklistAIHistoryEvent::UpdatedConversationMetadata {
+            terminal_surface_id: self.terminal_surface_id_for_conversation(&conversation_id),
+            conversation_id,
+        });
     }
 
     /// Sets a live conversation's server token, updates the reverse index, and
@@ -1941,6 +1945,11 @@ impl BlocklistAIHistoryModel {
 
         self.all_conversations_metadata.remove(&conversation_id);
         self.conversations_by_id.remove(&conversation_id);
+        self.children_by_parent.remove(&conversation_id);
+        self.children_by_parent.retain(|_, child_ids| {
+            child_ids.retain(|child_id| *child_id != conversation_id);
+            !child_ids.is_empty()
+        });
 
         if let Some(terminal_surface_id) = terminal_surface_id {
             if self

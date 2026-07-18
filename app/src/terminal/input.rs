@@ -4852,9 +4852,9 @@ impl Input {
                 let user_message = error.user_message();
                 let path = error.path().to_path_buf();
 
-                report_error!(
-                    anyhow::Error::new(error).context("Failed to write conversation to file"),
-                    extra: { "path" => %path.display() }
+                log::error!(
+                    "Failed to write conversation to file {}: {error}",
+                    path.display()
                 );
                 let window_id = ctx.window_id();
                 ToastStack::handle(ctx).update(ctx, move |toast_stack, ctx| {
@@ -10328,9 +10328,7 @@ impl Input {
         if let Err(e) = self.agent_view_controller.update(ctx, |controller, ctx| {
             controller.try_enter_agent_view(None, AgentViewEntryOrigin::ImageAdded, ctx)
         }) {
-            report_error!(
-                anyhow::Error::new(e).context("Failed to enter agent view when adding images")
-            );
+            log::warn!("Failed to enter agent view when adding images: {e}");
         }
     }
 
@@ -12477,9 +12475,9 @@ impl Input {
                     number_of_bottom_lines_per_grid,
                 )
             } else {
-                report_error!(
-                    "Failed to fetch predicted queries, could not find block with ID",
-                    extra: { "block_id" => ?block.serialized_block.id }
+                log::warn!(
+                    "Failed to fetch predicted queries, could not find block with ID {:?}",
+                    block.serialized_block.id
                 );
                 return;
             }

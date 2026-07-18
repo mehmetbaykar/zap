@@ -493,7 +493,7 @@ impl<S> TerminalManager<S> {
                 );
             }
         } else {
-            report_error!("No event loop handle to join when dropping terminal manager.")
+            log::warn!("No event loop handle to join when dropping terminal manager.");
         }
 
         self.inactive_pty_reads_rx.close();
