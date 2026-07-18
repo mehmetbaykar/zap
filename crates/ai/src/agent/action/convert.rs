@@ -16,7 +16,7 @@ use crate::agent::action_result::{AnyFileContent, FileContext};
 use crate::agent::convert::ToolToAIAgentActionError;
 use crate::agent::FileLocations;
 use crate::diff_validation::{ParsedDiff, V4AHunk};
-use crate::document::AIDocumentId;
+use crate::document::{AIDocumentId, DEFAULT_PLANNING_DOCUMENT_TITLE};
 use crate::skills::SkillReference;
 
 impl From<api::message::tool_call::RunShellCommand> for AIAgentActionType {
@@ -343,9 +343,7 @@ impl From<api::message::tool_call::CreateDocuments> for AIAgentActionType {
                 .map(|doc| DocumentToCreate {
                     content: doc.content,
                     title: if doc.title.is_empty() {
-                        // DO NOT SUBMIT
-                        // crate::ai::ai_document_view::DEFAULT_PLANNING_DOCUMENT_TITLE.to_string()
-                        "".to_string()
+                        DEFAULT_PLANNING_DOCUMENT_TITLE.to_string()
                     } else {
                         doc.title
                     },
