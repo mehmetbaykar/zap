@@ -123,6 +123,8 @@ pub(crate) fn initialize_app(app: &mut App) {
     app.add_singleton_model(|ctx| OrchestrationPillBarModel::new(Default::default(), ctx));
     app.add_singleton_model(|_| CLIAgentSessionsModel::new());
     app.add_singleton_model(AgentConversationsModel::new);
+    app.add_singleton_model(crate::ai::persisted_workspace::PersistedWorkspace::new);
+    app.add_singleton_model(crate::notifications::model::NotificationsModel::new);
     app.add_singleton_model(LLMPreferences::new);
     app.add_singleton_model(|ctx| AITipModel::new_for_agent_tips(ctx));
     app.add_singleton_model(|_| SettingsPaneManager::new());

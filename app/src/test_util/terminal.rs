@@ -144,6 +144,8 @@ pub fn initialize_app_for_terminal_view(app: &mut App) {
     app.add_singleton_model(ByoLlmAuthBannerSessionState::new);
     app.add_singleton_model(|_| GitHubAuthNotifier::new());
     app.add_singleton_model(AgentConversationsModel::new);
+    app.add_singleton_model(crate::ai::persisted_workspace::PersistedWorkspace::new);
+    app.add_singleton_model(crate::notifications::model::NotificationsModel::new);
 
     app.update(experiments::init);
     AltScreenReporting::register(app);
