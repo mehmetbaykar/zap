@@ -775,6 +775,21 @@ impl FileTreeView {
                 };
                 self.scroll_to_file(&repository_root, &file_std, ctx);
             }
+            ActiveFileEvent::LoadFailed { location } => {
+                // Zap: a remote file failed to open — its tree entry is likely
+                // stale (deleted on the remote host). Re-list the parent
+                // directory so ghost entries are pruned.
+                let BufferLocation::Remote(remote) = location else {
+                    return;
+                };
+                let Some(parent) = remote.path.parent() else {
+                    return;
+                };
+                let Some(root) = self.find_deepest_root_for_file(&remote.path) else {
+                    return;
+                };
+                self.force_reload_remote_directory(&root, &parent, ctx);
+            }
         }
     }
 
@@ -1497,6 +1512,47 @@ impl FileTreeView {
     ) {
     }
 
+    /// Forces a re-fetch of a remote directory's children, bypassing the
+    /// `loaded()` short-circuit in `ensure_loaded_path`.
+    ///
+    /// Remote trees only receive best-effort incremental pushes (and plain
+    /// non-git directories get none at all), so `loaded()` does not guarantee
+    /// freshness. Called ONLY from user-initiated paths — the expand toggle
+    /// and the failed-remote-open recovery — never from the generic
+    /// expanded-folders refresh loop in `update_directory_contents`, which
+    /// fires on unrelated local-repo/cwd events and would flood the remote
+    /// host with RPCs.
+    #[cfg(feature = "local_fs")]
+    fn force_reload_remote_directory(
+        &mut self,
+        root_path: &StandardizedPath,
+        target_path: &StandardizedPath,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let Some(root_dir) = self.root_directories.get(root_path) else {
+            return;
+        };
+        if !root_dir.is_remote() {
+            return;
+        }
+        let Some(target_item) = root_dir.entry.get(target_path).cloned() else {
+            return;
+        };
+        let FileTreeEntryState::Directory(_) = target_item else {
+            return;
+        };
+        self.load_remote_directory(root_path, &target_item, ctx);
+    }
+
+    #[cfg(not(feature = "local_fs"))]
+    fn force_reload_remote_directory(
+        &mut self,
+        _root_path: &StandardizedPath,
+        _target_path: &StandardizedPath,
+        _ctx: &mut ViewContext<Self>,
+    ) {
+    }
+
     /// Toggles the expansion state of a folder
     pub fn toggle_folder_expansion(
         &mut self,
@@ -1517,7 +1573,14 @@ impl FileTreeView {
                     .insert(folder_path.clone());
             } else {
                 root_dir.expanded_folders.insert(folder_path.clone());
-                self.ensure_loaded_path(root_path, folder_path, ctx);
+                let is_remote_root = root_dir.is_remote();
+                if is_remote_root {
+                    // Remote trees may be stale (see force_reload_remote_directory);
+                    // make collapse → expand act as a user-driven refresh.
+                    self.force_reload_remote_directory(root_path, folder_path, ctx);
+                } else {
+                    self.ensure_loaded_path(root_path, folder_path, ctx);
+                }
 
                 if let Some(collapsed) = self.explicitly_collapsed.get_mut(root_path) {
                     collapsed.remove(folder_path);

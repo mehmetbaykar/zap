@@ -164,6 +164,18 @@ impl PaneContent for CodePane {
                 CodeViewEvent::RunTabConfigSkill { path } => {
                     ctx.emit(crate::pane_group::Event::RunTabConfigSkill { path: path.clone() });
                 }
+                CodeViewEvent::FileLoadFailed { location } => {
+                    // Zap: only remote failures feed the file-tree staleness
+                    // recovery — local trees are watcher-backed and self-correct.
+                    if matches!(
+                        location,
+                        crate::code::buffer_location::BufferLocation::Remote(_)
+                    ) {
+                        pane_group.active_file_model().update(ctx, |model, ctx| {
+                            model.active_file_load_failed(location.clone(), ctx);
+                        });
+                    }
+                }
             },
         );
 

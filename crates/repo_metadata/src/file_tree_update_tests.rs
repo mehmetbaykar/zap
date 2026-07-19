@@ -316,6 +316,7 @@ fn apply_complete_update_adds_files_and_directories() {
             ],
         }],
         standing_results_delta: Default::default(),
+        replace_children_of: None,
     };
 
     tree.apply_repo_metadata_update(&update);
@@ -363,6 +364,7 @@ fn apply_update_with_removals_and_additions() {
             })],
         }],
         standing_results_delta: Default::default(),
+        replace_children_of: None,
     };
 
     tree.apply_repo_metadata_update(&update);
@@ -394,6 +396,7 @@ fn apply_incomplete_update_missing_children_subtree() {
             })],
         }],
         standing_results_delta: Default::default(),
+        replace_children_of: None,
     };
 
     tree.apply_repo_metadata_update(&update);
@@ -423,6 +426,7 @@ fn apply_incomplete_update_missing_children_subtree() {
             })],
         }],
         standing_results_delta: Default::default(),
+        replace_children_of: None,
     };
 
     tree.apply_repo_metadata_update(&followup);
@@ -451,6 +455,7 @@ fn apply_incomplete_update_missing_parent_from_undelivered_page() {
             })],
         }],
         standing_results_delta: Default::default(),
+        replace_children_of: None,
     };
 
     tree.apply_repo_metadata_update(&update);
@@ -611,4 +616,110 @@ fn lazy_load_filters_mutations_for_unloaded_parents() {
         &update.update_entries[0].subtree_metadata[0],
         RepoNodeMetadata::File(f) if f.path == std_path("/repo/src/main.rs")
     ));
+}
+
+/// Regression: a `LoadRepoMetadataDirectory` re-list is an authoritative full
+/// listing of one directory. With `replace_children_of` set, children that
+/// exist locally but are absent from the listing (deleted on the remote host)
+/// must be pruned — the apply path is otherwise merge-only and deleted remote
+/// files would ghost in the client tree forever.
+#[test]
+fn apply_update_with_replace_children_of_prunes_deleted_entries() {
+    let initial = dir(
+        "/repo",
+        vec![dir(
+            "/repo/src",
+            vec![file("/repo/src/kept.rs"), file("/repo/src/deleted.rs")],
+        )],
+    );
+    let mut tree = build_tree_from_entry(initial);
+
+    let update = RepoMetadataUpdate {
+        repo_path: std_path("/repo"),
+        remove_entries: vec![],
+        update_entries: vec![FileTreeEntryUpdate {
+            parent_path_to_replace: std_path("/repo/src"),
+            subtree_metadata: vec![RepoNodeMetadata::File(FileNodeMetadata {
+                path: std_path("/repo/src/kept.rs"),
+                extension: Some("rs".to_string()),
+                ignored: false,
+            })],
+        }],
+        standing_results_delta: Default::default(),
+        replace_children_of: Some(std_path("/repo/src")),
+    };
+
+    tree.apply_repo_metadata_update(&update);
+
+    assert!(tree.get(&std_path("/repo/src/kept.rs")).is_some());
+    assert!(
+        tree.get(&std_path("/repo/src/deleted.rs")).is_none(),
+        "child absent from an authoritative re-list must be pruned"
+    );
+}
+
+/// Without `replace_children_of`, partial updates stay merge-semantics:
+/// entries not mentioned must survive.
+#[test]
+fn apply_update_without_replace_children_of_keeps_unmentioned_entries() {
+    let initial = dir(
+        "/repo",
+        vec![dir(
+            "/repo/src",
+            vec![file("/repo/src/kept.rs"), file("/repo/src/other.rs")],
+        )],
+    );
+    let mut tree = build_tree_from_entry(initial);
+
+    let update = RepoMetadataUpdate {
+        repo_path: std_path("/repo"),
+        remove_entries: vec![],
+        update_entries: vec![FileTreeEntryUpdate {
+            parent_path_to_replace: std_path("/repo/src"),
+            subtree_metadata: vec![RepoNodeMetadata::File(FileNodeMetadata {
+                path: std_path("/repo/src/kept.rs"),
+                extension: Some("rs".to_string()),
+                ignored: false,
+            })],
+        }],
+        standing_results_delta: Default::default(),
+        replace_children_of: None,
+    };
+
+    tree.apply_repo_metadata_update(&update);
+
+    assert!(
+        tree.get(&std_path("/repo/src/other.rs")).is_some(),
+        "partial (merge) updates must not remove unmentioned entries"
+    );
+}
+
+/// An authoritative re-list of an emptied directory (all children deleted on
+/// the remote) must clear every child.
+#[test]
+fn apply_update_with_replace_children_of_empties_directory() {
+    let initial = dir(
+        "/repo",
+        vec![dir("/repo/src", vec![file("/repo/src/gone.rs")])],
+    );
+    let mut tree = build_tree_from_entry(initial);
+
+    let update = RepoMetadataUpdate {
+        repo_path: std_path("/repo"),
+        remove_entries: vec![],
+        update_entries: vec![],
+        standing_results_delta: Default::default(),
+        replace_children_of: Some(std_path("/repo/src")),
+    };
+
+    tree.apply_repo_metadata_update(&update);
+
+    assert!(
+        tree.get(&std_path("/repo/src/gone.rs")).is_none(),
+        "emptied directory re-list must remove all previous children"
+    );
+    assert!(
+        tree.get(&std_path("/repo/src")).is_some(),
+        "the re-listed directory itself must survive"
+    );
 }

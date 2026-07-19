@@ -207,6 +207,30 @@ impl FileTreeEntry {
             self.remove(path);
         }
 
+        // 1b. Zap: an authoritative directory re-list prunes stale children —
+        // this RPC carries no `remove_entries`, and without pruning, entries
+        // deleted on the remote host would linger in the client tree forever
+        // (the subtree patches below only add/update, never remove).
+        if let Some(dir_path) = &update.replace_children_of {
+            let incoming: std::collections::HashSet<&StandardizedPath> = update
+                .update_entries
+                .iter()
+                .flat_map(|entry_update| entry_update.subtree_metadata.iter())
+                .map(|node| match node {
+                    crate::file_tree_update::RepoNodeMetadata::Directory(dir) => &dir.path,
+                    crate::file_tree_update::RepoNodeMetadata::File(file) => &file.path,
+                })
+                .collect();
+            let stale: Vec<StandardizedPath> = self
+                .child_paths(dir_path)
+                .filter(|child| !incoming.contains(child.as_ref()))
+                .map(|child| child.as_ref().clone())
+                .collect();
+            for path in stale {
+                self.remove(&path);
+            }
+        }
+
         // 2. Process subtree patches
         for entry_update in &update.update_entries {
             self.apply_entry_update(entry_update);

@@ -10,6 +10,9 @@ use super::buffer_location::BufferLocation;
 pub enum ActiveFileEvent {
     /// A new file became focused.
     ActiveFileChanged { location: BufferLocation },
+    /// Zap: a file failed to load (it no longer exists at its recorded
+    /// location). The file tree uses this to refresh stale remote entries.
+    LoadFailed { location: BufferLocation },
 }
 
 /// Model that tracks the currently focused file.
@@ -41,5 +44,18 @@ impl ActiveFileModel {
             ctx.emit(ActiveFileEvent::ActiveFileChanged { location });
             ctx.notify();
         }
+    }
+
+    /// Zap: report that a file failed to load at its recorded location.
+    pub fn active_file_load_failed(
+        &mut self,
+        location: BufferLocation,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        if self.active_file.as_ref() == Some(&location) {
+            self.active_file = None;
+        }
+        ctx.emit(ActiveFileEvent::LoadFailed { location });
+        ctx.notify();
     }
 }

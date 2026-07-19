@@ -1454,6 +1454,7 @@ impl LocalRepoMetadataModel {
             remove_entries,
             update_entries,
             standing_results_delta: StandingQueryResultsDelta::default(),
+            replace_children_of: None,
         })
     }
 

@@ -209,6 +209,11 @@ pub enum CodeViewEvent {
     RunTabConfigSkill {
         path: PathBuf,
     },
+    /// Zap: a tab's backing file failed to load (e.g. it no longer exists at
+    /// its recorded location). Lets the file tree refresh stale remote entries.
+    FileLoadFailed {
+        location: BufferLocation,
+    },
 }
 
 #[derive(Default, Clone)]
@@ -764,6 +769,11 @@ impl CodeView {
                     .iter()
                     .position(|tab| tab.editor_view == emitter)
                 {
+                    // Zap: tell listeners (the file tree) which location failed —
+                    // a missing remote file means its tree entry is stale.
+                    if let Some(location) = me.tab_group[failed_index].location.clone() {
+                        ctx.emit(CodeViewEvent::FileLoadFailed { location });
+                    }
                     me.remove_tab_data_index(failed_index, ctx);
                 }
             }

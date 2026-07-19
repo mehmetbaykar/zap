@@ -25,6 +25,7 @@ fn snapshot_and_incremental_update_maintain_remote_standing_results() {
                 upserted_project_skills: vec![skill.clone()],
                 ..Default::default()
             },
+            replace_children_of: None,
         };
         model.update(&mut app, |model, ctx| {
             model.insert_from_snapshot(host.clone(), &snapshot, ctx);
@@ -39,6 +40,7 @@ fn snapshot_and_incremental_update_maintain_remote_standing_results() {
                 upserted_project_rules: vec![rule.clone()],
                 ..Default::default()
             },
+            replace_children_of: None,
         };
         model.update(&mut app, |model, ctx| {
             model.apply_incremental_update(&host, &incremental, ctx);

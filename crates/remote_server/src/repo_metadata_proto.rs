@@ -206,6 +206,8 @@ pub fn proto_to_repo_metadata_update(
             .as_ref()
             .map(proto_to_standing_results_delta)
             .unwrap_or_default(),
+        // Watcher pushes are partial deltas with explicit removals — never prune.
+        replace_children_of: None,
     })
 }
 
@@ -267,6 +269,8 @@ pub fn proto_snapshot_to_update(
             .as_ref()
             .map(proto_to_standing_results_delta)
             .unwrap_or_default(),
+        // Full snapshots replace the tree wholesale downstream — no per-directory prune.
+        replace_children_of: None,
     })
 }
 
@@ -293,6 +297,7 @@ pub fn proto_load_repo_metadata_directory_response_to_update(
     resp: &proto::LoadRepoMetadataDirectoryResponse,
 ) -> Option<RepoMetadataUpdate> {
     let repo_path = StandardizedPath::try_new(&resp.repo_path).ok()?;
+    let dir_path = StandardizedPath::try_new(&resp.dir_path).ok()?;
 
     let update_entries: Vec<FileTreeEntryUpdate> = resp
         .entries
@@ -305,6 +310,9 @@ pub fn proto_load_repo_metadata_directory_response_to_update(
         remove_entries: Vec::new(),
         update_entries,
         standing_results_delta: StandingQueryResultsDelta::default(),
+        // This response is the authoritative full listing of `dir_path`'s
+        // children — mark it so the apply path prunes deleted entries.
+        replace_children_of: Some(dir_path),
     })
 }
 

@@ -31,6 +31,7 @@ fn incremental_update_round_trip_preserves_standing_results_delta() {
         remove_entries: Vec::new(),
         update_entries: Vec::new(),
         standing_results_delta: standing_delta(),
+        replace_children_of: None,
     };
 
     let proto_update = proto::RepoMetadataUpdatePush::from(&update);

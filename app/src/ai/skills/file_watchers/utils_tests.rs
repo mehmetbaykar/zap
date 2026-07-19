@@ -802,6 +802,7 @@ fn find_skill_files_in_tree_returns_remote_skill_paths_for_remote_repos() {
                 upserted_project_skills: vec![StandingQueryContent::file(skill_path.clone())],
                 ..Default::default()
             },
+            replace_children_of: None,
         };
 
         model_handle.update(&mut app, |model, ctx| {

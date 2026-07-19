@@ -34,6 +34,14 @@ pub struct RepoMetadataUpdate {
     pub update_entries: Vec<FileTreeEntryUpdate>,
     /// Standing query changes synchronized with this tree change.
     pub standing_results_delta: StandingQueryResultsDelta,
+    /// Zap: when set, this update is an authoritative full listing of the
+    /// directory's immediate children (a `LoadRepoMetadataDirectory` re-list).
+    /// Consumers must prune existing children of that directory that are
+    /// absent from `update_entries` — the apply path is otherwise merge-only,
+    /// so files deleted on a remote host would never disappear from the
+    /// client tree. `None` for ordinary incremental watcher pushes, which are
+    /// partial deltas carrying explicit `remove_entries` instead.
+    pub replace_children_of: Option<StandardizedPath>,
 }
 
 /// Mirrors `FileTreeEntry` proto.
