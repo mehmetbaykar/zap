@@ -2,11 +2,13 @@ use std::path::PathBuf;
 
 use warpui::elements::{Border, ChildView, Container, Hoverable, MouseStateHandle, Text};
 use warpui::platform::Cursor;
+use warpui::text_layout::ClipConfig;
 use warpui::ui_components::components::UiComponentStyles;
 use warpui::{
     AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
 
+use crate::ai::persisted_workspace::{PersistedWorkspace, PersistedWorkspaceEvent};
 use crate::appearance::Appearance;
 use crate::tab_configs::PickerStyle;
 use crate::view_components::{DropdownItem, FilterableDropdown};
@@ -55,9 +57,15 @@ impl RepoPicker {
         style: Option<PickerStyle>,
         ctx: &mut ViewContext<Self>,
     ) -> Self {
-        // PersistedWorkspace is decommissioned, so we no longer subscribe to the "WorkspaceAdded"
-        // event. The dropdown list is always empty, leaving only the bottom `+ Add new repo...`
-        // fallback button.
+        // Subscribe to PersistedWorkspace so the list refreshes when the user
+        // adds a repo via the folder picker.
+        ctx.subscribe_to_model(&PersistedWorkspace::handle(ctx), |me, _, event, ctx| {
+            if let PersistedWorkspaceEvent::WorkspaceAdded { path } = event {
+                let path_str = path.to_string_lossy().to_string();
+                me.refresh_items(Some(&path_str), ctx);
+            }
+        });
+
         let width = style.as_ref().map_or(DEFAULT_DROPDOWN_WIDTH, |s| s.width);
         let bg = style.and_then(|s| s.background);
         let dropdown = ctx.add_typed_action_view(|ctx| {
@@ -135,10 +143,29 @@ impl RepoPicker {
     }
 
     fn refresh_items(&mut self, select_path: Option<&str>, ctx: &mut ViewContext<Self>) {
-        // PersistedWorkspace is decommissioned, so there is no longer a "previously opened git
-        // repository" candidate source; the dropdown list is always empty, with `+ Add new repo...`
-        // existing as a sticky footer.
-        let items: Vec<DropdownItem<RepoPickerAction>> = Vec::new();
+        // workspaces() already returns entries sorted by most-recently-touched.
+        // "+ Add new repo..." is a sticky footer (not a list item) so it is
+        // not included here.
+        //
+        // Each item's `display_text` is the full user-friendly form
+        // (`~`-prefixed). The dropdown clips it at render width via
+        // `ClipConfig::start()`, so distinct paths with shared trailing
+        // segments stay readable without character-count approximation.
+        // The action carries the *raw* absolute path so consumers reading
+        // `RepoPickerEvent::Selected` keep getting a real filesystem path.
+        let home = dirs::home_dir().map(|p| p.display().to_string());
+        let items: Vec<DropdownItem<RepoPickerAction>> = PersistedWorkspace::as_ref(ctx)
+            .workspaces()
+            .filter(|ws| ws.path.exists())
+            .map(|ws| {
+                let path_str = ws.path.to_string_lossy().into_owned();
+                let display =
+                    warp_util::path::user_friendly_path(&path_str, home.as_deref()).into_owned();
+                DropdownItem::new(display, RepoPickerAction::Select(path_str.clone()))
+                    .with_clip_config(ClipConfig::start())
+                    .with_tooltip(path_str)
+            })
+            .collect();
 
         let raw_to_select = select_path
             .or(self.selected.as_deref())

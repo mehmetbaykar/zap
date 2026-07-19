@@ -6793,14 +6793,28 @@ impl CodeReviewView {
     /// (e.g. a worktree branch whose tracking was auto-set to origin/master).
     fn pr_menu_item(&self, app: &AppContext) -> MenuItem<CodeReviewAction> {
         let diff_state = self.diff_state_model.as_ref(app);
-        let is_on_main = diff_state.is_on_main_branch(app);
-        let has_upstream = diff_state.upstream_ref(app).is_some();
-        let upstream_differs_from_main = diff_state.upstream_differs_from_main(app);
-        MenuItemFields::new(crate::t!("code-review-create-pr"))
-            .with_icon(Icon::Github)
-            .with_on_select_action(CodeReviewAction::OpenCreatePrDialog)
-            .with_disabled(is_on_main || !has_upstream || !upstream_differs_from_main)
-            .into_item()
+        let is_pr_info_refreshing = self.is_pr_info_refreshing(app);
+        if let Some(pr_info) = self.pr_info(app) {
+            MenuItemFields::new(format!("PR #{}", pr_info.number))
+                .with_icon(Icon::Github)
+                .with_on_select_action(CodeReviewAction::ViewPr(pr_info.url))
+                .with_disabled(is_pr_info_refreshing)
+                .into_item()
+        } else {
+            let is_on_main = diff_state.is_on_main_branch(app);
+            let has_upstream = diff_state.upstream_ref(app).is_some();
+            let upstream_differs_from_main = diff_state.upstream_differs_from_main(app);
+            MenuItemFields::new(crate::t!("code-review-create-pr"))
+                .with_icon(Icon::Github)
+                .with_on_select_action(CodeReviewAction::OpenCreatePrDialog)
+                .with_disabled(
+                    is_pr_info_refreshing
+                        || is_on_main
+                        || !has_upstream
+                        || !upstream_differs_from_main,
+                )
+                .into_item()
+        }
     }
 
     /// Items for the git operations dropdown (chevron button). All three

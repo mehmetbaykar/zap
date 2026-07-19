@@ -3368,12 +3368,20 @@ fn resolve_icon_with_status_variant(
     }
 }
 
-fn has_unread_activity(_typed: &TypedPane<'_>, _app: &AppContext) -> bool {
-    false
+fn has_unread_activity(typed: &TypedPane<'_>, app: &AppContext) -> bool {
+    let TypedPane::Terminal(terminal_pane) = typed else {
+        return false;
+    };
+    let terminal_view = terminal_pane.terminal_view(app);
+    has_unread_activity_for_terminal_view(terminal_view.as_ref(app).id(), app)
 }
 
-fn has_unread_activity_for_terminal_view(_terminal_view_id: EntityId, _app: &AppContext) -> bool {
-    false
+fn has_unread_activity_for_terminal_view(terminal_view_id: EntityId, app: &AppContext) -> bool {
+    // Zap: the fork's NotificationsModel is the de-clouded successor of
+    // upstream's AgentNotificationsModel — same unread-per-terminal query.
+    crate::notifications::model::NotificationsModel::as_ref(app)
+        .notifications()
+        .has_unread_for_terminal_view(terminal_view_id)
 }
 
 const INDICATOR_DOT_SIZE: f32 = 8.;
