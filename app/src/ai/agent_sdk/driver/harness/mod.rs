@@ -28,10 +28,12 @@ use super::{
 };
 
 mod claude_code;
+mod codex;
 mod gemini;
 mod json_utils;
 
 pub(crate) use claude_code::ClaudeHarness;
+use codex::CodexHarness;
 use gemini::GeminiHarness;
 
 /// Trait for third-party agent harnesses that execute prompts via their own CLIs.
@@ -120,9 +122,7 @@ pub(crate) fn harness_kind(harness: Harness) -> Result<HarnessKind, AgentDriverE
         Harness::Claude => Ok(HarnessKind::ThirdParty(Box::new(ClaudeHarness))),
         Harness::OpenCode => Ok(HarnessKind::Unsupported(Harness::OpenCode)),
         Harness::Gemini => Ok(HarnessKind::ThirdParty(Box::new(GeminiHarness))),
-        // Codex CLI support for the standalone agent driver (upstream's `codex.rs`
-        // harness) was not ported in this merge; treat it like `OpenCode` until it is.
-        Harness::Codex => Ok(HarnessKind::Unsupported(Harness::Codex)),
+        Harness::Codex => Ok(HarnessKind::ThirdParty(Box::new(CodexHarness))),
         Harness::Unknown => Err(AgentDriverError::InvalidRuntimeState),
     }
 }

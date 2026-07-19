@@ -1,5 +1,8 @@
-use super::validate_cli_installed;
+use warp_cli::agent::Harness;
+
+use super::{harness_kind, validate_cli_installed, HarnessKind};
 use crate::ai::agent_sdk::driver::AgentDriverError;
+use crate::terminal::CLIAgent;
 
 fn assert_harness_setup_failed(err: &AgentDriverError) -> (&str, &str) {
     match err {
@@ -30,4 +33,17 @@ fn validate_cli_installed_includes_docs_url_in_error() {
     let (_, reason) = assert_harness_setup_failed(&err);
     assert!(reason.contains(url));
     assert!(reason.contains("Install it first"));
+}
+
+#[test]
+fn harness_kind_dispatches_codex_as_third_party() {
+    let kind = harness_kind(Harness::Codex).expect("codex should resolve");
+    match kind {
+        HarnessKind::ThirdParty(harness) => {
+            assert_eq!(harness.harness(), Harness::Codex);
+            assert_eq!(harness.cli_agent(), CLIAgent::Codex);
+        }
+        HarnessKind::Oz => panic!("codex resolved to Oz"),
+        HarnessKind::Unsupported(h) => panic!("codex still unsupported: {h:?}"),
+    }
 }
