@@ -15,7 +15,7 @@ Top-level directories:
 | Directory | Purpose |
 |------|------|
 | `app/` | The main binary crate (`warp`); wires up all subsystems, the UI, database migrations, and the platform glue layer |
-| `crates/` | 66 workspace members, library crates split by responsibility |
+| `crates/` | 68 workspace members (+ `app`), library crates split by responsibility |
 | `command-signatures-v2/` | A standalone subproject (`--exclude`d when running nextest) |
 | `script/` | Cross-platform bootstrap, build, and presubmit scripts |
 | `resources/` | Runtime resources such as fonts, icons, shell integration scripts, and shaders |
@@ -63,7 +63,7 @@ Key architectural patterns (see `WARP.md` for details):
 
 ## 3. `crates/` at a glance
 
-The table below lists all 66 crates grouped by topic. Each row gives only a **one-sentence responsibility**; for implementation details, open the corresponding `crates/<name>/src/lib.rs` directly (many crates have `//!` module docs at the top of `lib.rs`).
+The table below lists the crates grouped by topic. Each row gives only a **one-sentence responsibility**; for implementation details, open the corresponding `crates/<name>/src/lib.rs` directly (many crates have `//!` module docs at the top of `lib.rs`).
 
 ### 3.1 UI framework / view layer
 
