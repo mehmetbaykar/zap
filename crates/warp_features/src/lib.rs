@@ -485,6 +485,14 @@ pub enum FeatureFlag {
     /// Enables loading conversations in the Agent Management View.
     InteractiveConversationManagementView,
 
+    /// Agent Management View: the dashboard listing local interactive conversations and ambient
+    /// agent runs, with filtering and a details side panel.
+    AgentManagementView,
+
+    /// Agent Management Details View - enables the details panel on card click within the Agent
+    /// Management View.
+    AgentManagementDetailsView,
+
     /// Enables agent tips displayed below the warping indicator in Agent Mode.
     AgentTips,
 

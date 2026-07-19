@@ -6,6 +6,7 @@ pub(crate) mod active_agent_views_model;
 pub(crate) mod agent;
 pub(crate) mod agent_conversations_model;
 pub(crate) mod agent_events;
+pub(crate) mod agent_management;
 pub(crate) mod agent_providers;
 pub(crate) mod agent_tips;
 pub(crate) mod ai_document_view;
@@ -24,6 +25,7 @@ pub(crate) mod byop_readiness;
 #[cfg(any(feature = "local_fs", not(target_family = "wasm")))]
 pub(crate) mod codebase_auto_indexing;
 pub mod control_code_parser;
+pub(crate) mod conversation_details_panel;
 #[cfg(feature = "local_fs")]
 pub(crate) mod conversation_export;
 pub(crate) mod conversation_navigation;
@@ -70,6 +72,8 @@ pub fn init(app: &mut AppContext) {
     blocklist::suggested_agent_mode_workflow_modal::init(app);
     blocklist::suggested_rule_modal::init(app);
     ai_document_view::init(app);
+    conversation_details_panel::init(app);
+    agent_management::init(app);
 }
 
 pub use request_usage_model::*;

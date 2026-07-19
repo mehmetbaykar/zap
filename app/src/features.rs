@@ -271,6 +271,10 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::V4AFileDiffs,
         #[cfg(feature = "interactive_conversation_management_view")]
         FeatureFlag::InteractiveConversationManagementView,
+        #[cfg(feature = "agent_management_view")]
+        FeatureFlag::AgentManagementView,
+        #[cfg(feature = "agent_management_details_view")]
+        FeatureFlag::AgentManagementDetailsView,
         #[cfg(feature = "agent_tips")]
         FeatureFlag::AgentTips,
         #[cfg(feature = "agent_mode_computer_use")]

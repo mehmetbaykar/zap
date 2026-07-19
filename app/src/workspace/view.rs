@@ -31,6 +31,8 @@ use crate::workspace::cross_window_tab_drag::{
 pub(crate) use onboarding::OnboardingTutorial;
 
 use crate::ai::agent_conversations_model::AgentConversationsModel;
+use crate::ai::agent_management::telemetry::AgentManagementTelemetryEvent;
+use crate::ai::agent_management::view::AgentManagementView;
 use crate::ai::agent_conversations_model::ConversationOrTask;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::blocklist::agent_view::agent_input_footer::editor::AgentToolbarEditorMode;
@@ -1036,6 +1038,9 @@ pub struct Workspace {
     notification_mailbox_view: Option<ViewHandle<NotificationMailboxView>>,
     /// Notification toast stack (floating in the bottom-right). Same gate as above on `HOANotifications`.
     notification_toast_stack: Option<ViewHandle<AgentNotificationToastStack>>,
+    /// Agent management dashboard (full-view list of local conversations + ambient agent runs).
+    /// Only instantiated when the `AgentManagementView` feature flag is enabled.
+    agent_management_view: Option<ViewHandle<AgentManagementView>>,
     /// We need to render some dynamic keybindings for our tooltips. These cannot be looked up in the
     /// render method, so look them up when the view is constructed and cache them here. Note that they
     /// need to be kept in sync as the keybindings change.
@@ -2955,6 +2960,15 @@ impl Workspace {
             None
         };
 
+        // Agent management dashboard. Zap does not persist/restore its filters across app
+        // restarts (see `AgentManagementView::new`'s doc comment), so it is always constructed
+        // with default filters.
+        let agent_management_view = if FeatureFlag::AgentManagementView.is_enabled() {
+            Some(ctx.add_typed_action_view(|ctx| AgentManagementView::new(None, ctx)))
+        } else {
+            None
+        };
+
         // Subscribe to notification model events so the unread red dot on the title-bar Inbox button refreshes promptly.
         if FeatureFlag::HOANotifications.is_enabled() {
             ctx.subscribe_to_model(&NotificationsModel::handle(ctx), |_, _, _event, ctx| {
@@ -3157,6 +3171,7 @@ impl Workspace {
             update_toast_stack,
             notification_mailbox_view,
             notification_toast_stack,
+            agent_management_view,
             cached_keybindings,
             prompt_editor_modal,
             agent_toolbar_editor_modal,
@@ -8909,8 +8924,36 @@ impl Workspace {
         self.vertical_tabs_panel.show_settings_popup = false;
     }
 
-    /// Stub: agent management view removed (BYOP).
-    fn set_is_agent_management_view_open(&mut self, _is_open: bool, _ctx: &mut ViewContext<Self>) {}
+    /// Sets the visibility state of the agent management view
+    /// and updates the AgentConversationsModel to reflect the new state.
+    fn set_is_agent_management_view_open(&mut self, is_open: bool, ctx: &mut ViewContext<Self>) {
+        let was_open = self.current_workspace_state.is_agent_management_view_open;
+        if was_open == is_open {
+            return;
+        }
+        self.current_workspace_state.is_agent_management_view_open = is_open;
+
+        if let Some(agent_management_view) = self.agent_management_view.clone() {
+            let window_id = self.window_id;
+            let view_id = agent_management_view.id();
+            AgentConversationsModel::handle(ctx).update(ctx, |model, ctx| {
+                if is_open {
+                    model.register_view_open(window_id, view_id, ctx);
+                } else {
+                    model.register_view_closed(window_id, view_id, ctx);
+                }
+            });
+        }
+
+        // Notify panels about the agent management view state change so they can
+        // update their top border visibility accordingly.
+        self.left_panel_view.update(ctx, |panel, ctx| {
+            panel.set_agent_management_view_open(is_open, ctx);
+        });
+        self.right_panel_view.update(ctx, |panel, ctx| {
+            panel.set_agent_management_view_open(is_open, ctx);
+        });
+    }
 
     fn toggle_left_panel(&mut self, ctx: &mut ViewContext<Self>) {
         let active_pane_group = self.active_tab_pane_group().clone();
@@ -18374,10 +18417,35 @@ impl Workspace {
 
     fn render_agent_management_view_button(
         &self,
-        _appearance: &Appearance,
-        _ctx: &AppContext,
+        appearance: &Appearance,
+        ctx: &AppContext,
     ) -> Box<dyn Element> {
-        warpui::elements::Empty::new().finish()
+        let is_active = self.current_workspace_state.is_agent_management_view_open;
+
+        SavePosition::new(
+            Container::new(
+                Align::new(
+                    self.render_tab_bar_icon_button(
+                        appearance,
+                        icons::Icon::Grid,
+                        &self.mouse_states.agent_management_view_button,
+                        WorkspaceAction::ToggleAgentManagementView,
+                        crate::t!("workspace-agent-management-panel-tooltip"),
+                        keybinding_name_to_display_string(
+                            "workspace:toggle_agent_management_view",
+                            ctx,
+                        ),
+                        is_active,
+                        false,
+                    )
+                    .finish(),
+                )
+                .finish(),
+            )
+            .finish(),
+            "workspace:toggle_agent_management_view",
+        )
+        .finish()
     }
 
     fn render_left_toggle_button(
@@ -23405,6 +23473,40 @@ impl TypedActionView for Workspace {
             OpenConversationListView => {
                 if FeatureFlag::AgentViewConversationListView.is_enabled() {
                     self.open_left_panel_view(&LeftPanelAction::ConversationListView, ctx);
+                }
+            }
+            ToggleAgentManagementView => {
+                if AISettings::as_ref(ctx).is_any_ai_enabled(ctx)
+                    && FeatureFlag::AgentManagementView.is_enabled()
+                {
+                    let is_open = !self.current_workspace_state.is_agent_management_view_open;
+                    self.set_is_agent_management_view_open(is_open, ctx);
+
+                    send_telemetry_from_ctx!(
+                        AgentManagementTelemetryEvent::ViewToggled { is_open },
+                        ctx
+                    );
+
+                    if is_open {
+                        if let Some(agent_management_view) = self.agent_management_view.clone() {
+                            ctx.focus(&agent_management_view);
+                        }
+                    } else {
+                        self.focus_active_tab(ctx);
+                    }
+
+                    ctx.notify();
+                }
+            }
+            OpenAgentManagementView => {
+                if AISettings::as_ref(ctx).is_any_ai_enabled(ctx)
+                    && FeatureFlag::AgentManagementView.is_enabled()
+                {
+                    self.set_is_agent_management_view_open(true, ctx);
+                    if let Some(agent_management_view) = self.agent_management_view.clone() {
+                        ctx.focus(&agent_management_view);
+                    }
+                    ctx.notify();
                 }
             }
             ShowRewindConfirmationDialog {

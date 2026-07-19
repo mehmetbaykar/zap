@@ -660,6 +660,8 @@ pub enum WorkspaceAction {
     OpenGlobalSearch,
     ToggleConversationListView,
     OpenConversationListView,
+    ToggleAgentManagementView,
+    OpenAgentManagementView,
     /// Reset the AWS Bedrock login banner dismissed state (for debugging).
     #[cfg(debug_assertions)]
     DebugResetAwsBedrockLoginBannerDismissed,
@@ -1024,6 +1026,8 @@ impl WorkspaceAction {
             | OpenGlobalSearch
             | ToggleConversationListView
             | OpenConversationListView
+            | ToggleAgentManagementView
+            | OpenAgentManagementView
             | ToggleNotificationMailbox { .. }
             | ToggleAIDocumentPane { .. }
             | HideAIDocumentPanes

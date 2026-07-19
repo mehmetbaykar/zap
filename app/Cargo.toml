@@ -785,6 +785,11 @@ suggested_rules = []
 command_correction_key = []
 use_tantivy_search = []
 agent_management_popup = []
+# Gates FeatureFlag::AgentManagementView / AgentManagementDetailsView (the agent management
+# dashboard UI, ported from upstream). Kept default-off: unlike upstream, this is a freshly
+# ported, not-yet-compile-verified-in-this-fork surface; flip on once built/tested.
+agent_management_view = []
+agent_management_details_view = []
 simulate_github_unauthed = []
 reload_stale_conversation_files = []
 nld_onnx_model = ["input_classifier/onnx_candle"]

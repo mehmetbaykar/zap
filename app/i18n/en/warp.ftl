@@ -136,12 +136,15 @@ agent-management-metadata-run-time = Run time: { $run_time }
 agent-management-metadata-credits-used = Credits used: { $usage }
 agent-management-environment-selected = Environment: { $environment }
 agent-management-loading-cloud-runs = Loading agent runs
+agent-management-empty-state-title = No agent runs yet
+agent-management-empty-state-description = Start a new agent to see it here.
 
 # =============================================================================
 # SECTION: workspace-runtime (Owner: agent-i18n-remaining)
 # Files: app/src/workspace/view.rs
 # =============================================================================
 
+workspace-agent-management-panel-tooltip = Agent management panel
 workspace-menu-update-warp-manually = Update Zap manually
 workspace-menu-whats-new = What's new
 workspace-menu-settings = Settings
@@ -1705,6 +1708,7 @@ keybinding-desc-workspace-toggle-warp-drive = Toggle Zap Drive
 keybinding-desc-workspace-toggle-warp-drive-menu = Zap Drive
 keybinding-desc-workspace-toggle-conversation-list-view = Toggle Agent conversation list view
 keybinding-desc-workspace-toggle-conversation-list-view-menu = Agent conversation list view
+keybinding-desc-workspace-toggle-agent-management-view = Toggle the agent management view
 keybinding-desc-workspace-close-panel = Close focused panel
 
 # Command palette / navigation

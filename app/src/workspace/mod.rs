@@ -1443,6 +1443,17 @@ pub fn init(app: &mut AppContext) {
     .with_linux_or_windows_key_binding("ctrl-shift-U")
     .with_group(bindings::BindingGroup::WarpAi.as_str())]);
 
+    app.register_editable_bindings([EditableBinding::new(
+        "workspace:toggle_agent_management_view",
+        crate::t!("keybinding-desc-workspace-toggle-agent-management-view"),
+        WorkspaceAction::ToggleAgentManagementView,
+    )
+    .with_enabled(|| FeatureFlag::AgentManagementView.is_enabled())
+    .with_context_predicate(id!("Workspace") & id!(flags::IS_ANY_AI_ENABLED))
+    .with_mac_key_binding("cmd-shift-M")
+    .with_linux_or_windows_key_binding("ctrl-shift-M")
+    .with_group(bindings::BindingGroup::WarpAi.as_str())]);
+
     add_open_setting_pages_as_editable_binding(app);
     add_overflow_menu_items_as_editable_binding(app);
 }
