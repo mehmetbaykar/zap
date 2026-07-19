@@ -12,6 +12,7 @@ use crate::search::action::CommandBindingDataSource;
 use crate::search::binding_source::BindingSource;
 use crate::search::command_palette::mixer::{CommandPaletteItemAction, ItemSummary};
 use crate::search::command_palette::new_session::NewSessionDataSource;
+use crate::search::command_palette::repos::RepoDataSource;
 use crate::search::command_palette::ssh_servers::SshServersDataSource;
 use crate::search::command_palette::{files, launch_config, navigation, tabs, CommandPaletteMixer};
 use crate::search::data_source::QueryResult;
@@ -30,6 +31,7 @@ pub struct DataSourceStore {
     new_session_data_source: Option<ModelHandle<NewSessionDataSource>>,
     all_conversation_data_source: ModelHandle<conversations::DataSource>,
     ssh_servers_data_source: ModelHandle<SshServersDataSource>,
+    repo_data_source: ModelHandle<RepoDataSource>,
     tabs_data_source: Option<ModelHandle<tabs::DataSource>>,
 }
 
@@ -57,6 +59,7 @@ impl DataSourceStore {
             ctx.add_model(|_| conversations::DataSource::new());
 
         let ssh_servers_data_source = ctx.add_model(|_| SshServersDataSource::new());
+        let repo_data_source = ctx.add_model(|_| RepoDataSource::new());
 
         Self {
             actions_data_source,
@@ -66,6 +69,7 @@ impl DataSourceStore {
             new_session_data_source,
             all_conversation_data_source,
             ssh_servers_data_source,
+            repo_data_source,
             tabs_data_source: None,
         }
     }
@@ -152,6 +156,13 @@ impl DataSourceStore {
             mixer.add_sync_source(
                 self.ssh_servers_data_source.clone(),
                 HashSet::from([QueryFilter::SshServers]),
+            );
+
+            // Zap: the SSH-servers source above once replaced upstream's recent-repos
+            // source in this slot; register both so the `repos:` filter works again.
+            mixer.add_sync_source(
+                self.repo_data_source.clone(),
+                HashSet::from([QueryFilter::Repos]),
             );
 
             ctx.notify();
