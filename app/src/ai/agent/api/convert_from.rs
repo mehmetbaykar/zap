@@ -2,6 +2,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use ai::agent::action::StartAgentExecutionMode;
+use ai::agent::action_result::StartAgentVersion;
 use ai::agent::convert::ToolToAIAgentActionError;
 use ai::agent::UnknownCitationTypeError;
 use ai::skills::{skill_reference_from_read_skill_ref, SkillPathOrigin};
@@ -73,13 +75,69 @@ pub(crate) fn convert_user_query_mode(mode: Option<&api::UserQueryMode>) -> User
     }
 }
 
-// The `RunAgents`/orchestration-execute proto cluster (Harness oneof, run_agents
-// execution mode, RunAgents message) does not exist in this fork's pinned
-// `warp_multi_agent_api`. The conversions that used to live here
-// (convert_run_agents_harness / convert_run_agents_execution_mode /
-// convert_run_agents) were removed; native-side orchestration types
-// (RunAgentsRequest et al.) remain local-only and are no longer populated
-// from an incoming proto tool call.
+// The `RunAgents` bulk-orchestration proto message does not exist in this
+// fork's pinned `warp_multi_agent_api`; only the `StartAgent`/`StartAgentV2`
+// single-child tools below are convertible. `RunAgentsRequest` et al. remain
+// local-only types that are never populated from an incoming proto tool call.
+
+/// Converts a proto lifecycle event type into the fork's string form
+/// (snake_case proto short names, e.g. "errored", "in_progress").
+/// Returns `None` for unknown or unspecified values.
+fn convert_start_agent_lifecycle_event_type(event_type: i32) -> Option<String> {
+    match api::LifecycleEventType::try_from(event_type).ok()? {
+        api::LifecycleEventType::Unspecified => None,
+        api::LifecycleEventType::Started => Some("started".to_string()),
+        api::LifecycleEventType::Idle => Some("idle".to_string()),
+        api::LifecycleEventType::Restarted => Some("restarted".to_string()),
+        api::LifecycleEventType::Errored => Some("errored".to_string()),
+        api::LifecycleEventType::Cancelled => Some("cancelled".to_string()),
+        api::LifecycleEventType::Blocked => Some("blocked".to_string()),
+        api::LifecycleEventType::InProgress => Some("in_progress".to_string()),
+        api::LifecycleEventType::Succeeded => Some("succeeded".to_string()),
+        api::LifecycleEventType::Failed => Some("failed".to_string()),
+    }
+}
+
+fn convert_start_agent_v2_harness_type(
+    harness: Option<api::start_agent_v2::execution_mode::Harness>,
+) -> Option<String> {
+    harness
+        .map(|harness| harness.r#type)
+        .filter(|harness_type| !harness_type.trim().is_empty())
+}
+
+/// Zap has no cloud child-agent execution: a `Remote` proto mode degrades to
+/// the local default instead of erroring, so the exchange is never aborted.
+fn convert_start_agent_execution_mode(
+    execution_mode: Option<api::start_agent::ExecutionMode>,
+) -> StartAgentExecutionMode {
+    match execution_mode.and_then(|execution_mode| execution_mode.mode) {
+        Some(api::start_agent::execution_mode::Mode::Remote(_)) => {
+            log::warn!("StartAgent requested remote execution; degrading to local (no cloud)");
+            StartAgentExecutionMode::local_with_defaults()
+        }
+        Some(api::start_agent::execution_mode::Mode::Local(_)) | None => {
+            StartAgentExecutionMode::local_with_defaults()
+        }
+    }
+}
+
+fn convert_start_agent_v2_execution_mode(
+    execution_mode: Option<api::start_agent_v2::ExecutionMode>,
+) -> StartAgentExecutionMode {
+    match execution_mode.and_then(|execution_mode| execution_mode.mode) {
+        Some(api::start_agent_v2::execution_mode::Mode::Remote(_)) => {
+            log::warn!("StartAgentV2 requested remote execution; degrading to local (no cloud)");
+            StartAgentExecutionMode::local_with_defaults()
+        }
+        Some(api::start_agent_v2::execution_mode::Mode::Local(local)) => {
+            convert_start_agent_v2_harness_type(local.harness)
+                .map(StartAgentExecutionMode::local_harness)
+                .unwrap_or_else(StartAgentExecutionMode::local_with_defaults)
+        }
+        None => StartAgentExecutionMode::local_with_defaults(),
+    }
+}
 
 /// Unexpected errors when trying to convert an [`api::Message`] to an [`AIAgentOutputMessage`].
 #[derive(Debug, thiserror::Error)]
@@ -661,6 +719,42 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
                     subagent_type,
                 }))
             }
+            api::message::tool_call::Tool::StartAgent(start_agent) => {
+                create_standard_action(AIAgentActionType::StartAgent {
+                    version: StartAgentVersion::V1,
+                    name: start_agent.name,
+                    prompt: start_agent.prompt,
+                    execution_mode: convert_start_agent_execution_mode(start_agent.execution_mode),
+                    lifecycle_subscription: start_agent.lifecycle_subscription.map(
+                        |subscription| {
+                            subscription
+                                .event_types
+                                .into_iter()
+                                .filter_map(convert_start_agent_lifecycle_event_type)
+                                .collect()
+                        },
+                    ),
+                })
+            }
+            api::message::tool_call::Tool::StartAgentV2(start_agent) => {
+                create_standard_action(AIAgentActionType::StartAgent {
+                    version: StartAgentVersion::V2,
+                    name: start_agent.name,
+                    prompt: start_agent.prompt,
+                    execution_mode: convert_start_agent_v2_execution_mode(
+                        start_agent.execution_mode,
+                    ),
+                    lifecycle_subscription: start_agent.lifecycle_subscription.map(
+                        |subscription| {
+                            subscription
+                                .event_types
+                                .into_iter()
+                                .filter_map(convert_start_agent_lifecycle_event_type)
+                                .collect()
+                        },
+                    ),
+                })
+            }
             api::message::tool_call::Tool::InsertReviewComments(insert_review_comments) => {
                 create_standard_action(insert_review_comments.into())
             }
@@ -835,3 +929,7 @@ fn convert_api_question(
         },
     })
 }
+
+#[cfg(test)]
+#[path = "convert_from_tests.rs"]
+mod convert_from_tests;

@@ -4,13 +4,15 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use shell_words::split as split_shell_words;
 use warp_cli::agent::Harness;
-use warpui::{Entity, ModelContext};
+use warp_core::execution_mode::AppExecutionMode;
+use warpui::{Entity, EntityId, ModelContext, SingletonEntity};
 
 use super::{ActionExecution, AnyActionExecution, ExecuteActionInput};
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{
     AIAgentActionResultType, AIAgentActionType, StartAgentExecutionMode, StartAgentResult,
 };
+use crate::ai::blocklist::permissions::BlocklistAIPermissions;
 use crate::ai::local_harness_setup::local_harness_product_disabled_message;
 
 /// Per-request outcome of a local child launch.
@@ -47,15 +49,25 @@ impl StartAgentRequest {
     }
 }
 
-pub struct StartAgentExecutor;
+pub struct StartAgentExecutor {
+    terminal_view_id: EntityId,
+}
 
 impl StartAgentExecutor {
-    pub fn new() -> Self {
-        Self
+    pub fn new(terminal_view_id: EntityId) -> Self {
+        Self { terminal_view_id }
     }
 
-    pub(super) fn should_autoexecute(&self) -> bool {
-        true
+    /// Direct `StartAgent` actions (e.g. the BYOP `start_agent` tool) honor the
+    /// profile's `run_agents` permission: only `AlwaysAllow` (or an autonomous app
+    /// run) spawns without user approval; `AlwaysAsk` waits for the action card's
+    /// Accept. The plan-driven orchestrator path is unaffected — `RunAgentsExecutor`
+    /// does its own approval and dispatches into this executor directly.
+    pub(super) fn should_autoexecute(&self, ctx: &ModelContext<Self>) -> bool {
+        AppExecutionMode::as_ref(ctx).is_autonomous()
+            || BlocklistAIPermissions::as_ref(ctx)
+                .get_run_agents_setting(ctx, Some(self.terminal_view_id))
+                .is_always_allow()
     }
 
     pub(super) fn preprocess_action(&mut self) -> BoxFuture<'static, ()> {

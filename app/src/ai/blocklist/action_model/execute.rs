@@ -307,7 +307,7 @@ impl BlocklistAIActionExecutor {
         let read_skill_executor = ctx.add_model(|_| ReadSkillExecutor::new());
         let ask_user_question_executor =
             ctx.add_model(|_| AskUserQuestionExecutor::new(terminal_view_id));
-        let start_agent_executor = ctx.add_model(|_| StartAgentExecutor::new());
+        let start_agent_executor = ctx.add_model(|_| StartAgentExecutor::new(terminal_view_id));
         let run_agents_executor = ctx
             .add_model(|_| RunAgentsExecutor::new(start_agent_executor.clone(), terminal_view_id));
         let wait_for_events_executor = ctx.add_model(|_| WaitForEventsExecutor::new());
@@ -932,7 +932,7 @@ impl BlocklistAIActionExecutor {
                 .update(ctx, |executor, ctx| executor.should_autoexecute(input, ctx)),
             AIAgentActionType::StartAgent { .. } => self
                 .start_agent_executor
-                .update(ctx, |executor, _| executor.should_autoexecute()),
+                .update(ctx, |executor, ctx| executor.should_autoexecute(ctx)),
             AIAgentActionType::RunAgents(_) => self
                 .run_agents_executor
                 .update(ctx, |executor, ctx| executor.should_autoexecute(input, ctx)),

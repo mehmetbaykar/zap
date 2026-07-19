@@ -109,3 +109,49 @@ fn transfer_control_finished_result_converts_to_tool_call_result_input() {
         other => panic!("Expected tool-call-result input, got {other:?}"),
     }
 }
+
+#[test]
+fn start_agent_results_convert_to_versioned_tool_call_results() {
+    use ai::agent::action_result::{StartAgentResult, StartAgentVersion};
+
+    let convert = |result: StartAgentResult| {
+        let input =
+            api::request::input::user_inputs::user_input::Input::try_from(AIAgentActionResult {
+                id: "tool_call".to_string().into(),
+                task_id: TaskId::new("task".to_string()),
+                result: AIAgentActionResultType::StartAgent(result),
+            })
+            .unwrap();
+        match input {
+            api::request::input::user_inputs::user_input::Input::ToolCallResult(result) => {
+                result.result.expect("start_agent result should be set")
+            }
+            other => panic!("Expected tool-call-result input, got {other:?}"),
+        }
+    };
+
+    match convert(StartAgentResult::Success {
+        agent_id: "agent-1".to_string(),
+        version: StartAgentVersion::V1,
+    }) {
+        api::request::input::tool_call_result::Result::StartAgent(r) => match r.result {
+            Some(api::start_agent_result::Result::Success(s)) => {
+                assert_eq!(s.agent_id, "agent-1");
+            }
+            other => panic!("Expected v1 success, got {other:?}"),
+        },
+        other => panic!("Expected v1 StartAgent slot, got {other:?}"),
+    }
+
+    match convert(StartAgentResult::Cancelled {
+        version: StartAgentVersion::V2,
+    }) {
+        api::request::input::tool_call_result::Result::StartAgentV2(r) => match r.result {
+            Some(api::start_agent_v2_result::Result::Error(e)) => {
+                assert_eq!(e.error, "Cancelled by user");
+            }
+            other => panic!("Expected v2 cancelled-as-error, got {other:?}"),
+        },
+        other => panic!("Expected v2 StartAgentV2 slot, got {other:?}"),
+    }
+}

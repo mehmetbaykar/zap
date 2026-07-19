@@ -2685,6 +2685,7 @@ const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
     "open_code_review",
     "transfer_shell_command_control_to_user",
     "suggest_prompt",
+    "start_agent",
 ];
 
 /// Lists the tool names actually fed to the upstream model this turn (built-in REGISTRY + current MCP tools),
@@ -2694,6 +2695,7 @@ const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
 pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
     let is_lrc = params.lrc_command_id.is_some();
     let web_enabled = params.web_search_enabled;
+    let start_agent_enabled = params.run_agents_enabled && params.parent_agent_id.is_none();
     let plan_mode = is_plan_mode_turn(&params.input);
     let mut names: Vec<String> = tools::REGISTRY
         .iter()
@@ -2702,6 +2704,9 @@ pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
                 return false;
             }
             if !web_enabled && t.name == tools::webfetch::TOOL_NAME {
+                return false;
+            }
+            if !start_agent_enabled && t.name == tools::start_agent::TOOL_NAME {
                 return false;
             }
             if t.name == "suggest_new_conversation" {
@@ -2739,6 +2744,9 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
     // information gathering and asking back.
     let is_lrc = params.lrc_command_id.is_some();
     let web_enabled = params.web_search_enabled;
+    // start_agent: profile `run_agents` permission gate + single-level recursion guard —
+    // a child agent (parent_agent_id set) never gets to spawn grandchildren.
+    let start_agent_enabled = params.run_agents_enabled && params.parent_agent_id.is_none();
     let plan_mode = is_plan_mode_turn(&params.input);
     // Zap BYOP: the `suggest_prompt` chip UI is restored via the view layer subscribing to
     // PromptSuggestionExecutorEvent (see `terminal/view.rs::
@@ -2755,6 +2763,9 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
             // BYOP web tools are gated by profile.web_search_enabled (not exposed to the upstream model when the user has turned off the privacy
             // toggle, to avoid mistakenly invoking external network requests).
             if !web_enabled && t.name == tools::webfetch::TOOL_NAME {
+                return false;
+            }
+            if !start_agent_enabled && t.name == tools::start_agent::TOOL_NAME {
                 return false;
             }
             // suggest_new_conversation: no UI implementation; the executor in Zap is changed to
@@ -4252,6 +4263,10 @@ pub async fn generate_byop_output(
 
         // Stream ended: emit the accumulated tool_calls all at once.
         let mut final_messages: Vec<api::Message> = Vec::new();
+        // start_agent ceiling: spawns beyond MAX_START_AGENT_CALLS_PER_TURN in a single
+        // assistant turn get a synthetic error result instead of a child agent, so a
+        // misbehaving model can't fork-bomb the machine with hidden panes.
+        let mut start_agent_calls_this_turn = 0usize;
         let mut ordered_tool_calls: Vec<ToolCall> = Vec::with_capacity(tool_bufs.len());
         for call_id in tool_order {
             if let Some(call) = tool_bufs.remove(&call_id) {
@@ -4399,6 +4414,44 @@ pub async fn generate_byop_output(
                     }
                 }
                 continue;
+            }
+
+            // start_agent per-turn ceiling (see the counter's declaration above). Runs before
+            // parse_incoming_tool_call so an over-limit call never becomes a real ToolCall:
+            // the model just reads back a structured error and continues.
+            if call.fn_name == tools::start_agent::TOOL_NAME {
+                start_agent_calls_this_turn += 1;
+                if start_agent_calls_this_turn > tools::start_agent::MAX_START_AGENT_CALLS_PER_TURN
+                {
+                    log::warn!(
+                        "[byop] start_agent call #{start_agent_calls_this_turn} exceeds the \
+                         per-turn ceiling ({}); refusing spawn",
+                        tools::start_agent::MAX_START_AGENT_CALLS_PER_TURN,
+                    );
+                    let args_str = if call.fn_arguments.is_string() {
+                        call.fn_arguments.as_str().unwrap_or("").to_owned()
+                    } else {
+                        call.fn_arguments.to_string()
+                    };
+                    let error_content = format!(
+                        r#"{{"status":"error","error":"Too many start_agent calls in one turn (max {}). Wait for the running child agents to finish before spawning more."}}"#,
+                        tools::start_agent::MAX_START_AGENT_CALLS_PER_TURN,
+                    );
+                    final_messages.push(make_tool_call_carrier_message(
+                        &current_task_id,
+                        &request_id,
+                        &call.call_id,
+                        &call.fn_name,
+                        &args_str,
+                    ));
+                    final_messages.push(make_tool_call_result_message(
+                        &current_task_id,
+                        &request_id,
+                        call.call_id.clone(),
+                        error_content,
+                    ));
+                    continue;
+                }
             }
 
             // Zap BYOP web tool interception: webfetch / websearch are not mapped to a protobuf
@@ -7757,5 +7810,51 @@ mod issue_94_task_linearization_tests {
             "both user messages from two turns with different request_id must be kept"
         );
         assert_eq!(message_ids(&out), vec!["m1", "m2", "m3"]);
+    }
+}
+
+#[cfg(test)]
+mod start_agent_gating_tests {
+    use super::*;
+
+    fn params() -> RequestParams {
+        RequestParams::new_for_test(vec![], vec![])
+    }
+
+    fn has_start_agent(params: &RequestParams) -> bool {
+        available_tool_names(params)
+            .iter()
+            .any(|n| n == tools::start_agent::TOOL_NAME)
+    }
+
+    fn tools_array_has_start_agent(params: &RequestParams) -> bool {
+        build_tools_array(params)
+            .iter()
+            .any(|t| t.name.as_str() == tools::start_agent::TOOL_NAME)
+    }
+
+    #[test]
+    fn hidden_when_run_agents_disabled() {
+        let params = params();
+        assert!(!params.run_agents_enabled);
+        assert!(!has_start_agent(&params));
+        assert!(!tools_array_has_start_agent(&params));
+    }
+
+    #[test]
+    fn exposed_when_run_agents_enabled() {
+        let mut params = params();
+        params.run_agents_enabled = true;
+        assert!(has_start_agent(&params));
+        assert!(tools_array_has_start_agent(&params));
+    }
+
+    #[test]
+    fn hidden_for_child_agents() {
+        let mut params = params();
+        params.run_agents_enabled = true;
+        params.parent_agent_id = Some("parent-1".to_string());
+        assert!(!has_start_agent(&params));
+        assert!(!tools_array_has_start_agent(&params));
     }
 }

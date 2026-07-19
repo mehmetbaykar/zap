@@ -739,10 +739,12 @@ impl TryFrom<AIAgentActionResult> for api::request::input::user_inputs::user_inp
             AIAgentActionResultType::RequestComputerUse(request_computer_use_result) => Some(
                 convert_request_computer_use_result(request_computer_use_result)?,
             ),
+            AIAgentActionResultType::StartAgent(start_agent_result) => {
+                Some(start_agent_result.into())
+            }
             // Local-only tools are not represented by the fork's pinned proto.
             AIAgentActionResultType::SearchCodebase(_)
             | AIAgentActionResultType::FetchConversation(_)
-            | AIAgentActionResultType::StartAgent(_)
             | AIAgentActionResultType::SendMessageToAgent(_)
             | AIAgentActionResultType::RunAgents(_)
             | AIAgentActionResultType::WaitForEvents(_) => None,

@@ -30,6 +30,7 @@ pub mod mcp;
 pub mod search;
 pub mod shell;
 pub mod skill;
+pub mod start_agent;
 pub mod suggest;
 pub mod todowrite;
 pub mod web_runtime;
@@ -97,6 +98,10 @@ pub const REGISTRY: &[&OpenAiTool] = &[
     // intercepts it by name before parse_incoming_tool_call and calls web_runtime directly to run the HTTP.
     // gating: when profile.web_search_enabled=false, build_tools_array filters it out.
     &webfetch::WEBFETCH,
+    // Child-agent orchestration. Gated by the profile's `run_agents` permission
+    // (`RequestParams.run_agents_enabled`) and hidden from child agents themselves
+    // (`parent_agent_id` recursion guard) — see build_tools_array.
+    &start_agent::START_AGENT,
 ];
 
 /// Reverse-looks up the registry by OpenAI function name.
@@ -198,6 +203,8 @@ pub fn action_result_to_msg_result(
         ReqR::SuggestPrompt(r) => MsgR::SuggestPrompt(r),
         ReqR::OpenCodeReview(r) => MsgR::OpenCodeReview(r),
         ReqR::TransferShellCommandControlToUser(r) => MsgR::TransferShellCommandControlToUser(r),
+        ReqR::StartAgent(r) => MsgR::StartAgent(r),
+        ReqR::StartAgentV2(r) => MsgR::StartAgentV2(r),
         _ => return None,
     };
     Some(msg_side)
