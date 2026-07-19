@@ -5,12 +5,14 @@ use warpui_core::r#async::executor;
 
 use super::*;
 use crate::proto::{
-    client_message, delete_file_response, host_scoped_request, read_file_chunk_response,
+    client_message, delete_file_response, host_scoped_request, open_buffer_response,
+    read_file_chunk_response,
     resolve_path_response, run_command_response, save_buffer_response, server_message,
     session_scoped_request, write_file_chunk_response, ClientMessage, CodebaseIndexStatus,
     CodebaseIndexStatusState, CodebaseIndexStatusUpdated, CodebaseIndexStatusesSnapshot,
     DeleteFileResponse, DeleteFileSuccess, ErrorCode, FileSystemEntryKind, GetDiffStateResponse,
-    InitializeResponse, OpenBufferResponse, ReadFileChunkResponse, ReadFileChunkSuccess,
+    BufferConflictDetected, FileOperationError, InitializeResponse, OpenBufferResponse,
+    OpenBufferSuccess, ReadFileChunkResponse, ReadFileChunkSuccess,
     RemoteAgentContextSnapshot, RemoteContextFileProto, ResolvePathResponse, ResolvePathSuccess,
     RunCommandResponse, RunCommandSuccess, SaveBufferResponse, SaveBufferSuccess, ServerMessage,
     WriteFile, WriteFileChunkResponse, WriteFileChunkSuccess,
@@ -623,21 +625,116 @@ async fn open_buffer_round_trips_as_session_scoped() {
         match unwrap_session_scoped(msg) {
             session_scoped_request::Message::OpenBuffer(req) => {
                 assert_eq!(req.path, "/tmp/f.txt");
+                assert!(!req.force_reload);
             }
             other => panic!("Expected OpenBuffer, got {other:?}"),
         }
         server_message::Message::OpenBufferResponse(OpenBufferResponse {
-            content: "remote contents".to_string(),
-            server_version: 7,
+            result: Some(open_buffer_response::Result::Success(OpenBufferSuccess {
+                content: "remote contents".to_string(),
+                server_version: 7,
+            })),
         })
     });
 
     let resp = client
-        .open_buffer("/tmp/f.txt".to_string())
+        .open_buffer("/tmp/f.txt".to_string(), false)
         .await
         .expect("open_buffer should succeed");
-    assert_eq!(resp.content, "remote contents");
-    assert_eq!(resp.server_version, 7);
+    let Some(open_buffer_response::Result::Success(success)) = resp.result else {
+        panic!("expected a success result, got {:?}", resp.result);
+    };
+    assert_eq!(success.content, "remote contents");
+    assert_eq!(success.server_version, 7);
+}
+
+/// The conflict-resolution path must set `force_reload` so the daemon
+/// re-reads the file from disk instead of returning cached buffer state.
+#[tokio::test]
+async fn open_buffer_force_reload_flag_reaches_the_wire() {
+    let (client, _disconnect_rx, _executor) = setup_mock_client(|msg| {
+        match unwrap_session_scoped(msg) {
+            session_scoped_request::Message::OpenBuffer(req) => {
+                assert!(req.force_reload);
+            }
+            other => panic!("Expected OpenBuffer, got {other:?}"),
+        }
+        server_message::Message::OpenBufferResponse(OpenBufferResponse {
+            result: Some(open_buffer_response::Result::Success(OpenBufferSuccess {
+                content: String::new(),
+                server_version: 1,
+            })),
+        })
+    });
+
+    client
+        .open_buffer("/tmp/f.txt".to_string(), true)
+        .await
+        .expect("open_buffer should succeed");
+}
+
+/// A typed error result must round-trip (previously errors were only
+/// expressible as a generic ErrorResponse).
+#[tokio::test]
+async fn open_buffer_error_result_round_trips() {
+    let (client, _disconnect_rx, _executor) = setup_mock_client(|msg| {
+        match unwrap_session_scoped(msg) {
+            session_scoped_request::Message::OpenBuffer(_) => {}
+            other => panic!("Expected OpenBuffer, got {other:?}"),
+        }
+        server_message::Message::OpenBufferResponse(OpenBufferResponse {
+            result: Some(open_buffer_response::Result::Error(FileOperationError {
+                message: "disk on fire".to_string(),
+            })),
+        })
+    });
+
+    let resp = client
+        .open_buffer("/tmp/f.txt".to_string(), false)
+        .await
+        .expect("transport should succeed even for an app-level error");
+    let Some(open_buffer_response::Result::Error(error)) = resp.result else {
+        panic!("expected an error result, got {:?}", resp.result);
+    };
+    assert_eq!(error.message, "disk on fire");
+}
+
+/// A BufferConflictDetected push must surface as the matching ClientEvent —
+/// this is the wire hop that makes the editor's conflict banner reachable
+/// for server-detected conflicts.
+#[tokio::test]
+async fn buffer_conflict_detected_push_maps_to_client_event() {
+    let (client_stream, server_stream) = tokio::io::duplex(4096);
+    let (server_read, server_write) = tokio::io::split(server_stream);
+    let (client_read, client_write) = tokio::io::split(client_stream);
+    drop(server_read);
+
+    let executor = executor::Background::default();
+    let (_client, event_rx, _host_rx) =
+        RemoteServerClient::new(client_read.compat(), client_write.compat_write(), &executor);
+    let mut writer = server_write.compat_write();
+
+    protocol::write_server_message(
+        &mut writer,
+        &ServerMessage {
+            request_id: String::new(),
+            message: Some(server_message::Message::BufferConflictDetected(
+                BufferConflictDetected {
+                    path: "/tmp/conflicted.txt".to_string(),
+                },
+            )),
+        },
+    )
+    .await
+    .unwrap();
+    writer.flush().await.unwrap();
+
+    match event_rx.recv().await.unwrap() {
+        ClientEvent::BufferConflictDetected { path } => {
+            assert_eq!(path, "/tmp/conflicted.txt");
+        }
+        other => panic!("Expected BufferConflictDetected, got {other:?}"),
+    }
 }
 
 /// A session-scoped request on a connection that has already dropped resolves

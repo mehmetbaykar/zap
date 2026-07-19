@@ -1827,7 +1827,7 @@ impl GlobalBufferModel {
         log::debug!("[remote-buffer] Sending OpenBuffer for path={path_str} host={host_id:?}");
         let handle = RemoteServerManager::as_ref(ctx).host_request_handle(&host_id);
         ctx.spawn(
-            async move { handle.open_buffer(path_str).await },
+            async move { handle.open_buffer(path_str, false).await },
             move |me, result, ctx| {
                 me.apply_open_buffer_response(file_id, result.map_err(|e| e.to_string()), ctx);
             },
@@ -1847,8 +1847,19 @@ impl GlobalBufferModel {
         result: Result<remote_server::proto::OpenBufferResponse, String>,
         ctx: &mut ModelContext<Self>,
     ) {
+        // Unwrap the typed Success/Error oneof; a missing result is a protocol
+        // error from an incompatible daemon build.
+        let result = result.and_then(|resp| match resp.result {
+            Some(remote_server::proto::open_buffer_response::Result::Success(success)) => {
+                Ok(success)
+            }
+            Some(remote_server::proto::open_buffer_response::Result::Error(error)) => {
+                Err(error.message)
+            }
+            None => Err("OpenBufferResponse carried no result".to_string()),
+        });
         match result {
-            Ok(remote_server::proto::OpenBufferResponse {
+            Ok(remote_server::proto::OpenBufferSuccess {
                 content,
                 server_version,
             }) => {
@@ -2246,7 +2257,10 @@ impl GlobalBufferModel {
         log::debug!("[remote-buffer] Re-opening buffer: path={path_str}");
         let handle = RemoteServerManager::as_ref(ctx).host_request_handle(&host_id);
         ctx.spawn(
-            async move { handle.open_buffer(path_str).await },
+            // force_reload: this is the conflict-resolution "discard local
+            // edits" path — the daemon must re-read the file from disk, not
+            // hand back its cached (possibly stale) buffer content.
+            async move { handle.open_buffer(path_str, true).await },
             move |me, result, ctx| {
                 me.apply_open_buffer_response(file_id, result.map_err(|e| e.to_string()), ctx);
             },

@@ -833,6 +833,7 @@ impl HostRequestHandle {
     pub async fn open_buffer(
         &self,
         path: String,
+        force_reload: bool,
     ) -> Result<crate::proto::OpenBufferResponse, HostRequestError> {
         // `OpenBuffer` is session-scoped: the daemon binds the buffer
         // subscription to the connection the request arrives on, so it must be
@@ -847,7 +848,7 @@ impl HostRequestHandle {
             .await
             .map_err(|_| HostRequestError::AllSessionsDisconnected)?
             .ok_or(HostRequestError::AllSessionsDisconnected)?;
-        Ok(client.open_buffer(path).await?)
+        Ok(client.open_buffer(path, force_reload).await?)
     }
 
     /// Batch-reads one or more files from the remote host with full context

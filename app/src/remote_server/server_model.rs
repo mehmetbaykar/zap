@@ -25,19 +25,19 @@ use super::proto::{
     client_message, delete_file_response, discard_files_response, get_diff_state_response,
     git_commit_chain_response, git_create_pr_response, git_get_committed_branch_files_response,
     git_get_pr_info_response, git_push_response, host_scoped_request, notification,
-    remote_skill_proto, resolve_conflict_response, run_command_response, save_buffer_response,
-    server_message, session_scoped_request, write_file_response, Abort, BranchInfo, BufferEdit,
-    BufferUpdatedPush, ClientMessage, CloseBuffer, DeleteFile, DeleteFileResponse,
-    DeleteFileSuccess, DiscardFilesError, DiscardFilesResponse, DiscardFilesSuccess, ErrorCode,
-    ErrorResponse, FailedFileRead, FileContextProto, FileOperationError, GetBranchesError,
-    GetBranchesResponse, GetBranchesSuccess, GetDiffStateResponse, GitCommitChainRequest,
-    GitCommitChainResponse, GitCommitChainSuccess, GitCreatePrRequest, GitCreatePrResponse,
-    GitGetCommittedBranchFilesRequest, GitGetCommittedBranchFilesResponse,
-    GitGetCommittedBranchFilesSuccess, GitGetPrInfoRequest, GitGetPrInfoResponse,
-    GitGetPrInfoSuccess, GitHubPrInfoPush, GitHubRepositoryInfoPush, GitOpDelta, GitOpError,
-    GitPushRequest, GitPushResponse, GitStatusPush, HomeSkillMetadata, Initialize,
-    InitializeResponse, NavigatedToDirectory, NavigatedToDirectoryResponse, OpenBuffer,
-    OpenBufferResponse, ReadFileContextResponse, RemoteAgentContextSnapshot,
+    open_buffer_response, remote_skill_proto, resolve_conflict_response, run_command_response,
+    save_buffer_response, server_message, session_scoped_request, write_file_response, Abort,
+    BranchInfo, BufferEdit, BufferUpdatedPush, ClientMessage, CloseBuffer, DeleteFile,
+    DeleteFileResponse, DeleteFileSuccess, DiscardFilesError, DiscardFilesResponse,
+    DiscardFilesSuccess, ErrorCode, ErrorResponse, FailedFileRead, FileContextProto,
+    FileOperationError, GetBranchesError, GetBranchesResponse, GetBranchesSuccess,
+    GetDiffStateResponse, GitCommitChainRequest, GitCommitChainResponse, GitCommitChainSuccess,
+    GitCreatePrRequest, GitCreatePrResponse, GitGetCommittedBranchFilesRequest,
+    GitGetCommittedBranchFilesResponse, GitGetCommittedBranchFilesSuccess, GitGetPrInfoRequest,
+    GitGetPrInfoResponse, GitGetPrInfoSuccess, GitHubPrInfoPush, GitHubRepositoryInfoPush,
+    GitOpDelta, GitOpError, GitPushRequest, GitPushResponse, GitStatusPush, HomeSkillMetadata,
+    Initialize, InitializeResponse, NavigatedToDirectory, NavigatedToDirectoryResponse, OpenBuffer,
+    OpenBufferResponse, OpenBufferSuccess, ReadFileContextResponse, RemoteAgentContextSnapshot,
     RemoteContextFileProto, RemoteSkillProto, ResolveConflict, ResolveConflictResponse,
     ResolveConflictSuccess, RipgrepSearchRequest, RunCommandError, RunCommandErrorCode,
     RunCommandRequest, RunCommandResponse, RunCommandSuccess, SaveBuffer, SaveBufferResponse,
@@ -471,8 +471,12 @@ impl ServerModel {
                                 (Some(content), Some(sv)) => {
                                     server_message::Message::OpenBufferResponse(
                                         OpenBufferResponse {
-                                            content: content.clone(),
-                                            server_version: sv,
+                                            result: Some(open_buffer_response::Result::Success(
+                                                OpenBufferSuccess {
+                                                    content: content.clone(),
+                                                    server_version: sv,
+                                                },
+                                            )),
                                         },
                                     )
                                 }
@@ -625,11 +629,25 @@ impl ServerModel {
                     success,
                     ..
                 } => {
+                    // When a file-watcher update couldn't be applied because the
+                    // buffer has unsaved client edits, forward the conflict to
+                    // connected clients so they can show a resolution banner.
                     if !success {
                         let path = me.buffers.path_for_file_id(*file_id).unwrap_or_default();
-                        log::warn!(
-                            "Server-local buffer update conflicted for {path}; the pinned remote-server protocol has no conflict push"
-                        );
+                        let conns: Vec<_> = me
+                            .buffers
+                            .connections_for_buffer(file_id)
+                            .map(|set| set.iter().copied().collect())
+                            .unwrap_or_default();
+                        for conn_id in conns {
+                            me.send_server_message(
+                                Some(conn_id),
+                                None,
+                                server_message::Message::BufferConflictDetected(
+                                    super::proto::BufferConflictDetected { path: path.clone() },
+                                ),
+                            );
+                        }
                     }
                 }
                 GlobalBufferModelEvent::RemoteBufferConflict { .. } => {
@@ -1773,6 +1791,31 @@ impl ServerModel {
             .track_open_buffer(msg.path.clone(), file_id, buffer_state.buffer);
         self.buffers.add_connection(file_id, conn_id);
 
+        // Conflict resolution: discard any in-memory buffer state and re-read
+        // the file from disk. The fresh content flows back through
+        // `BufferLoaded`, which completes the pending request below; other
+        // connections receive a BufferUpdatedPush.
+        if msg.force_reload && gbm.as_ref(ctx).buffer_loaded(file_id) {
+            if let Err(error) =
+                gbm.update(ctx, |gbm, ctx| gbm.force_reload_server_local(file_id, ctx))
+            {
+                return HandlerOutcome::Sync(server_message::Message::OpenBufferResponse(
+                    OpenBufferResponse {
+                        result: Some(open_buffer_response::Result::Error(FileOperationError {
+                            message: format!("Failed to reload buffer from disk: {error}"),
+                        })),
+                    },
+                ));
+            }
+            self.buffers.insert_pending(
+                file_id,
+                request_id.clone(),
+                conn_id,
+                PendingBufferRequestKind::OpenBuffer,
+            );
+            return HandlerOutcome::Async(None);
+        }
+
         // If already loaded, respond immediately.
         if gbm.as_ref(ctx).buffer_loaded(file_id) {
             let content = gbm
@@ -1786,8 +1829,10 @@ impl ServerModel {
                 .unwrap_or(1);
             return HandlerOutcome::Sync(server_message::Message::OpenBufferResponse(
                 OpenBufferResponse {
-                    content,
-                    server_version,
+                    result: Some(open_buffer_response::Result::Success(OpenBufferSuccess {
+                        content,
+                        server_version,
+                    })),
                 },
             ));
         }

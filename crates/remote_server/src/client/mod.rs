@@ -449,11 +449,15 @@ impl RemoteServerClient {
     pub async fn open_buffer(
         &self,
         path: String,
+        force_reload: bool,
     ) -> Result<crate::proto::OpenBufferResponse, ClientError> {
         let request_id = RequestId::new();
         let msg = ClientMessage::session_scoped(
             request_id.to_string(),
-            session_scoped_request::Message::OpenBuffer(crate::proto::OpenBuffer { path }),
+            session_scoped_request::Message::OpenBuffer(crate::proto::OpenBuffer {
+                path,
+                force_reload,
+            }),
         );
 
         let response = self.send_request_internal(request_id, msg).await?;
@@ -706,6 +710,9 @@ impl RemoteServerClient {
                 expected_client_version: push.expected_client_version,
                 edits: push.edits,
             }),
+            server_message::Message::BufferConflictDetected(push) => {
+                Some(ClientEvent::BufferConflictDetected { path: push.path })
+            }
             server_message::Message::DiffStateSnapshot(snapshot) => {
                 let Some(repo_path) = StandardizedPath::try_new(&snapshot.repo_path).ok() else {
                     log::warn!(
