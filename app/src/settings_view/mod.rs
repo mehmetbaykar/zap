@@ -79,6 +79,8 @@ pub mod mcp_servers_page;
 mod nav;
 mod network_page;
 pub mod pane_manager;
+mod privacy;
+mod privacy_page;
 mod remove_custom_endpoint_confirmation_dialog;
 // Zap Wave 3-1: `platform` / `platform_page` were physically removed along with the
 // `OzCloudAPIKeys` settings entry + the Zap Inc cloud API key management UI.
@@ -238,6 +240,8 @@ pub enum SettingsSection {
     ThirdPartyCLIAgents,
     /// Global HTTP proxy settings page. Gated by `FeatureFlag::HttpProxySettings`.
     Network,
+    /// Secret-redaction settings page (safe mode / custom + enterprise regex lists).
+    Privacy,
     /// Internal backing-page identifier for CodeSettingsPageView. EditorAndCodeReview
     /// is currently the only sub-page label, but we keep `Code` as the backing-page
     /// key so that page lookup still works after the LSP-management subpage was
@@ -277,6 +281,8 @@ impl Display for SettingsSection {
             }
             // Proxy settings page. The i18n key `settings-section-network` is already complete in all three languages: en / zh-CN / ja.
             SettingsSection::Network => crate::t!("settings-section-network"),
+            // No i18n key exists for this fork-added page; same pattern as the Scripting arm above.
+            SettingsSection::Privacy => "Privacy".to_string(),
             // Zap Wave 3-1: the `OzCloudAPIKeys` Display arm was physically removed along with the variant.
             // Zap Wave 7-3: the `CloudEnvironments` Display arm was physically removed along with the variant.
         };
@@ -358,6 +364,7 @@ impl FromStr for SettingsSection {
             // Chinese-locale stored values ("network" U+7F51 U+7EDC, "cloud sync"
             // U+4E91 U+540C U+6B65) as \u{} escapes — same match, pure-ASCII source.
             "Network" | "\u{7F51}\u{7EDC}" => Ok(Self::Network),
+            "Privacy" => Ok(Self::Privacy),
             // Zap Wave 3-1: `OzCloudAPIKeys` was physically removed along with the UI.
             // Zap Wave 7-3: the `CloudEnvironments` FromStr arm was physically removed along with the variant.
             _ => Err(()),
@@ -595,6 +602,7 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     ai_page::init_actions_from_parent_view(app, context, builder);
     code_page::init_actions_from_parent_view(app, context, builder);
     warp_drive_page::init_actions_from_parent_view(app, context, builder);
+    privacy_page::init_actions_from_parent_view(app, context, builder);
 
     if ChannelState::enable_debug_features() || cfg!(windows) {
         ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
@@ -897,6 +905,7 @@ pub enum SettingsAction {
     AI(AISettingsPageAction),
     Code(CodeSettingsPageAction),
     ZapDrive(warp_drive_page::WarpDriveSettingsPageAction),
+    PrivacyPageToggle(privacy_page::PrivacyPageAction),
     WarpifyPageToggle(WarpifyPageAction),
     Tab,
     Split(Direction),
@@ -1055,6 +1064,7 @@ macro_rules! update_page {
             SettingsPageViewHandle::ZapDrive(handle) => $ctx.update_view(handle, $update),
             // Issue #72: Global HTTP proxy settings page.
             SettingsPageViewHandle::Network(handle) => $ctx.update_view(handle, $update),
+            SettingsPageViewHandle::Privacy(handle) => $ctx.update_view(handle, $update),
         }
     };
 }
@@ -1174,6 +1184,12 @@ impl SettingsView {
         // Network (HTTP proxy) settings page. Gated by FeatureFlag::HttpProxySettings.
         let network_page_handle = ctx.add_typed_action_view(network_page::NetworkPageView::new);
 
+        // Privacy (secret redaction) settings page. Always on, no feature flag gate.
+        let privacy_page_handle = ctx.add_typed_action_view(privacy_page::PrivacyPageView::new);
+        ctx.subscribe_to_view(&privacy_page_handle, |me, _, event, ctx| {
+            me.handle_privacy_page_event(event, ctx);
+        });
+
         let font_family = Appearance::as_ref(ctx).ui_font_family();
         let search_editor = ctx.add_typed_action_view(|ctx| {
             let options = SingleLineEditorOptions {
@@ -1227,6 +1243,8 @@ impl SettingsView {
             settings_pages.push(SettingsPage::new(network_page_handle));
         }
 
+        // Privacy page is always assembled (no feature flag gate).
+        settings_pages.push(SettingsPage::new(privacy_page_handle));
 
         // Decentralized fork: in local mode, remove all settings entries related to cloud
         // accounts / billing / teams / sync / sharing.
@@ -1258,6 +1276,16 @@ impl SettingsView {
                 .position(|item| matches!(item, SettingsNavItem::Page(SettingsSection::About)))
                 .unwrap_or(nav_items.len());
             nav_items.insert(about_pos, SettingsNavItem::Page(SettingsSection::Scripting));
+        }
+
+        // Add the Privacy page to the sidebar, always on (no feature flag gate). Insert it
+        // before About, like Network/Scripting above.
+        {
+            let about_pos = nav_items
+                .iter()
+                .position(|item| matches!(item, SettingsNavItem::Page(SettingsSection::About)))
+                .unwrap_or(nav_items.len());
+            nav_items.insert(about_pos, SettingsNavItem::Page(SettingsSection::Privacy));
         }
 
         // Resolve the initial page: map internal backing-page sections to their default subpage.
@@ -1759,6 +1787,20 @@ impl SettingsView {
     // Zap Wave 3-1: `handle_platform_page_event` was physically removed along with
     // `platform_page::PlatformPageViewEvent`.
 
+    fn handle_privacy_page_event(
+        &mut self,
+        event: &privacy_page::PrivacyPageViewEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        match event {
+            privacy_page::PrivacyPageViewEvent::ShowAddRegexModal
+            | privacy_page::PrivacyPageViewEvent::HideAddRegexModal => {
+                // Modal rendering is handled in get_modal_content_for_page
+                ctx.notify();
+            }
+        }
+    }
+
     fn handle_mcp_servers_page_event(
         &mut self,
         event: &MCPServersSettingsPageEvent,
@@ -1963,6 +2005,7 @@ impl SettingsView {
             SettingsPageViewHandle::ZapDrive(v) => v.as_ref(app).should_render(app),
             // Issue #72: Global HTTP proxy settings page.
             SettingsPageViewHandle::Network(v) => v.as_ref(app).should_render(app),
+            SettingsPageViewHandle::Privacy(v) => v.as_ref(app).should_render(app),
         }
     }
 
@@ -2155,6 +2198,9 @@ impl SettingsView {
             }
             SettingsPageViewHandle::AI(view) => {
                 view.read(app, |view, _| view.get_modal_content(app))
+            }
+            SettingsPageViewHandle::Privacy(view) => {
+                view.read(app, |view, _| view.get_modal_content())
             }
             _ => None,
         }
@@ -2526,6 +2572,15 @@ impl TypedActionView for SettingsView {
                     if let SettingsPageViewHandle::Warpify(view) = &warpify_page.view_handle {
                         view.update(ctx, |view, ctx| {
                             view.handle_action(warpify_action, ctx);
+                        })
+                    }
+                }
+            }
+            SettingsAction::PrivacyPageToggle(privacy_action) => {
+                if let Some(privacy_page) = self.settings_page(SettingsSection::Privacy) {
+                    if let SettingsPageViewHandle::Privacy(view) = &privacy_page.view_handle {
+                        view.update(ctx, |view, ctx| {
+                            view.handle_action(privacy_action, ctx);
                         })
                     }
                 }

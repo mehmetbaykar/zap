@@ -34,6 +34,7 @@ use super::features_page::FeaturesPageView;
 use super::keybindings::KeybindingsView;
 use super::mcp_servers_page::MCPServersSettingsPageView;
 use super::network_page::NetworkPageView;
+use super::privacy_page::PrivacyPageView;
 use super::scripting_page::ScriptingSettingsPageView;
 use super::warp_drive_page::WarpDriveSettingsPageView;
 use super::warpify_page::WarpifyPageView;
@@ -108,6 +109,8 @@ pub enum SettingsPageViewHandle {
     ZapDrive(ViewHandle<WarpDriveSettingsPageView>),
     /// Global HTTP proxy settings page.
     Network(ViewHandle<NetworkPageView>),
+    /// Secret-redaction settings page.
+    Privacy(ViewHandle<PrivacyPageView>),
 }
 
 impl SettingsPageViewHandle {
@@ -128,6 +131,7 @@ impl SettingsPageViewHandle {
             MCPServers(view_handle) => ChildView::new(view_handle).finish(),
             ZapDrive(view_handle) => ChildView::new(view_handle).finish(),
             Network(view_handle) => ChildView::new(view_handle).finish(),
+            Privacy(view_handle) => ChildView::new(view_handle).finish(),
         }
     }
 }
@@ -137,7 +141,6 @@ impl From<ViewHandle<MCPServersSettingsPageView>> for SettingsPageViewHandle {
         SettingsPageViewHandle::MCPServers(view_handle)
     }
 }
-
 
 impl SettingsPage {
     pub fn new<V>(view_handle: ViewHandle<V>) -> Self
