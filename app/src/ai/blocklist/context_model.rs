@@ -614,6 +614,14 @@ impl BlocklistAIContextModel {
             });
         }
 
+        // Include repository info from the origin remote URL if available.
+        if let Some(repo_context) = self.repository_context(app) {
+            context.push(repo_context);
+        }
+        if let Some(pull_request_context) = self.pull_request_context(app) {
+            context.push(pull_request_context);
+        }
+
         // Always include project rules if available
         if let Some(rules) = project_rules {
             context.push(AIAgentContext::ProjectRules {
