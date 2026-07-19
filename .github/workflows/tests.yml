@@ -7,8 +7,7 @@
 # and the `integration` package's shell/SSH suites (they need a live sshd + GCP-tunneled test VMs;
 # upstream itself skips the SSH ones on fork PRs).
 #
-# The nextest compile step doubles as the whole-workspace build gate; `warp_tui` is a non-default
-# workspace member so it gets its own check (one OS is enough — it's platform-generic).
+# The nextest compile step doubles as the whole-workspace build gate.
 
 name: Tests
 
@@ -115,10 +114,6 @@ jobs:
         run: cargo nextest run ${{ env.WORKSPACE_TEST_ARGS }} ${{ matrix.extra_test_args }} --profile ci --no-run
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check the TUI (non-default workspace member)
-        if: ${{ matrix.os == 'linux' }}
-        run: cargo check -p warp_tui --locked
 
       # --profile ci: fail-fast off + per-test failure output (see .config/nextest.toml).
       # --retries 2 absorbs the handful of load-sensitive view tests on shared runners.

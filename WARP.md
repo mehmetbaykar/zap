@@ -20,7 +20,7 @@ Zap intentionally has no Warp-server development mode. Do not restore `with_loca
 - `cargo nextest run -p warp_completer --features v2` runs the v2 completer tests.
 - `cargo test --doc` runs documentation tests.
 
-During the dated upstream-merge catch-up, follow `SPEC.md`: every slice must pass the workspace check, full test-build, WarpUI tests, and the `warp` failing-name baseline diff. Starting with slice 5, also run `cargo check -p warp_tui`.
+During upstream merges, follow `SPEC.md`: every wave must pass the workspace check, full test-build, WarpUI tests, and the `warp` failing-name baseline diff. (`crates/warp_tui` was removed 2026-07-19 — upstream TUI commits are keep-deleted per `script/upstream-strip.list`; no TUI gate exists anymore.)
 
 ### Formatting and linting
 
@@ -101,7 +101,7 @@ Warp is synchronized by real git merges, never by selective cherry-picking. Use 
 - Always run git as `git -C <repo> ...` in automation.
 - Fetch Warp with `--no-tags` to avoid release-tag pollution.
 - Apply `script/upstream-strip.list` after each merge for recurring cloud tombstones.
-- Preserve fork-owned Agent, CLI, TUI, SSH manager, BYOP, updater, and release code.
+- Preserve fork-owned Agent, CLI, SSH manager, BYOP, updater, and release code.
 - Keep upstream product behavior, adapting only its Warp-cloud boundary.
 - Never strip `app/src/ai/request_usage_model.rs`; it is the fork's local unlimited stub.
 - The fork pins an older `warp_multi_agent_api`; omit proto-only orchestration conversions rather than upgrading it implicitly.
