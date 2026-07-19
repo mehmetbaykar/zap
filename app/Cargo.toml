@@ -501,6 +501,8 @@ default = [
     "ai_context_menu",
     "at_menu_outside_of_ai_mode",
     "interactive_conversation_management_view",
+    "agent_management_view",
+    "agent_management_details_view",
     "tab_close_button_on_left",
     "ai_resume_button",
     "code_find_replace",
