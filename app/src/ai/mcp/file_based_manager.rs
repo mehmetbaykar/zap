@@ -9,6 +9,7 @@ use warp_core::features::FeatureFlag;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
+use super::file_mcp_watcher::FileMCPConfigDiagnostic;
 use super::{FileMCPWatcher, FileMCPWatcherEvent, MCPProvider};
 use crate::ai::mcp::templatable_installation::TemplatableMCPServerInstallation;
 use crate::ai::mcp::ParsedTemplatableMCPServerResult;
@@ -24,6 +25,13 @@ pub struct FileBasedMCPManager {
     file_based_servers: HashMap<u64, TemplatableMCPServerInstallation>,
     /// Reverse mapping: logical root path → provider → set of server hashes.
     file_based_servers_by_root: HashMap<PathBuf, HashMap<MCPProvider, HashSet<u64>>>,
+    /// Latest read or parse diagnostic for each config path.
+    ///
+    /// This lives beside the parsed server snapshot rather than in a frontend:
+    /// an invalid update preserves the last-known-good servers while any
+    /// consumer can query the current config health. A successful parse or
+    /// removal clears the diagnostic for that path.
+    config_diagnostics_by_path: HashMap<PathBuf, FileMCPConfigDiagnostic>,
 }
 
 impl FileBasedMCPManager {
@@ -43,6 +51,7 @@ impl FileBasedMCPManager {
         Self {
             file_based_servers: Default::default(),
             file_based_servers_by_root: Default::default(),
+            config_diagnostics_by_path: Default::default(),
         }
     }
 
@@ -50,19 +59,35 @@ impl FileBasedMCPManager {
     fn handle_watcher_event(&mut self, event: &FileMCPWatcherEvent, ctx: &mut ModelContext<Self>) {
         match event {
             FileMCPWatcherEvent::ConfigParsed {
+                config_path,
                 root_path,
                 provider,
                 servers,
             } => {
+                self.config_diagnostics_by_path.remove(config_path);
                 self.apply_parsed_servers(root_path.clone(), *provider, servers.clone(), ctx);
             }
             FileMCPWatcherEvent::ConfigRemoved {
+                config_path,
                 root_path,
                 provider,
             } => {
+                self.config_diagnostics_by_path.remove(config_path);
                 self.remove_servers_for_root_provider(root_path, *provider, ctx);
             }
+            FileMCPWatcherEvent::ConfigError { diagnostic } => {
+                // Keep the last-known-good servers; just record the config health.
+                self.config_diagnostics_by_path
+                    .insert(diagnostic.config_path.clone(), diagnostic.clone());
+            }
         }
+    }
+
+    /// Latest read/parse diagnostic for a config path, if its most recent
+    /// update was invalid.
+    #[cfg(test)]
+    pub fn config_diagnostic(&self, config_path: &Path) -> Option<&FileMCPConfigDiagnostic> {
+        self.config_diagnostics_by_path.get(config_path)
     }
 
     /// Get file-based MCP servers in scope for the given current working directory.
