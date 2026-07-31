@@ -295,6 +295,12 @@ fn convert_provider(
         api::skill_descriptor::provider::Type::Droid(_) => Ok(SkillProvider::Droid),
         api::skill_descriptor::provider::Type::Github(_) => Ok(SkillProvider::Github),
         api::skill_descriptor::provider::Type::OpenCode(_) => Ok(SkillProvider::OpenCode),
+        // The proto knows Kiro, but the fork has no Kiro provider (no skills path, no icon,
+        // no CLI agent). Reject rather than mis-map; add a real `SkillProvider::Kiro` if the
+        // fork ever grows Kiro support.
+        api::skill_descriptor::provider::Type::Kiro(_) => {
+            Err(SkillConversionError::ProviderInvalid)
+        }
     }
 }
 

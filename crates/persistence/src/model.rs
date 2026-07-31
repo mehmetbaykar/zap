@@ -1470,6 +1470,8 @@ impl From<&ToolUsageMetadata> for stream_finished::ToolUsageMetadata {
                 (&metadata.read_shell_command_output_stats).into(),
             ),
             use_computer_stats: Some((&metadata.use_computer_stats).into()),
+            // The fork has no codebase index, so it never reports these stats.
+            search_codebase_stats: None,
         }
     }
 }
