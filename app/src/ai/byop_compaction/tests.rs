@@ -562,6 +562,7 @@ fn ts(seconds: i64) -> prost_types::Timestamp {
 
 fn user_query(id: &str, task_id: &str, request_id: &str, seconds: i64) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),
@@ -580,6 +581,7 @@ fn user_query(id: &str, task_id: &str, request_id: &str, seconds: i64) -> api::M
 
 fn agent_output(id: &str, task_id: &str, request_id: &str, seconds: i64) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),

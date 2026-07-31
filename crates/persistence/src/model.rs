@@ -1603,6 +1603,7 @@ mod tests {
             dependencies: None,
             messages: (0..message_count)
                 .map(|i| api::Message {
+                    fetched_memories: Vec::new(),
                     id: format!("{id}-msg-{i}"),
                     task_id: id.to_string(),
                     server_message_data: String::new(),

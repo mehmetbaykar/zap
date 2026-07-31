@@ -86,6 +86,7 @@ fn create_user_query_message(
     query: &str,
 ) -> warp_multi_agent_api::Message {
     warp_multi_agent_api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),
@@ -244,6 +245,7 @@ fn byop_user_query_message(
     current_time: Option<DateTime<Local>>,
 ) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: message_id.to_owned(),
         task_id: "root-task".to_owned(),
         server_message_data: String::new(),
@@ -265,6 +267,7 @@ fn byop_user_query_message(
 
 fn byop_tool_call_message(task_id: &str, message_id: &str, call_id: &str) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: message_id.to_owned(),
         task_id: task_id.to_owned(),
         server_message_data: String::new(),
@@ -280,6 +283,7 @@ fn byop_tool_call_message(task_id: &str, message_id: &str, call_id: &str) -> api
 
 fn byop_tool_result_message(task_id: &str, message_id: &str, call_id: &str) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: message_id.to_owned(),
         task_id: task_id.to_owned(),
         server_message_data: "{}".to_owned(),
@@ -3135,6 +3139,7 @@ fn agent_output_message(
     text: &str,
 ) -> warp_multi_agent_api::Message {
     warp_multi_agent_api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),
@@ -3156,6 +3161,7 @@ fn subagent_tool_call_result_message(
     request_id: &str,
 ) -> warp_multi_agent_api::Message {
     warp_multi_agent_api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),
@@ -3766,6 +3772,7 @@ fn regular_tool_call_message(
     request_id: &str,
 ) -> warp_multi_agent_api::Message {
     warp_multi_agent_api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),
@@ -3796,6 +3803,7 @@ fn regular_tool_call_result_message(
     request_id: &str,
 ) -> warp_multi_agent_api::Message {
     warp_multi_agent_api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),
@@ -3826,6 +3834,7 @@ fn server_tool_call_message(
     request_id: &str,
 ) -> warp_multi_agent_api::Message {
     warp_multi_agent_api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),

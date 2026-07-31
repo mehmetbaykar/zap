@@ -109,6 +109,7 @@ fn tool_call_message_with_tool_for_test(
     tool: api::message::tool_call::Tool,
 ) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),
@@ -128,6 +129,7 @@ fn tool_call_result_message_with_result_for_test(
     result: api::message::tool_call_result::Result,
 ) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),
@@ -188,6 +190,8 @@ fn build_restored_conversation_with_cli_subagent_for_test(
                         exit_code: 0,
                         result: Some(api::run_shell_command_result::Result::CommandFinished(
                             api::ShellCommandFinished {
+                                start_ts: None,
+                                finish_ts: None,
                                 command_id: block_id_string.clone(),
                                 output: "jump output".to_string(),
                                 exit_code: 0,
@@ -311,6 +315,8 @@ fn build_restored_conversation_with_cli_subagent_snapshot_for_test(
                         exit_code: 0,
                         result: Some(api::run_shell_command_result::Result::CommandFinished(
                             api::ShellCommandFinished {
+                                start_ts: None,
+                                finish_ts: None,
                                 command_id: block_id_string.clone(),
                                 output: "short task output".to_string(),
                                 exit_code: 0,

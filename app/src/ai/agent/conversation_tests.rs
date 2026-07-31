@@ -56,6 +56,7 @@ fn restored_conversation_with_root_description(description: &str) -> AIConversat
 
 fn user_query_message(id: &str, request_id: &str, query: &str) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),
@@ -99,6 +100,7 @@ fn user_query_message_with_shell_context(
     );
 
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),
@@ -246,6 +248,7 @@ fn restored_conversation_with_messages(messages: Vec<api::Message>) -> AIConvers
 
 fn agent_output_message(id: &str, request_id: &str) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),
@@ -262,6 +265,7 @@ fn agent_output_message(id: &str, request_id: &str) -> api::Message {
 
 fn tool_call_message(id: &str, call_id: &str) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),
@@ -295,6 +299,7 @@ fn tool_call_message_with_tool(
     tool: api::message::tool_call::Tool,
 ) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),
@@ -314,6 +319,7 @@ fn tool_call_result_message_with_result(
     result: api::message::tool_call_result::Result,
 ) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: id.to_string(),
         task_id: "root-task".to_string(),
         server_message_data: String::new(),
@@ -872,6 +878,8 @@ fn test_cli_subagent_serialized_block_preserves_block_id_and_metadata() {
                                 result: Some(
                                     api::run_shell_command_result::Result::CommandFinished(
                                         api::ShellCommandFinished {
+                                            start_ts: None,
+                                            finish_ts: None,
                                             command_id: "cli-block-1".to_string(),
                                             output: "hi".to_string(),
                                             exit_code: 0,
@@ -960,6 +968,8 @@ fn test_cli_subagent_serialized_block_prefers_persisted_snapshot_output() {
                                 result: Some(
                                     api::run_shell_command_result::Result::CommandFinished(
                                         api::ShellCommandFinished {
+                                            start_ts: None,
+                                            finish_ts: None,
                                             command_id: String::from(block_id.clone()),
                                             output: "truncated task output".to_string(),
                                             exit_code: 0,
@@ -1087,6 +1097,8 @@ fn test_cli_subagent_serialized_block_ignores_later_attachment_and_context_block
                                 result: Some(
                                     api::run_shell_command_result::Result::CommandFinished(
                                         api::ShellCommandFinished {
+                                            start_ts: None,
+                                            finish_ts: None,
                                             command_id: "cli-block-1".to_string(),
                                             output: "hi".to_string(),
                                             exit_code: 0,
@@ -1194,6 +1206,8 @@ fn test_cli_subagent_serialized_block_uses_metadata_command_id_not_latest_comman
                                 result: Some(
                                     api::run_shell_command_result::Result::CommandFinished(
                                         api::ShellCommandFinished {
+                                            start_ts: None,
+                                            finish_ts: None,
                                             command_id: "cli-block-1".to_string(),
                                             output: "first".to_string(),
                                             exit_code: 0,
@@ -1215,6 +1229,8 @@ fn test_cli_subagent_serialized_block_uses_metadata_command_id_not_latest_comman
                                 result: Some(
                                     api::run_shell_command_result::Result::CommandFinished(
                                         api::ShellCommandFinished {
+                                            start_ts: None,
+                                            finish_ts: None,
                                             command_id: "other-block".to_string(),
                                             output: "second".to_string(),
                                             exit_code: 0,

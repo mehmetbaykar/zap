@@ -7669,6 +7669,7 @@ mod issue_94_task_linearization_tests {
     /// Build a UserQuery message with a `request_id`.
     fn user_query_msg(id: &str, task_id: &str, request_id: &str, query: &str) -> api::Message {
         api::Message {
+            fetched_memories: Vec::new(),
             id: id.to_string(),
             task_id: task_id.to_string(),
             server_message_data: String::new(),
