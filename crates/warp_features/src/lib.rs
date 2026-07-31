@@ -785,9 +785,11 @@ pub enum FeatureFlag {
     /// eliminating seams between adjacent box-drawing cells in the terminal.
     BoxDrawingGlyphs,
 
-    /// Enables the `oz runner` CRUD commands for managing cloud agent runners
-    /// via the CLI.
-    CloudAgentRunnerCLICommands,
+    /// Enables cloud agent runner selection: the `oz runner` CRUD commands
+    /// for managing runners via the CLI, and the Runner dropdown in the
+    /// orchestration (`run_agents`) confirmation card and plan-card config
+    /// block for choosing a runner when starting remote child agents.
+    CloudAgentRunners,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -863,7 +865,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::ContextWindowUsageBreakdown,
     FeatureFlag::WaitForEventsParentRegistration,
     FeatureFlag::BoxDrawingGlyphs,
-    FeatureFlag::CloudAgentRunnerCLICommands,
+    FeatureFlag::CloudAgentRunners,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Zap).

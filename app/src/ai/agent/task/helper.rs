@@ -104,6 +104,13 @@ impl ToolExt for api::message::tool_call::Tool {
         use api::message::tool_call::Tool;
         match self {
             Tool::RunShellCommand(_) => "run_shell_command",
+            // Names kept identical to upstream so records round-trip, even though
+            // this fork does not offer these tools.
+            Tool::SearchCodebase(_) => "search_codebase",
+            Tool::RunAgents(_) => "orchestrate",
+            Tool::WaitForEvents(_) => "wait_for_events",
+            Tool::StartRecording(_) => "start_recording",
+            Tool::StopRecording(_) => "stop_recording",
             Tool::ReadFiles(_) => "read_files",
             Tool::UploadFileArtifact(_) => "upload_artifact",
             Tool::ApplyFileDiffs(_) => "apply_file_diffs",

@@ -244,7 +244,9 @@ fn write_task_messages(
             | Message::SystemQuery(_)
             | Message::CodeReview(_)
             | Message::ServerEvent(_)
-            | Message::InvokeSkill(_) => {}
+            | Message::InvokeSkill(_)
+            // Cloud orchestration config: no fork equivalent, nothing to serialize.
+            | Message::OrchestrationConfigSnapshot(_) => {}
         }
     }
     Ok(())
@@ -497,7 +499,13 @@ fn write_tool_call_args(out: &mut String, tool: &Tool) {
         | Tool::InitProject(_)
         | Tool::Server(_)
         | Tool::Subagent(_)
-        | Tool::TransferShellCommandControlToUser(_) => {}
+        | Tool::TransferShellCommandControlToUser(_)
+        // Stripped in this fork: no codebase index, no cloud orchestration, no recording.
+        | Tool::SearchCodebase(_)
+        | Tool::RunAgents(_)
+        | Tool::WaitForEvents(_)
+        | Tool::StartRecording(_)
+        | Tool::StopRecording(_) => {}
     }
 }
 
@@ -975,7 +983,13 @@ fn write_tool_call_result_content(out: &mut String, result: &ToolCallResultType)
         | ToolCallResultType::InitProject(_)
         | ToolCallResultType::TransferShellCommandControlToUser(_)
         | ToolCallResultType::SuggestCreatePlan(_)
-        | ToolCallResultType::SuggestPlan(_) => {
+        | ToolCallResultType::SuggestPlan(_)
+        // Stripped in this fork: no codebase index, no cloud orchestration, no recording.
+        | ToolCallResultType::SearchCodebase(_)
+        | ToolCallResultType::RunAgentsResult(_)
+        | ToolCallResultType::WaitForEvents(_)
+        | ToolCallResultType::StartRecording(_)
+        | ToolCallResultType::StopRecording(_) => {
             out.push_str("status: completed\n");
         }
     }

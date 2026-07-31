@@ -1,3 +1,4 @@
+use chrono::{DateTime, Local};
 use warp_multi_agent_api::apply_file_diffs_result::success::UpdatedFileContent;
 use warp_multi_agent_api::ask_user_question_result::answer_item::{
     self, Answer as AskUserQuestionAnswer,
@@ -7,6 +8,13 @@ use warp_multi_agent_api::{self as api};
 use super::*;
 use crate::agent::action_result::ShellCommandError;
 use crate::agent::convert::ConvertToAPITypeError;
+
+fn local_datetime_to_timestamp(timestamp: DateTime<Local>) -> prost_types::Timestamp {
+    prost_types::Timestamp {
+        seconds: timestamp.timestamp(),
+        nanos: timestamp.timestamp_subsec_nanos() as i32,
+    }
+}
 
 impl TryFrom<RequestCommandOutputResult> for api::request::input::tool_call_result::Result {
     type Error = ConvertToAPITypeError;
@@ -18,8 +26,8 @@ impl TryFrom<RequestCommandOutputResult> for api::request::input::tool_call_resu
                 block_id,
                 output,
                 exit_code,
-                start_ts: _,
-                completed_ts: _,
+                start_ts,
+                completed_ts,
             } => Ok(
                 api::request::input::tool_call_result::Result::RunShellCommand(
                     #[allow(deprecated)]
@@ -32,6 +40,8 @@ impl TryFrom<RequestCommandOutputResult> for api::request::input::tool_call_resu
                                 command_id: block_id.to_string(),
                                 output,
                                 exit_code: exit_code.value(),
+                                start_ts: start_ts.map(local_datetime_to_timestamp),
+                                finish_ts: completed_ts.map(local_datetime_to_timestamp),
                             },
                         )),
                     },
@@ -117,8 +127,8 @@ impl TryFrom<WriteToLongRunningShellCommandResult>
                 block_id,
                 output,
                 exit_code,
-                start_ts: _,
-                completed_ts: _,
+                start_ts,
+                completed_ts,
             } => Ok(
                 api::request::input::tool_call_result::Result::WriteToLongRunningShellCommand(
                     api::WriteToLongRunningShellCommandResult {
@@ -127,6 +137,8 @@ impl TryFrom<WriteToLongRunningShellCommandResult>
                                 command_id: block_id.to_string(),
                                 output,
                                 exit_code: exit_code.value(),
+                                start_ts: start_ts.map(local_datetime_to_timestamp),
+                                finish_ts: completed_ts.map(local_datetime_to_timestamp),
                             }
                         ))
                     },
@@ -157,18 +169,28 @@ impl TryFrom<ReadFilesResult> for api::request::input::tool_call_result::Result 
 
     fn try_from(result: ReadFilesResult) -> Result<Self, Self::Error> {
         match result {
-            ReadFilesResult::Success { files } => Ok(
-                api::request::input::tool_call_result::Result::ReadFiles(api::ReadFilesResult {
+            ReadFilesResult::Success {
+                files,
+                failed_files,
+            } => Ok(api::request::input::tool_call_result::Result::ReadFiles(
+                api::ReadFilesResult {
                     result: Some(api::read_files_result::Result::AnyFilesSuccess(
                         api::read_files_result::AnyFilesSuccess {
                             files: files
                                 .into_iter()
                                 .flat_map(Into::<Vec<api::AnyFileContent>>::into)
                                 .collect(),
+                            failed_reads: failed_files
+                                .into_iter()
+                                .map(|failed_file| api::read_files_result::FailedRead {
+                                    path: failed_file.path,
+                                    message: failed_file.message,
+                                })
+                                .collect(),
                         },
                     )),
-                }),
-            ),
+                },
+            )),
             ReadFilesResult::Error(error) => Ok(
                 api::request::input::tool_call_result::Result::ReadFiles(api::ReadFilesResult {
                     result: Some(api::read_files_result::Result::Error(
@@ -588,8 +610,8 @@ impl TryFrom<ReadShellCommandOutputResult> for api::request::input::tool_call_re
                 block_id,
                 output,
                 exit_code,
-                start_ts: _,
-                completed_ts: _,
+                start_ts,
+                completed_ts,
             } => Ok(
                 api::request::input::tool_call_result::Result::ReadShellCommandOutput(
                     api::ReadShellCommandOutputResult {
@@ -599,6 +621,8 @@ impl TryFrom<ReadShellCommandOutputResult> for api::request::input::tool_call_re
                                 command_id: block_id.to_string(),
                                 output,
                                 exit_code: exit_code.value(),
+                                start_ts: start_ts.map(local_datetime_to_timestamp),
+                                finish_ts: completed_ts.map(local_datetime_to_timestamp),
                             },
                         )),
                     },
@@ -683,8 +707,8 @@ impl TryFrom<TransferShellCommandControlToUserResult>
                 block_id,
                 output,
                 exit_code,
-                start_ts: _,
-                completed_ts: _,
+                start_ts,
+                completed_ts,
             } => Ok(
                 api::request::input::tool_call_result::Result::TransferShellCommandControlToUser(
                     api::TransferShellCommandControlToUserResult {
@@ -694,6 +718,8 @@ impl TryFrom<TransferShellCommandControlToUserResult>
                                     command_id: block_id.to_string(),
                                     output,
                                     exit_code: exit_code.value(),
+                                    start_ts: start_ts.map(local_datetime_to_timestamp),
+                                    finish_ts: completed_ts.map(local_datetime_to_timestamp),
                                 },
                             ),
                         ),

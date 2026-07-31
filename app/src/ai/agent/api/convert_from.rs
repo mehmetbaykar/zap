@@ -304,6 +304,10 @@ impl ConvertAPIMessageToClientOutputMessage for api::Message {
             api::message::Message::ModelUsed(_) => {
                 Ok(MaybeAIAgentOutputMessage::NoClientRepresentation)
             }
+            // Cloud orchestration config: no client-side representation in this fork.
+            api::message::Message::OrchestrationConfigSnapshot(_) => {
+                Ok(MaybeAIAgentOutputMessage::NoClientRepresentation)
+            }
             api::message::Message::UpdateTodos(update_todos) => {
                 if let Some(operation) = update_todos.operation {
                     match operation {

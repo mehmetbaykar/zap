@@ -120,6 +120,7 @@ fn markdown_visuals_fixture_directory() -> String {
 
 fn restored_user_query_message(task_id: &str, request_id: &str, directory: &str) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: "restored-user-query".to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),
@@ -145,6 +146,7 @@ fn restored_user_query_message(task_id: &str, request_id: &str, directory: &str)
 
 fn restored_agent_output_message(task_id: &str, request_id: &str) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: "restored-agent-output".to_string(),
         task_id: task_id.to_string(),
         server_message_data: String::new(),

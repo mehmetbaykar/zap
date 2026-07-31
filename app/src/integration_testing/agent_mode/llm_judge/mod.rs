@@ -86,6 +86,8 @@ pub fn filter_tool_call_result(result: &message::ToolCallResult) -> message::Too
                             command_id: "command_id".to_string(),
                             output: "[OUTPUT OMITTED]".to_string(),
                             exit_code: cmd_result.exit_code,
+                            start_ts: None,
+                            finish_ts: None,
                         },
                     ),
                 ),
@@ -109,6 +111,7 @@ pub fn filter_tool_call_result(result: &message::ToolCallResult) -> message::Too
                     Some(ReadResult::TextFilesSuccess(
                         read_files_result::TextFilesSuccess {
                             files: filtered_files,
+                            failed_reads: success.failed_reads.clone(),
                         },
                     ))
                 }
@@ -147,6 +150,7 @@ pub fn filter_tool_call_result(result: &message::ToolCallResult) -> message::Too
                     Some(ReadResult::AnyFilesSuccess(
                         read_files_result::AnyFilesSuccess {
                             files: filtered_files,
+                            failed_reads: success.failed_reads.clone(),
                         },
                     ))
                 }

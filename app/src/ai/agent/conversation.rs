@@ -3902,6 +3902,7 @@ impl AIConversation {
                                 output: command_output,
                                 exit_code,
                                 command_id: finished_command_id,
+                                ..
                             },
                         )) = &cmd_result.result
                         {

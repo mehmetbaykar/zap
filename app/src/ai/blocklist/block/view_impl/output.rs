@@ -5,7 +5,8 @@ use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::comment::ReviewComment;
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::{
-    AIAgentInput, CancellationOutcome, CreateDocumentsResult, EditDocumentsResult, ReadFilesResult,
+    AIAgentInput, CancellationOutcome, CreateDocumentsResult, EditDocumentsResult,
+    ReadFilesFailedFile, ReadFilesResult,
     SubagentCall, SubagentType, TodoOperation,
 };
 use crate::util::time_format::format_elapsed_seconds;
@@ -88,7 +89,8 @@ use crate::{
                 },
                 inline_action_icons::{self, icon_size},
                 requested_action::{
-                    render_requested_action_body_text, render_requested_action_row_for_text,
+                    render_requested_action_body_text, render_requested_action_row,
+                    render_requested_action_row_for_text, FormattedTextOrElement,
                     RenderableAction,
                 },
                 requested_command::RequestedCommand,
@@ -464,13 +466,14 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
 
                                 // checks if the read file action result is completed and successful.
                                 // if successful, we have FileContext with pre-computed line counts that we use to clamp displayed file ranges to the length of the file
-                                let file_names = match agent_action_results {
+                                let (file_names, result_failed_files) = match agent_action_results {
                                     // if completed and successful, generate a user message with file info + line count
                                     Some(AIAgentActionResult {
                                         result:
                                             AIAgentActionResultType::ReadFiles(
                                                 ReadFilesResult::Success {
                                                     files: file_contexts,
+                                                    failed_files,
                                                 },
                                             ),
                                         ..
@@ -497,23 +500,29 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                                                 .add_child(renderable_action.render(app).finish());
                                             continue;
                                         }
-                                        group_file_contexts_for_display(
-                                            file_contexts,
-                                            props.shell_launch_data,
-                                            props.current_working_directory,
+                                        (
+                                            group_file_contexts_for_display(
+                                                file_contexts,
+                                                props.shell_launch_data,
+                                                props.current_working_directory,
+                                            ),
+                                            failed_files.clone(),
                                         )
                                     }
                                     // if not completed/successful, generate a user message without line count
-                                    _ => files
-                                        .iter()
-                                        .map(|file| {
-                                            file.to_user_message(
-                                                props.shell_launch_data,
-                                                props.current_working_directory,
-                                                None,
-                                            )
-                                        })
-                                        .collect_vec(),
+                                    _ => (
+                                        files
+                                            .iter()
+                                            .map(|file| {
+                                                file.to_user_message(
+                                                    props.shell_launch_data,
+                                                    props.current_working_directory,
+                                                    None,
+                                                )
+                                            })
+                                            .collect_vec(),
+                                        vec![],
+                                    ),
                                 };
 
                                 let file_locations = files
@@ -540,6 +549,7 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                                     app,
                                     skill,
                                     action_index,
+                                    &result_failed_files,
                                 ));
                             }
                         }
@@ -1553,6 +1563,102 @@ fn render_read_skill(
     renderable_action.render(app).finish()
 }
 
+fn render_read_files_partial(
+    props: Props,
+    id: &AIAgentActionId,
+    file_names: impl IntoIterator<Item = impl AsRef<str>>,
+    failed_files: &[ReadFilesFailedFile],
+    app: &AppContext,
+    parsed_skill: Option<&ai::skills::ParsedSkill>,
+    action_index: usize,
+) -> Box<dyn Element> {
+    let appearance = Appearance::as_ref(app);
+    let theme = appearance.theme();
+
+    let skill_button = parsed_skill.and_then(|skill| {
+        props
+            .state_handles
+            .skill_button_handles
+            .get(id)
+            .cloned()
+            .map(|button_handle| {
+                let reference = SkillManager::handle(app)
+                    .as_ref(app)
+                    .reference_for_skill_path(&skill.path);
+                // The fork's skill paths may be remote (SSH), unlike upstream's local-only assumption.
+                let source = match &skill.path {
+                    LocalOrRemotePath::Local(path) => CodeSource::Skill {
+                        reference,
+                        path: path.clone(),
+                        origin: SkillOpenOrigin::ReadFiles,
+                    },
+                    LocalOrRemotePath::Remote(path) => CodeSource::RemoteFileTree {
+                        remote_path: crate::code::buffer_location::RemotePath::new(
+                            path.host_id.clone(),
+                            path.path.clone(),
+                        ),
+                    },
+                };
+                let skill_icon_override = icon_override_for_skill_name(&skill.name);
+                render_skill_button(
+                    &format!("/{}", skill.name),
+                    button_handle,
+                    appearance,
+                    skill.provider,
+                    skill_icon_override,
+                    move |ctx| {
+                        ctx.dispatch_typed_action(AIBlockAction::OpenCodeInWarp {
+                            source: source.clone(),
+                        });
+                    },
+                )
+            })
+    });
+
+    let success_text =
+        render_read_files_text(props.into(), file_names, app, appearance, action_index);
+    let success_row = render_requested_action_row(
+        FormattedTextOrElement::FormattedText(Box::new(success_text)),
+        Some(inline_action_icons::green_check_icon(appearance).finish()),
+        skill_button,
+        true,
+        false,
+        app,
+    );
+
+    let failed_paths = failed_files
+        .iter()
+        .map(|file| {
+            shell_native_absolute_path(
+                &file.path,
+                props.shell_launch_data,
+                props.current_working_directory,
+            )
+        })
+        .join("\n");
+    let failed_row = render_requested_action_row_for_text(
+        failed_paths.into(),
+        appearance.ui_font_family(),
+        Some(inline_action_icons::red_x_icon(appearance).finish()),
+        None,
+        true,
+        false,
+        app,
+    );
+
+    let mut content = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+    content.add_child(success_row);
+    content.add_child(failed_row);
+
+    Container::new(content.finish())
+        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
+        .with_background_color(internal_colors::neutral_2(theme))
+        .with_border(Border::all(1.).with_border_fill(theme.surface_2()))
+        .finish()
+        .with_agent_output_item_spacing(app)
+        .finish()
+}
+
 fn render_read_files(
     props: Props,
     id: &AIAgentActionId,
@@ -1560,9 +1666,25 @@ fn render_read_files(
     app: &AppContext,
     parsed_skill: Option<&ai::skills::ParsedSkill>,
     action_index: usize,
+    failed_files: &[ReadFilesFailedFile],
 ) -> Box<dyn Element> {
     let status = props.action_model.as_ref(app).get_action_status(id);
     let appearance = Appearance::as_ref(app);
+
+    // For partial reads (some files succeeded, some failed) show a two-section
+    // layout once the action is done.
+    if !failed_files.is_empty() && status.as_ref().is_some_and(|s| s.is_done()) {
+        return render_read_files_partial(
+            props,
+            id,
+            file_names,
+            failed_files,
+            app,
+            parsed_skill,
+            action_index,
+        );
+    }
+
     let formatted_files =
         render_read_files_text(props.into(), file_names, app, appearance, action_index);
 

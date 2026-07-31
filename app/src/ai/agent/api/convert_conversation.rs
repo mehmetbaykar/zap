@@ -28,12 +28,12 @@ use crate::ai::agent::{
     DocumentContext, EditDocumentsResult, FileContext, FileGlobResult, FileGlobV2Match,
     FileGlobV2Result, FinishedAIAgentOutput, GrepFileMatch, GrepLineMatch, GrepResult,
     ImageContext, InsertReviewCommentsResult, OutputModelInfo, PassiveCodeDiffEntry,
-    PassiveSuggestionResultType, PassiveSuggestionTrigger, ReadDocumentsResult, ReadFilesResult,
-    ReadMCPResourceResult, ReadShellCommandOutputResult, RequestCommandOutputResult,
-    RequestFileEditsResult, ServerOutputId, Shared, ShellCommandCompletedTrigger,
-    ShellCommandError, SuggestNewConversationResult, SuggestPromptResult,
-    TransferShellCommandControlToUserResult, UpdatedFileContext, UserQueryMode,
-    WriteToLongRunningShellCommandResult,
+    PassiveSuggestionResultType, PassiveSuggestionTrigger, ReadDocumentsResult,
+    ReadFilesFailedFile, ReadFilesResult, ReadMCPResourceResult, ReadShellCommandOutputResult,
+    RequestCommandOutputResult, RequestFileEditsResult, ServerOutputId, Shared,
+    ShellCommandCompletedTrigger, ShellCommandError, SuggestNewConversationResult,
+    SuggestPromptResult, TransferShellCommandControlToUserResult, UpdatedFileContext,
+    UserQueryMode, WriteToLongRunningShellCommandResult,
 };
 use crate::ai::block_context::BlockContext;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
@@ -343,7 +343,9 @@ impl ConvertToExchanges for &api::Task {
                         | api::message::system_query::Type::FetchReviewComments(_)
                         | api::message::system_query::Type::GeneratePassiveSuggestions(_)
                         // TODO: Implement this for real. ZB adding this to bump proto version for unrelated API changes.
-                        | api::message::system_query::Type::SummarizeConversation(_) => false,
+                        | api::message::system_query::Type::SummarizeConversation(_)
+                        // Cloud handoff rehydration: no fork equivalent.
+                        | api::message::system_query::Type::HandoffRehydration(_) => false,
                     }
                 }
                 api::message::Message::ToolCallResult(tool_call_result) => {
@@ -423,7 +425,8 @@ impl ConvertToExchanges for &api::Task {
                 | api::message::Message::DebugOutput(_)
                 | api::message::Message::ArtifactEvent(_)
                 | api::message::Message::MessagesReceivedFromAgents(_)
-                | api::message::Message::ModelUsed(_) => false,
+                | api::message::Message::ModelUsed(_)
+                | api::message::Message::OrchestrationConfigSnapshot(_) => false,
             };
 
             if !added_message_as_exchange_input {
@@ -569,8 +572,19 @@ pub(crate) fn convert_tool_call_result_to_input(
                         .iter()
                         .map(|file| FileContext::from(file.clone()))
                         .collect();
+                    let failed_files = success
+                        .failed_reads
+                        .iter()
+                        .map(|failed_file| ReadFilesFailedFile {
+                            path: failed_file.path.clone(),
+                            message: failed_file.message.clone(),
+                        })
+                        .collect();
 
-                    ReadFilesResult::Success { files }
+                    ReadFilesResult::Success {
+                        files,
+                        failed_files,
+                    }
                 }
                 Some(api::read_files_result::Result::TextFilesSuccess(success)) => {
                     let files = success
@@ -578,7 +592,18 @@ pub(crate) fn convert_tool_call_result_to_input(
                         .iter()
                         .map(|file| FileContext::from(file.clone()))
                         .collect();
-                    ReadFilesResult::Success { files }
+                    let failed_files = success
+                        .failed_reads
+                        .iter()
+                        .map(|failed_file| ReadFilesFailedFile {
+                            path: failed_file.path.clone(),
+                            message: failed_file.message.clone(),
+                        })
+                        .collect();
+                    ReadFilesResult::Success {
+                        files,
+                        failed_files,
+                    }
                 }
                 Some(api::read_files_result::Result::Error(error)) => {
                     ReadFilesResult::Error(error.message.clone())
@@ -1257,7 +1282,13 @@ pub(crate) fn convert_tool_call_result_to_input(
         }
         // Deprecated/unused result types.
         Some(ToolCallResultType::SuggestCreatePlan(..))
-        | Some(ToolCallResultType::SuggestPlan(..)) => None,
+        | Some(ToolCallResultType::SuggestPlan(..))
+        // Stripped in this fork: no codebase index, no cloud orchestration, no recording.
+        | Some(ToolCallResultType::SearchCodebase(..))
+        | Some(ToolCallResultType::RunAgentsResult(..))
+        | Some(ToolCallResultType::WaitForEvents(..))
+        | Some(ToolCallResultType::StartRecording(..))
+        | Some(ToolCallResultType::StopRecording(..)) => None,
         None => {
             create_cancelled_result_for_tool_call(task_id, &tool_call_id, tool_call_map, context)
         }
@@ -1350,6 +1381,12 @@ fn create_cancelled_result_for_tool_call(
         ToolType::SendMessageToAgent(_) => return None,
         // These tools are deprecated.
         ToolType::SuggestCreatePlan(_) | ToolType::SuggestPlan(_) => return None,
+        // Stripped in this fork: no codebase index, no cloud orchestration, no recording.
+        ToolType::SearchCodebase(_)
+        | ToolType::RunAgents(_)
+        | ToolType::WaitForEvents(_)
+        | ToolType::StartRecording(_)
+        | ToolType::StopRecording(_) => return None,
     };
 
     Some(AIAgentInput::ActionResult {
@@ -1536,7 +1573,8 @@ where
                 | api::message::Message::UpdateTodos(_)
                 | api::message::Message::MessagesReceivedFromAgents(_)
                 | api::message::Message::EventsFromAgents(_)
-                | api::message::Message::PassiveSuggestionResult(_) => None,
+                | api::message::Message::PassiveSuggestionResult(_)
+                | api::message::Message::OrchestrationConfigSnapshot(_) => None,
                 // Anything else is considered agent/stream activity we want to measure
                 api::message::Message::AgentOutput(_)
                 | api::message::Message::AgentReasoning(_)

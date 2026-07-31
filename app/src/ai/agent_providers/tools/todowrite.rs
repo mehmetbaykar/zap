@@ -201,6 +201,7 @@ fn make_update_todos_message(
     operation: api::message::update_todos::Operation,
 ) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
         server_message_data: String::new(),

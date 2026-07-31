@@ -802,7 +802,10 @@ fn build_serializer_readiness_projection(
             | api::message::Message::MessagesReceivedFromAgents(_)
             | api::message::Message::ModelUsed(_)
             | api::message::Message::EventsFromAgents(_)
-            | api::message::Message::PassiveSuggestionResult(_) => {}
+            | api::message::Message::PassiveSuggestionResult(_)
+            // Config metadata, not a turn boundary: treating it as one would desync
+            // BYOP provider turn alternation.
+            | api::message::Message::OrchestrationConfigSnapshot(_) => {}
         }
     }
 
@@ -965,7 +968,10 @@ fn build_controller_readiness_projection(
             | api::message::Message::MessagesReceivedFromAgents(_)
             | api::message::Message::ModelUsed(_)
             | api::message::Message::EventsFromAgents(_)
-            | api::message::Message::PassiveSuggestionResult(_) => {}
+            | api::message::Message::PassiveSuggestionResult(_)
+            // Config metadata, not a turn boundary: treating it as one would desync
+            // BYOP provider turn alternation.
+            | api::message::Message::OrchestrationConfigSnapshot(_) => {}
         }
     }
 
@@ -4665,6 +4671,12 @@ pub async fn generate_byop_output(
                 tool_usage_metadata: None,
                 warp_token_usage: std::collections::HashMap::new(),
                 byok_token_usage: std::collections::HashMap::new(),
+                // Real value: the prompt tokens this turn actually consumed.
+                total_input_tokens: captured_prompt_tokens.max(0) as u32,
+                // Warp-cloud billing concepts with no BYOP equivalent.
+                platform_credits_spent: 0.0,
+                custom_endpoint_token_usage: std::collections::HashMap::new(),
+                context_window_segments: Vec::new(),
             })
         });
         yield Ok(make_finished_done(usage_metadata));
@@ -4903,6 +4915,7 @@ fn make_append_event(task_id: &str, message_id: &str, kind: AppendKind) -> api::
         ),
     };
     let message = api::Message {
+        fetched_memories: Vec::new(),
         id: message_id.to_owned(),
         task_id: task_id.to_owned(),
         server_message_data: String::new(),
@@ -5020,6 +5033,7 @@ fn parse_incoming_tool_call(
 
 fn make_reasoning_message(task_id: &str, request_id: &str, reasoning: String) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
         server_message_data: String::new(),
@@ -5037,6 +5051,7 @@ fn make_reasoning_message(task_id: &str, request_id: &str, reasoning: String) ->
 
 fn make_agent_output_message(task_id: &str, request_id: &str, text: String) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
         server_message_data: String::new(),
@@ -5082,6 +5097,7 @@ fn make_user_query_message(
         })
     };
     api::Message {
+        fetched_memories: Vec::new(),
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
         server_message_data: String::new(),
@@ -5104,6 +5120,7 @@ fn make_web_fetch_fetching_message(
     urls: Vec<String>,
 ) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
         server_message_data: String::new(),
@@ -5152,6 +5169,7 @@ fn make_web_fetch_status_from_result(
         })
     };
     api::Message {
+        fetched_memories: Vec::new(),
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
         server_message_data: String::new(),
@@ -5180,6 +5198,7 @@ fn make_tool_call_result_message(
     // needs to special-case in the `Message::ToolCallResult` branch: when result=None, read content from server_message_data
     // (otherwise it goes through tools::serialize_result to deserialize the structured variant).
     api::Message {
+        fetched_memories: Vec::new(),
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
         server_message_data: content,
@@ -5211,6 +5230,7 @@ fn make_tool_call_carrier_message(
 ) -> api::Message {
     let carrier = format!("{}\n{}", fn_name, args_str);
     api::Message {
+        fetched_memories: Vec::new(),
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
         server_message_data: carrier,
@@ -5231,6 +5251,7 @@ fn make_tool_call_message(
     tool: api::message::tool_call::Tool,
 ) -> api::Message {
     api::Message {
+        fetched_memories: Vec::new(),
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
         server_message_data: String::new(),

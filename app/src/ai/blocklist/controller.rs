@@ -2785,6 +2785,7 @@ impl BlocklistAIController {
         })
         .to_string();
         warp_multi_agent_api::Message {
+            fetched_memories: Vec::new(),
             id: uuid::Uuid::new_v4().to_string(),
             task_id: task_id.to_owned(),
             server_message_data,
@@ -2853,6 +2854,7 @@ impl BlocklistAIController {
         };
 
         warp_multi_agent_api::Message {
+            fetched_memories: Vec::new(),
             id: uuid::Uuid::new_v4().to_string(),
             task_id: result.task_id.to_string(),
             server_message_data,

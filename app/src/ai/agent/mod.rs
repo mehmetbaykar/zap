@@ -1243,7 +1243,10 @@ impl<'a> std::fmt::Display for MarkdownActionResult<'a> {
                 }
             },
             AIAgentActionResultType::ReadFiles(result) => match result {
-                ReadFilesResult::Success { files } => {
+                ReadFilesResult::Success {
+                    files,
+                    failed_files,
+                } => {
                     write!(f, "\n\n**Files Read:**\n\n")?;
                     for file in files {
                         writeln!(f, "**{}**", file.file_name)?;
@@ -1252,6 +1255,12 @@ impl<'a> std::fmt::Display for MarkdownActionResult<'a> {
                             if !text.trim().is_empty() {
                                 writeln!(f, "```\n{text}\n```\n")?;
                             }
+                        }
+                    }
+                    if !failed_files.is_empty() {
+                        write!(f, "\n**Files Failed:**\n\n")?;
+                        for failed_file in failed_files {
+                            writeln!(f, "- **{}**: {}", failed_file.path, failed_file.message)?;
                         }
                     }
                     Ok(())
@@ -2203,6 +2212,8 @@ pub enum AIAgentContext {
         name: String,
         /// The repository owner/organization (e.g. "warpdotdev"), if determinable from the remote URL.
         owner: Option<String>,
+        /// The repository host (e.g. "github.com"), if determinable from the remote URL.
+        host: Option<String>,
     },
 
     /// Information about the GitHub pull request associated with the current branch.
@@ -2219,6 +2230,9 @@ pub enum AIAgentContext {
         /// The pull request's base branch.
         #[serde(default)]
         base_branch: String,
+        /// The full URL of the pull request (e.g. "https://github.com/owner/repo/pull/123").
+        #[serde(default)]
+        url: String,
     },
 
     /// List of available skills is provided to the agent during initialization

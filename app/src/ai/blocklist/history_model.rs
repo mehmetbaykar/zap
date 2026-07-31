@@ -2984,6 +2984,7 @@ fn reconcile_dangling_tool_calls_in_forked_task(
                 // Synthesized `Cancel` carries the call's `request_id` so it
                 // groups into the same exchange as its `tool_call` on restore.
                 warp_multi_agent_api::Message {
+                    fetched_memories: Vec::new(),
                     id: Uuid::new_v4().to_string(),
                     task_id: task.id.clone(),
                     server_message_data: String::new(),
@@ -3255,6 +3256,7 @@ fn byop_result_message_ids_by_tool_call_key(
                 | Some(warp_multi_agent_api::message::Message::ModelUsed(_))
                 | Some(warp_multi_agent_api::message::Message::EventsFromAgents(_))
                 | Some(warp_multi_agent_api::message::Message::PassiveSuggestionResult(_))
+                | Some(warp_multi_agent_api::message::Message::OrchestrationConfigSnapshot(_))
                 | None => {}
             }
         }
@@ -3318,6 +3320,7 @@ fn byop_tool_call_keys_by_message_id(
                 | Some(warp_multi_agent_api::message::Message::ModelUsed(_))
                 | Some(warp_multi_agent_api::message::Message::EventsFromAgents(_))
                 | Some(warp_multi_agent_api::message::Message::PassiveSuggestionResult(_))
+                | Some(warp_multi_agent_api::message::Message::OrchestrationConfigSnapshot(_))
                 | None => {}
             }
         }

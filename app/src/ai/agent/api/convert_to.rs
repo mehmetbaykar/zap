@@ -32,6 +32,8 @@ fn convert_request_computer_use_result(
                 api::RequestComputerUseResult {
                     result: Some(api::request_computer_use_result::Result::Approved(
                         api::request_computer_use_result::Approved {
+                            // The fork captures the full screen, not per-window.
+                            windows: Vec::new(),
                             screen_dimensions: Some(api::ScreenDimensions {
                                 width_px: screenshot.original_width as i32,
                                 height_px: screenshot.original_height as i32,
@@ -77,6 +79,9 @@ fn convert_use_computer_result(
             api::request::input::tool_call_result::Result::UseComputer(api::UseComputerResult {
                 result: Some(api::use_computer_result::Result::Success(
                     api::use_computer_result::Success {
+                        // The fork captures the full screen, not per-window.
+                        windows: Vec::new(),
+                        captured_window: None,
                         screenshot: result.screenshot.map(|screenshot| api::RawImage {
                             data: screenshot.data,
                             mime_type: screenshot.mime_type.to_string(),
@@ -768,6 +773,7 @@ impl TryFrom<AIAgentActionResult> for api::request::input::user_inputs::user_inp
 
 fn convert_context(context: &[AIAgentContext]) -> api::InputContext {
     let mut api_context = api::InputContext::default();
+    let mut git_context = None;
     for context in context.iter().cloned() {
         match context {
             AIAgentContext::Block(block) => {
@@ -851,17 +857,43 @@ fn convert_context(context: &[AIAgentContext]) -> api::InputContext {
                 }
             }
             AIAgentContext::Git { head, branch } => {
-                api_context.git = Some(api::input_context::Git {
-                    head,
-                    branch: branch.unwrap_or_default(),
+                let api_git_context =
+                    git_context.get_or_insert_with(api::input_context::Git::default);
+                api_git_context.head = head;
+                api_git_context.branch = branch.unwrap_or_default();
+            }
+            AIAgentContext::Repository { name, owner, host } => {
+                let api_git_context =
+                    git_context.get_or_insert_with(api::input_context::Git::default);
+                api_git_context.repository = Some(api::input_context::git::Repository {
+                    name,
+                    owner: owner.unwrap_or_default(),
+                    host: host.unwrap_or_default(),
                 });
             }
-            // The fork's pinned `warp_multi_agent_api::input_context::Git` message only
-            // carries `head`/`branch`; it has no `repository`/`pull_request` sub-messages
-            // to populate, so this context is gathered locally (see
-            // `context_model.rs::repository_context`/`pull_request_context`) but not yet
-            // transmittable to the BYOP backends.
-            AIAgentContext::Repository { .. } | AIAgentContext::PullRequest { .. } => {}
+            AIAgentContext::PullRequest {
+                number,
+                state,
+                draft,
+                base_branch,
+                url,
+            } => {
+                if number <= 0 {
+                    continue;
+                }
+                let Some(state) = api_pull_request_state(&state, draft) else {
+                    continue;
+                };
+                let pull_request = api::input_context::git::PullRequest {
+                    number,
+                    state: state as i32,
+                    base_branch,
+                    url,
+                };
+                let api_git_context =
+                    git_context.get_or_insert_with(api::input_context::Git::default);
+                api_git_context.pull_request = Some(pull_request);
+            }
             AIAgentContext::Skills { skills } => {
                 api_context.updated_skills_context = Some(api::input_context::SkillsContext {
                     available_skills: skills
@@ -878,7 +910,27 @@ fn convert_context(context: &[AIAgentContext]) -> api::InputContext {
             }
         }
     }
+    api_context.git = git_context;
     api_context
+}
+
+fn api_pull_request_state(
+    state: &str,
+    draft: bool,
+) -> Option<api::input_context::git::pull_request::State> {
+    use api::input_context::git::pull_request::State;
+    match state.to_ascii_uppercase().as_str() {
+        "OPEN" => {
+            if draft {
+                Some(State::OpenDraft)
+            } else {
+                Some(State::Open)
+            }
+        }
+        "CLOSED" => Some(State::Closed),
+        "MERGED" => Some(State::Merged),
+        _ => None,
+    }
 }
 
 impl From<Suggestions> for api::Suggestions {
