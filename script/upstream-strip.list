@@ -264,3 +264,10 @@ specs/REMOTE-1674/TECH.md
 specs/REMOTE-1696/PRODUCT.md
 specs/REMOTE-1696/TECH.md
 specs/rtc-task-invalidation-phase1/TECH.md
+# Wave 2026-08-01 (0017f3059..b2f0b285d): cloud orchestration + codebase-index
+# paths upstream keeps evolving. Verified absent in the fork, present upstream.
+app/src/ai/orchestration
+app/src/ai/blocklist/action_model/execute/search_codebase.rs
+crates/ai/src/agent/action/convert_tests.rs
+crates/ai/src/agent/orchestration_config_tests.rs
+agents/specs
