@@ -257,7 +257,7 @@ impl RunAgentsExecutor {
                 if !me.pending.remove(&action_id) {
                     return;
                 }
-                let agents = build_agent_outcomes(&configs, outcomes);
+                let agents = build_agent_outcomes(&configs, outcomes, &model_id);
                 me.record_launched_agents(parent_conversation_id, &agents);
                 ctx.emit(RunAgentsExecutorEvent::SpawningFinished {
                     action_id: action_id.clone(),
@@ -500,6 +500,7 @@ pub fn run_agents_to_start_agent_mode(
 fn build_agent_outcomes(
     configs: &[RunAgentsAgentRunConfig],
     outcomes: Vec<RunAgentsAgentOutcomeKind>,
+    batch_model_id: &str,
 ) -> Vec<RunAgentsAgentOutcome> {
     configs
         .iter()
@@ -507,6 +508,13 @@ fn build_agent_outcomes(
         .map(|(config, kind)| RunAgentsAgentOutcome {
             name: config.name.clone(),
             kind,
+            // Report what this child actually ran on: its own override when it
+            // set one, otherwise the batch model it inherited.
+            resolved_model_id: if config.model_id.trim().is_empty() {
+                batch_model_id.to_string()
+            } else {
+                config.model_id.clone()
+            },
         })
         .collect()
 }

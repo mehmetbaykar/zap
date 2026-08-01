@@ -47,7 +47,7 @@ fn from_args_builds_a_local_native_batch() {
     assert!(run_agents.plan_id.is_empty());
     assert_eq!(
         run_agents.execution_mode,
-        Some(api::run_agents::ExecutionMode::Local(
+        Some(api::run_agents::ExecutionModeOneOf::Local(
             api::run_agents::Local {}
         ))
     );
@@ -149,6 +149,9 @@ fn result_to_json_reports_each_agent_outcome() {
         }),
         vec![
             api::run_agents_result::AgentOutcome {
+                model_id: String::new(),
+                harness: None,
+                execution_mode: None,
                 name: "Test Fixer".to_string(),
                 result: Some(api::run_agents_result::agent_outcome::Result::Launched(
                     api::run_agents_result::LaunchedAgent {
@@ -157,6 +160,9 @@ fn result_to_json_reports_each_agent_outcome() {
                 )),
             },
             api::run_agents_result::AgentOutcome {
+                model_id: String::new(),
+                harness: None,
+                execution_mode: None,
                 name: "Docs Writer".to_string(),
                 result: Some(api::run_agents_result::agent_outcome::Result::Failed(
                     api::run_agents_result::FailedAgent {
@@ -187,6 +193,9 @@ fn result_to_json_omits_unresolved_run_wide_config() {
         "",
         None,
         vec![api::run_agents_result::AgentOutcome {
+            model_id: String::new(),
+            harness: None,
+            execution_mode: None,
             name: "a".to_string(),
             result: Some(api::run_agents_result::agent_outcome::Result::Launched(
                 api::run_agents_result::LaunchedAgent {

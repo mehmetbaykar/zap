@@ -196,6 +196,13 @@ pub struct RunAgentsAgentRunConfig {
     pub name: String,
     pub prompt: String,
     pub title: String,
+    /// Optional model override for this child only. Empty means the child
+    /// inherits the batch-level `model_id`.
+    ///
+    /// Upstream pairs this with an `agent_identity_uid` for dispatching a child
+    /// as a different service account; that field is not adopted here because it
+    /// requires remote execution, which this fork does not have.
+    pub model_id: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

@@ -13,6 +13,7 @@ fn local_run_request() -> RunAgentsRequest {
             name: "worker".to_string(),
             prompt: "Inspect the code".to_string(),
             title: "Code inspection".to_string(),
+            model_id: String::new(),
         }],
         plan_id: "plan-1".to_string(),
         harness_auth_secret_name: Some("codex-auth".to_string()),

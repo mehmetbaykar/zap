@@ -69,6 +69,9 @@ struct AgentArgs {
     prompt: String,
     #[serde(default)]
     title: String,
+    /// Optional per-child model override. Empty means inherit the batch model.
+    #[serde(default)]
+    model: String,
 }
 
 /// Harness values the local child launcher accepts
@@ -115,6 +118,10 @@ fn parameters() -> Value {
                         "title": {
                             "type": "string",
                             "description": "Optional title for the spawned agent's task. Defaults to the agent's name."
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Optional model id for this child only. Omit to use the same model as the rest of the batch."
                         }
                     },
                     "required": ["name", "prompt"],
@@ -224,6 +231,12 @@ fn from_args(args: &str) -> Result<api::message::tool_call::Tool> {
                 // Cloud-only: identifies the service account a factory agent
                 // dispatches siblings as. Zap runs children locally, as the user.
                 agent_identity_uid: String::new(),
+                // Per-child overrides. The model is exposed to the caller; harness
+                // and execution mode stay batch-level in this fork, so they are left
+                // unset rather than claiming a per-child choice was made.
+                model_id: agent.model.trim().to_owned(),
+                harness: None,
+                execution_mode: None,
             }
         })
         .collect();
@@ -247,7 +260,7 @@ fn from_args(args: &str) -> Result<api::message::tool_call::Tool> {
         plan_id: String::new(),
         // Zap has no cloud: children always run locally. `RunAgentsExecutionMode`
         // has no Remote variant, and the executor denies remote batches outright.
-        execution_mode: Some(api::run_agents::ExecutionMode::Local(
+        execution_mode: Some(api::run_agents::ExecutionModeOneOf::Local(
             api::run_agents::Local {},
         )),
     }))

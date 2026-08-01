@@ -19,6 +19,7 @@ fn make_request() -> RunAgentsRequest {
             name: "child".to_string(),
             prompt: "do work".to_string(),
             title: "Child agent".to_string(),
+            model_id: String::new(),
         }],
         plan_id: "plan-1".to_string(),
         harness_auth_secret_name: Some("local-provider-key".to_string()),
@@ -53,6 +54,7 @@ mod format_terminal_state_tests {
     fn launched(name: &str, agent_id: &str) -> RunAgentsAgentOutcome {
         RunAgentsAgentOutcome {
             name: name.to_string(),
+            resolved_model_id: String::new(),
             kind: RunAgentsAgentOutcomeKind::Launched {
                 agent_id: agent_id.to_string(),
             },
@@ -62,6 +64,7 @@ mod format_terminal_state_tests {
     fn failed(name: &str, error: &str) -> RunAgentsAgentOutcome {
         RunAgentsAgentOutcome {
             name: name.to_string(),
+            resolved_model_id: String::new(),
             kind: RunAgentsAgentOutcomeKind::Failed {
                 error: error.to_string(),
             },

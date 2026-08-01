@@ -71,11 +71,13 @@ fn child_outcomes_preserve_request_order() {
             name: "first".to_string(),
             prompt: String::new(),
             title: String::new(),
+            model_id: String::new(),
         },
         RunAgentsAgentRunConfig {
             name: "second".to_string(),
             prompt: String::new(),
             title: String::new(),
+            model_id: String::new(),
         },
     ];
     let outcomes = build_agent_outcomes(
@@ -88,6 +90,7 @@ fn child_outcomes_preserve_request_order() {
                 error: "failed".to_string(),
             },
         ],
+        "",
     );
 
     assert_eq!(outcomes[0].name, "first");
@@ -130,6 +133,7 @@ fn build_run_agents_action(action_id: &str, plan_id: &str) -> AIAgentAction {
                 name: "first".to_string(),
                 prompt: "do the thing".to_string(),
                 title: "first".to_string(),
+                model_id: String::new(),
             }],
             plan_id: plan_id.to_string(),
             harness_auth_secret_name: None,

@@ -128,6 +128,7 @@ fn convert_run_agents(run_agents: api::RunAgents) -> AIAgentActionType {
                 name: config.name,
                 prompt: config.prompt,
                 title: config.title,
+                model_id: config.model_id,
             })
             .collect(),
         plan_id,

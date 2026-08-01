@@ -1090,6 +1090,13 @@ impl From<RunAgentsResult> for api::request::input::tool_call_result::Result {
                     .into_iter()
                     .map(|agent| api::run_agents_result::AgentOutcome {
                         name: agent.name,
+                        // Per-agent overrides the executor resolved. Only the model
+                        // is tracked locally; `harness` and `execution_mode` are
+                        // batch-level in this fork, already reported on `Launched`,
+                        // and left unset here rather than echoed per child.
+                        model_id: agent.resolved_model_id,
+                        harness: None,
+                        execution_mode: None,
                         result: Some(match agent.kind {
                             RunAgentsAgentOutcomeKind::Launched { agent_id } => {
                                 api::run_agents_result::agent_outcome::Result::Launched(
