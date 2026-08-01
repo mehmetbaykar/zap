@@ -125,6 +125,9 @@ fn rich_input_submit_strategy(agent: CLIAgent) -> RichInputSubmitStrategy {
         CLIAgent::Codex | CLIAgent::DeepSeek | CLIAgent::OhMyPi => {
             RichInputSubmitStrategy::BracketedPaste
         }
+        // Hermes needs bracketed paste for voice input to auto-submit reliably
+        // (upstream 21b35edb6); Inline drops the submit after a character stream.
+        CLIAgent::Hermes => RichInputSubmitStrategy::BracketedPaste,
         CLIAgent::Copilot => RichInputSubmitStrategy::BracketedPasteDelayedEnter,
         CLIAgent::Claude
         | CLIAgent::OpenCode
@@ -136,7 +139,6 @@ fn rich_input_submit_strategy(agent: CLIAgent) -> RichInputSubmitStrategy {
         | CLIAgent::Droid
         | CLIAgent::Pi
         | CLIAgent::Goose
-        | CLIAgent::Hermes
         | CLIAgent::Vibe
         | CLIAgent::Unknown => RichInputSubmitStrategy::Inline,
     }

@@ -1,3 +1,4 @@
+use schemars::JsonSchema as _;
 use settings_value::SettingsValue as _;
 
 use super::*;
