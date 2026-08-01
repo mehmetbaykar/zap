@@ -292,7 +292,6 @@ pub(crate) fn plugin_manager_for_with_shell(
         | CLIAgent::CursorCli
         | CLIAgent::Goose
         | CLIAgent::Antigravity
-        | CLIAgent::Omp
         | CLIAgent::Hermes
         | CLIAgent::Vibe
         | CLIAgent::Antigravity

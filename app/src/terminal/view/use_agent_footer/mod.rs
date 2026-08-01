@@ -136,7 +136,6 @@ fn rich_input_submit_strategy(agent: CLIAgent) -> RichInputSubmitStrategy {
         | CLIAgent::Droid
         | CLIAgent::Pi
         | CLIAgent::Goose
-        | CLIAgent::Omp
         | CLIAgent::Hermes
         | CLIAgent::Vibe
         | CLIAgent::Antigravity

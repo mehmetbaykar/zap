@@ -122,7 +122,6 @@ fn corner_overlay_offset(total: f32, overlay_extra_overhang_ratio: f32) -> f32 {
 
 const DEEPSEEK_LOGO_PATH: &str = "bundled/svg/deepseek.svg";
 const ANTIGRAVITY_LOGO_PATH: &str = "bundled/svg/antigravity.svg";
-const OMP_LOGO_PATH: &str = "bundled/svg/omp.svg";
 
 pub(crate) fn render_cli_agent_logo(
     agent: CLIAgent,
@@ -132,7 +131,6 @@ pub(crate) fn render_cli_agent_logo(
     let multi_color_logo_path = match agent {
         CLIAgent::DeepSeek => Some(DEEPSEEK_LOGO_PATH),
         CLIAgent::Antigravity => Some(ANTIGRAVITY_LOGO_PATH),
-        CLIAgent::Omp => Some(OMP_LOGO_PATH),
         _ => None,
     };
     if let Some(path) = multi_color_logo_path {
@@ -280,7 +278,7 @@ pub(crate) fn render_icon_with_status_with_badge_style(
                 render_cli_agent_logo(agent, WarpThemeFill::Solid(icon_color), sub_text);
             let background = if matches!(
                 agent,
-                CLIAgent::DeepSeek | CLIAgent::Antigravity | CLIAgent::Omp
+                CLIAgent::DeepSeek | CLIAgent::Antigravity
             ) {
                 theme.background()
             } else {

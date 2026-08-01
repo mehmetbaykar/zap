@@ -69,6 +69,15 @@ fn local_path(path: &str) -> LocalOrRemotePath {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn legacy_omp_serialized_name_resolves_to_oh_my_pi() {
+    // The fork registered oh-my-pi as `Omp` before upstream added it as `OhMyPi`
+    // (fork 3250483b5 vs upstream 8a30a37ff). Persisted settings may still carry
+    // the old name, so it must keep deserializing to the surviving variant.
+    assert_eq!(CLIAgent::from_serialized_name("Omp"), CLIAgent::OhMyPi);
+    assert_eq!(CLIAgent::OhMyPi.to_serialized_name(), "OhMyPi");
+}
+
+#[test]
 fn test_build_review_prompt_current_line_is_1_indexed() {
     // LineCount 0 (0-indexed) should appear as L1 in the prompt.
     let comment = make_comment(
@@ -266,7 +275,6 @@ fn test_detect_known_agents() {
                 ("copilot", CLIAgent::Copilot),
                 ("agent", CLIAgent::CursorCli),
                 ("goose", CLIAgent::Goose),
-                ("omp", CLIAgent::Omp),
                 ("vibe", CLIAgent::Vibe),
                 ("agy", CLIAgent::Antigravity),
                 ("omp", CLIAgent::OhMyPi),
