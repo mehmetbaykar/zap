@@ -1,20 +1,18 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use remote_server::setup::{PreinstallCheckResult, PreinstallStatus};
+use remote_server::transport::Error;
+use settings::Setting;
 use warp_core::SessionId;
 use warpui::{Entity, ModelContext, ModelHandle, SingletonEntity, WeakModelHandle};
 
-use settings::Setting;
-
-use crate::terminal::warpify::settings::{SshExtensionInstallMode, WarpifySettings};
-
+use super::pty_controller::{EventLoopSender, PtyController};
 use crate::remote_server::manager::{RemoteServerManager, RemoteServerManagerEvent};
 use crate::remote_server::ssh_transport::SshTransport;
 use crate::terminal::model::session::{IsSSHWrapperSession, SessionInfo};
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
-use remote_server::setup::{PreinstallCheckResult, PreinstallStatus};
-use remote_server::transport::Error;
-
-use super::pty_controller::{EventLoopSender, PtyController};
+use crate::terminal::warpify::settings::{SshExtensionInstallMode, WarpifySettings};
 
 /// Per-SSH-init state machine. Encoding the state as an enum makes invalid
 /// transitions unrepresentable and ensures the `SessionInfo` stash cannot be
@@ -149,13 +147,16 @@ impl<T: EventLoopSender> RemoteServerController<T> {
     /// Extracts the `SessionInfo` from the stash and writes the bootstrap
     /// script to the PTY via `PtyController::initialize_shell`.
     fn flush_stashed_bootstrap(&mut self, session_info: SessionInfo, ctx: &mut ModelContext<Self>) {
-        match self.pty_controller.upgrade(ctx) { Some(pty) => {
-            pty.update(ctx, |pty, ctx| {
-                pty.initialize_shell(&session_info, ctx);
-            });
-        } _ => {
-            log::warn!("Remote server PtyController dropped before bootstrap could be flushed");
-        }}
+        match self.pty_controller.upgrade(ctx) {
+            Some(pty) => {
+                pty.update(ctx, |pty, ctx| {
+                    pty.initialize_shell(&session_info, ctx);
+                });
+            }
+            _ => {
+                log::warn!("Remote server PtyController dropped before bootstrap could be flushed");
+            }
+        }
     }
 
     /// Idle -> AwaitingCheck

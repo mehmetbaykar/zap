@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use channel_versions::{Changelog, ChannelVersions};
-use rand::{distributions::Alphanumeric, thread_rng, Rng as _};
+use rand::distributions::Alphanumeric;
+use rand::{Rng as _, thread_rng};
 
 use super::channel_versions::fetch_channel_versions;
 use super::release_assets_directory_url;

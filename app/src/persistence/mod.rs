@@ -28,6 +28,15 @@ use anyhow::Context as _;
 use chrono::{DateTime, Local};
 use instant::Instant;
 use lsp::supported_servers::LSPServerType;
+#[cfg(any(feature = "local_fs", feature = "integration_tests"))]
+pub use sqlite::database_file_path_for_current_scope;
+// Only re-exported for integration tests; in-crate callers should resolve the
+// path for the process's current persistence scope.
+#[cfg(any(feature = "local_fs", feature = "integration_tests"))]
+#[cfg_attr(not(feature = "integration_tests"), expect(unused_imports))]
+pub use sqlite::database_file_path_for_scope;
+#[cfg(any(feature = "local_fs", feature = "integration_tests"))]
+pub use sqlite::establish_ro_connection;
 use uuid::Uuid;
 use warp_core::command::ExitCode;
 use warp_multi_agent_api as api;
@@ -54,16 +63,6 @@ use crate::terminal::model::session::SessionId;
 use crate::workflows::WorkflowObject;
 use crate::workspaces::user_profiles::UserProfileWithUID;
 use crate::workspaces::workspace::{Workspace as WorkspaceMetadata, WorkspaceUid};
-
-#[cfg(any(feature = "local_fs", feature = "integration_tests"))]
-pub use sqlite::database_file_path_for_current_scope;
-// Only re-exported for integration tests; in-crate callers should resolve the
-// path for the process's current persistence scope.
-#[cfg(any(feature = "local_fs", feature = "integration_tests"))]
-#[cfg_attr(not(feature = "integration_tests"), expect(unused_imports))]
-pub use sqlite::database_file_path_for_scope;
-#[cfg(any(feature = "local_fs", feature = "integration_tests"))]
-pub use sqlite::establish_ro_connection;
 
 #[derive(Clone)]
 pub enum PersistenceScope {

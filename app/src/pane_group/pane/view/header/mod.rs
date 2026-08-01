@@ -1,48 +1,42 @@
 use std::fmt::Debug;
 
-use crate::{
-    appearance::Appearance,
-    menu::{Menu, MenuItem},
-    pane_group::{
-        focus_state::{PaneFocusHandle, PaneGroupFocusEvent},
-        pane::{
-            view::StandardHeader, ActionOrigin, PaneConfiguration, PaneConfigurationEvent,
-            PaneStack, PaneStackEvent, ToolbeltButton,
-        },
-        BackingView, Direction, PaneDragDropLocation, PaneId, TabBarAxis, TabBarHoverIndex,
-    },
-    report_error, send_telemetry_from_ctx,
-    server::telemetry::TelemetryEvent,
-    settings::CodeSettings,
-    tab::tab_position_id,
-    terminal::view::TerminalAction,
-    view_components::{FeaturePopup, NewFeaturePopupEvent, NewFeaturePopupLabel},
-    workspace::{TabBarLocation, VerticalTabsPaneDropTargetData},
+use pathfinder_geometry::rect::RectF;
+use pathfinder_geometry::vector::{Vector2F, vec2f};
+use warp_core::features::FeatureFlag;
+use warp_core::settings::Setting;
+use warpui::elements::{
+    AcceptedByDropTarget, Align, Border, ChildAnchor, Clipped, ConstrainedBox, Container,
+    CornerRadius, CrossAxisAlignment, Dismiss, Draggable, DraggableState, Empty, Flex, Hoverable,
+    Icon, MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning, ParentAnchor,
+    ParentElement, ParentOffsetBounds, PositionedElementAnchor, PositionedElementOffsetBounds,
+    Radius, SavePosition, Shrinkable, Stack, Text,
 };
-
-use crate::workspace::TabBarDropTargetData;
-
-use super::header_content::{HeaderContent, HeaderRenderContext, StandardHeaderOptions};
-
-use pathfinder_geometry::{
-    rect::RectF,
-    vector::{vec2f, Vector2F},
-};
-use warp_core::{features::FeatureFlag, settings::Setting};
+use warpui::presenter::ChildView;
 use warpui::{
-    elements::{
-        AcceptedByDropTarget, Align, Border, ChildAnchor, Clipped, ConstrainedBox, Container,
-        CornerRadius, CrossAxisAlignment, Dismiss, Draggable, DraggableState, Empty, Flex,
-        Hoverable, Icon, MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning,
-        ParentAnchor, ParentElement, ParentOffsetBounds, PositionedElementAnchor,
-        PositionedElementOffsetBounds, Radius, SavePosition, Shrinkable, Stack, Text,
-    },
-    presenter::ChildView,
     AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
     ViewContext, ViewHandle,
 };
 
 use super::PaneDropTargetData;
+use super::header_content::{HeaderContent, HeaderRenderContext, StandardHeaderOptions};
+use crate::appearance::Appearance;
+use crate::menu::{Menu, MenuItem};
+use crate::pane_group::focus_state::{PaneFocusHandle, PaneGroupFocusEvent};
+use crate::pane_group::pane::view::StandardHeader;
+use crate::pane_group::pane::{
+    ActionOrigin, PaneConfiguration, PaneConfigurationEvent, PaneStack, PaneStackEvent,
+    ToolbeltButton,
+};
+use crate::pane_group::{
+    BackingView, Direction, PaneDragDropLocation, PaneId, TabBarAxis, TabBarHoverIndex,
+};
+use crate::server::telemetry::TelemetryEvent;
+use crate::settings::CodeSettings;
+use crate::tab::tab_position_id;
+use crate::terminal::view::TerminalAction;
+use crate::view_components::{FeaturePopup, NewFeaturePopupEvent, NewFeaturePopupLabel};
+use crate::workspace::{TabBarDropTargetData, TabBarLocation, VerticalTabsPaneDropTargetData};
+use crate::{report_error, send_telemetry_from_ctx};
 
 pub(crate) mod components;
 
@@ -600,7 +594,7 @@ impl<P: BackingView> PaneHeader<P> {
         );
         let should_display_overflow_menu_button = !self.overflow_menu.as_ref(app).is_empty();
 
-        let hoverable = Hoverable::new(
+        (Hoverable::new(
             self.mouse_state_handles.header_hover_handle.clone(),
             |hover_state| {
                 // Determine if icons should be shown based on hover state and options.
@@ -645,17 +639,14 @@ impl<P: BackingView> PaneHeader<P> {
                         .finish();
                 title_row.add_child(Shrinkable::new(1., title_text).finish());
 
-                if let Some(secondary) = &title_secondary {
-                    if !secondary.is_empty() {
-                        let secondary_text = Text::new_inline(
-                            secondary.clone(),
-                            appearance.ui_font_family(),
-                            font_size,
-                        )
-                        .with_color(font_color.into())
-                        .finish();
-                        title_row.add_child(secondary_text);
-                    }
+                if let Some(secondary) = &title_secondary
+                    && !secondary.is_empty()
+                {
+                    let secondary_text =
+                        Text::new_inline(secondary.clone(), appearance.ui_font_family(), font_size)
+                            .with_color(font_color.into())
+                            .finish();
+                    title_row.add_child(secondary_text);
                 }
 
                 // If a max width is set, constrain the title to that width.
@@ -725,9 +716,7 @@ impl<P: BackingView> PaneHeader<P> {
                 .finish()
             },
         )
-        .finish();
-
-        hoverable
+        .finish()) as _
     }
 }
 

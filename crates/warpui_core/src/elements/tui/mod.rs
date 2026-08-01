@@ -71,8 +71,8 @@ pub use scene::{
 };
 pub use scrollable::{TuiScrollable, TuiScrollableElement};
 pub use selectable::{
-    point_after_col, TuiRowGlyph, TuiRowResize, TuiSelectable, TuiSelectableElement,
-    TuiSelectionHandle, TuiSelectionSpan,
+    TuiRowGlyph, TuiRowResize, TuiSelectable, TuiSelectableElement, TuiSelectionHandle,
+    TuiSelectionSpan, point_after_col,
 };
 pub use shimmering_text::TuiShimmeringText;
 pub use text::TuiText;

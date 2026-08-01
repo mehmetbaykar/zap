@@ -1,26 +1,26 @@
-use std::{borrow::Cow, fmt, str::FromStr};
+use std::borrow::Cow;
+use std::fmt;
+use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use derivative::Derivative;
 use pathfinder_geometry::vector::vec2f;
 use serde::{Deserialize, Serialize};
-use warp_core::ui::{appearance::Appearance, theme::Fill, Icon};
-use warpui::{
-    elements::{
-        Align, ChildAnchor, ConstrainedBox, Hoverable, MouseStateHandle, OffsetPositioning,
-        ParentAnchor, ParentElement, ParentOffsetBounds, Stack,
-    },
-    ui_components::components::UiComponent,
-    Element,
+use warp_core::ui::Icon;
+use warp_core::ui::appearance::Appearance;
+use warp_core::ui::theme::Fill;
+use warpui::Element;
+use warpui::elements::{
+    Align, ChildAnchor, ConstrainedBox, Hoverable, MouseStateHandle, OffsetPositioning,
+    ParentAnchor, ParentElement, ParentOffsetBounds, Stack,
 };
+use warpui::ui_components::components::UiComponent;
 
-use crate::{
-    auth::UserUid,
-    drive::sharing::{SharingAccessLevel, Subject},
-    server::ids::{ServerId, SyncId},
-    server_time::ServerTimestamp,
-};
+use crate::auth::UserUid;
+use crate::drive::sharing::{SharingAccessLevel, Subject};
+use crate::server::ids::{ServerId, SyncId};
+use crate::server_time::ServerTimestamp;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ObjectIdType {

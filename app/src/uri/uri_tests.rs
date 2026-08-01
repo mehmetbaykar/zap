@@ -1,15 +1,15 @@
-use super::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
 use warpui::App;
 
+use super::*;
+use crate::ChannelState;
 use crate::ai::agent::api::ServerConversationToken;
 use crate::drive::ZapDriveObjectArgs;
 use crate::launch_configs::launch_config::make_mock_single_window_launch_config;
 use crate::linear::{LinearAction, LinearIssueWork};
 use crate::settings_view::settings_widget_deeplink_target;
-use crate::ChannelState;
 
 // -- warp://settings deeplink parsing ----------------------------------------
 

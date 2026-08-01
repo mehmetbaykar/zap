@@ -8,21 +8,19 @@ pub mod env_var_collection_block;
 pub mod manager;
 pub mod view;
 
-use crate::{
-    cloud_object::{
-        model::{
-            generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
-            json_model::{JsonModel, JsonSerializer},
-        },
-        GenericStoredObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType,
-    },
-    drive::items::{env_var_collection::WarpDriveEnvVarCollection, WarpDriveItem},
-    external_secrets::ExternalSecret,
-    server::ids::SyncId,
-    terminal::shell::ShellType,
-    Appearance, ObjectTypeAndId,
+use crate::cloud_object::model::generic_string_model::{
+    GenericStringModel, GenericStringObjectId, StringModel,
 };
+use crate::cloud_object::model::json_model::{JsonModel, JsonSerializer};
+use crate::cloud_object::{
+    GenericStoredObject, GenericStringObjectFormat, GenericStringObjectUniqueKey, JsonObjectType,
+};
+use crate::drive::items::WarpDriveItem;
+use crate::drive::items::env_var_collection::WarpDriveEnvVarCollection;
+use crate::external_secrets::ExternalSecret;
+use crate::server::ids::SyncId;
+use crate::terminal::shell::ShellType;
+use crate::{Appearance, ObjectTypeAndId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EnvVarCollectionType {

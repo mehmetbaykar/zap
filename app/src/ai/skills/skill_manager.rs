@@ -4,23 +4,21 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use ai::skills::{
-    get_provider_for_path, provider_rank, ParsedSkill, SkillPathOrigin, SkillProvider,
-    SkillReference, SkillScope,
+    ParsedSkill, SkillPathOrigin, SkillProvider, SkillReference, SkillScope, get_provider_for_path,
+    provider_rank,
 };
-pub use file_watchers::{
-    extract_skill_parent_directory, read_skills_from_directories, SkillWatcher, SkillWatcherEvent,
-};
+pub use file_watchers::{SkillWatcher, SkillWatcherEvent, extract_skill_parent_directory};
 use warp_core::features::FeatureFlag;
 use warp_util::host_id::HostId;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::{AppContext, Entity, ModelContext, ModelHandle, SingletonEntity};
 
+use super::bundled::{BundledSkill, BundledSkills};
 #[cfg(test)]
 use super::bundled::{
-    activation_for_bundled_skill, build_bundled_skill_context, read_bundled_skills,
-    BundledSkillActivation,
+    BundledSkillActivation, activation_for_bundled_skill, build_bundled_skill_context,
+    read_bundled_skills,
 };
-use super::bundled::{BundledSkill, BundledSkills};
 use super::{ActiveSkillLookupError, SkillDescriptor, SkillManagerEvent, SkillPathQuery};
 use crate::ai::skills::skill_utils::SkillDeduplicator;
 
@@ -132,7 +130,7 @@ impl SkillManager {
         // the home directory as their dir_path; project skills use their owning directory.
         let mut skill_paths = Vec::new();
         let mut deduplicator = SkillDeduplicator::default();
-        let path_matches_location = |path: &LocalOrRemotePath| match (working_directory, path) {
+        let _path_matches_location = |path: &LocalOrRemotePath| match (working_directory, path) {
             (Some(LocalOrRemotePath::Local(_)), LocalOrRemotePath::Local(_)) => true,
             (
                 Some(LocalOrRemotePath::Remote(working_directory)),
@@ -144,15 +142,15 @@ impl SkillManager {
             | (None, LocalOrRemotePath::Remote(_)) => false,
         };
 
-        if let Some(home_dir) = self.home_directory_for_origin(path_origin) {
-            if let Some(home_skill_paths) = self.directory_skills.get(&home_dir) {
-                skill_paths.extend(
-                    home_skill_paths
-                        .iter()
-                        .cloned()
-                        .map(|path| (home_dir.clone(), path)),
-                );
-            }
+        if let Some(home_dir) = self.home_directory_for_origin(path_origin)
+            && let Some(home_skill_paths) = self.directory_skills.get(&home_dir)
+        {
+            skill_paths.extend(
+                home_skill_paths
+                    .iter()
+                    .cloned()
+                    .map(|path| (home_dir.clone(), path)),
+            );
         }
 
         if let Some(working_directory) = working_directory {
@@ -387,10 +385,10 @@ impl SkillManager {
                     .map(provider_rank)
                     .unwrap_or(usize::MAX)
             });
-        if let Some(path) = best_fs_path {
-            if let Some(skill) = self.skills_by_path.get(&path) {
-                return Some(skill);
-            }
+        if let Some(path) = best_fs_path
+            && let Some(skill) = self.skills_by_path.get(&path)
+        {
+            return Some(skill);
         }
         // Fallback: bundled skills (matched by name rather than id).
         self.bundled_skills.local_skill_by_name(name)
@@ -634,23 +632,26 @@ impl SkillManager {
 
     fn cache_skills(&mut self, skills: Vec<ParsedSkill>) {
         for skill in skills {
-            match extract_skill_parent_directory(&skill.path) { Ok(parent_dir) => {
-                self.directory_skills
-                    .entry(parent_dir)
-                    .or_default()
-                    .insert(skill.path.clone());
+            match extract_skill_parent_directory(&skill.path) {
+                Ok(parent_dir) => {
+                    self.directory_skills
+                        .entry(parent_dir)
+                        .or_default()
+                        .insert(skill.path.clone());
 
-                self.skills_by_name
-                    .entry(skill.name.clone())
-                    .or_default()
-                    .insert(skill.path.clone());
-                self.skills_by_path.insert(skill.path.clone(), skill);
-            } _ => {
-                log::warn!(
-                    "Could not extract parent directory for skill: {:?}",
-                    skill.path
-                );
-            }}
+                    self.skills_by_name
+                        .entry(skill.name.clone())
+                        .or_default()
+                        .insert(skill.path.clone());
+                    self.skills_by_path.insert(skill.path.clone(), skill);
+                }
+                _ => {
+                    log::warn!(
+                        "Could not extract parent directory for skill: {:?}",
+                        skill.path
+                    );
+                }
+            }
         }
     }
 

@@ -3,17 +3,17 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::RepoMetadataModel;
+use repo_metadata::repositories::DetectedRepositories;
 use tempfile::tempdir;
+use warpui::r#async::block_on;
 use warpui::elements::Empty;
 use warpui::platform::WindowStyle;
-use warpui::r#async::block_on;
 use warpui::windowing::WindowManager;
 use warpui::{App, AppContext, Element, Entity, SingletonEntity, TypedActionView, View};
 
 use crate::search::ai_context_menu::files::data_source::{
-    file_data_source_for_pwd, fuzzy_match_files, FileSnapshot,
+    FileSnapshot, file_data_source_for_pwd, fuzzy_match_files,
 };
 use crate::search::ai_context_menu::mixer::AIContextMenuSearchableAction;
 use crate::search::data_source::Query;

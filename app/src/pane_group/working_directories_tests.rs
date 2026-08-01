@@ -6,12 +6,12 @@ use std::path::PathBuf;
 
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::{App, EntityId};
 
 use super::PaneGroupRepositoryRoots;
 use crate::code::buffer_location::BufferLocation;
 use crate::pane_group::WorkingDirectoriesModel;
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 fn local(path: &std::path::Path) -> LocalOrRemotePath {
     LocalOrRemotePath::Local(path.to_path_buf())

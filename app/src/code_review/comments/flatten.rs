@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
+use warp_util::local_or_remote_path::LocalOrRemotePath;
+
 use super::comment::{
     AttachedReviewComment, AttachedReviewCommentTarget, CommentId, CommentOrigin,
 };
 use super::pending_imported::{PendingImportedReviewComment, PendingImportedReviewCommentTarget};
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 /// Converts pending imported provider comments into attached review comments by:
 /// * flattening threaded replies

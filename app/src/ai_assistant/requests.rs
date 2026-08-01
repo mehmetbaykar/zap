@@ -5,7 +5,7 @@ use warp_core::user_preferences::GetUserPreferences as _;
 use warpui::{AppContext, Entity, ModelContext};
 
 use super::execution_context::WarpAiExecutionContext;
-use super::utils::{markdown_segments_from_text, FormattedTranscriptMessage, TranscriptPart};
+use super::utils::{FormattedTranscriptMessage, TranscriptPart, markdown_segments_from_text};
 use crate::ai::{RequestLimitInfo, RequestUsageInfo};
 use crate::ai_assistant::utils::{AssistantTranscriptPart, TranscriptPartSubType};
 use crate::send_telemetry_from_ctx;

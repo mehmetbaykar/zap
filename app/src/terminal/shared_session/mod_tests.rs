@@ -1,19 +1,21 @@
-use super::{decode_scrollback, SharedSessionScrollbackType};
-use crate::assert_lines_approx_eq;
-use crate::terminal::color::List;
-use crate::terminal::model::test_utils::block_size;
-use crate::uri::web_intent_parser::maybe_rewrite_web_url_to_intent;
-
-use crate::terminal::model::ObfuscateSecrets;
-use crate::terminal::shared_session::protocol::{Scrollback, ScrollbackBlock};
-use crate::terminal::TerminalModel;
-use crate::terminal::{event_listener::ChannelEventListener, model::block::SerializedBlock};
-use crate::themes::default_themes::dark_theme;
-use serde_json::Value;
 use std::sync::Arc;
+
+use serde_json::Value;
 use url::Url;
 use warpui::r#async::executor::Background;
 use warpui::units::Lines;
+
+use super::{SharedSessionScrollbackType, decode_scrollback};
+use crate::assert_lines_approx_eq;
+use crate::terminal::TerminalModel;
+use crate::terminal::color::List;
+use crate::terminal::event_listener::ChannelEventListener;
+use crate::terminal::model::ObfuscateSecrets;
+use crate::terminal::model::block::SerializedBlock;
+use crate::terminal::model::test_utils::block_size;
+use crate::terminal::shared_session::protocol::{Scrollback, ScrollbackBlock};
+use crate::themes::default_themes::dark_theme;
+use crate::uri::web_intent_parser::maybe_rewrite_web_url_to_intent;
 
 pub const MAX_BYTES_SHAREABLE: usize = 5000;
 

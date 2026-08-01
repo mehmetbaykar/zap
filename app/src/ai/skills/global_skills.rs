@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use ai::skills::{provider_rank, ParsedSkill};
+use ai::skills::{ParsedSkill, provider_rank};
 use warp_cli::skill::SkillSpec;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 
@@ -29,10 +29,10 @@ pub fn filter_skills_by_spec(
     let mut seen_paths = HashSet::new();
 
     for spec in specs {
-        if let Some(path) = matching_skill_path(repo_path, &skills_by_path, spec) {
-            if seen_paths.insert(path.clone()) {
-                selected_paths.push(path);
-            }
+        if let Some(path) = matching_skill_path(repo_path, &skills_by_path, spec)
+            && seen_paths.insert(path.clone())
+        {
+            selected_paths.push(path);
         }
     }
 

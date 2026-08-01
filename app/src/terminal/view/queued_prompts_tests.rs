@@ -9,12 +9,12 @@ use std::rc::Rc;
 
 use warpui::{App, SingletonEntity, TypedActionView, ViewHandle};
 
+use super::TerminalView;
 use super::queued_prompts_panel::{
     QueuedPromptsPanelAction, QueuedPromptsPanelEvent, QueuedPromptsPanelView,
 };
-use super::TerminalView;
-use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::ImageContext;
+use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::ai::blocklist::block::FinishReason;
 use crate::ai::blocklist::{
@@ -561,9 +561,11 @@ fn enqueue_followup_prompt_uses_supplied_conversation_id_when_v2_is_enabled() {
                 ctx,
             );
 
-            assert!(QueuedQueryModel::as_ref(ctx)
-                .queue(selected_conversation_id)
-                .is_empty());
+            assert!(
+                QueuedQueryModel::as_ref(ctx)
+                    .queue(selected_conversation_id)
+                    .is_empty()
+            );
             let other_queue = QueuedQueryModel::as_ref(ctx).queue(other_conversation_id);
             assert_eq!(other_queue.len(), 1);
             assert_eq!(other_queue[0].text(), "goes to the forked id");
@@ -596,9 +598,11 @@ fn enqueue_followup_prompt_falls_back_to_pending_block_when_v2_is_disabled() {
                 ctx,
             );
 
-            assert!(QueuedQueryModel::as_ref(ctx)
-                .queue(conversation_id)
-                .is_empty());
+            assert!(
+                QueuedQueryModel::as_ref(ctx)
+                    .queue(conversation_id)
+                    .is_empty()
+            );
             assert!(view.queued_prompt_callback.is_some());
             assert!(view.pending_user_query_view_id.is_some());
         });

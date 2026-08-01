@@ -1,60 +1,62 @@
 use std::borrow::Cow;
 
-use crate::code::editor::comment_editor::DEFAULT_COMMENT_MAX_WIDTH;
-use crate::code::editor::view::{CodeEditorEvent, CodeEditorView};
-use crate::code_review::comment_rendering::CommentViewCard;
-use crate::code_review::comments::{
-    AttachedReviewComment, AttachedReviewCommentTarget, CommentId, CommentOrigin,
-    ReviewCommentBatch, ReviewCommentBatchEvent,
-};
-use crate::code_review::CodeReviewTelemetryEvent;
-use crate::menu::{Event, Menu, MenuItem, MenuItemFields};
-use crate::notebooks::editor::view::{EditorViewEvent, RichTextEditorView};
-use crate::send_telemetry_from_ctx;
-use crate::settings::AISettings;
-use crate::view_components::action_button::{
-    ActionButton, ActionButtonTheme, ButtonSize, KeystrokeSource, NakedTheme, PrimaryTheme,
-    SecondaryTheme,
-};
-use crate::{
-    appearance::Appearance, code_review::code_review_view::CodeReviewView,
-    ui_components::icons::Icon, workspace::view::right_panel::ReviewDestination,
-};
 use indexmap::IndexMap;
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::vec2f;
 use string_offset::CharOffset;
 use vec1::vec1;
 use warp_core::ui::color::blend::Blend;
-use warp_editor::model::CoreEditorModel;
-use warp_util::local_or_remote_path::LocalOrRemotePath;
-
+use warp_core::ui::theme::Fill;
 use warp_core::ui::theme::color::internal_colors::{
     accent_overlay_2, accent_overlay_3, neutral_1, neutral_3, neutral_4, neutral_6, text_main,
     text_sub,
 };
-use warp_core::ui::theme::Fill;
+use warp_editor::model::CoreEditorModel;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
+use warpui::clipboard::ClipboardContent;
+use warpui::elements::new_scrollable::{NewScrollable, ScrollableAppearance, SingleAxisConfig};
+use warpui::elements::resizable::{
+    DragBarSide, Resizable, ResizableStateHandle, resizable_state_handle,
+};
+use warpui::elements::{
+    Border, ChildAnchor, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox, Container,
+    CornerRadius, CrossAxisAlignment, Dismiss, DispatchEventResult, Element, Empty, EventHandler,
+    Expanded, Flex, Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle,
+    OffsetPositioning, ParentElement, PositionedElementAnchor, PositionedElementOffsetBounds,
+    Radius, SavePosition, ScrollTarget, ScrollToPositionMode, ScrollbarWidth, Shrinkable, Stack,
+    Text,
+};
+use warpui::keymap::Keystroke;
+use warpui::platform::Cursor;
+use warpui::ui_components::button::ButtonVariant;
+use warpui::ui_components::components::UiComponent;
+use warpui::units::Pixels;
 use warpui::{
-    clipboard::ClipboardContent,
-    elements::{
-        new_scrollable::{NewScrollable, ScrollableAppearance, SingleAxisConfig},
-        resizable::{resizable_state_handle, DragBarSide, Resizable, ResizableStateHandle},
-        Border, ChildAnchor, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox,
-        Container, CornerRadius, CrossAxisAlignment, Dismiss, DispatchEventResult, Element, Empty,
-        EventHandler, Expanded, Flex, Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle,
-        OffsetPositioning, ParentElement, PositionedElementAnchor, PositionedElementOffsetBounds,
-        Radius, SavePosition, ScrollTarget, ScrollToPositionMode, ScrollbarWidth, Shrinkable,
-        Stack, Text,
-    },
-    keymap::Keystroke,
-    platform::Cursor,
-    ui_components::{button::ButtonVariant, components::UiComponent},
-    units::Pixels,
     AppContext, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle, WeakViewHandle,
 };
 
 use crate::ai::request_usage_model::{AIRequestUsageModel, AIRequestUsageModelEvent};
+use crate::appearance::Appearance;
+use crate::code::editor::comment_editor::DEFAULT_COMMENT_MAX_WIDTH;
+use crate::code::editor::view::{CodeEditorEvent, CodeEditorView};
+use crate::code_review::CodeReviewTelemetryEvent;
+use crate::code_review::code_review_view::CodeReviewView;
+use crate::code_review::comment_rendering::CommentViewCard;
+use crate::code_review::comments::{
+    AttachedReviewComment, AttachedReviewCommentTarget, CommentId, CommentOrigin,
+    ReviewCommentBatch, ReviewCommentBatchEvent,
+};
+use crate::menu::{Event, Menu, MenuItem, MenuItemFields};
+use crate::notebooks::editor::view::{EditorViewEvent, RichTextEditorView};
+use crate::send_telemetry_from_ctx;
+use crate::settings::AISettings;
+use crate::ui_components::icons::Icon;
+use crate::view_components::action_button::{
+    ActionButton, ActionButtonTheme, ButtonSize, KeystrokeSource, NakedTheme, PrimaryTheme,
+    SecondaryTheme,
+};
+use crate::workspace::view::right_panel::ReviewDestination;
 /// Header text for the outdated section when there is exactly one outdated comment.
 const OUTDATED_SECTION_HEADER_SINGULAR: &str = "1 comment will be omitted because it is outdated.";
 /// Header text format for the outdated section when there are multiple outdated comments.
@@ -382,47 +384,52 @@ impl CommentListView {
         for comment in comments {
             let id = comment.id;
 
-            let entry = match self.comments_by_id.shift_remove(&id) { Some(mut existing) => {
-                existing
-                    .card
-                    .update_source(comment, self.repo_path.as_ref(), ctx);
-                existing
-            } _ => {
-                let card = CommentViewCard::new(
-                    comment,
-                    false, /* always_use_static_diff */
-                    false, /* disable_scrolling */
-                    Some(Pixels::new(DEFAULT_COMMENT_MAX_WIDTH)),
-                    self.repo_path.as_ref(),
-                    ctx,
-                );
-
-                ctx.subscribe_to_view(
-                    card.comment_editor(),
-                    Self::handle_comment_editor_selection_events,
-                );
-                if let Some(diff_editor) = card.static_diff_editor() {
-                    ctx.subscribe_to_view(
-                        diff_editor,
-                        Self::handle_static_diff_editor_selection_events,
+            let entry = match self.comments_by_id.shift_remove(&id) {
+                Some(mut existing) => {
+                    existing
+                        .card
+                        .update_source(comment, self.repo_path.as_ref(), ctx);
+                    existing
+                }
+                _ => {
+                    let card = CommentViewCard::new(
+                        comment,
+                        false, /* always_use_static_diff */
+                        false, /* disable_scrolling */
+                        Some(Pixels::new(DEFAULT_COMMENT_MAX_WIDTH)),
+                        self.repo_path.as_ref(),
+                        ctx,
                     );
-                }
 
-                let comment_id = id;
-                let action_button = ActionButton::new("", NakedTheme)
-                    .with_icon(Icon::DotsVertical)
-                    .with_size(ButtonSize::Small)
-                    .on_click(move |ctx| {
-                        ctx.dispatch_typed_action(CommentListAction::ShowOverflow { comment_id })
-                    });
-                let action_button = ctx.add_view(|_| action_button);
+                    ctx.subscribe_to_view(
+                        card.comment_editor(),
+                        Self::handle_comment_editor_selection_events,
+                    );
+                    if let Some(diff_editor) = card.static_diff_editor() {
+                        ctx.subscribe_to_view(
+                            diff_editor,
+                            Self::handle_static_diff_editor_selection_events,
+                        );
+                    }
 
-                CommentDisplayState {
-                    card,
-                    icon_button: action_button,
-                    mouse_state: Default::default(),
+                    let comment_id = id;
+                    let action_button = ActionButton::new("", NakedTheme)
+                        .with_icon(Icon::DotsVertical)
+                        .with_size(ButtonSize::Small)
+                        .on_click(move |ctx| {
+                            ctx.dispatch_typed_action(CommentListAction::ShowOverflow {
+                                comment_id,
+                            })
+                        });
+                    let action_button = ctx.add_view(|_| action_button);
+
+                    CommentDisplayState {
+                        card,
+                        icon_button: action_button,
+                        mouse_state: Default::default(),
+                    }
                 }
-            }};
+            };
 
             new_comments_by_id.insert(id, entry);
         }
@@ -549,10 +556,10 @@ impl CommentListView {
                 card.comment_editor()
                     .update(ctx, |view, ctx| view.clear_text_selection(ctx));
             }
-            if let Some(diff_editor) = card.static_diff_editor() {
-                if source_view_id.is_none_or(|id| diff_editor.id() != id) {
-                    diff_editor.update(ctx, |view, ctx| view.clear_selection(ctx));
-                }
+            if let Some(diff_editor) = card.static_diff_editor()
+                && source_view_id.is_none_or(|id| diff_editor.id() != id)
+            {
+                diff_editor.update(ctx, |view, ctx| view.clear_selection(ctx));
             }
         }
     }
@@ -1045,10 +1052,12 @@ impl CommentListView {
         html_url: Option<&str>,
         appearance: &Appearance,
     ) -> Vec<MenuItem<CommentListAction>> {
-        let mut items = vec![MenuItemFields::new(crate::t!("code-review-copy-text"))
-            .with_icon(Icon::Copy)
-            .with_on_select_action(CommentListAction::CopyCommentText)
-            .into_item()];
+        let mut items = vec![
+            MenuItemFields::new(crate::t!("code-review-copy-text"))
+                .with_icon(Icon::Copy)
+                .with_on_select_action(CommentListAction::CopyCommentText)
+                .into_item(),
+        ];
 
         let mut edit_item = MenuItemFields::new(crate::t!("common-edit"))
             .with_icon(Icon::Pencil)
@@ -1232,13 +1241,13 @@ impl TypedActionView for CommentListView {
             }
             CommentListAction::DismissOverflowMenu => self.close_overflow_menu(ctx),
             CommentListAction::CopyCommentText => {
-                if let Some(id) = self.active_overflow_comment_id.take() {
-                    if let Some(state) = self.comments_by_id.get(&id) {
-                        let content = state.card.source().content.clone();
-                        let mut clipboard = ClipboardContent::plain_text(content.clone());
-                        clipboard.html = markdown_to_html(state.card.comment_editor(), ctx);
-                        ctx.clipboard().write(clipboard);
-                    }
+                if let Some(id) = self.active_overflow_comment_id.take()
+                    && let Some(state) = self.comments_by_id.get(&id)
+                {
+                    let content = state.card.source().content.clone();
+                    let mut clipboard = ClipboardContent::plain_text(content.clone());
+                    clipboard.html = markdown_to_html(state.card.comment_editor(), ctx);
+                    ctx.clipboard().write(clipboard);
                 }
                 ctx.notify();
             }

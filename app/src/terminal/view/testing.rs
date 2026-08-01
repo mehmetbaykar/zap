@@ -45,9 +45,9 @@ impl TerminalView {
         use pathfinder_geometry::vector::vec2f;
         use warpui::units::{IntoPixels as _, Pixels};
 
+        use crate::terminal::BlockPadding;
         use crate::terminal::event_listener::ChannelEventListener;
         use crate::terminal::model::block::BlockSize;
-        use crate::terminal::BlockPadding;
         use crate::themes::default_themes::dark_theme;
         let size_info = SizeInfo::new(
             vec2f(7., 10.5),

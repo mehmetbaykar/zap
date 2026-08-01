@@ -1,12 +1,10 @@
 use std::marker::PhantomData;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{Local, TimeDelta};
 use history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use warp_errors::report_error;
 use warpui::{AppContext, Entity, SingletonEntity, ViewContext};
-
-use crate::terminal::shared_session::ParticipantId;
 
 use super::{AIBlockModel, AIBlockOutputStatus, OutputStatusUpdateCallback};
 use crate::ai::agent::conversation::AIConversationId;
@@ -17,6 +15,7 @@ use crate::ai::agent::{
 use crate::ai::blocklist::history_model;
 use crate::ai::blocklist::model::{AIRequestType, PassiveRequestType};
 use crate::ai::llms::LLMId;
+use crate::terminal::shared_session::ParticipantId;
 
 /// Standard [`AIBlock`] impl for live outputs corresponding to an `OutputStream`.
 pub struct AIBlockModelImpl<V> {

@@ -74,13 +74,11 @@ impl ActiveNotebookData {
                 if self.is_active_notebook(*notebook_id) {
                     if let Some(new_editor) = ObjectStoreViewModel::as_ref(ctx)
                         .object_current_editor(&notebook_id.uid(), ctx)
+                        && self.mode == Mode::Editing
+                        && matches!(new_editor.state, EditorState::OtherUserActive)
                     {
-                        if self.mode == Mode::Editing
-                            && matches!(new_editor.state, EditorState::OtherUserActive)
-                        {
-                            self.mode = Mode::View;
-                            ctx.emit(ActiveNotebookDataEvent::ModeChangedFromServer);
-                        }
+                        self.mode = Mode::View;
+                        ctx.emit(ActiveNotebookDataEvent::ModeChangedFromServer);
                     }
                     ctx.notify();
                 }

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use enum_iterator::{cardinality, Sequence};
+use enum_iterator::{Sequence, cardinality};
 #[cfg(feature = "test-util")]
 pub use overrides::{get_overrides, set_overrides};
 
@@ -974,12 +974,22 @@ impl FeatureFlag {
             BlocklistMarkdownTableRendering => {
                 Some("Enables rendering markdown tables inline in AI block list responses.")
             }
-            MarkdownTables => Some("Enables rendering and interaction support for markdown tables in notebooks."),
-            JupyterNotebookRendering => Some("Renders .ipynb files as a formatted notebook instead of raw JSON."),
-            SettingsFile => Some("Enables configuring Zap via a user-editable `settings.toml` file, with hot reload and error reporting for invalid values."),
-            GitOperationsInCodeReview => Some("Enables commit, push, and create-PR actions directly from the code review panel."),
+            MarkdownTables => {
+                Some("Enables rendering and interaction support for markdown tables in notebooks.")
+            }
+            JupyterNotebookRendering => {
+                Some("Renders .ipynb files as a formatted notebook instead of raw JSON.")
+            }
+            SettingsFile => Some(
+                "Enables configuring Zap via a user-editable `settings.toml` file, with hot reload and error reporting for invalid values.",
+            ),
+            GitOperationsInCodeReview => Some(
+                "Enables commit, push, and create-PR actions directly from the code review panel.",
+            ),
             GroupedTabs => Some("Enables organizing tabs into named, collapsible groups."),
-            PinnedTabs => Some("Enables pinning individual tabs and tab groups to the front of the tab bar."),
+            PinnedTabs => {
+                Some("Enables pinning individual tabs and tab groups to the front of the tab bar.")
+            }
             _ => None,
         }
     }

@@ -1,16 +1,14 @@
 use pathfinder_geometry::vector::vec2f;
 use warpui::App;
 
+use super::*;
 use crate::context_chips::prompt_type::PromptType;
-
-use crate::terminal::model::blocks::{ToTotalIndex as _, INLINE_BANNER_HEIGHT};
+use crate::terminal::model::blocks::{INLINE_BANNER_HEIGHT, ToTotalIndex as _};
 use crate::terminal::session_settings::SessionSettings;
 use crate::terminal::view::shared_session::test_utils::terminal_view_for_viewer;
 use crate::test_util::add_window_with_terminal;
 use crate::test_util::terminal::initialize_app_for_terminal_view;
-use crate::{assert_lines_approx_eq, FeatureFlag};
-
-use super::*;
+use crate::{FeatureFlag, assert_lines_approx_eq};
 
 #[test]
 fn test_prompt_context_menu_items_shared_session_viewer_no_edit_prompt() {

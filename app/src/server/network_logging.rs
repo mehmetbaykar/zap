@@ -41,27 +41,25 @@ impl NetworkLogModel {
         for client in http_clients {
             client.set_before_request_fn(Box::new(
                 enclose!((tx) move |request, serialized_payload| {
-                    if !tx.is_closed() {
-                        if let Err(error) = tx.try_send(NetworkLogItem::request(
+                    if !tx.is_closed()
+                        && let Err(error) = tx.try_send(NetworkLogItem::request(
                             request,
                             serialized_payload.clone(),
                             chrono::Local::now().fixed_offset(),
                         )) {
                             log::error!("Error sending request to the network log: {error}");
                         }
-                    }
                 }),
             ));
 
             client.set_after_response_fn(Box::new(enclose!((tx) move |response| {
-                if !tx.is_closed() {
-                    if let Err(error) = tx.try_send(NetworkLogItem::response(
+                if !tx.is_closed()
+                    && let Err(error) = tx.try_send(NetworkLogItem::response(
                         response,
                         chrono::Local::now().fixed_offset(),
                     )) {
                         log::error!("Error sending response to the network log: {error}");
                     }
-                }
             })));
         }
 

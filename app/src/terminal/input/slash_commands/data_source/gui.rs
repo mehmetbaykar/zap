@@ -10,12 +10,12 @@ use super::{
 };
 use crate::ai::blocklist::agent_view::{AgentViewController, AgentViewControllerEvent};
 use crate::ai::blocklist::block::cli_controller::CLISubagentController;
+use crate::search::SyncDataSource;
 use crate::search::data_source::{Query, QueryResult};
 use crate::search::mixer::DataSourceRunErrorWrapper;
-use crate::search::slash_command_menu::static_commands::commands::COMMAND_REGISTRY;
-use crate::search::slash_command_menu::static_commands::Availability;
 use crate::search::slash_command_menu::StaticCommand;
-use crate::search::SyncDataSource;
+use crate::search::slash_command_menu::static_commands::Availability;
+use crate::search::slash_command_menu::static_commands::commands::COMMAND_REGISTRY;
 use crate::settings::{InputSettings, InputSettingsChangedEvent};
 use crate::terminal::input::slash_commands::AcceptSlashCommandOrSavedPrompt;
 use crate::terminal::model::session::active_session::ActiveSession;

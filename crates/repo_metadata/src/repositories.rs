@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
-use futures::future::{ready, Either};
+use futures::future::{Either, ready};
 #[cfg(test)]
 use virtual_fs::{Stub, VirtualFS};
 use warp_util::host_id::HostId;
@@ -102,25 +102,25 @@ impl DetectedRepositories {
             };
 
             let local_key = path.to_local_path().map(LocalOrRemotePath::Local);
-            if let Some(ref key) = local_key {
-                if self.repository_roots.contains(key) {
-                    if let Some(local_path) = path.to_local_path() {
-                        if let Some(repository) = DirectoryWatcher::as_ref(ctx)
-                            .get_watched_directory_for_path(&local_path)
-                        {
-                            ctx.emit(DetectedRepositoriesEvent::DetectedGitRepo {
-                                repository: repository.clone(),
-                                source,
-                            });
-                            // Watcher is alive — use the cached result.
-                            return Either::Right(ready(path.to_local_path()));
-                        }
-                        // Watcher was cleaned up (e.g. diff state model dropped
-                        // and recreated). Fall through to the full scan which
-                        // will re-register the watcher.
-                    } else {
+            if let Some(ref key) = local_key
+                && self.repository_roots.contains(key)
+            {
+                if let Some(local_path) = path.to_local_path() {
+                    if let Some(repository) =
+                        DirectoryWatcher::as_ref(ctx).get_watched_directory_for_path(&local_path)
+                    {
+                        ctx.emit(DetectedRepositoriesEvent::DetectedGitRepo {
+                            repository: repository.clone(),
+                            source,
+                        });
+                        // Watcher is alive — use the cached result.
                         return Either::Right(ready(path.to_local_path()));
                     }
+                    // Watcher was cleaned up (e.g. diff state model dropped
+                    // and recreated). Fall through to the full scan which
+                    // will re-register the watcher.
+                } else {
+                    return Either::Right(ready(path.to_local_path()));
                 }
             }
 
@@ -154,24 +154,27 @@ impl DetectedRepositories {
                             .filter(|p| !p.starts_with(&repo_root_path));
 
                             match DirectoryWatcher::handle(ctx).update(ctx, |watcher, ctx| {
-                                    watcher
-                                        .add_directory_with_git_dir(
-                                            repo_root_path,
-                                            external_git_dir,
-                                            ctx,
-                                        )
-                                        .ok()
-                                })
-                            { Some(repository) => {
-                                let repo_path = repository.as_ref(ctx).root_dir().to_local_path();
-                                ctx.emit(DetectedRepositoriesEvent::DetectedGitRepo {
-                                    repository,
-                                    source,
-                                });
-                                let _ = tx.send(repo_path);
-                            } _ => {
-                                let _ = tx.send(None);
-                            }}
+                                watcher
+                                    .add_directory_with_git_dir(
+                                        repo_root_path,
+                                        external_git_dir,
+                                        ctx,
+                                    )
+                                    .ok()
+                            }) {
+                                Some(repository) => {
+                                    let repo_path =
+                                        repository.as_ref(ctx).root_dir().to_local_path();
+                                    ctx.emit(DetectedRepositoriesEvent::DetectedGitRepo {
+                                        repository,
+                                        source,
+                                    });
+                                    let _ = tx.send(repo_path);
+                                }
+                                _ => {
+                                    let _ = tx.send(None);
+                                }
+                            }
                         } else {
                             // No working tree path; do not treat git_dir_path as a repository path.
                             let _ = tx.send(None);
@@ -342,13 +345,14 @@ async fn find_git_repo(path: &Path) -> Option<GitRepoInfo> {
         }
 
         // First, check if the current directory is a bare git repository.
-        if let Some(dir_name) = current.file_name().and_then(|s| s.to_str()) {
-            if dir_name.ends_with(".git") && is_valid_git_dir(&current).await {
-                return Some(GitRepoInfo {
-                    working_tree_path: None,
-                    git_dir_path: current.clone(),
-                });
-            }
+        if let Some(dir_name) = current.file_name().and_then(|s| s.to_str())
+            && dir_name.ends_with(".git")
+            && is_valid_git_dir(&current).await
+        {
+            return Some(GitRepoInfo {
+                working_tree_path: None,
+                git_dir_path: current.clone(),
+            });
         }
 
         // Check for a .git directory.

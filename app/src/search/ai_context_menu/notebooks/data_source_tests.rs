@@ -2,6 +2,7 @@ use chrono::{Duration, Utc};
 use settings::manager::SettingsManager;
 use warpui::{App, SingletonEntity};
 
+use crate::NetworkStatus;
 use crate::auth::AuthStateProvider;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::model::view::ObjectStoreViewModel;
@@ -20,7 +21,6 @@ use crate::settings::AISettings;
 use crate::system::SystemStats;
 use crate::workspaces::user_profiles::UserProfiles;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::NetworkStatus;
 
 fn mock_server_notebook_with_revision(id: i64, title: &str, revision: Revision) -> NotebookObject {
     NotebookObject::new(

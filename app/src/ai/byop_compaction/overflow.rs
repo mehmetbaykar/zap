@@ -21,8 +21,8 @@
 //!   return count >= usable(input)
 //! }
 //! ```
-use super::consts::COMPACTION_BUFFER;
 use super::CompactionConfig;
+use super::consts::COMPACTION_BUFFER;
 
 /// Model token limit — source: models.dev metadata or BYOP provider config.
 #[derive(Debug, Clone, Copy)]

@@ -11,14 +11,13 @@ pub use entry::{
     AgentConversationProvenance,
 };
 use fuzzy_match::FuzzyMatchResult;
-pub use query::query_conversation_entries;
 use itertools::Itertools;
+pub use query::query_conversation_entries;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use warp_cli::agent::Harness;
 use warp_core::features::FeatureFlag;
-use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::WarpTheme;
-use warp_errors::report_error;
+use warp_core::ui::theme::color::internal_colors;
 use warpui::color::ColorU;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, WindowId};
 
@@ -28,7 +27,7 @@ use crate::ai::ambient_agents::{
 };
 use crate::ai::artifacts::Artifact;
 use crate::ai::blocklist::{
-    format_credits, BlocklistAIHistoryEvent, BlocklistAIHistoryModel, ConversationStatusUpdate,
+    BlocklistAIHistoryEvent, BlocklistAIHistoryModel, ConversationStatusUpdate, format_credits,
 };
 use crate::ai::conversation_navigation::ConversationNavigationData;
 use crate::auth::{AuthStateProvider, UserUid};
@@ -1316,7 +1315,6 @@ impl AgentConversationsModel {
         self.has_finished_initial_load = false;
     }
 }
-
 
 /// A normalized conversation entry paired with optional title-match metadata.
 pub struct AgentConversationQueryResult {

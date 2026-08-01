@@ -18,7 +18,7 @@ use crate::terminal::model::session::Session;
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::EditorSettings;
 #[cfg(feature = "local_fs")]
-use crate::util::openable_file_type::{is_supported_image_file, resolve_file_target, FileTarget};
+use crate::util::openable_file_type::{FileTarget, is_supported_image_file, resolve_file_target};
 use crate::workspace::ActiveSession;
 
 #[cfg(test)]
@@ -135,11 +135,11 @@ impl NotebookLinks {
             if url.scheme() == "file" {
                 // Unlike below, if there's missing information, we can still fall back to the
                 // system for file:// URL handling.
-                if let Some(session) = self.session_source.session(ctx) {
-                    if let Ok(file) = url.to_file_path() {
-                        // TODO(ben): Support line and column in file:// URLs.
-                        return Either::Left(Self::resolve_file(file, session, None));
-                    }
+                if let Some(session) = self.session_source.session(ctx)
+                    && let Ok(file) = url.to_file_path()
+                {
+                    // TODO(ben): Support line and column in file:// URLs.
+                    return Either::Left(Self::resolve_file(file, session, None));
                 }
             }
 
@@ -150,13 +150,12 @@ impl NotebookLinks {
         // The heuristic we use is to take the substring up to the first slash (if present), and
         // check for a valid public domain name or IP address.
         let maybe_domain = link.split_once('/').map_or(link, |(start, _)| start);
-        if addr::parse_domain_name(maybe_domain)
+        if (addr::parse_domain_name(maybe_domain)
             .is_ok_and(|domain| domain.has_known_suffix() && domain.root().is_some())
-            || maybe_domain.parse::<IpAddr>().is_ok()
+            || maybe_domain.parse::<IpAddr>().is_ok())
+            && let Ok(url) = Url::parse(&format!("http://{link}"))
         {
-            if let Ok(url) = Url::parse(&format!("http://{link}")) {
-                return Either::Right(future::ready(Ok(LinkTarget::Url(url))));
-            }
+            return Either::Right(future::ready(Ok(LinkTarget::Url(url))));
         }
 
         // At this point, we can only resolve file targets, which require a session.

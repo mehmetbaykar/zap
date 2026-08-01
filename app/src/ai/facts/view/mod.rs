@@ -3,9 +3,6 @@
 // so it was removed entirely and the imports trimmed. The Pane container view itself is kept, responsible for switching between the Rules / RuleEditor pages.
 use std::path::PathBuf;
 
-use crate::pane_group::focus_state::PaneFocusHandle;
-use crate::pane_group::{pane::view, BackingView, PaneConfiguration, PaneEvent};
-use crate::server::ids::SyncId;
 use warp_core::ui::appearance::Appearance;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::elements::{
@@ -16,6 +13,11 @@ use warpui::{
     AppContext, Element, Entity, FocusContext, ModelHandle, SingletonEntity, TypedActionView, View,
     ViewContext, ViewHandle,
 };
+
+use crate::pane_group::focus_state::PaneFocusHandle;
+use crate::pane_group::pane::view;
+use crate::pane_group::{BackingView, PaneConfiguration, PaneEvent};
+use crate::server::ids::SyncId;
 
 pub mod rule;
 pub mod rule_editor;

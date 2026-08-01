@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::*;
-use crate::ai::agent::{
-    conversation::AIConversationId, task::TaskId, AIAgentActionId, AIAgentActionResultType,
-};
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::task::TaskId;
+use crate::ai::agent::{AIAgentActionId, AIAgentActionResultType};
 
 #[test]
 fn is_shell_command_action_pending_checks_running_actions() {
@@ -18,15 +18,21 @@ fn is_shell_command_action_pending_checks_running_actions() {
         RunningActions::new(RunningActionPhase::Serial, action_id.clone()),
     );
 
-    assert!(running_actions
-        .get(&conversation_id)
-        .is_some_and(|r| r.contains(&action_id)));
-    assert!(!running_actions
-        .get(&conversation_id)
-        .is_some_and(|r| r.contains(&other_id)));
-    assert!(!running_actions
-        .get(&AIConversationId::new())
-        .is_some_and(|r| r.contains(&action_id)));
+    assert!(
+        running_actions
+            .get(&conversation_id)
+            .is_some_and(|r| r.contains(&action_id))
+    );
+    assert!(
+        !running_actions
+            .get(&conversation_id)
+            .is_some_and(|r| r.contains(&other_id))
+    );
+    assert!(
+        !running_actions
+            .get(&AIConversationId::new())
+            .is_some_and(|r| r.contains(&action_id))
+    );
 }
 
 fn make_action_result(id: &str) -> Arc<AIAgentActionResult> {

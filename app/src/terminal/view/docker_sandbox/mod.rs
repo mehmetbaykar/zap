@@ -6,31 +6,30 @@ use std::path::PathBuf;
 use std::sync::mpsc::SyncSender;
 
 #[cfg(feature = "local_tty")]
-use warpui::geometry::vector::Vector2F;
-#[cfg(feature = "local_tty")]
 use warpui::ModelHandle;
 use warpui::ViewContext;
 #[cfg(not(target_family = "wasm"))]
 use warpui::ViewHandle;
+#[cfg(feature = "local_tty")]
+use warpui::geometry::vector::Vector2F;
 
+use super::TerminalView;
+#[cfg(all(feature = "local_tty", not(feature = "remote_tty")))]
+use crate::banner::BannerState;
 #[cfg(feature = "local_tty")]
 use crate::pane_group::TerminalViewResources;
 #[cfg(feature = "local_tty")]
 use crate::persistence::ModelEvent;
 #[cfg(feature = "local_tty")]
-use crate::terminal::local_tty::docker_sandbox::resolve_sbx_path_from_user_shell;
-#[cfg(feature = "local_tty")]
 use crate::terminal::TerminalManager;
-
-use super::TerminalView;
-#[cfg(all(feature = "local_tty", not(feature = "remote_tty")))]
-use crate::banner::BannerState;
 #[cfg(all(feature = "local_tty", not(feature = "remote_tty")))]
 use crate::terminal::available_shells::AvailableShell;
+#[cfg(feature = "local_tty")]
+use crate::terminal::local_tty::docker_sandbox::resolve_sbx_path_from_user_shell;
 #[cfg(all(feature = "local_tty", not(feature = "remote_tty")))]
 use crate::terminal::local_tty::{
-    create_terminal_view_surface, TerminalManager as LocalTtyTerminalManager,
-    TerminalViewSurfaceConfig,
+    TerminalManager as LocalTtyTerminalManager, TerminalViewSurfaceConfig,
+    create_terminal_view_surface,
 };
 #[cfg(feature = "remote_tty")]
 use crate::terminal::remote_tty::TerminalManager as RemoteTtyTerminalManager;

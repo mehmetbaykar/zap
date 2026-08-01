@@ -2,13 +2,13 @@ use instant::Duration;
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::vec2f;
 use warpui::accessibility::AccessibilityContent;
+use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::elements::{
     ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Fill,
     Flex, Hoverable, MainAxisAlignment, MouseStateHandle, OffsetPositioning, ParentAnchor,
     ParentElement, ParentOffsetBounds, Stack,
 };
 use warpui::platform::Cursor;
-use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 use warpui::{
     AppContext, Element, Entity, FocusContext, SingletonEntity, TypedActionView, View, ViewContext,
@@ -144,9 +144,11 @@ impl ParticipantAvatarView {
     }
 
     fn context_menu_items(&self) -> Vec<MenuItem<ParticipantAvatarAction>> {
-        vec![MenuItemFields::new(self.display_name.clone())
-            .with_disabled(true)
-            .into_item()]
+        vec![
+            MenuItemFields::new(self.display_name.clone())
+                .with_disabled(true)
+                .into_item(),
+        ]
     }
 
     fn handle_menu_event(&mut self, event: &MenuEvent, ctx: &mut ViewContext<Self>) {

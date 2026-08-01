@@ -6,11 +6,11 @@ use parking_lot::Mutex;
 use url::{Origin, Url};
 
 use super::Channel;
+use crate::AppId;
 #[cfg(not(feature = "test-util"))]
 use crate::channel::config::DISABLED_HTTP_SENTINEL;
 use crate::channel::config::{ChannelConfig, McpOAuthProviderConfig};
 use crate::features::FeatureFlag;
-use crate::AppId;
 
 lazy_static! {
     static ref CHANNEL_STATE: Mutex<ChannelState> = Mutex::new(ChannelState::init());

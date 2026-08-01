@@ -19,8 +19,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
 
 use http_client::Client;
@@ -165,10 +164,10 @@ impl ModelCaps {
 pub fn lookup_caps(provider_id: &str, model_id: &str) -> Option<ModelCaps> {
     let s = state().read().ok()?;
     let catalog = s.catalog.as_ref()?;
-    if let Some(p) = catalog.get(provider_id) {
-        if let Some(m) = p.models.get(model_id) {
-            return Some(ModelCaps::from_model(m));
-        }
+    if let Some(p) = catalog.get(provider_id)
+        && let Some(m) = p.models.get(model_id)
+    {
+        return Some(ModelCaps::from_model(m));
     }
     for p in catalog.values() {
         if let Some(m) = p.models.get(model_id) {

@@ -61,10 +61,10 @@ impl ProxyCredentials {
         if self.password.is_empty() {
             // An empty string means "no password"; a failed delete is acceptable and only logged.
             // Avoid a let-chain (the app crate is Rust 2021) by checking in two steps.
-            if let Err(e) = ctx.secure_storage().remove_value(SECURE_STORAGE_KEY) {
-                if !matches!(e, secure_storage::Error::NotFound) {
-                    log::error!("Failed to remove proxy password: {e:#}");
-                }
+            if let Err(e) = ctx.secure_storage().remove_value(SECURE_STORAGE_KEY)
+                && !matches!(e, secure_storage::Error::NotFound)
+            {
+                log::error!("Failed to remove proxy password: {e:#}");
             }
             return;
         }

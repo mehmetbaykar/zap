@@ -6,15 +6,15 @@ use async_compat::CompatExt as _;
 use cfg_if::cfg_if;
 use futures::FutureExt as _;
 use mcp::oauth::{
-    self, load_credentials_from_secure_storage, write_to_secure_storage, AuthContext,
-    CallbackResult, FileBasedPersistedCredentialsMap, PersistedCredentials,
-    PersistedCredentialsMap, FILE_BASED_MCP_CREDENTIALS_KEY, TEMPLATABLE_MCP_CREDENTIALS_KEY,
+    self, AuthContext, CallbackResult, FILE_BASED_MCP_CREDENTIALS_KEY,
+    FileBasedPersistedCredentialsMap, PersistedCredentials, PersistedCredentialsMap,
+    TEMPLATABLE_MCP_CREDENTIALS_KEY, load_credentials_from_secure_storage, write_to_secure_storage,
 };
 use parking_lot::Mutex;
-use rmcp::transport::ConfigureCommandExt as _;
 use rmcp::ServiceExt as _;
-use simple_logger::manager::LogManager;
+use rmcp::transport::ConfigureCommandExt as _;
 use simple_logger::SimpleLogger;
+use simple_logger::manager::LogManager;
 use tokio::io::AsyncBufReadExt as _;
 use url::Url;
 use uuid::Uuid;
@@ -35,12 +35,12 @@ use crate::ai::mcp::http_client::build_client_with_headers;
 use crate::ai::mcp::parsing::resolve_json;
 use crate::ai::mcp::templatable::{GalleryData, TemplatableMCPServerObject};
 use crate::ai::mcp::templatable_installation::VariableValue;
-use crate::ai::mcp::templatable_manager::utils::{query_resources_for, query_tools_for};
 use crate::ai::mcp::templatable_manager::FigmaMcpStatus;
+use crate::ai::mcp::templatable_manager::utils::{query_resources_for, query_tools_for};
 use crate::ai::mcp::{
-    logs, Author, FileBasedMCPManager, JsonTemplate, MCPGalleryManager, MCPServer, MCPServerObject,
+    Author, FileBasedMCPManager, JsonTemplate, MCPGalleryManager, MCPServer, MCPServerObject,
     MCPServerUpdate, ParsedTemplatableMCPServerResult, StaticEnvVar, TemplatableMCPServer,
-    TemplatableMCPServerInstallation, TransportType,
+    TemplatableMCPServerInstallation, TransportType, logs,
 };
 use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
 use crate::cloud_object::update_manager::{InitiatedBy, UpdateManager};
@@ -50,7 +50,7 @@ use crate::cloud_object::{
 };
 use crate::drive::ObjectTypeAndId;
 use crate::persistence::{
-    database_file_path_for_current_scope, establish_ro_connection, ModelEvent,
+    ModelEvent, database_file_path_for_current_scope, establish_ro_connection,
 };
 use crate::server::ids::{ClientId, ServerId, SyncId};
 use crate::server::telemetry::{
@@ -61,7 +61,7 @@ use crate::settings::AISettings;
 use crate::view_components::DismissibleToast;
 use crate::workspace::ToastStack;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::{send_telemetry_from_ctx, GlobalResourceHandlesProvider};
+use crate::{GlobalResourceHandlesProvider, send_telemetry_from_ctx};
 
 /// Controls the behavior of `spawn_server_impl`.
 enum SpawnMode {
@@ -869,12 +869,11 @@ impl TemplatableMCPServerManager {
             // matches user expectations for repo-relative commands in `.mcp.json`.
             // Cloud-templated installations (lookup returns None) are unaffected and
             // continue to inherit Zap's process cwd.
-            if cli_server.cwd_parameter.is_none() {
-                if let Some(spawn_root) =
+            if cli_server.cwd_parameter.is_none()
+                && let Some(spawn_root) =
                     FileBasedMCPManager::as_ref(ctx).spawn_root_for_installation(installation_uuid)
-                {
-                    cli_server.cwd_parameter = Some(spawn_root.to_string_lossy().into_owned());
-                }
+            {
+                cli_server.cwd_parameter = Some(spawn_root.to_string_lossy().into_owned());
             }
         }
 
@@ -1112,16 +1111,19 @@ impl TemplatableMCPServerManager {
         }
         self.pending_oauth_csrf
             .retain(|_, v| *v != installation_uuid);
-        match self.active_servers.remove(&installation_uuid) { Some(server_info) => {
-            self.change_server_state(installation_uuid, MCPServerState::ShuttingDown, ctx);
-            // Cancel the server, and emit NotRunning state once it has stopped.
-            ctx.spawn(server_info.shutdown(), move |me, _, ctx| {
-                me.change_server_state(installation_uuid, MCPServerState::NotRunning, ctx);
-                ctx.dispatch_global_action("workspace:save_app", ());
-            });
-        } _ => {
-            self.change_server_state(installation_uuid, MCPServerState::NotRunning, ctx);
-        }}
+        match self.active_servers.remove(&installation_uuid) {
+            Some(server_info) => {
+                self.change_server_state(installation_uuid, MCPServerState::ShuttingDown, ctx);
+                // Cancel the server, and emit NotRunning state once it has stopped.
+                ctx.spawn(server_info.shutdown(), move |me, _, ctx| {
+                    me.change_server_state(installation_uuid, MCPServerState::NotRunning, ctx);
+                    ctx.dispatch_global_action("workspace:save_app", ());
+                });
+            }
+            _ => {
+                self.change_server_state(installation_uuid, MCPServerState::NotRunning, ctx);
+            }
+        }
 
         log::debug!("Successfully shut down server with installation uuid {installation_uuid}");
     }
@@ -1175,8 +1177,10 @@ impl TemplatableMCPServerManager {
                 mcp_server_installation: mcp_server_installation.clone(),
             };
             if let Err(err) = sender.send(event) {
-                report_error!(anyhow::Error::new(err)
-                    .context("Failed to save TemplatableMCPServerInstallation to database"));
+                report_error!(
+                    anyhow::Error::new(err)
+                        .context("Failed to save TemplatableMCPServerInstallation to database")
+                );
             }
         }
 
@@ -1259,8 +1263,10 @@ impl TemplatableMCPServerManager {
                 installation_uuids: installation_uuids.clone(),
             };
             if let Err(err) = sender.send(event) {
-                report_error!(anyhow::Error::new(err)
-                    .context("Failed to delete installations from local database"));
+                report_error!(
+                    anyhow::Error::new(err)
+                        .context("Failed to delete installations from local database")
+                );
             }
         }
 
@@ -1449,15 +1455,13 @@ impl TemplatableMCPServerManager {
 
         self.delete_templatable_mcp_server_installation(installation_uuid, ctx);
 
-        if reuse_variable_values {
-            if let Some(existing_variable_values) = existing_variable_values {
-                self.install_from_template(
-                    templatable_mcp_server.clone(),
-                    existing_variable_values,
-                    true,
-                    ctx,
-                );
-            }
+        if reuse_variable_values && let Some(existing_variable_values) = existing_variable_values {
+            self.install_from_template(
+                templatable_mcp_server.clone(),
+                existing_variable_values,
+                true,
+                ctx,
+            );
         }
     }
 
@@ -1582,8 +1586,10 @@ impl TemplatableMCPServerManager {
                         ctx
                     );
                 }
-                Err(e) => report_error!(anyhow::Error::new(e)
-                    .context("Failed to convert legacy MCP server to templatable")),
+                Err(e) => report_error!(
+                    anyhow::Error::new(e)
+                        .context("Failed to convert legacy MCP server to templatable")
+                ),
             }
         }
     }
@@ -1598,23 +1604,21 @@ impl TemplatableMCPServerManager {
             .map(|server| server.sync_id());
         let team_uid = TemplatableMCPServerManager::get_first_team_space_id(ctx);
 
-        if let Some(sync_id) = sync_id {
-            if let Some(team_uid) = team_uid {
-                let object_type_and_id = ObjectTypeAndId::GenericStringObject {
-                    object_type: GenericStringObjectFormat::Json(
-                        JsonObjectType::TemplatableMCPServer,
-                    ),
-                    id: sync_id,
-                };
-                UpdateManager::handle(ctx).update(ctx, |update_manager, ctx| {
-                    update_manager.move_object_to_location(
-                        object_type_and_id,
-                        StoredObjectLocation::Space(Space::Team { team_uid }),
-                        ctx,
-                    );
-                });
-                send_telemetry_from_ctx!(TelemetryEvent::MCPTemplateShared, ctx);
-            }
+        if let Some(sync_id) = sync_id
+            && let Some(team_uid) = team_uid
+        {
+            let object_type_and_id = ObjectTypeAndId::GenericStringObject {
+                object_type: GenericStringObjectFormat::Json(JsonObjectType::TemplatableMCPServer),
+                id: sync_id,
+            };
+            UpdateManager::handle(ctx).update(ctx, |update_manager, ctx| {
+                update_manager.move_object_to_location(
+                    object_type_and_id,
+                    StoredObjectLocation::Space(Space::Team { team_uid }),
+                    ctx,
+                );
+            });
+            send_telemetry_from_ctx!(TelemetryEvent::MCPTemplateShared, ctx);
         }
     }
 
@@ -2159,12 +2163,12 @@ async fn determine_transport(
                 }
                 other => Err(unexpected_error(other)),
             };
-            if transport.is_ok() && did_require_login {
-                if let Some(authenticated) = authenticated {
-                    if let Err(err) = authenticated(server_name).await {
-                        log::warn!("Failed to emit MCP authenticated notification: {err:?}");
-                    }
-                }
+            if transport.is_ok()
+                && did_require_login
+                && let Some(authenticated) = authenticated
+                && let Err(err) = authenticated(server_name).await
+            {
+                log::warn!("Failed to emit MCP authenticated notification: {err:?}");
             }
 
             transport
@@ -2262,10 +2266,10 @@ impl<T: rmcp::transport::Transport<R>, R: rmcp::service::ServiceRole> rmcp::tran
         let logger = self.logger.clone();
         async move {
             let result = self.transport.receive().await;
-            if let Some(item) = &result {
-                if let Ok(json) = serde_json::to_string(item) {
-                    logger.log(format!("[info] MCP: Received response: {json}"));
-                }
+            if let Some(item) = &result
+                && let Ok(json) = serde_json::to_string(item)
+            {
+                logger.log(format!("[info] MCP: Received response: {json}"));
             }
             result
         }

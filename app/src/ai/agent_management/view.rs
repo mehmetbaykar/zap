@@ -29,22 +29,21 @@ use fuzzy_match::match_indices_case_insensitive;
 use lazy_static::lazy_static;
 use siphasher::sip::SipHasher;
 use warp_cli::agent::Harness;
-use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors;
 use warpui::clipboard::ClipboardContent;
-use warpui::ui_components::components::UiComponent;
 use warpui::elements::new_scrollable::{
     NewScrollableElement, ScrollableAppearance, SingleAxisConfig,
 };
 use warpui::elements::{
-    Align, Border, Container, CornerRadius, CrossAxisAlignment, Element, Empty, Expanded, Flex,
-    Hoverable, List, ListState, MainAxisSize, MouseStateHandle, NewScrollable, ParentElement,
-    Radius, ScrollStateHandle, ScrollbarWidth, Shrinkable, SizeConstraintCondition,
-    SizeConstraintSwitch, Stack, Text, Wrap,
+    Align, Border, ChildView, Container, CornerRadius, CrossAxisAlignment, Element, Empty,
+    Expanded, Flex, Hoverable, List, ListState, MainAxisSize, MouseStateHandle, NewScrollable,
+    Padding, ParentElement, Radius, ScrollStateHandle, ScrollbarWidth, Shrinkable,
+    SizeConstraintCondition, SizeConstraintSwitch, Stack, Text, Wrap,
 };
-use warpui::elements::{ChildView, Padding};
 use warpui::fonts::{Properties, Weight};
 use warpui::keymap::FixedBinding;
+use warpui::ui_components::components::UiComponent;
 use warpui::{
     AppContext, Entity, FocusContext, ModelHandle, SingletonEntity, TypedActionView, View,
     ViewContext, ViewHandle, WeakViewHandle,
@@ -80,7 +79,6 @@ use crate::editor::{
     PropagateHorizontalNavigationKeys, SingleLineEditorOptions, TextOptions,
 };
 use crate::menu::{MenuItem, MenuItemFields};
-use crate::send_telemetry_from_ctx;
 use crate::ui_components::avatar::{Avatar, AvatarContent};
 use crate::ui_components::icons::Icon;
 use crate::util::time_format::format_approx_duration_from_now_utc;
@@ -98,7 +96,7 @@ use crate::workspace::{
     ForkedConversationDestination, RestoreConversationLayout, ToastStack, WorkspaceAction,
 };
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::AgentModeEntrypoint;
+use crate::{AgentModeEntrypoint, send_telemetry_from_ctx};
 
 lazy_static! {
     static ref HASHER: SipHasher = SipHasher::new_with_keys(0, 0);
@@ -568,7 +566,11 @@ impl AgentManagementView {
         ctx: &mut ViewContext<Dropdown<AgentManagementViewAction>>,
     ) -> Dropdown<AgentManagementViewAction> {
         let mut dropdown = Dropdown::new(ctx);
-        Self::setup_filter_menu(&mut dropdown, &crate::t!("agent-management-created-on"), ctx);
+        Self::setup_filter_menu(
+            &mut dropdown,
+            &crate::t!("agent-management-created-on"),
+            ctx,
+        );
 
         let items = vec![
             MenuItem::Item(MenuItemFields::new("All").with_on_select_action(
@@ -927,42 +929,48 @@ impl AgentManagementView {
             self.list_state.add_item();
             let card_key = card.item_id.as_key();
 
-            match old_items.remove(&card_key) { Some(mut existing) => {
-                if should_show_artifacts(&card.artifacts) {
-                    if let Some(view) = &existing.artifact_buttons_view {
-                        view.update(ctx, |v, ctx| v.update_artifacts(&card.artifacts, ctx));
+            match old_items.remove(&card_key) {
+                Some(mut existing) => {
+                    if should_show_artifacts(&card.artifacts) {
+                        if let Some(view) = &existing.artifact_buttons_view {
+                            view.update(ctx, |v, ctx| v.update_artifacts(&card.artifacts, ctx));
+                        } else {
+                            existing.artifact_buttons_view =
+                                Some(self.create_artifact_buttons_view(&card.artifacts, ctx));
+                        }
                     } else {
-                        existing.artifact_buttons_view =
-                            Some(self.create_artifact_buttons_view(&card.artifacts, ctx));
+                        existing.artifact_buttons_view = None;
                     }
-                } else {
-                    existing.artifact_buttons_view = None;
+
+                    existing.action_buttons_view.update(ctx, |row, ctx| {
+                        row.set_config(card.action_buttons_config, ctx)
+                    });
+
+                    new_items.push(existing);
                 }
+                _ => {
+                    let artifact_buttons_view = if should_show_artifacts(&card.artifacts) {
+                        Some(self.create_artifact_buttons_view(&card.artifacts, ctx))
+                    } else {
+                        None
+                    };
+                    let action_buttons_view = self.create_action_buttons_view(
+                        card.item_id,
+                        card.action_buttons_config,
+                        ctx,
+                    );
 
-                existing.action_buttons_view.update(ctx, |row, ctx| {
-                    row.set_config(card.action_buttons_config, ctx)
-                });
-
-                new_items.push(existing);
-            } _ => {
-                let artifact_buttons_view = if should_show_artifacts(&card.artifacts) {
-                    Some(self.create_artifact_buttons_view(&card.artifacts, ctx))
-                } else {
-                    None
-                };
-                let action_buttons_view =
-                    self.create_action_buttons_view(card.item_id, card.action_buttons_config, ctx);
-
-                new_items.push(CardState {
-                    hover_state: MouseStateHandle::default(),
-                    avatar_hover_state: MouseStateHandle::default(),
-                    session_status_hover_state: MouseStateHandle::default(),
-                    action_buttons_hover_state: MouseStateHandle::default(),
-                    artifact_buttons_view,
-                    action_buttons_view,
-                    item_id: card.item_id,
-                });
-            }}
+                    new_items.push(CardState {
+                        hover_state: MouseStateHandle::default(),
+                        avatar_hover_state: MouseStateHandle::default(),
+                        session_status_hover_state: MouseStateHandle::default(),
+                        action_buttons_hover_state: MouseStateHandle::default(),
+                        artifact_buttons_view,
+                        action_buttons_view,
+                        item_id: card.item_id,
+                    });
+                }
+            }
         }
 
         let num_items = new_items.len();
@@ -1416,22 +1424,22 @@ impl AgentManagementView {
                 .with_corner_radius(CornerRadius::with_all(Radius::Percentage(50.)));
 
             let mut stack = Stack::new().with_child(container.finish());
-            if state.is_hovered() {
-                if let Some(tooltip_text) = &tooltip_text_opt {
-                    let tooltip = ui_builder
-                        .tool_tip(tooltip_text.to_string())
-                        .build()
-                        .finish();
-                    stack.add_positioned_overlay_child(
-                        tooltip,
-                        warpui::elements::OffsetPositioning::offset_from_parent(
-                            pathfinder_geometry::vector::vec2f(0., -4.),
-                            warpui::elements::ParentOffsetBounds::WindowByPosition,
-                            warpui::elements::ParentAnchor::TopMiddle,
-                            warpui::elements::ChildAnchor::BottomMiddle,
-                        ),
-                    );
-                }
+            if state.is_hovered()
+                && let Some(tooltip_text) = &tooltip_text_opt
+            {
+                let tooltip = ui_builder
+                    .tool_tip(tooltip_text.to_string())
+                    .build()
+                    .finish();
+                stack.add_positioned_overlay_child(
+                    tooltip,
+                    warpui::elements::OffsetPositioning::offset_from_parent(
+                        pathfinder_geometry::vector::vec2f(0., -4.),
+                        warpui::elements::ParentOffsetBounds::WindowByPosition,
+                        warpui::elements::ParentAnchor::TopMiddle,
+                        warpui::elements::ChildAnchor::BottomMiddle,
+                    ),
+                );
             }
             stack.finish()
         })
@@ -1548,7 +1556,8 @@ impl AgentManagementView {
         );
 
         let item_id = card.item_id;
-        let clickable = Hoverable::new(card.hover_state.clone(), move |state| {
+
+        (Hoverable::new(card.hover_state.clone(), move |state| {
             let background = if state.is_hovered() {
                 internal_colors::fg_overlay_1(theme)
             } else {
@@ -1565,9 +1574,7 @@ impl AgentManagementView {
         .on_click(move |ctx, _, _| {
             ctx.dispatch_typed_action(AgentManagementViewAction::OpenSession { item_id });
         })
-        .finish();
-
-        clickable
+        .finish()) as _
     }
 
     fn render_empty_state(&self, app: &AppContext) -> Box<dyn Element> {

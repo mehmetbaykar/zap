@@ -12,8 +12,8 @@ use warpui::{Action, AppContext, Element};
 use crate::ai::agent_providers::llm_id as byop_llm_id;
 use crate::ai::custom_model_routers::is_custom_router_id;
 use crate::ai::llms::{
-    is_using_api_key_for_provider, should_show_bedrock_icon_for_model, DisableReason, LLMId,
-    LLMInfo,
+    DisableReason, LLMId, LLMInfo, is_using_api_key_for_provider,
+    should_show_bedrock_icon_for_model,
 };
 use crate::menu::{MenuItem, MenuItemFields, MenuTooltipPosition};
 

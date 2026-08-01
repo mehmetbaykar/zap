@@ -79,12 +79,11 @@ fn build_oneshot_request(
     if opts.response_format_json {
         chat_opts = chat_opts.with_response_format(genai::chat::ChatResponseFormat::JsonMode);
     }
-    if opts.allow_reasoning {
-        if let Some(effort) = cfg.reasoning_effort.to_genai() {
-            if super::reasoning::model_supports_reasoning(cfg.api_type, &cfg.model_id) {
-                chat_opts = chat_opts.with_reasoning_effort(effort);
-            }
-        }
+    if opts.allow_reasoning
+        && let Some(effort) = cfg.reasoning_effort.to_genai()
+        && super::reasoning::model_supports_reasoning(cfg.api_type, &cfg.model_id)
+    {
+        chat_opts = chat_opts.with_reasoning_effort(effort);
     }
 
     let max_chars = opts.max_chars.unwrap_or(DEFAULT_MAX_CHARS);

@@ -1,13 +1,24 @@
+use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::sync::mpsc::SyncSender;
+
+use chrono::{DateTime, Utc};
+use itertools::Itertools;
+use warp_core::features::FeatureFlag;
+use warp_util::sync::Condition;
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
+
+use super::generic_string_model::GenericStringObjectId;
 use crate::ai::execution_profiles::AIExecutionProfileObject;
 use crate::auth::AuthStateProvider;
 use crate::cloud_object::{
     GenericStoredObject, GenericStringObjectFormat, JsonObjectType, ObjectIdType, ObjectType,
-    Owner, Revision, Space, StoredObjectLocation, StoredObjectModel,
+    Owner, Revision, Space, StoredObject, StoredObjectLocation, StoredObjectModel,
 };
 use crate::drive::folders::{FolderObject, FolderObjectModel};
 use crate::drive::{
-    should_auto_open_welcome_folder, write_has_auto_opened_welcome_folder_to_user_defaults,
-    DriveIndexVariant, ObjectTypeAndId,
+    DriveIndexVariant, ObjectTypeAndId, should_auto_open_welcome_folder,
+    write_has_auto_opened_welcome_folder_to_user_defaults,
 };
 use crate::env_vars::{EnvVarCollection, EnvVarCollectionObject, EnvVarCollectionObjectModel};
 use crate::notebooks::NotebookObject;
@@ -19,20 +30,6 @@ use crate::workflows::workflow::Workflow;
 use crate::workflows::workflow_enum::{WorkflowEnum, WorkflowEnumObject, WorkflowEnumObjectModel};
 use crate::workflows::{WorkflowObject, WorkflowObjectModel};
 use crate::workspaces::user_workspaces::UserWorkspaces;
-
-use itertools::Itertools;
-use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::sync::mpsc::SyncSender;
-
-use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
-
-use crate::cloud_object::StoredObject;
-use chrono::{DateTime, Utc};
-use warp_core::features::FeatureFlag;
-use warp_util::sync::Condition;
-
-use super::generic_string_model::GenericStringObjectId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateSource {
@@ -342,11 +339,11 @@ impl ObjectStoreModel {
             let old_folder = object.metadata().folder_id;
             let mut changed = false;
 
-            if let Some(new_owner) = new_owner {
-                if new_owner != object.permissions().owner {
-                    object.permissions_mut().owner = new_owner;
-                    changed = true;
-                }
+            if let Some(new_owner) = new_owner
+                && new_owner != object.permissions().owner
+            {
+                object.permissions_mut().owner = new_owner;
+                changed = true;
             }
 
             if new_folder != old_folder {
@@ -404,13 +401,13 @@ impl ObjectStoreModel {
         if let Some(object) = self.objects_by_id.get_mut(uid) {
             object.metadata_mut().metadata_last_updated_ts = Some(new_ts);
 
-            if let Some(model_event_sender) = &self.model_event_sender {
-                if let Err(e) = model_event_sender.send(ModelEvent::UpdateObjectMetadata {
+            if let Some(model_event_sender) = &self.model_event_sender
+                && let Err(e) = model_event_sender.send(ModelEvent::UpdateObjectMetadata {
                     id: object.hashed_sqlite_id(),
                     metadata: object.metadata().clone(),
-                }) {
-                    log::error!("Error saving to cache: {e:?}");
-                }
+                })
+            {
+                log::error!("Error saving to cache: {e:?}");
             }
             ctx.notify();
         }
@@ -522,10 +519,10 @@ impl ObjectStoreModel {
             });
 
             let folder_clone = folder.clone();
-            if let Some(model_event_sender) = &self.model_event_sender {
-                if let Err(e) = model_event_sender.send(folder_clone.upsert_event()) {
-                    log::error!("Error persisting folder: {e:?}");
-                }
+            if let Some(model_event_sender) = &self.model_event_sender
+                && let Err(e) = model_event_sender.send(folder_clone.upsert_event())
+            {
+                log::error!("Error persisting folder: {e:?}");
             }
 
             ctx.notify();
@@ -1292,13 +1289,13 @@ impl ObjectStoreModel {
     fn maybe_open_welcome_folder(&mut self, object_id: &SyncId, ctx: &mut ModelContext<Self>) {
         if let Some(object) = self.get_by_uid(&object_id.uid()) {
             let folder: Option<&FolderObject> = object.into();
-            if let Some(folder) = folder {
-                if folder.metadata().is_welcome_object {
-                    // Doing this as a nested check as a slight optimization
-                    if should_auto_open_welcome_folder(ctx) {
-                        self.set_folder_open_state(folder.id, FolderOpenState::Open, ctx);
-                        write_has_auto_opened_welcome_folder_to_user_defaults(ctx);
-                    }
+            if let Some(folder) = folder
+                && folder.metadata().is_welcome_object
+            {
+                // Doing this as a nested check as a slight optimization
+                if should_auto_open_welcome_folder(ctx) {
+                    self.set_folder_open_state(folder.id, FolderOpenState::Open, ctx);
+                    write_has_auto_opened_welcome_folder_to_user_defaults(ctx);
                 }
             }
         }

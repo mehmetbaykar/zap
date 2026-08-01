@@ -19,7 +19,7 @@ use crate::appearance::Appearance;
 use crate::settings::{AISettings, InputSettings};
 use crate::terminal::input::{Input, InputAction, InputSuggestionsMode, MenuPositioning};
 use crate::terminal::model::TerminalModel;
-use crate::terminal::view::{TerminalAction, PADDING_LEFT};
+use crate::terminal::view::{PADDING_LEFT, TerminalAction};
 use crate::ui_components::icons::Icon;
 
 /// Whether the terminal input message bar should be shown.

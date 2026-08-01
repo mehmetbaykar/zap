@@ -31,8 +31,8 @@ use std::fmt::Write;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ai::skills::SkillReference;
@@ -40,8 +40,8 @@ use async_channel::Sender;
 use base64::Engine as _;
 #[cfg(feature = "local_fs")]
 use diesel::SqliteConnection;
-use futures::stream::AbortHandle;
 use futures::FutureExt as _;
+use futures::stream::AbortHandle;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use ordered_float::Float;
@@ -49,319 +49,213 @@ use parking_lot::FairMutex;
 #[cfg(feature = "local_fs")]
 use parking_lot::Mutex;
 use regex::Regex;
-use serde::Deserialize;
-use serde::Serialize;
-use settings::Setting as _;
-use settings::ToggleableSetting;
-use string_offset::ByteOffset;
-use string_offset::CharOffset;
+use serde::{Deserialize, Serialize};
+use settings::{Setting as _, ToggleableSetting};
+use string_offset::{ByteOffset, CharOffset};
 use vec1::Vec1;
-use vim::vim::VimHandler;
-use vim::vim::VimMode;
+use vim::vim::{VimHandler, VimMode};
 use warp_completer::completer;
-use warp_completer::completer::CompleterOptions;
-use warp_completer::completer::CompletionContext;
-use warp_completer::completer::CompletionsFallbackStrategy;
-use warp_completer::completer::Description;
-use warp_completer::completer::Match;
-use warp_completer::completer::MatchStrategy;
-use warp_completer::completer::MatchType;
-use warp_completer::completer::PathSeparators;
-use warp_completer::completer::SuggestionResults;
-use warp_completer::meta::HasSpan;
-use warp_completer::meta::Spanned;
-use warp_completer::parsers::simple::command_at_cursor_position;
+use warp_completer::completer::{
+    CompleterOptions, CompletionContext, CompletionsFallbackStrategy, Description, Match,
+    MatchStrategy, MatchType, PathSeparators, SuggestionResults,
+};
+use warp_completer::meta::{HasSpan, Spanned};
 use warp_completer::parsers::LiteCommand;
+use warp_completer::parsers::simple::command_at_cursor_position;
 use warp_completer::signatures::CommandRegistry;
 use warp_completer::util::parse_current_commands_and_tokens;
 use warp_core::r#async::debounce;
-use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::AnsiColorIdentifier;
+use warp_core::ui::theme::color::internal_colors;
 use warp_core::user_preferences::GetUserPreferences as _;
 use warp_editor::editor::NavigationKey;
 use warp_errors::{report_error, report_if_error};
 use warp_util::path::ShellFamily;
-use warpui::accessibility::AccessibilityContent;
-use warpui::accessibility::ActionAccessibilityContent;
-use warpui::accessibility::WarpA11yRole;
-use warpui::clipboard::ClipboardContent;
-use warpui::clipboard::ImageData;
+pub use warpui::WindowId;
+use warpui::accessibility::{AccessibilityContent, ActionAccessibilityContent, WarpA11yRole};
+use warpui::r#async::SpawnedFutureHandle;
+use warpui::clipboard::{ClipboardContent, ImageData};
 use warpui::clipboard_utils::CLIPBOARD_IMAGE_MIME_TYPES;
 use warpui::color::ColorU;
-use warpui::elements::resizable_state_handle;
-use warpui::elements::Align;
-use warpui::elements::AnchorPair;
-use warpui::elements::ChildAnchor;
-use warpui::elements::Clipped;
-use warpui::elements::ConstrainedBox;
-use warpui::elements::Container;
-use warpui::elements::CornerRadius;
-use warpui::elements::CrossAxisAlignment;
-use warpui::elements::DispatchEventResult;
-use warpui::elements::DropTargetData;
-use warpui::elements::Element;
-use warpui::elements::EventHandler;
-use warpui::elements::Flex;
-use warpui::elements::MainAxisAlignment;
-use warpui::elements::MainAxisSize;
-use warpui::elements::MouseStateHandle;
-use warpui::elements::OffsetPositioning;
-use warpui::elements::OffsetType;
-use warpui::elements::ParentAnchor;
-use warpui::elements::ParentElement;
-pub use warpui::elements::ParentElement as _;
-use warpui::elements::PositionedElementOffsetBounds;
-use warpui::elements::PositioningAxis;
-use warpui::elements::Radius;
-use warpui::elements::ResizableStateHandle;
-use warpui::elements::SavePosition;
-use warpui::elements::SelectionHandle;
-pub use warpui::elements::Stack;
-use warpui::elements::Text;
-use warpui::elements::Wrap;
-use warpui::elements::XAxisAnchor;
-use warpui::elements::YAxisAnchor;
-use warpui::end_trace;
-pub use warpui::geometry::vector::vec2f;
-pub use warpui::geometry::vector::Vector2F;
-use warpui::keymap::BindingDescription;
-use warpui::keymap::EditableBinding;
-use warpui::keymap::FixedBinding;
-use warpui::keymap::Keystroke;
+use warpui::elements::{
+    Align, AnchorPair, ChildAnchor, Clipped, ConstrainedBox, Container, CornerRadius,
+    CrossAxisAlignment, DispatchEventResult, DropTargetData, Element, EventHandler, Flex,
+    MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning, OffsetType, ParentAnchor,
+    ParentElement, PositionedElementOffsetBounds, PositioningAxis, Radius, ResizableStateHandle,
+    SavePosition, SelectionHandle, Text, Wrap, XAxisAnchor, YAxisAnchor, resizable_state_handle,
+};
+pub use warpui::elements::{ParentElement as _, Stack};
+pub use warpui::geometry::vector::{Vector2F, vec2f};
+use warpui::keymap::{BindingDescription, EditableBinding, FixedBinding, Keystroke};
 use warpui::platform::OperatingSystem;
 use warpui::presenter::ChildView;
-use warpui::r#async::SpawnedFutureHandle;
-use warpui::start_trace;
 use warpui::text_layout::TextStyle;
 use warpui::ui_components::chip::Chip;
-use warpui::ui_components::components::Coords;
-use warpui::ui_components::components::UiComponent;
-use warpui::ui_components::components::UiComponentStyles;
+use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::units::IntoPixels;
-use warpui::AppContext;
-use warpui::Entity;
-use warpui::EntityId;
-use warpui::FocusContext;
-use warpui::ModelAsRef;
-use warpui::ModelHandle;
-use warpui::SingletonEntity;
-use warpui::TypedActionView;
-use warpui::View;
-use warpui::ViewContext;
-use warpui::ViewHandle;
-use warpui::WeakViewHandle;
-pub use warpui::WindowId;
+use warpui::{
+    AppContext, Entity, EntityId, FocusContext, ModelAsRef, ModelHandle, SingletonEntity,
+    TypedActionView, View, ViewContext, ViewHandle, WeakViewHandle, end_trace, start_trace,
+};
 
 use self::decorations::InputBackgroundJobOptions;
 use super::alias::is_expandable_alias;
 use super::block_list_viewport::InputMode;
-use super::event::BlockCompletedEvent;
-use super::event::BlockType;
-use super::event::UserBlockCompleted;
+use super::event::{BlockCompletedEvent, BlockType, UserBlockCompleted};
 use super::ligature_settings::LigatureSettings;
-use super::model::block::AgentInteractionMetadata;
-use super::model::block::BlockId;
-use super::model::block::BlockMetadata;
-use super::model::block::BlocklistEnvVarMetadata;
-use super::model::session::Session;
-use super::model::session::SessionId;
-use super::model::session::SessionType;
-use super::model::session::Sessions;
-use super::prompt;
-use super::prompt_render_helper::should_render_prompt_on_same_line;
-use super::prompt_render_helper::should_render_prompt_using_editor_decorator_elements;
-use super::prompt_render_helper::PromptRenderHelper;
-use super::prompt_render_helper::SameLinePromptElements;
-use super::safe_mode_settings::get_secret_obfuscation_mode;
-use super::safe_mode_settings::SafeModeSettings;
-use super::safe_mode_settings::SafeModeSettingsChangedEvent;
-use super::session_settings::SessionSettings;
-use super::session_settings::SessionSettingsChangedEvent;
-use super::settings::SpacingMode;
-use super::settings::TerminalSettings;
-use super::settings::TerminalSettingsChangedEvent;
+use super::model::block::{
+    AgentInteractionMetadata, BlockId, BlockMetadata, BlocklistEnvVarMetadata,
+};
+use super::model::session::{Session, SessionId, SessionType, Sessions};
+use super::prompt_render_helper::{
+    PromptRenderHelper, SameLinePromptElements, should_render_prompt_on_same_line,
+    should_render_prompt_using_editor_decorator_elements,
+};
+use super::safe_mode_settings::{
+    SafeModeSettings, SafeModeSettingsChangedEvent, get_secret_obfuscation_mode,
+};
+use super::session_settings::{SessionSettings, SessionSettingsChangedEvent};
+use super::settings::{SpacingMode, TerminalSettings, TerminalSettingsChangedEvent};
+use super::shared_session::SharedSessionStatus;
 use super::shared_session::presence_manager::PresenceManager;
 use super::shared_session::viewer::history_model::SharedSessionHistoryModel;
-use super::shared_session::SharedSessionStatus;
 use super::shell::ShellType;
-use super::universal_developer_input::UniversalDeveloperInputButtonBar;
-use super::universal_developer_input::UniversalDeveloperInputButtonBarEvent;
+use super::universal_developer_input::{
+    UniversalDeveloperInputButtonBar, UniversalDeveloperInputButtonBarEvent,
+};
 use super::view::ambient_agent::AmbientAgentViewModel;
-use super::view::inline_banner::PromptSuggestionBannerState;
-use super::view::inline_banner::ZeroStatePromptSuggestionTriggeredFrom;
-use super::view::inline_banner::ZeroStatePromptSuggestionType;
-use super::view::queued_prompts_panel::QueuedPromptsPanelEvent;
-use super::view::queued_prompts_panel::QueuedPromptsPanelView;
-use super::view::ExecuteCommandEvent;
-use super::view::SyncInputType;
-use super::view::TerminalAction;
-use super::view::PADDING_LEFT as TERMINAL_VIEW_PADDING_LEFT;
+use super::view::inline_banner::{
+    PromptSuggestionBannerState, ZeroStatePromptSuggestionTriggeredFrom,
+    ZeroStatePromptSuggestionType,
+};
+use super::view::queued_prompts_panel::{QueuedPromptsPanelEvent, QueuedPromptsPanelView};
+use super::view::{
+    ExecuteCommandEvent, PADDING_LEFT as TERMINAL_VIEW_PADDING_LEFT, SyncInputType, TerminalAction,
+};
 use super::warpify::SubshellSource;
-use super::History;
-use super::HistoryEntry;
-use super::SizeInfo;
-use super::TerminalModel;
-use super::UpArrowHistoryConfig;
+use super::{History, HistoryEntry, SizeInfo, TerminalModel, UpArrowHistoryConfig, prompt};
+#[allow(unused_imports)]
+use crate::ASSETS;
+use crate::ai::AIRequestUsageModel;
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::agent::AIAgentAttachment;
-use crate::ai::agent::AIAgentContext;
-use crate::ai::agent::AIAgentExchangeId;
-use crate::ai::agent::CancellationReason;
-use crate::ai::agent::EntrypointType;
-use crate::ai::agent_conversations_model::AgentConversationNavigationSubject;
-use crate::ai::agent_conversations_model::AgentConversationsModel;
+use crate::ai::agent::{
+    AIAgentAttachment, AIAgentContext, AIAgentExchangeId, CancellationReason, EntrypointType,
+};
+use crate::ai::agent_conversations_model::{
+    AgentConversationNavigationSubject, AgentConversationsModel,
+};
 use crate::ai::ambient_agents::AttachmentInput;
 use crate::ai::attachment_utils::MAX_ATTACHMENT_SIZE_BYTES;
 use crate::ai::block_context::BlockContext;
 use crate::ai::blocklist::agent_view::shortcuts::AgentShortcutViewModel;
-use crate::ai::blocklist::agent_view::AgentInputFooter;
-use crate::ai::blocklist::agent_view::AgentInputFooterEvent;
-use crate::ai::blocklist::agent_view::AgentViewController;
-use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
-use crate::ai::blocklist::agent_view::EphemeralMessageModel;
+use crate::ai::blocklist::agent_view::{
+    AgentInputFooter, AgentInputFooterEvent, AgentViewController, AgentViewEntryOrigin,
+    EphemeralMessageModel,
+};
 use crate::ai::blocklist::block::cli_controller::{CLISubagentController, CLISubagentEvent};
 use crate::ai::blocklist::block::status_bar::BlocklistAIStatusBar;
-use crate::ai::blocklist::drive_object_attachment_for_reference;
-use crate::ai::blocklist::plan_attachment_for_reference;
 use crate::ai::blocklist::conversation_selection::ConversationSelectionHandle;
 use crate::ai::blocklist::telemetry_banner::should_collect_ai_ugc_telemetry;
 use crate::ai::blocklist::{
-    ai_indicator_height, render_ai_agent_mode_icon, render_ai_follow_up_icon, AttachmentType,
-    BlocklistAIActionModel, BlocklistAIContextEvent, BlocklistAIContextModel,
-    BlocklistAIController, BlocklistAIControllerEvent, BlocklistAIHistoryEvent,
-    BlocklistAIHistoryModel, BlocklistAIInputEvent, BlocklistAIInputModel, InputConfig, InputType,
-    InputTypeAutoDetectionSource, QueuedQuery, QueuedQueryEvent, QueuedQueryId, QueuedQueryModel,
-    QueuedQueryOrigin, SlashCommandRequest, BLOCK_CONTEXT_ATTACHMENT_REGEX,
-    DIFF_HUNK_ATTACHMENT_REGEX, DRIVE_OBJECT_ATTACHMENT_REGEX,
+    AttachmentType, BLOCK_CONTEXT_ATTACHMENT_REGEX, BlocklistAIActionModel,
+    BlocklistAIContextEvent, BlocklistAIContextModel, BlocklistAIController,
+    BlocklistAIControllerEvent, BlocklistAIHistoryEvent, BlocklistAIHistoryModel,
+    BlocklistAIInputEvent, BlocklistAIInputModel, DIFF_HUNK_ATTACHMENT_REGEX,
+    DRIVE_OBJECT_ATTACHMENT_REGEX, InputConfig, InputType, InputTypeAutoDetectionSource,
+    QueuedQuery, QueuedQueryEvent, QueuedQueryId, QueuedQueryModel, QueuedQueryOrigin,
+    SlashCommandRequest, ai_indicator_height, drive_object_attachment_for_reference,
+    plan_attachment_for_reference, render_ai_agent_mode_icon, render_ai_follow_up_icon,
 };
 #[cfg(not(target_family = "wasm"))]
 use crate::ai::conversation_export::export_conversation_markdown;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
-use crate::ai::llms::LLMPreferences;
-use crate::ai::llms::LLMPreferencesEvent;
+use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::ai::predict::next_command_model::{
-    is_command_valid, is_next_command_enabled, NextCommandModel, NextCommandModelEvent,
-    NextCommandSuggestionState, ZeroStateSuggestionInfo,
+    NextCommandModel, NextCommandModelEvent, NextCommandSuggestionState, ZeroStateSuggestionInfo,
+    is_command_valid, is_next_command_enabled,
 };
 use crate::ai::predict::prompt_suggestions::{
     has_pending_code_or_unit_test_prompt_suggestion,
     is_accept_prompt_suggestion_bound_to_ctrl_enter,
 };
-use crate::ai::skills::{SkillManager, SkillOpenOrigin, SkillTelemetryEvent};
-use crate::ai::AIRequestUsageModel;
+use crate::ai::skills::{SkillOpenOrigin, SkillTelemetryEvent};
 use crate::ai_assistant::execution_context::WarpAiExecutionContext;
-use crate::appearance::Appearance;
-use crate::appearance::AppearanceEvent;
-use crate::channel::Channel;
-use crate::channel::ChannelState;
+use crate::appearance::{Appearance, AppearanceEvent};
+use crate::channel::{Channel, ChannelState};
 use crate::cloud_object::model::actions::ObjectActionType;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::model::view::ObjectStoreViewModel;
 use crate::cloud_object::update_manager::UpdateManager;
-use crate::cloud_object::Space;
-use crate::cloud_object::StoredObject;
-use crate::cmd_or_ctrl_shift;
+use crate::cloud_object::{Space, StoredObject};
 #[cfg(feature = "local_fs")]
 use crate::code::editor_management::CodeSource;
 use crate::code_review::diff_state::DiffMode;
 use crate::completer::SessionContext;
-use crate::context_chips::display::PromptDisplay;
-use crate::context_chips::display::PromptDisplayEvent;
+use crate::context_chips::display::{PromptDisplay, PromptDisplayEvent};
 use crate::context_chips::display_chip::{DisplayChipConfig, PromptChipShellCommand};
 use crate::context_chips::prompt_type::PromptType;
 use crate::context_chips::spacing;
-use crate::editor::default_cursor_colors;
-use crate::editor::position_id_for_cached_point;
-use crate::editor::position_id_for_cursor;
-use crate::editor::position_id_for_first_cursor;
-use crate::editor::AttachedImage as AttachedImageRawData;
-use crate::editor::AutosuggestionLocation;
-use crate::editor::AutosuggestionType;
-use crate::editor::BaselinePositionComputationMethod;
-use crate::editor::CommandXRayAnchor;
-use crate::editor::CrdtOperation;
-use crate::editor::CursorColors;
-use crate::editor::DisplayPoint;
-use crate::editor::EditOrigin;
-use crate::editor::EditorAction;
-use crate::editor::EditorDecoratorElements;
-use crate::editor::EditorOptions;
-use crate::editor::EditorSnapshot;
-use crate::editor::EditorView;
-use crate::editor::Event as EditorEvent;
-use crate::editor::ImageContextOptions;
-use crate::editor::InteractionState;
-use crate::editor::PathTransformerFn;
-use crate::editor::PlainTextEditorViewAction;
-use crate::editor::Point as BufferPoint;
-use crate::editor::PropagateAndNoOpEscapeKey;
-use crate::editor::PropagateAndNoOpNavigationKeys;
-use crate::editor::PropagateHorizontalNavigationKeys;
-use crate::editor::ReplicaId;
-use crate::editor::TextColors;
-use crate::editor::TextRun;
-use crate::editor::MAX_IMAGES_PER_CONVERSATION;
+use crate::editor::{
+    AttachedImage as AttachedImageRawData, AutosuggestionLocation, AutosuggestionType,
+    BaselinePositionComputationMethod, CommandXRayAnchor, CrdtOperation, CursorColors,
+    DisplayPoint, EditOrigin, EditorAction, EditorDecoratorElements, EditorOptions, EditorSnapshot,
+    EditorView, Event as EditorEvent, ImageContextOptions, InteractionState,
+    MAX_IMAGES_PER_CONVERSATION, PathTransformerFn, PlainTextEditorViewAction,
+    Point as BufferPoint, PropagateAndNoOpEscapeKey, PropagateAndNoOpNavigationKeys,
+    PropagateHorizontalNavigationKeys, ReplicaId, TextColors, TextRun, default_cursor_colors,
+    position_id_for_cached_point, position_id_for_cursor, position_id_for_first_cursor,
+};
 use crate::features::FeatureFlag;
-use crate::input_suggestions::Event as InputSuggestionsEvent;
-use crate::input_suggestions::HistoryInputSuggestion;
-use crate::input_suggestions::InputSuggestions;
-use crate::input_suggestions::TabCompletionsPreselectOption;
+use crate::input_suggestions::{
+    Event as InputSuggestionsEvent, HistoryInputSuggestion, InputSuggestions,
+    TabCompletionsPreselectOption,
+};
 use crate::network::NetworkStatus;
-use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::PaneGroupAction;
+use crate::pane_group::focus_state::PaneFocusHandle;
 #[cfg(feature = "local_fs")]
 use crate::persistence::{database_file_path_for_current_scope, establish_ro_connection};
 use crate::prefix::longest_common_prefix;
 use crate::prompt::editor_modal::OpenSource as PromptEditorOpenSource;
 use crate::resource_center::{
-    mark_feature_used_and_write_to_user_defaults, Tip, TipAction, TipHint, TipsCompleted,
+    Tip, TipAction, TipHint, TipsCompleted, mark_feature_used_and_write_to_user_defaults,
 };
+use crate::search::QueryFilter;
 use crate::search::ai_context_menu::mixer::AIContextMenuSearchableAction;
 use crate::search::ai_context_menu::search::is_valid_search_query;
 use crate::search::ai_context_menu::view::AIContextMenuAction;
 use crate::search::slash_command_menu::static_commands::commands;
 use crate::search::slash_command_menu::static_commands::commands::COMMAND_REGISTRY;
-use crate::search::QueryFilter;
-use crate::send_telemetry_from_ctx;
 use crate::server::ids::SyncId;
-use crate::server::telemetry::AICommandSearchEntrypoint;
-use crate::server::telemetry::AgentModeAutoDetectionFalsePositivePayload;
-use crate::server::telemetry::AgentModeAutoDetectionSettingOrigin;
-use crate::server::telemetry::CommandXRayTrigger;
-use crate::server::telemetry::EnvVarTelemetryMetadata;
-use crate::server::telemetry::PaletteSource;
-use crate::server::telemetry::SlashCommandAcceptedDetails;
-use crate::server::telemetry::SlashMenuSource;
-use crate::server::telemetry::TelemetryEvent;
-use crate::server::telemetry::TelemetrySpace;
-use crate::server::telemetry::WorkflowTelemetryMetadata;
+use crate::server::telemetry::{
+    AICommandSearchEntrypoint, AgentModeAutoDetectionFalsePositivePayload,
+    AgentModeAutoDetectionSettingOrigin, CommandXRayTrigger, EnvVarTelemetryMetadata,
+    PaletteSource, SlashCommandAcceptedDetails, SlashMenuSource, TelemetryEvent, TelemetrySpace,
+    WorkflowTelemetryMetadata,
+};
 use crate::session_management::SessionNavigationPromptElements;
-use crate::settings::AISettings;
-use crate::settings::AISettingsChangedEvent;
-use crate::settings::AliasExpansionSettings;
-use crate::settings::AppEditorSettings;
-use crate::settings::AppEditorSettingsChangedEvent;
-use crate::settings::InputModeSettings;
-use crate::settings::InputSettings;
-use crate::settings::InputSettingsChangedEvent;
-use crate::settings::PrivacySettings;
-use crate::settings::MAX_TIMES_TO_SHOW_AUTOSUGGESTION_HINT;
-use crate::settings_view::flags;
-use crate::settings_view::SettingsSection;
-use crate::suggestions::ignored_suggestions_model::IgnoredSuggestionsModel;
-use crate::suggestions::ignored_suggestions_model::IgnoredSuggestionsModelEvent;
-use crate::suggestions::ignored_suggestions_model::SuggestionType;
+use crate::settings::{
+    AISettings, AISettingsChangedEvent, AliasExpansionSettings, AppEditorSettings,
+    AppEditorSettingsChangedEvent, InputModeSettings, InputSettings, InputSettingsChangedEvent,
+    MAX_TIMES_TO_SHOW_AUTOSUGGESTION_HINT, PrivacySettings,
+};
+use crate::settings_view::{SettingsSection, flags};
+use crate::suggestions::ignored_suggestions_model::{
+    IgnoredSuggestionsModel, IgnoredSuggestionsModelEvent, SuggestionType,
+};
+use crate::terminal::CLIAgent;
 #[cfg(not(target_family = "wasm"))]
 use crate::terminal::cli_agent_sessions::plugin_manager::PluginModalKind;
-use crate::terminal::cli_agent_sessions::CLIAgentInputState;
-use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
-use crate::terminal::cli_agent_sessions::CLIAgentSessionsModelEvent;
+use crate::terminal::cli_agent_sessions::{
+    CLIAgentInputState, CLIAgentSessionsModel, CLIAgentSessionsModelEvent,
+};
 use crate::terminal::input::buffer_model::InputBufferModel;
-use crate::terminal::input::conversations::InlineConversationMenuEvent;
-use crate::terminal::input::conversations::InlineConversationMenuView;
+use crate::terminal::input::conversations::{
+    InlineConversationMenuEvent, InlineConversationMenuView,
+};
 use crate::terminal::input::inline_history::InlineHistoryMenuView;
 use crate::terminal::input::inline_menu::InlineMenuPositioner;
 use crate::terminal::input::models::{
@@ -372,77 +266,58 @@ use crate::terminal::input::profiles::{InlineProfileSelectorEvent, InlineProfile
 use crate::terminal::input::prompts::{InlinePromptsMenuEvent, InlinePromptsMenuView};
 use crate::terminal::input::repos::{InlineReposMenuEvent, InlineReposMenuView};
 use crate::terminal::input::rewind::{RewindMenuEvent, RewindMenuView};
-use crate::terminal::input::skills::{
-    InlineSkillSelectorEvent, InlineSkillSelectorView, LOCAL_SKILLS_REMOTE_EXECUTION_ERROR_MESSAGE,
-};
+use crate::terminal::input::skills::{InlineSkillSelectorEvent, InlineSkillSelectorView};
 use crate::terminal::input::slash_command_model::{SlashCommandEntryState, SlashCommandModel};
 use crate::terminal::input::slash_commands::{
-    slash_command_is_submitted_as_prompt, GuiSlashCommandDataSource, InlineSlashCommandView,
-    SlashCommandDataSource as _, SlashCommandTrigger,
+    GuiSlashCommandDataSource, InlineSlashCommandView, SlashCommandDataSource as _,
+    SlashCommandTrigger, slash_command_is_submitted_as_prompt,
 };
 use crate::terminal::input::suggestions_mode_model::{
     InputSuggestionsModeEvent, InputSuggestionsModeModel,
 };
 use crate::terminal::input::terminal_message_bar::TerminalInputMessageBar;
-use crate::terminal::input::user_query::UserQueryMenuEvent;
-use crate::terminal::input::user_query::UserQueryMenuView;
+use crate::terminal::input::user_query::{UserQueryMenuEvent, UserQueryMenuView};
 use crate::terminal::model::session::active_session::ActiveSession;
 use crate::terminal::model::session::shell_quote_arg;
 use crate::terminal::package_installers::command_at_cursor_has_common_package_installer_prefix;
 use crate::terminal::prompt_render_helper::should_render_ps1_prompt;
 use crate::terminal::shared_session::protocol::ParticipantId;
 use crate::terminal::universal_developer_input::AtContextMenuDisabledReason;
-use crate::terminal::view::ambient_agent::HarnessSelector;
-use crate::terminal::view::ambient_agent::HostSelector;
-use crate::terminal::view::ambient_agent::NakedHeaderButtonTheme;
-use crate::terminal::view::inline_banner::PromptSuggestionsView;
 use crate::terminal::view::CodeDiffAction;
-use crate::terminal::CLIAgent;
+use crate::terminal::view::ambient_agent::{HarnessSelector, HostSelector, NakedHeaderButtonTheme};
+use crate::terminal::view::inline_banner::PromptSuggestionsView;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
 use crate::user_config::WarpConfig;
 use crate::util::bindings;
-use crate::util::bindings::keybinding_name_to_normalized_string;
-use crate::util::bindings::CustomAction;
+use crate::util::bindings::{CustomAction, keybinding_name_to_normalized_string};
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor;
 use crate::util::image::MAX_IMAGE_COUNT_FOR_QUERY;
 use crate::util::truncation::truncate_from_end;
-use crate::view_components::DismissibleToast;
-use crate::view_components::ToastFlavor;
-use crate::voltron::Voltron;
-use crate::voltron::VoltronEvent;
-use crate::voltron::VoltronFeatureView;
-use crate::voltron::VoltronFeatureViewHandle;
-use crate::voltron::VoltronFeatureViewMeta;
-use crate::voltron::VoltronItem;
-use crate::voltron::VoltronMetadata;
-use crate::workflows;
+use crate::view_components::{DismissibleToast, ToastFlavor};
+use crate::voltron::{
+    Voltron, VoltronEvent, VoltronFeatureView, VoltronFeatureViewHandle, VoltronFeatureViewMeta,
+    VoltronItem, VoltronMetadata,
+};
 use crate::workflows::aliases::WorkflowAliases;
-use crate::workflows::command_parser::compute_workflow_display_data;
-use crate::workflows::command_parser::compute_workflow_display_data_for_history_command;
-use crate::workflows::command_parser::compute_workflow_display_data_with_overrides;
-use crate::workflows::command_parser::WorkflowArgumentIndex;
-use crate::workflows::command_parser::WorkflowDisplayData;
-use crate::workflows::info_box::WorkflowsInfoBoxViewEvent;
-use crate::workflows::info_box::WorkflowsMoreInfoView;
-use crate::workflows::info_box::WORKFLOW_PARAMETER_HIGHLIGHT_COLOR;
+use crate::workflows::command_parser::{
+    WorkflowArgumentIndex, WorkflowDisplayData, compute_workflow_display_data,
+    compute_workflow_display_data_for_history_command,
+    compute_workflow_display_data_with_overrides,
+};
+use crate::workflows::info_box::{
+    WORKFLOW_PARAMETER_HIGHLIGHT_COLOR, WorkflowsInfoBoxViewEvent, WorkflowsMoreInfoView,
+};
 use crate::workflows::local_workflows::LocalWorkflows;
 use crate::workflows::workflow_enum::EnumVariants;
-use crate::workflows::WorkflowSelectionSource;
-use crate::workflows::WorkflowSource;
-use crate::workflows::WorkflowType;
+use crate::workflows::{WorkflowSelectionSource, WorkflowSource, WorkflowType};
 use crate::workspace::sync_inputs::SyncedInputState;
-use crate::workspace::CommandSearchOptions;
-use crate::workspace::ForkFromExchange;
-use crate::workspace::ForkedConversationDestination;
-use crate::workspace::InitContent;
-use crate::workspace::RestoreConversationLayout;
-use crate::workspace::ToastStack;
-use crate::workspace::WorkspaceAction;
-use crate::AgentModeEntrypoint;
-#[allow(unused_imports)]
-use crate::ASSETS;
+use crate::workspace::{
+    CommandSearchOptions, ForkFromExchange, ForkedConversationDestination, InitContent,
+    RestoreConversationLayout, ToastStack, WorkspaceAction,
+};
+use crate::{AgentModeEntrypoint, cmd_or_ctrl_shift, send_telemetry_from_ctx, workflows};
 
 /// Drop target data for dropping content on the [`Input`].
 #[derive(Debug, Clone)]
@@ -3417,10 +3292,10 @@ impl Input {
         };
 
         #[cfg(feature = "local_fs")]
-        if let Some(db_url) = database_file_path_for_current_scope().to_str() {
-            if let Ok(conn) = establish_ro_connection(db_url) {
-                input.conn = Some(Arc::new(Mutex::new(conn)));
-            }
+        if let Some(db_url) = database_file_path_for_current_scope().to_str()
+            && let Ok(conn) = establish_ro_connection(db_url)
+        {
+            input.conn = Some(Arc::new(Mutex::new(conn)));
         }
 
         if input.model.lock().shared_session_status().is_viewer() {
@@ -3872,14 +3747,17 @@ impl Input {
                     AgentConversationNavigationSubject::Entry(*item_id),
                     Some(RestoreConversationLayout::ActivePane),
                     ctx,
-                ) { Some(action) => {
-                    ctx.dispatch_typed_action_deferred(action);
-                } _ => {
-                    ctx.emit(Event::ShowToast {
-                        message: "Couldn't navigate to conversation.".to_string(),
-                        flavor: ToastFlavor::Error,
-                    });
-                }}
+                ) {
+                    Some(action) => {
+                        ctx.dispatch_typed_action_deferred(action);
+                    }
+                    _ => {
+                        ctx.emit(Event::ShowToast {
+                            message: "Couldn't navigate to conversation.".to_string(),
+                            flavor: ToastFlavor::Error,
+                        });
+                    }
+                }
             }
             InlineConversationMenuEvent::Dismissed => {
                 if self
@@ -5336,17 +5214,16 @@ impl Input {
             (InputType::AI, _) => {
                 if let Some(conversation) =
                     self.ai_context_model.as_ref(app).selected_conversation(app)
+                    && conversation.is_child_agent_conversation()
                 {
-                    if conversation.is_child_agent_conversation() {
-                        let agent_name = conversation.agent_name().unwrap_or("child");
-                        if conversation.status().is_in_progress() {
-                            if is_queue_next_prompt_enabled {
-                                return format!("Queue a follow up for the {agent_name} agent");
-                            }
-                            return format!("Steer the {agent_name} agent");
+                    let agent_name = conversation.agent_name().unwrap_or("child");
+                    if conversation.status().is_in_progress() {
+                        if is_queue_next_prompt_enabled {
+                            return format!("Queue a follow up for the {agent_name} agent");
                         }
-                        return format!("Ask the {agent_name} agent a follow up");
+                        return format!("Steer the {agent_name} agent");
                     }
+                    return format!("Ask the {agent_name} agent a follow up");
                 }
 
                 // Follow the `agent_indicator` pattern (see `app/src/tab.rs`):
@@ -6307,52 +6184,48 @@ impl Input {
         {
             // Skip any empty blocks created by the user. Keep the last zero-state autosuggestion
             // until the user executes a command.
-            if !command.is_empty() {
-                if let Some(ZeroStateSuggestionInfo {
+            if !command.is_empty()
+                && let Some(ZeroStateSuggestionInfo {
                     request,
                     response,
                     is_from_ai,
                     history_based_autosuggestion_state,
                     request_duration_ms,
                 }) = zerostate_next_command_suggestion_info
-                {
-                    self.last_intelligent_autosuggestion_result =
-                        Some(IntelligentAutosuggestionResult {
-                            was_suggestion_accepted: self.was_intelligent_autosuggestion_accepted,
-                            is_from_ai,
-                            predicted_command: response.most_likely_action.clone(),
-                        });
+            {
+                self.last_intelligent_autosuggestion_result =
+                    Some(IntelligentAutosuggestionResult {
+                        was_suggestion_accepted: self.was_intelligent_autosuggestion_accepted,
+                        is_from_ai,
+                        predicted_command: response.most_likely_action.clone(),
+                    });
 
-                    let should_collect_ugc = should_collect_ai_ugc_telemetry(
-                        ctx,
-                        PrivacySettings::as_ref(ctx).is_telemetry_enabled,
-                    );
-                    send_telemetry_from_ctx!(
-                        TelemetryEvent::AgentModePrediction {
-                            was_suggestion_accepted: self.was_intelligent_autosuggestion_accepted,
-                            request_duration_ms,
-                            is_from_ai,
-                            does_actual_command_match_prediction: response.most_likely_action
-                                == command,
-                            does_actual_command_match_history_prediction:
-                                history_based_autosuggestion_state.history_command_prediction
-                                    == command,
-                            history_prediction_likelihood: history_based_autosuggestion_state
-                                .history_command_prediction_likelihood,
-                            total_history_count: history_based_autosuggestion_state
-                                .total_history_count,
-                            actual_next_command_run: should_collect_ugc
-                                .then_some(command.to_string()),
-                            history_based_autosuggestion_state: should_collect_ugc
-                                .then_some(history_based_autosuggestion_state.clone()),
-                            generate_ai_input_suggestions_request: should_collect_ugc
-                                .then_some(*request),
-                            generate_ai_input_suggestions_response: should_collect_ugc
-                                .then(|| response.clone())
-                        },
-                        ctx
-                    );
-                }
+                let should_collect_ugc = should_collect_ai_ugc_telemetry(
+                    ctx,
+                    PrivacySettings::as_ref(ctx).is_telemetry_enabled,
+                );
+                send_telemetry_from_ctx!(
+                    TelemetryEvent::AgentModePrediction {
+                        was_suggestion_accepted: self.was_intelligent_autosuggestion_accepted,
+                        request_duration_ms,
+                        is_from_ai,
+                        does_actual_command_match_prediction: response.most_likely_action
+                            == command,
+                        does_actual_command_match_history_prediction:
+                            history_based_autosuggestion_state.history_command_prediction == command,
+                        history_prediction_likelihood: history_based_autosuggestion_state
+                            .history_command_prediction_likelihood,
+                        total_history_count: history_based_autosuggestion_state.total_history_count,
+                        actual_next_command_run: should_collect_ugc.then_some(command.to_string()),
+                        history_based_autosuggestion_state: should_collect_ugc
+                            .then_some(history_based_autosuggestion_state.clone()),
+                        generate_ai_input_suggestions_request: should_collect_ugc
+                            .then_some(*request),
+                        generate_ai_input_suggestions_response: should_collect_ugc
+                            .then(|| response.clone())
+                    },
+                    ctx
+                );
             }
             // Reset state for whether the user accepted the intelligent autosuggestion.
             self.was_intelligent_autosuggestion_accepted = false;
@@ -6590,10 +6463,10 @@ impl Input {
         }
 
         // The vim status bar should be shown and hidden immediately upon toggling.
-        if settings.as_ref(ctx).vim_mode_enabled() {
-            if let AppEditorSettingsChangedEvent::VimStatusBar { .. } = evt {
-                ctx.notify();
-            }
+        if settings.as_ref(ctx).vim_mode_enabled()
+            && let AppEditorSettingsChangedEvent::VimStatusBar { .. } = evt
+        {
+            ctx.notify();
         }
     }
 
@@ -7585,41 +7458,40 @@ impl Input {
         should_restore_buffer_before_history_up: bool,
         ctx: &mut ViewContext<Self>,
     ) {
-        if should_restore_buffer_before_history_up {
-            if let InputSuggestionsMode::HistoryUp {
+        if should_restore_buffer_before_history_up
+            && let InputSuggestionsMode::HistoryUp {
                 original_buffer,
                 original_cursor_point,
                 original_input_was_locked,
                 original_input_type,
                 ..
             } = self.suggestions_mode_model.as_ref(ctx).mode()
-            {
-                let original_buffer = original_buffer.clone();
-                let original_cursor_point = *original_cursor_point;
-                let original_input_was_locked = *original_input_was_locked;
-                let original_input_type = *original_input_type;
-                // If the user closes the input suggestions menu, we want to reset the AI input mode
-                // to the exact same state it was originally, which includes the mode itself and
-                // whether it was locked to that mode.
-                self.ai_input_model.update(ctx, |ai_input_model, ctx| {
-                    ai_input_model.set_input_config(
-                        InputConfig {
-                            input_type: original_input_type,
-                            is_locked: original_input_was_locked,
-                        },
-                        original_buffer.is_empty(),
-                        Some(InputTypeAutoDetectionSource::RestoreSavedConfig),
-                        ctx,
-                    );
-                });
+        {
+            let original_buffer = original_buffer.clone();
+            let original_cursor_point = *original_cursor_point;
+            let original_input_was_locked = *original_input_was_locked;
+            let original_input_type = *original_input_type;
+            // If the user closes the input suggestions menu, we want to reset the AI input mode
+            // to the exact same state it was originally, which includes the mode itself and
+            // whether it was locked to that mode.
+            self.ai_input_model.update(ctx, |ai_input_model, ctx| {
+                ai_input_model.set_input_config(
+                    InputConfig {
+                        input_type: original_input_type,
+                        is_locked: original_input_was_locked,
+                    },
+                    original_buffer.is_empty(),
+                    Some(InputTypeAutoDetectionSource::RestoreSavedConfig),
+                    ctx,
+                );
+            });
 
-                self.editor.update(ctx, |editor, ctx| {
-                    editor.set_buffer_text_ignoring_undo(&original_buffer, ctx);
-                    if let Some(original_cursor_point) = original_cursor_point {
-                        editor.reset_selections_to_point(&original_cursor_point, ctx);
-                    }
-                });
-            }
+            self.editor.update(ctx, |editor, ctx| {
+                editor.set_buffer_text_ignoring_undo(&original_buffer, ctx);
+                if let Some(original_cursor_point) = original_cursor_point {
+                    editor.reset_selections_to_point(&original_cursor_point, ctx);
+                }
+            });
         }
         self.close_input_suggestions(/*should_focus_input=*/ should_focus_input, ctx);
     }
@@ -8103,9 +7975,11 @@ impl Input {
             .info_box_expanded;
 
         InputSettings::handle(ctx).update(ctx, |input_settings, ctx| {
-            report_if_error!(input_settings
-                .workflows_box_expanded
-                .set_value(info_box_expanded, ctx));
+            report_if_error!(
+                input_settings
+                    .workflows_box_expanded
+                    .set_value(info_box_expanded, ctx)
+            );
         });
     }
 
@@ -8341,52 +8215,50 @@ impl Input {
                     #[cfg(feature = "local_fs")]
                     // First, use rich history to find commands with a matching prefix that were run
                     // in a similar context, taking into account the most recent block run.
-                    if let Some(conn) = conn {
-                        if let Some(last_user_block_completed) =
+                    if let Some(conn) = conn
+                        && let Some(last_user_block_completed) =
                             &completer_data.last_user_block_completed
-                        {
-                            let similar_history_contexts = {
-                                let mut conn = conn.lock();
-                                NextCommandModel::get_similar_history_context(
-                                    &mut conn,
-                                    last_user_block_completed,
-                                    0,
-                                )
-                            };
-                            if !similar_history_contexts.is_empty() {
-                                let mut history_next_command_counts =
-                                    counter::Counter::<String>::new();
-                                // Find the most likely next command after a similar context, out of those that have a matching prefix and aren't ignored.
-                                for history_context in &similar_history_contexts {
-                                    if history_context
-                                        .next_command
-                                        .command
-                                        .starts_with(&buffer_text)
-                                        && !ignored_suggestions
-                                            .contains(&history_context.next_command.command)
-                                    {
-                                        history_next_command_counts
-                                            [&history_context.next_command.command] += 1;
-                                    }
-                                }
-
-                                for (most_likely_next_command, _) in
-                                    history_next_command_counts.k_most_common_ordered(5)
+                    {
+                        let similar_history_contexts = {
+                            let mut conn = conn.lock();
+                            NextCommandModel::get_similar_history_context(
+                                &mut conn,
+                                last_user_block_completed,
+                                0,
+                            )
+                        };
+                        if !similar_history_contexts.is_empty() {
+                            let mut history_next_command_counts = counter::Counter::<String>::new();
+                            // Find the most likely next command after a similar context, out of those that have a matching prefix and aren't ignored.
+                            for history_context in &similar_history_contexts {
+                                if history_context
+                                    .next_command
+                                    .command
+                                    .starts_with(&buffer_text)
+                                    && !ignored_suggestions
+                                        .contains(&history_context.next_command.command)
                                 {
-                                    if is_command_valid(
-                                        &most_likely_next_command,
-                                        completion_context.as_ref(),
-                                        session_env_vars.as_ref(),
-                                    )
-                                    .await
-                                    {
-                                        return AutoSuggestionResult {
-                                            buffer_text,
-                                            autosuggestion_result: Some(
-                                                most_likely_next_command.clone(),
-                                            ),
-                                        };
-                                    }
+                                    history_next_command_counts
+                                        [&history_context.next_command.command] += 1;
+                                }
+                            }
+
+                            for (most_likely_next_command, _) in
+                                history_next_command_counts.k_most_common_ordered(5)
+                            {
+                                if is_command_valid(
+                                    &most_likely_next_command,
+                                    completion_context.as_ref(),
+                                    session_env_vars.as_ref(),
+                                )
+                                .await
+                                {
+                                    return AutoSuggestionResult {
+                                        buffer_text,
+                                        autosuggestion_result: Some(
+                                            most_likely_next_command.clone(),
+                                        ),
+                                    };
                                 }
                             }
                         }
@@ -8503,13 +8375,12 @@ impl Input {
         // If there is an abbreviation, we expand it as long as we aren't executing.
         // In fish, an alias formatted like `ls=echo Hello && ls` would get expanded
         // twice if we also performed expansion on enter.
-        if matches!(executing, Executing::No) {
-            if let Some(abbr_value) = session_context
+        if matches!(executing, Executing::No)
+            && let Some(abbr_value) = session_context
                 .session
                 .abbreviation_value(&first_token.item)
-            {
-                return Some((first_token, abbr_value));
-            }
+        {
+            return Some((first_token, abbr_value));
         }
 
         // We only expand aliases if the user has turned the setting on.
@@ -8845,13 +8716,11 @@ impl Input {
         let history_model = BlocklistAIHistoryModel::as_ref(ctx);
         if let Some(local_conversation_id) =
             history_model.find_conversation_id_by_server_token(&conversation_token)
+            && let Some(conversation) = history_model.conversation(&local_conversation_id)
         {
-            if let Some(conversation) = history_model.conversation(&local_conversation_id) {
-                let content =
-                    conversation.export_to_markdown(Some(self.ai_action_model.as_ref(ctx)));
-                if !content.trim().is_empty() {
-                    return AIAgentAttachment::PlainText(content);
-                }
+            let content = conversation.export_to_markdown(Some(self.ai_action_model.as_ref(ctx)));
+            if !content.trim().is_empty() {
+                return AIAgentAttachment::PlainText(content);
             }
         }
 
@@ -9675,9 +9544,11 @@ impl Input {
                                         current_count + 1
                                     };
 
-                                    report_if_error!(input_settings
-                                        .autosuggestion_accepted_count
-                                        .set_value(new_count, ctx))
+                                    report_if_error!(
+                                        input_settings
+                                            .autosuggestion_accepted_count
+                                            .set_value(new_count, ctx)
+                                    )
                                 }
                             })
                         }
@@ -9803,10 +9674,10 @@ impl Input {
                         self.start_xray_at_offset(pos, CommandXRayTrigger::Keystroke, ctx);
                     }
                     CommandXRayAnchor::Hover(mouse_position) => {
-                        if let Some(offset) = self.start_byte_index_at_point(mouse_position, ctx) {
-                            if !self.suggestions_mode_model.as_ref(ctx).is_visible() {
-                                self.start_xray_at_offset(offset, CommandXRayTrigger::Hover, ctx);
-                            }
+                        if let Some(offset) = self.start_byte_index_at_point(mouse_position, ctx)
+                            && !self.suggestions_mode_model.as_ref(ctx).is_visible()
+                        {
+                            self.start_xray_at_offset(offset, CommandXRayTrigger::Hover, ctx);
                         }
                     }
                 }
@@ -10632,13 +10503,12 @@ impl Input {
             return Vec::new();
         };
 
-        let commands = history_model
+        // TODO: append viewer's local shell history
+        history_model
             .as_ref(ctx)
             .entries()
             .map(|entry| HistoryInputSuggestion::Command { entry })
-            .collect();
-        // TODO: append viewer's local shell history
-        commands
+            .collect()
     }
 
     /// Returns a collection of history entries that are user AI queries or shell commands in order
@@ -10920,10 +10790,10 @@ impl Input {
             _ => CompletionsFallbackStrategy::None,
         };
 
-        if self.is_completions_while_typing_turned_on(ctx) {
-            if let Some(last_abort_handle) = self.completions_abort_handle.take() {
-                last_abort_handle.abort();
-            }
+        if self.is_completions_while_typing_turned_on(ctx)
+            && let Some(last_abort_handle) = self.completions_abort_handle.take()
+        {
+            last_abort_handle.abort();
         }
 
         let input_type = self.ai_input_model.as_ref(ctx).input_type();
@@ -11232,8 +11102,8 @@ impl Input {
                             [0..self.start_byte_index_of_last_selection(ctx).as_usize()]
                             .to_string();
 
-                        if completions_trigger == CompletionsTrigger::Keybinding {
-                            if let Some(common_prefix) = longest_common_prefix(
+                        if completions_trigger == CompletionsTrigger::Keybinding
+                            && let Some(common_prefix) = longest_common_prefix(
                                 results
                                     .suggestions
                                     .iter()
@@ -11251,29 +11121,29 @@ impl Input {
                                         )
                                     })
                                     .map(|suggestion| suggestion.replacement()),
-                            ) {
-                                // Insert the common prefix if it is longer than what the user has
-                                // already typed. This check is necessary because the suggestions
-                                // are case-insensitive, while the common prefix is necessarily
-                                // case-sensitive. That can lead to the common prefix being shorter
-                                // than the input, causing confusing behavior where the input is
-                                // truncated. Also, only fill in the common prefix if the
-                                // replacement itself is a prefix of the common prefix. If there
-                                // are only fuzzy completions, then it's possible this is not the
-                                // case, and we don't want to fill in the common prefix in that
-                                // case.
-                                let replacement_start = results.replacement_span.start();
-                                let current_word = &buffer_text_original[replacement_start
-                                    ..self.start_byte_index_of_last_selection(ctx).as_usize()];
-                                if common_prefix.len() > results.replacement_span.distance()
-                                    && common_prefix.starts_with(current_word)
-                                {
-                                    self.insert_completion_prefix_into_editor(
-                                        ctx,
-                                        common_prefix,
-                                        results.replacement_span.start(),
-                                    );
-                                }
+                            )
+                        {
+                            // Insert the common prefix if it is longer than what the user has
+                            // already typed. This check is necessary because the suggestions
+                            // are case-insensitive, while the common prefix is necessarily
+                            // case-sensitive. That can lead to the common prefix being shorter
+                            // than the input, causing confusing behavior where the input is
+                            // truncated. Also, only fill in the common prefix if the
+                            // replacement itself is a prefix of the common prefix. If there
+                            // are only fuzzy completions, then it's possible this is not the
+                            // case, and we don't want to fill in the common prefix in that
+                            // case.
+                            let replacement_start = results.replacement_span.start();
+                            let current_word = &buffer_text_original[replacement_start
+                                ..self.start_byte_index_of_last_selection(ctx).as_usize()];
+                            if common_prefix.len() > results.replacement_span.distance()
+                                && common_prefix.starts_with(current_word)
+                            {
+                                self.insert_completion_prefix_into_editor(
+                                    ctx,
+                                    common_prefix,
+                                    results.replacement_span.start(),
+                                );
                             }
                         }
 
@@ -11870,10 +11740,10 @@ impl Input {
                             // Kind of a quirk, but PowerShell only inserts a
                             // newline after a backtick if the character preceding
                             // the backtick is whitespace.
-                            if let Some(c) = preceding_chars.next() {
-                                if !c.is_ascii_whitespace() {
-                                    return false;
-                                }
+                            if let Some(c) = preceding_chars.next()
+                                && !c.is_ascii_whitespace()
+                            {
+                                return false;
                             }
                             return true;
                         }
@@ -11881,10 +11751,10 @@ impl Input {
                     Some(ShellFamily::Posix) | None => {
                         if c == '\\' {
                             // Continue if there are more \ characters
-                            if let Some(c) = preceding_chars.next() {
-                                if c == '\\' {
-                                    continue;
-                                }
+                            if let Some(c) = preceding_chars.next()
+                                && c == '\\'
+                            {
+                                continue;
                             }
                             // Odd number of \ characters
                             return true;
@@ -12904,25 +12774,25 @@ impl Input {
 
         ctx.emit(Event::ExecuteAIQuery);
 
-        if let Some(workflow_state) = self.workflows_state.selected_workflow_state.as_ref() {
-            if let WorkflowType::Cloud(workflow) = &workflow_state.workflow_type {
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::ExecutedWarpDrivePrompt {
-                        id: workflow.id.into_server().map(Into::into),
-                        selection_source: workflow_state.workflow_selection_source,
-                    },
-                    ctx
-                );
+        if let Some(workflow_state) = self.workflows_state.selected_workflow_state.as_ref()
+            && let WorkflowType::Cloud(workflow) = &workflow_state.workflow_type
+        {
+            send_telemetry_from_ctx!(
+                TelemetryEvent::ExecutedWarpDrivePrompt {
+                    id: workflow.id.into_server().map(Into::into),
+                    selection_source: workflow_state.workflow_selection_source,
+                },
+                ctx
+            );
 
-                UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
-                    update_manager.record_object_action(
-                        workflow.object_type_and_id(),
-                        ObjectActionType::Execute,
-                        None,
-                        ctx,
-                    )
-                });
-            }
+            UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
+                update_manager.record_object_action(
+                    workflow.object_type_and_id(),
+                    ObjectActionType::Execute,
+                    None,
+                    ctx,
+                )
+            });
         }
     }
 
@@ -12969,31 +12839,30 @@ impl Input {
 
         // If the buffer is non-empty, we should kick off the autodetection process, in case the
         // classification doesn't match the previous locked mode.
-        if !buffer_text.is_empty() {
-            if let Some(completion_context) = self.completion_session_context(ctx) {
-                let ai_input_model = self.ai_input_model.clone();
+        if !buffer_text.is_empty()
+            && let Some(completion_context) = self.completion_session_context(ctx)
+        {
+            let ai_input_model = self.ai_input_model.clone();
 
-                ctx.spawn(
-                    async move {
-                        (
-                            parse_current_commands_and_tokens(buffer_text, &completion_context)
-                                .await,
+            ctx.spawn(
+                async move {
+                    (
+                        parse_current_commands_and_tokens(buffer_text, &completion_context).await,
+                        completion_context,
+                    )
+                },
+                move |_input, (parsed_tokens, completion_context), ctx| {
+                    let session_id = completion_context.session.id();
+                    ai_input_model.update(ctx, |model, ctx| {
+                        model.detect_and_set_input_type(
+                            parsed_tokens,
                             completion_context,
-                        )
-                    },
-                    move |_input, (parsed_tokens, completion_context), ctx| {
-                        let session_id = completion_context.session.id();
-                        ai_input_model.update(ctx, |model, ctx| {
-                            model.detect_and_set_input_type(
-                                parsed_tokens,
-                                completion_context,
-                                Some(session_id),
-                                ctx,
-                            );
-                        });
-                    },
-                );
-            }
+                            Some(session_id),
+                            ctx,
+                        );
+                    });
+                },
+            );
         }
     }
 
@@ -13368,16 +13237,19 @@ impl Input {
                     .shared_session_input_state
                     .as_ref()
                     .map(|state| state.history_model.clone())
-                { Some(shared_session_history_model) => {
-                    shared_session_history_model.update(ctx, |history_model, _ctx| {
-                        history_model.push(HistoryEntry::for_completed_block(
-                            block_completed.command,
-                            &block_completed.serialized_block,
-                        ))
-                    })
-                } _ => {
-                    log::warn!("Tried to access non-existent shared session history model")
-                }}
+                {
+                    Some(shared_session_history_model) => {
+                        shared_session_history_model.update(ctx, |history_model, _ctx| {
+                            history_model.push(HistoryEntry::for_completed_block(
+                                block_completed.command,
+                                &block_completed.serialized_block,
+                            ))
+                        })
+                    }
+                    _ => {
+                        log::warn!("Tried to access non-existent shared session history model")
+                    }
+                }
             } else if is_next_command_enabled(ctx) {
                 self.maybe_predict_next_action_ai(block_completed, ctx);
             }
@@ -13545,12 +13417,14 @@ impl Input {
             prompt_chip_snapshot: None,
         };
 
-        if let Some(block) = block {
-            if !is_udi && block.honor_ps1() && model.block_list().is_bootstrapped() {
-                // PS1 mode: capture the raw prompt grid so the command palette
-                // can render it with full fidelity (CORE-1683).
-                prompt_elements.ps1_prompt_grid = Some(block.prompt_grid().clone());
-            }
+        if let Some(block) = block
+            && !is_udi
+            && block.honor_ps1()
+            && model.block_list().is_bootstrapped()
+        {
+            // PS1 mode: capture the raw prompt grid so the command palette
+            // can render it with full fidelity (CORE-1683).
+            prompt_elements.ps1_prompt_grid = Some(block.prompt_grid().clone());
         }
 
         // Always capture a chip snapshot as the fallback prompt representation.
@@ -14368,10 +14242,10 @@ impl View for Input {
             ctx.set.insert(flags::CODE_SUGGESTIONS_FLAG);
         }
 
-        if let Some(workflow) = self.workflows_state.selected_workflow_state.clone() {
-            if workflow.should_show_more_info_view {
-                ctx.set.insert("WorkflowInfoBox");
-            }
+        if let Some(workflow) = self.workflows_state.selected_workflow_state.clone()
+            && workflow.should_show_more_info_view
+        {
+            ctx.set.insert("WorkflowInfoBox");
         }
 
         let is_profile_model_selector_open = self.should_show_universal_developer_input(app)

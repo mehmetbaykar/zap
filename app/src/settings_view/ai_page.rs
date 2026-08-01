@@ -7,7 +7,6 @@ use std::sync::LazyLock;
 use ::ai::api_keys::{ApiKeyManager, ApiKeys};
 #[cfg(not(target_family = "wasm"))]
 use ::ai::grok_subscription::oauth::{self, ManualCodeExchange};
-use chrono::{DateTime, Local};
 use enum_iterator::all;
 use itertools::Itertools;
 use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine};
@@ -17,7 +16,6 @@ use strum::IntoEnumIterator;
 use warp_core::context_flag::ContextFlag;
 use warp_core::features::FeatureFlag;
 use warp_core::ui::theme::color::internal_colors;
-use warp_editor::editor::NavigationKey;
 use warpui::elements::{
     Border, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Dismiss, Empty,
     Expanded, Fill, Flex, FormattedTextElement, HighlightedHyperlink, Hoverable, HyperlinkLens,
@@ -32,8 +30,8 @@ use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::ui_components::slider::SliderStateHandle;
 use warpui::ui_components::switch::SwitchStateHandle;
 use warpui::{
-    id, Action, AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext,
-    ViewHandle,
+    Action, AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext,
+    ViewHandle, id,
 };
 
 use super::agent_providers_widget::AgentProvidersWidget;
@@ -46,43 +44,43 @@ use super::remove_custom_endpoint_confirmation_dialog::{
 };
 use super::set_default_model_modal::{SetDefaultModelModalBody, SetDefaultModelModalBodyEvent};
 use super::settings_page::{
+    HEADER_PADDING, InputListItem, LocalOnlyIconState, MatchData, PageType, SettingsPageMeta,
+    SettingsPageViewHandle, SettingsWidget, TOGGLE_BUTTON_RIGHT_PADDING, ToggleState,
     build_sub_header, build_toggle_element, render_body_item_label,
     render_body_item_label_with_icon, render_custom_size_header, render_dropdown_item,
     render_dropdown_item_label, render_full_pane_width_ai_button, render_input_list,
-    render_separator, render_settings_info_banner, InputListItem, LocalOnlyIconState, MatchData,
-    PageType, SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, ToggleState,
-    HEADER_PADDING, TOGGLE_BUTTON_RIGHT_PADDING,
+    render_separator, render_settings_info_banner,
 };
 use super::{
-    editor_text_colors, flags, SettingActionPairContexts, SettingActionPairDescriptions,
-    SettingsAction, SettingsSection, ToggleSettingActionPair,
+    SettingActionPairContexts, SettingActionPairDescriptions, SettingsAction, SettingsSection,
+    ToggleSettingActionPair, editor_text_colors, flags,
 };
+use crate::ai::blocklist::BlocklistAIPermissions;
 #[cfg(not(target_family = "wasm"))]
 use crate::ai::blocklist::agent_view::agent_input_footer::editor::{
     AgentToolbarEditorMode, AgentToolbarInlineEditor,
 };
-use crate::ai::blocklist::BlocklistAIPermissions;
 use crate::ai::execution_profiles::model_menu_items::available_model_menu_items;
 use crate::ai::execution_profiles::profiles::{
     AIExecutionProfilesModel, AIExecutionProfilesModelEvent, ClientProfileId,
 };
 use crate::ai::execution_profiles::{
-    long_context_pricing_warning_title, AIExecutionProfile, AIExecutionProfileAppExt,
-    ActionPermission, WriteToPtyPermission,
+    AIExecutionProfile, AIExecutionProfileAppExt, ActionPermission, WriteToPtyPermission,
+    long_context_pricing_warning_title,
 };
 use crate::ai::llms::{
-    is_using_api_key_for_provider, LLMContextWindow, LLMId, LLMPreferences, LLMPreferencesEvent,
-    LLMProvider,
+    LLMContextWindow, LLMId, LLMPreferences, LLMPreferencesEvent, LLMProvider,
+    is_using_api_key_for_provider,
 };
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::ai::paths::host_native_absolute_path;
 use crate::appearance::{Appearance, AppearanceEvent};
-use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
 use crate::cloud_object::GenericStringObjectFormat::Json;
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
 use crate::cloud_object::{JsonObjectType, ObjectType};
 use crate::editor::{
-    EditorOptions, EditorView, Event as EditorEvent, InteractionState,
-    PropagateAndNoOpNavigationKeys, SingleLineEditorOptions, TextColors, TextOptions,
+    EditorOptions, EditorView, Event as EditorEvent, InteractionState, SingleLineEditorOptions,
+    TextColors, TextOptions,
 };
 use crate::menu::{MenuItem, MenuItemFields};
 use crate::modal::{Modal, ModalEvent, ModalViewState};
@@ -102,22 +100,20 @@ use crate::settings::{
     ShowConversationHistory, ShowHintText, ThinkingDisplayMode, VoiceInputEnabled,
     VoiceInputToggleKey,
 };
+use crate::terminal::CLIAgent;
 use crate::terminal::cli_agent::{CLIAgentInstallEvent, CLIAgentInstallModel};
 use crate::terminal::session_settings::{SessionSettings, SessionSettingsChangedEvent};
-use crate::terminal::CLIAgent;
 use crate::ui_components::icons::Icon;
 use crate::util::bindings;
-use crate::view_components::action_button::{
-    ActionButton, ButtonSize, DangerSecondaryTheme, SecondaryTheme,
-};
+use crate::view_components::action_button::{ActionButton, ButtonSize, SecondaryTheme};
 use crate::view_components::dropdown::DropdownAction;
 use crate::view_components::{
-    render_warning_box, Dropdown, DropdownItem, FilterableDropdown, SubmittableTextInput,
-    SubmittableTextInputEvent, WarningBoxConfig,
+    Dropdown, DropdownItem, FilterableDropdown, SubmittableTextInput, SubmittableTextInputEvent,
+    WarningBoxConfig, render_warning_box,
 };
 use crate::workspaces::user_workspaces::UserWorkspacesEvent;
 use crate::{
-    report_error, report_if_error, send_telemetry_from_ctx, TelemetryEvent, UserWorkspaces,
+    TelemetryEvent, UserWorkspaces, report_error, report_if_error, send_telemetry_from_ctx,
 };
 
 /// Identifies which subpage of the AI settings the user is viewing.
@@ -163,98 +159,116 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     builder: fn(SettingsAction) -> T,
 ) {
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::new(
-            &crate::t!("toggle-suffix-active-ai"),
-            builder(SettingsAction::AI(AISettingsPageAction::ToggleActiveAI)),
-            &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
-            flags::IS_ACTIVE_AI_ENABLED,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)],
+        vec![
+            ToggleSettingActionPair::new(
+                &crate::t!("toggle-suffix-active-ai"),
+                builder(SettingsAction::AI(AISettingsPageAction::ToggleActiveAI)),
+                &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
+                flags::IS_ACTIVE_AI_ENABLED,
+            )
+            .with_group(bindings::BindingGroup::WarpAi),
+        ],
         app,
     );
 
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::new(
-            &if FeatureFlag::AgentView.is_enabled() {
-                crate::t!("toggle-suffix-ai-input-autodetect-agent")
-            } else {
-                crate::t!("toggle-suffix-ai-input-autodetect-nld")
-            },
-            builder(SettingsAction::AI(
-                AISettingsPageAction::ToggleAIInputAutoDetection,
-            )),
-            &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
-            flags::AI_INPUT_AUTODETECTION_FLAG,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)
-        .with_enabled(|| FeatureFlag::AgentMode.is_enabled())],
+        vec![
+            ToggleSettingActionPair::new(
+                &if FeatureFlag::AgentView.is_enabled() {
+                    crate::t!("toggle-suffix-ai-input-autodetect-agent")
+                } else {
+                    crate::t!("toggle-suffix-ai-input-autodetect-nld")
+                },
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleAIInputAutoDetection,
+                )),
+                &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
+                flags::AI_INPUT_AUTODETECTION_FLAG,
+            )
+            .with_group(bindings::BindingGroup::WarpAi)
+            .with_enabled(|| FeatureFlag::AgentMode.is_enabled()),
+        ],
         app,
     );
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::new(
-            &crate::t!("toggle-suffix-nld-in-terminal"),
-            builder(SettingsAction::AI(
-                AISettingsPageAction::ToggleNLDInTerminal,
-            )),
-            &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
-            flags::NLD_IN_TERMINAL_FLAG,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)
-        .with_enabled(|| FeatureFlag::AgentView.is_enabled())],
+        vec![
+            ToggleSettingActionPair::new(
+                &crate::t!("toggle-suffix-nld-in-terminal"),
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleNLDInTerminal,
+                )),
+                &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
+                flags::NLD_IN_TERMINAL_FLAG,
+            )
+            .with_group(bindings::BindingGroup::WarpAi)
+            .with_enabled(|| FeatureFlag::AgentView.is_enabled()),
+        ],
         app,
     );
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::new(
-            &crate::t!("toggle-suffix-next-command"),
-            builder(SettingsAction::AI(
-                AISettingsPageAction::ToggleIntelligentAutosuggestions,
-            )),
-            &(context.clone() & id!(flags::IS_ACTIVE_AI_ENABLED)),
-            flags::INTELLIGENT_AUTOSUGGESTIONS_FLAG,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)],
+        vec![
+            ToggleSettingActionPair::new(
+                &crate::t!("toggle-suffix-next-command"),
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleIntelligentAutosuggestions,
+                )),
+                &(context.clone() & id!(flags::IS_ACTIVE_AI_ENABLED)),
+                flags::INTELLIGENT_AUTOSUGGESTIONS_FLAG,
+            )
+            .with_group(bindings::BindingGroup::WarpAi),
+        ],
         app,
     );
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::new(
-            &crate::t!("toggle-suffix-prompt-suggestions"),
-            builder(SettingsAction::AI(
-                AISettingsPageAction::TogglePromptSuggestions,
-            )),
-            &(context.clone() & id!(flags::IS_ACTIVE_AI_ENABLED)),
-            flags::PROMPT_SUGGESTIONS_FLAG,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)],
+        vec![
+            ToggleSettingActionPair::new(
+                &crate::t!("toggle-suffix-prompt-suggestions"),
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::TogglePromptSuggestions,
+                )),
+                &(context.clone() & id!(flags::IS_ACTIVE_AI_ENABLED)),
+                flags::PROMPT_SUGGESTIONS_FLAG,
+            )
+            .with_group(bindings::BindingGroup::WarpAi),
+        ],
         app,
     );
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::new(
-            &crate::t!("toggle-suffix-code-suggestions"),
-            builder(SettingsAction::AI(
-                AISettingsPageAction::ToggleCodeSuggestions,
-            )),
-            &(context.clone()
-                & id!(flags::IS_ACTIVE_AI_ENABLED)
-                & id!(flags::PROMPT_SUGGESTIONS_FLAG)),
-            flags::CODE_SUGGESTIONS_FLAG,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)],
+        vec![
+            ToggleSettingActionPair::new(
+                &crate::t!("toggle-suffix-code-suggestions"),
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleCodeSuggestions,
+                )),
+                &(context.clone()
+                    & id!(flags::IS_ACTIVE_AI_ENABLED)
+                    & id!(flags::PROMPT_SUGGESTIONS_FLAG)),
+                flags::CODE_SUGGESTIONS_FLAG,
+            )
+            .with_group(bindings::BindingGroup::WarpAi),
+        ],
         app,
     );
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::custom(
-            SettingActionPairDescriptions::new("Show agent tips", "Hide agent tips"),
-            builder(SettingsAction::AI(
-                AISettingsPageAction::ToggleShowAgentTips,
-            )),
-            SettingActionPairContexts::new(
-                context.clone() & id!(flags::IS_ANY_AI_ENABLED) & !id!(flags::SHOW_AGENT_TIPS_FLAG),
-                context.clone() & id!(flags::IS_ANY_AI_ENABLED) & id!(flags::SHOW_AGENT_TIPS_FLAG),
-            ),
-            None,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)
-        .with_enabled(|| FeatureFlag::AgentTips.is_enabled())],
+        vec![
+            ToggleSettingActionPair::custom(
+                SettingActionPairDescriptions::new("Show agent tips", "Hide agent tips"),
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleShowAgentTips,
+                )),
+                SettingActionPairContexts::new(
+                    context.clone()
+                        & id!(flags::IS_ANY_AI_ENABLED)
+                        & !id!(flags::SHOW_AGENT_TIPS_FLAG),
+                    context.clone()
+                        & id!(flags::IS_ANY_AI_ENABLED)
+                        & id!(flags::SHOW_AGENT_TIPS_FLAG),
+                ),
+                None,
+            )
+            .with_group(bindings::BindingGroup::WarpAi)
+            .with_enabled(|| FeatureFlag::AgentTips.is_enabled()),
+        ],
         app,
     );
     {
@@ -336,65 +350,75 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
         app.register_fixed_bindings(mode_bindings);
     }
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::new(
-            &crate::t!("toggle-suffix-nl-autosuggestions"),
-            builder(SettingsAction::AI(
-                AISettingsPageAction::ToggleNaturalLanguageAutosuggestions,
-            )),
-            &(context.clone() & id!(flags::IS_ACTIVE_AI_ENABLED)),
-            flags::NATURAL_LANGUAGE_AUTOSUGGESTIONS_FLAG,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)
-        .with_enabled(|| FeatureFlag::PredictAMQueries.is_enabled())],
+        vec![
+            ToggleSettingActionPair::new(
+                &crate::t!("toggle-suffix-nl-autosuggestions"),
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleNaturalLanguageAutosuggestions,
+                )),
+                &(context.clone() & id!(flags::IS_ACTIVE_AI_ENABLED)),
+                flags::NATURAL_LANGUAGE_AUTOSUGGESTIONS_FLAG,
+            )
+            .with_group(bindings::BindingGroup::WarpAi)
+            .with_enabled(|| FeatureFlag::PredictAMQueries.is_enabled()),
+        ],
         app,
     );
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::new(
-            "commit and pull request generation",
-            builder(SettingsAction::AI(
-                AISettingsPageAction::ToggleGitOperationsAutogen,
-            )),
-            &(context.clone() & id!(flags::IS_ACTIVE_AI_ENABLED)),
-            flags::GIT_OPERATIONS_AUTOGEN_FLAG,
-        )
-        .with_enabled(|| FeatureFlag::GitOperationsInCodeReview.is_enabled())
-        .is_supported_on_current_platform(
-            AISettings::as_ref(app)
-                .git_operations_autogen_enabled_internal
-                .is_supported_on_current_platform()
-                && UserWorkspaces::as_ref(app).is_git_operations_ai_enabled(),
-        )],
-        app,
-    );
-    ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::new(
-            &crate::t!("toggle-suffix-voice-input"),
-            builder(SettingsAction::AI(AISettingsPageAction::ToggleVoiceInput)),
-            &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
-            flags::IS_VOICE_INPUT_ENABLED,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)
-        .with_enabled(|| cfg!(feature = "voice_input"))],
-        app,
-    );
-    ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-        vec![ToggleSettingActionPair::custom(
-            SettingActionPairDescriptions::new(
-                "Show \"Use Agent\" footer",
-                "Hide \"Use Agent\" footer",
+        vec![
+            ToggleSettingActionPair::new(
+                "commit and pull request generation",
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleGitOperationsAutogen,
+                )),
+                &(context.clone() & id!(flags::IS_ACTIVE_AI_ENABLED)),
+                flags::GIT_OPERATIONS_AUTOGEN_FLAG,
+            )
+            .with_enabled(|| FeatureFlag::GitOperationsInCodeReview.is_enabled())
+            .is_supported_on_current_platform(
+                AISettings::as_ref(app)
+                    .git_operations_autogen_enabled_internal
+                    .is_supported_on_current_platform()
+                    && UserWorkspaces::as_ref(app).is_git_operations_ai_enabled(),
             ),
-            builder(SettingsAction::AI(
-                AISettingsPageAction::ToggleUseAgentToolbar,
-            )),
-            SettingActionPairContexts::new(
-                context.clone()
-                    & id!(flags::IS_ANY_AI_ENABLED)
-                    & !id!(flags::USE_AGENT_FOOTER_FLAG),
-                context.clone() & id!(flags::IS_ANY_AI_ENABLED) & id!(flags::USE_AGENT_FOOTER_FLAG),
-            ),
-            None,
-        )
-        .with_group(bindings::BindingGroup::WarpAi)],
+        ],
+        app,
+    );
+    ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
+        vec![
+            ToggleSettingActionPair::new(
+                &crate::t!("toggle-suffix-voice-input"),
+                builder(SettingsAction::AI(AISettingsPageAction::ToggleVoiceInput)),
+                &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
+                flags::IS_VOICE_INPUT_ENABLED,
+            )
+            .with_group(bindings::BindingGroup::WarpAi)
+            .with_enabled(|| cfg!(feature = "voice_input")),
+        ],
+        app,
+    );
+    ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
+        vec![
+            ToggleSettingActionPair::custom(
+                SettingActionPairDescriptions::new(
+                    "Show \"Use Agent\" footer",
+                    "Hide \"Use Agent\" footer",
+                ),
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleUseAgentToolbar,
+                )),
+                SettingActionPairContexts::new(
+                    context.clone()
+                        & id!(flags::IS_ANY_AI_ENABLED)
+                        & !id!(flags::USE_AGENT_FOOTER_FLAG),
+                    context.clone()
+                        & id!(flags::IS_ANY_AI_ENABLED)
+                        & id!(flags::USE_AGENT_FOOTER_FLAG),
+                ),
+                None,
+            )
+            .with_group(bindings::BindingGroup::WarpAi),
+        ],
         app,
     );
     ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
@@ -2261,9 +2285,9 @@ impl AISettingsPageView {
     fn start_grok_oauth(&mut self, ctx: &mut ViewContext<Self>) {
         use warp_core::safe_error;
 
+        use crate::ToastStack;
         use crate::view_components::{DismissibleToast, ToastLink};
         use crate::workspace::WorkspaceAction;
-        use crate::ToastStack;
 
         const CONNECT_TOAST_OBJECT_ID: &str = "grok_oauth_connect_toast";
 
@@ -2350,8 +2374,8 @@ impl AISettingsPageView {
     fn submit_grok_code(&mut self, code: String, ctx: &mut ViewContext<Self>) {
         use warp_core::safe_error;
 
-        use crate::view_components::DismissibleToast;
         use crate::ToastStack;
+        use crate::view_components::DismissibleToast;
 
         const CONNECT_TOAST_OBJECT_ID: &str = "grok_oauth_connect_toast";
         let Some(exchange) = self.grok_oauth_attempt.clone() else {
@@ -3495,9 +3519,11 @@ impl TypedActionView for AISettingsPageView {
             AISettingsPageAction::SetVoiceInputToggleKey(key) => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.voice_input_toggle_key.set_value(*key, ctx));
-                    report_if_error!(settings
-                        .explicitly_interacted_with_voice
-                        .set_value(true, ctx));
+                    report_if_error!(
+                        settings
+                            .explicitly_interacted_with_voice
+                            .set_value(true, ctx)
+                    );
                 });
                 ctx.notify();
             }
@@ -3712,17 +3738,21 @@ impl TypedActionView for AISettingsPageView {
             }
             AISettingsPageAction::ToggleAutoOpenRichInputOnCLIAgentStart => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .auto_open_rich_input_on_cli_agent_start
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .auto_open_rich_input_on_cli_agent_start
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 ctx.notify();
             }
             AISettingsPageAction::ToggleAutoDismissRichInputAfterSubmit => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .auto_dismiss_rich_input_after_submit
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .auto_dismiss_rich_input_after_submit
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 ctx.notify();
             }
@@ -3830,17 +3860,21 @@ impl TypedActionView for AISettingsPageView {
             }
             AISettingsPageAction::SetOrchestrationMessageDisplayMode(mode) => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .orchestration_message_display_mode
-                        .set_value(*mode, ctx));
+                    report_if_error!(
+                        settings
+                            .orchestration_message_display_mode
+                            .set_value(*mode, ctx)
+                    );
                 });
                 ctx.notify();
             }
             AISettingsPageAction::SetPromptSubmissionMode(mode) => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .default_prompt_submission_mode
-                        .set_value(*mode, ctx));
+                    report_if_error!(
+                        settings
+                            .default_prompt_submission_mode
+                            .set_value(*mode, ctx)
+                    );
                 });
                 ctx.notify();
             }
@@ -4106,9 +4140,11 @@ impl TypedActionView for AISettingsPageView {
             }
             AISettingsPageAction::ToggleIncludeAgentCommandsInHistory => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .include_agent_commands_in_history
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .include_agent_commands_in_history
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 ctx.notify();
             }
@@ -4117,9 +4153,11 @@ impl TypedActionView for AISettingsPageView {
                 crate::util::file::external_editor::EditorSettings::handle(ctx).update(
                     ctx,
                     |settings, ctx| {
-                        report_if_error!(settings
-                            .open_conversation_layout_preference
-                            .set_value(*layout, ctx));
+                        report_if_error!(
+                            settings
+                                .open_conversation_layout_preference
+                                .set_value(*layout, ctx)
+                        );
                     },
                 );
                 send_telemetry_from_ctx!(
@@ -4133,9 +4171,11 @@ impl TypedActionView for AISettingsPageView {
             }
             AISettingsPageAction::ToggleShowConversationHistory => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .show_conversation_history
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .show_conversation_history
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 ctx.notify();
             }
@@ -4295,10 +4335,10 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if *model_index < p.models.len() {
-                            p.models.remove(*model_index);
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && *model_index < p.models.len()
+                    {
+                        p.models.remove(*model_index);
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4313,10 +4353,10 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if let Some(m) = p.models.get_mut(*model_index) {
-                            m.name = name.clone();
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && let Some(m) = p.models.get_mut(*model_index)
+                    {
+                        m.name = name.clone();
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4329,10 +4369,10 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if let Some(m) = p.models.get_mut(*model_index) {
-                            m.id = id.clone();
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && let Some(m) = p.models.get_mut(*model_index)
+                    {
+                        m.id = id.clone();
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4345,10 +4385,10 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if let Some(m) = p.models.get_mut(*model_index) {
-                            m.context_window = *context_window;
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && let Some(m) = p.models.get_mut(*model_index)
+                    {
+                        m.context_window = *context_window;
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4361,10 +4401,10 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if let Some(m) = p.models.get_mut(*model_index) {
-                            m.max_output_tokens = *max_output_tokens;
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && let Some(m) = p.models.get_mut(*model_index)
+                    {
+                        m.max_output_tokens = *max_output_tokens;
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4441,10 +4481,10 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if *header_index < p.extra_headers.len() {
-                            p.extra_headers.remove(*header_index);
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && *header_index < p.extra_headers.len()
+                    {
+                        p.extra_headers.remove(*header_index);
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4459,10 +4499,10 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if let Some(h) = p.extra_headers.get_mut(*header_index) {
-                            *h = (key.clone(), value.clone());
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && let Some(h) = p.extra_headers.get_mut(*header_index)
+                    {
+                        *h = (key.clone(), value.clone());
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4647,20 +4687,20 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if let Some(m) = p.models.get_mut(*model_index) {
-                            let slot = match kind {
-                                ModelCapabilityKind::Image => &mut m.image,
-                                ModelCapabilityKind::Pdf => &mut m.pdf,
-                                ModelCapabilityKind::Audio => &mut m.audio,
-                            };
-                            // Tri-state cycle: None → Some(true) → Some(false) → None.
-                            *slot = match *slot {
-                                None => Some(true),
-                                Some(true) => Some(false),
-                                Some(false) => None,
-                            };
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && let Some(m) = p.models.get_mut(*model_index)
+                    {
+                        let slot = match kind {
+                            ModelCapabilityKind::Image => &mut m.image,
+                            ModelCapabilityKind::Pdf => &mut m.pdf,
+                            ModelCapabilityKind::Audio => &mut m.audio,
+                        };
+                        // Tri-state cycle: None → Some(true) → Some(false) → None.
+                        *slot = match *slot {
+                            None => Some(true),
+                            Some(true) => Some(false),
+                            Some(false) => None,
+                        };
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4672,10 +4712,10 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if let Some(m) = p.models.get_mut(*model_index) {
-                            m.reasoning = !m.reasoning;
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && let Some(m) = p.models.get_mut(*model_index)
+                    {
+                        m.reasoning = !m.reasoning;
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4687,10 +4727,10 @@ impl TypedActionView for AISettingsPageView {
             } => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     let mut providers = settings.agent_providers.value().clone();
-                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
-                        if let Some(m) = p.models.get_mut(*model_index) {
-                            m.tool_call = !m.tool_call;
-                        }
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id)
+                        && let Some(m) = p.models.get_mut(*model_index)
+                    {
+                        m.tool_call = !m.tool_call;
                     }
                     let _ = settings.agent_providers.set_value(providers, ctx);
                 });
@@ -4735,9 +4775,7 @@ impl SettingsPageMeta for AISettingsPageView {
     }
 
     fn on_page_selected(&mut self, _: bool, ctx: &mut ViewContext<Self>) {
-        if UserWorkspaces::as_ref(ctx).is_byo_api_key_enabled() {
-            return;
-        }
+        if UserWorkspaces::as_ref(ctx).is_byo_api_key_enabled() {}
     }
 
     fn update_filter(&mut self, query: &str, ctx: &mut ViewContext<Self>) -> MatchData {
@@ -5973,10 +6011,7 @@ impl AgentsWidget {
                     AISettingsPageAction::OpenMCPServerCollection,
                 ),
                 FormattedTextFragment::plain_text(" or "),
-                FormattedTextFragment::hyperlink(
-                    "learn more about MCPs.",
-                    "",
-                ),
+                FormattedTextFragment::hyperlink("learn more about MCPs.", ""),
             ];
 
             Container::new(
@@ -6481,10 +6516,7 @@ impl SettingsWidget for MCPServersWidget {
                 "Add MCP servers to extend the Zap Agent's capabilities. \
             MCP servers expose data sources or tools to agents through a standardized interface, essentially acting like plugins. ",
             ),
-            FormattedTextFragment::hyperlink(
-                crate::t!("common-learn-more"),
-                "",
-            ),
+            FormattedTextFragment::hyperlink(crate::t!("common-learn-more"), ""),
         ];
 
         let description = Container::new(
@@ -7522,7 +7554,7 @@ impl CLIAgentWidget {
             .per_agent_chip_states
             .borrow_mut()
             .entry((agent, dimension))
-            .or_insert_with(MouseStateHandle::default)
+            .or_default()
             .clone();
 
         let mut chip = Hoverable::new(mouse, move |_| {

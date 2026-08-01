@@ -7,18 +7,16 @@
 
 use std::path::PathBuf;
 
-use warp_core::ui::appearance::Appearance;
-use warpui::platform::WindowStyle;
-use warpui::TypedActionView;
-
-use crate::settings_view::keybindings::KeybindingChangedNotifier;
-use crate::test_util::settings::initialize_settings_for_tests;
-
 use pathfinder_geometry::vector::Vector2F;
+use warp_core::ui::appearance::Appearance;
+use warpui::TypedActionView;
+use warpui::platform::WindowStyle;
 
 use super::browser::{SftpBrowserAction, SftpBrowserView};
 use super::types::{ConnectionState, Dialog, TransferDirection, TransferState};
 use crate::editor::EditorView;
+use crate::settings_view::keybindings::KeybindingChangedNotifier;
+use crate::test_util::settings::initialize_settings_for_tests;
 
 /// Initialize the minimal set of singletons required for tests
 fn initialize_app(app: &mut warpui::App) {

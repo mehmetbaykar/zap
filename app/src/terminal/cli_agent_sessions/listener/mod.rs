@@ -2,11 +2,11 @@ use warpui::{EntityId, ModelContext, ModelHandle, SingletonEntity};
 
 use super::{CLIAgentEvent, CLIAgentSession, CLIAgentSessionsModel};
 use crate::features::FeatureFlag;
+use crate::terminal::CLIAgent;
 use crate::terminal::cli_agent_sessions::event::{
-    parse_event, CLIAgentEventPayload, CLIAgentEventSource, CLIAgentEventType,
+    CLIAgentEventPayload, CLIAgentEventSource, CLIAgentEventType, parse_event,
 };
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
-use crate::terminal::CLIAgent;
 
 /// Per-agent handler that filters and transforms parsed CLI agent events.
 /// Each CLI agent can have a different implementation depending on which events
@@ -190,11 +190,7 @@ impl DeepSeekSessionHandler {
             .collect::<Vec<_>>()
             .join("\n");
 
-        if title.is_empty() {
-            None
-        } else {
-            Some(title)
-        }
+        if title.is_empty() { None } else { Some(title) }
     }
 }
 
@@ -337,9 +333,11 @@ mod legacy_tests {
     #[test]
     fn codex_try_parse_ignores_titled_notifications() {
         let handler = CodexSessionHandler;
-        assert!(handler
-            .try_parse(Some("some-title"), "Agent turn complete")
-            .is_none());
+        assert!(
+            handler
+                .try_parse(Some("some-title"), "Agent turn complete")
+                .is_none()
+        );
     }
 
     #[test]

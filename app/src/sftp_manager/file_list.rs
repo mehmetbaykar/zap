@@ -8,15 +8,15 @@ use std::collections::HashSet;
 
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
+use warpui::Element;
 use warpui::elements::{
     ConstrainedBox, Container, CrossAxisAlignment, Fill, Flex, Hoverable, MouseStateHandle,
     ParentElement, SavePosition, Shrinkable, Text,
 };
 use warpui::platform::Cursor;
-use warpui::Element;
 
 use crate::sftp_manager::browser::SftpBrowserAction;
-use crate::sftp_manager::types::{format_size, FileEntry, FileEntryType};
+use crate::sftp_manager::types::{FileEntry, FileEntryType, format_size};
 use crate::ui_components::icons::Icon;
 
 /// File size column width

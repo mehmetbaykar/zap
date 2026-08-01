@@ -6,50 +6,44 @@ use chrono::{DateTime, Local, TimeZone, Utc};
 use itertools::Itertools;
 use uuid::Uuid;
 use warp_cli::agent::Harness;
+use warp_multi_agent_api as api;
 use warpui::{App, EntityId, ModelHandle};
 
-use crate::{
-    ai::{
-        agent::{
-            api::ServerConversationToken,
-            conversation::{AIConversation, AIConversationId, ConversationStatus},
-            AIAgentExchange, AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus,
-            FinishedAIAgentOutput, RenderableAIError, Shared, TransientNetworkErrorKind,
-            UserQueryMode,
-        },
-        ambient_agents::{
-            conversation_output_status_from_conversation, AmbientAgentTaskId,
-            AmbientConversationStatus,
-        },
-        blocklist::{controller::RequestInput, ResponseStreamId},
-        byop_readiness::{RepairRecord, RepairSource, RepairState, RepairStateStatus, ToolCallKey},
-        llms::LLMId,
-    },
-    input_suggestions::HistoryInputSuggestion,
-    persistence::{
-        model::{
-            AgentConversation, AgentConversationData, AgentConversationRecord,
-            PersistedAutoexecuteMode,
-        },
-        ModelEvent,
-    },
-    terminal::model::session::SessionId,
-    test_util::settings::{
-        initialize_history_persistence_for_tests, initialize_settings_for_tests,
-    },
-    GlobalResourceHandles, GlobalResourceHandlesProvider,
-};
-use warp_multi_agent_api as api;
-
 use super::{
-    convert_persisted_conversation_to_ai_conversation_with_metadata, AIConversationMetadata,
-    AIQueryHistoryOutputStatus, BlocklistAIHistoryModel, PersistedAIInput, PersistedAIInputType,
+    AIConversationMetadata, AIQueryHistoryOutputStatus, BlocklistAIHistoryModel, PersistedAIInput,
+    PersistedAIInputType, convert_persisted_conversation_to_ai_conversation_with_metadata,
 };
-use crate::ai::agent::conversation::TodoStatus;
+use crate::ai::agent::api::ServerConversationToken;
+use crate::ai::agent::conversation::{
+    AIConversation, AIConversationId, ConversationStatus, TodoStatus,
+};
 use crate::ai::agent::task::helper::MessageExt;
 use crate::ai::agent::todos::AIAgentTodoList;
-use crate::ai::agent::{AIAgentTodo, AIAgentTodoId};
+use crate::ai::agent::{
+    AIAgentExchange, AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus, AIAgentTodo,
+    AIAgentTodoId, FinishedAIAgentOutput, RenderableAIError, Shared, TransientNetworkErrorKind,
+    UserQueryMode,
+};
+use crate::ai::ambient_agents::{
+    AmbientAgentTaskId, AmbientConversationStatus, conversation_output_status_from_conversation,
+};
+use crate::ai::blocklist::ResponseStreamId;
+use crate::ai::blocklist::controller::RequestInput;
+use crate::ai::byop_readiness::{
+    RepairRecord, RepairSource, RepairState, RepairStateStatus, ToolCallKey,
+};
+use crate::ai::llms::LLMId;
+use crate::input_suggestions::HistoryInputSuggestion;
+use crate::persistence::ModelEvent;
+use crate::persistence::model::{
+    AgentConversation, AgentConversationData, AgentConversationRecord, PersistedAutoexecuteMode,
+};
+use crate::terminal::model::session::SessionId;
 use crate::test_util::ai_agent_tasks::create_api_task;
+use crate::test_util::settings::{
+    initialize_history_persistence_for_tests, initialize_settings_for_tests,
+};
+use crate::{GlobalResourceHandles, GlobalResourceHandlesProvider};
 
 fn initialize_history_model_test_app(app: &mut App) {
     initialize_settings_for_tests(app);
@@ -2228,7 +2222,10 @@ fn test_optimistic_root_upgrade_then_persist_emits_event_with_single_server_task
             1,
             "post-upgrade persist must emit exactly one task row (the server root); got {} task(s) with ids {:?}",
             second_updated_tasks.len(),
-            second_updated_tasks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            second_updated_tasks
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
         );
         let only_task = &second_updated_tasks[0];
         assert_eq!(
@@ -2468,7 +2465,10 @@ fn test_truncate_from_exchange_to_empty_persist_event_has_empty_updated_tasks() 
             updated_tasks.is_empty(),
             "truncate-to-empty resets the root to optimistic; the persist must emit zero task rows, got {} row(s) with ids {:?}",
             updated_tasks.len(),
-            updated_tasks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            updated_tasks
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
         );
     });
 }
@@ -3686,7 +3686,7 @@ fn straddle_rewind_followup_requests_are_clean_and_durable() {
         let restored_tasks: Vec<warp_multi_agent_api::Task> = loop {
             match receiver.recv_timeout(Duration::from_secs(2)) {
                 Ok(ModelEvent::UpdateMultiAgentConversation { updated_tasks, .. }) => {
-                    break updated_tasks
+                    break updated_tasks;
                 }
                 Ok(_) => continue,
                 Err(_) => panic!("rewind must persist a task snapshot"),
@@ -4031,9 +4031,11 @@ fn todo_projections_delegate_to_the_conversation() {
             history
                 .conversation_mut(&conversation_id)
                 .expect("conversation exists")
-                .set_todo_lists_for_test(vec![AIAgentTodoList::default()
-                    .with_completed_items(vec![completed.clone()])
-                    .with_pending_items(vec![pending_first, pending_second.clone()])]);
+                .set_todo_lists_for_test(vec![
+                    AIAgentTodoList::default()
+                        .with_completed_items(vec![completed.clone()])
+                        .with_pending_items(vec![pending_first, pending_second.clone()]),
+                ]);
         });
 
         history_model.read(&app, |history, _| {

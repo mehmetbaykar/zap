@@ -1,13 +1,13 @@
 use warpui::{AppContext, EntityId, ModelHandle, SingletonEntity};
 
 use super::AIBlockModel;
+use crate::BlocklistAIHistoryModel;
 use crate::ai::agent::conversation::AIConversation;
 use crate::ai::agent::{
     AIAgentAction, AIAgentActionId, AIAgentActionType, AIAgentInput, AIAgentOutputMessageType,
     SummarizationType,
 };
 use crate::ai::blocklist::BlocklistAIActionModel;
-use crate::BlocklistAIHistoryModel;
 
 // Helper methods for accessing data on an impl of `AIBlockModel`.
 //
@@ -63,37 +63,39 @@ impl<T: ?Sized + AIBlockModel> AIBlockModelHelper for T {
     }
 
     fn contains_create_document_action(&self, app: &AppContext) -> bool {
-        match self.status(app).output_to_render() { Some(output) => {
-            let output = output.get();
-            output.messages.iter().any(|m| {
-                matches!(
-                    m.message,
-                    AIAgentOutputMessageType::Action(AIAgentAction {
-                        action: AIAgentActionType::CreateDocuments { .. },
-                        ..
-                    })
-                )
-            })
-        } _ => {
-            false
-        }}
+        match self.status(app).output_to_render() {
+            Some(output) => {
+                let output = output.get();
+                output.messages.iter().any(|m| {
+                    matches!(
+                        m.message,
+                        AIAgentOutputMessageType::Action(AIAgentAction {
+                            action: AIAgentActionType::CreateDocuments { .. },
+                            ..
+                        })
+                    )
+                })
+            }
+            _ => false,
+        }
     }
 
     fn contains_update_document_action(&self, app: &AppContext) -> bool {
-        match self.status(app).output_to_render() { Some(output) => {
-            let output = output.get();
-            output.messages.iter().any(|m| {
-                matches!(
-                    m.message,
-                    AIAgentOutputMessageType::Action(AIAgentAction {
-                        action: AIAgentActionType::EditDocuments { .. },
-                        ..
-                    })
-                )
-            })
-        } _ => {
-            false
-        }}
+        match self.status(app).output_to_render() {
+            Some(output) => {
+                let output = output.get();
+                output.messages.iter().any(|m| {
+                    matches!(
+                        m.message,
+                        AIAgentOutputMessageType::Action(AIAgentAction {
+                            action: AIAgentActionType::EditDocuments { .. },
+                            ..
+                        })
+                    )
+                })
+            }
+            _ => false,
+        }
     }
 
     fn is_latest_visible_exchange_in_root_task(&self, app: &AppContext) -> bool {
@@ -148,10 +150,10 @@ impl<T: ?Sized + AIBlockModel> AIBlockModelHelper for T {
         let output = self.status(app).output_to_render()?;
         let output = output.get();
         output.messages.iter().find_map(|message| {
-            if let AIAgentOutputMessageType::Action(action) = &message.message {
-                if let Some(status) = action_model.as_ref(app).get_action_status(&action.id) {
-                    return status.is_blocked().then_some(action.clone());
-                }
+            if let AIAgentOutputMessageType::Action(action) = &message.message
+                && let Some(status) = action_model.as_ref(app).get_action_status(&action.id)
+            {
+                return status.is_blocked().then_some(action.clone());
             }
             None
         })

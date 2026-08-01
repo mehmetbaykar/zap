@@ -36,15 +36,13 @@ mod cache_stability_tests;
 // The remaining symbols (`OpenAiCompatibleError`/`OpenAiCompatibleModel`/`AgentProviderSecretsEvent`)
 // are still accessible via full paths like `crate::ai::agent_providers::openai_compatible::*`;
 // they're no longer re-exported here to avoid `unused_imports` warnings.
-pub use openai_compatible::fetch_openai_compatible_models;
-pub use secrets::AgentProviderSecrets;
-
 // ---------------------------------------------------------------------------
 // LLMInfo synthesis: convert the agent_providers configured in settings into a form usable by the picker
 // ---------------------------------------------------------------------------
-
 use std::collections::HashMap;
 
+pub use openai_compatible::fetch_openai_compatible_models;
+pub use secrets::AgentProviderSecrets;
 use settings::Setting;
 use warpui::{AppContext, SingletonEntity};
 

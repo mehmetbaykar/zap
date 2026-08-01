@@ -3,8 +3,8 @@ use std::path::Path;
 use warp_util::standardized_path::StandardizedPath;
 
 use crate::{
-    language_by_filename, language_by_local_filename, language_by_name, load_language,
-    SUPPORTED_LANGUAGES,
+    SUPPORTED_LANGUAGES, language_by_filename, language_by_local_filename, language_by_name,
+    load_language,
 };
 
 /// Validate that every supported language can be loaded successfully.

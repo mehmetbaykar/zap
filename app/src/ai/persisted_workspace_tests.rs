@@ -31,9 +31,11 @@ fn root_for_workspace_returns_none_when_unregistered() {
     let persisted_workspace = empty_persisted_workspace();
     let repository = PathBuf::from("/tmp/some-fresh-repo");
 
-    assert!(persisted_workspace
-        .root_for_workspace(&repository)
-        .is_none());
+    assert!(
+        persisted_workspace
+            .root_for_workspace(&repository)
+            .is_none()
+    );
 }
 
 #[test]
@@ -58,7 +60,9 @@ fn root_for_workspace_ignores_unrelated_registered_workspace() {
     );
 
     let unrelated_path = PathBuf::from("/tmp/unrelated-repo/src/main.rs");
-    assert!(persisted_workspace
-        .root_for_workspace(&unrelated_path)
-        .is_none());
+    assert!(
+        persisted_workspace
+            .root_for_workspace(&unrelated_path)
+            .is_none()
+    );
 }

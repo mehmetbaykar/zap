@@ -1,31 +1,11 @@
 pub mod manager;
 pub mod templatable_manager;
 
-#[cfg(not(target_family = "wasm"))]
-use crate::server::datetime_ext::DateTimeExt;
-#[cfg(not(target_family = "wasm"))]
-use chrono::DateTime;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[cfg(not(target_family = "wasm"))]
-use crate::persistence::model::MCPEnvironmentVariables;
-use crate::{
-    cloud_object::{
-        model::{
-            generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
-            json_model::{JsonModel, JsonSerializer},
-            persistence::ObjectStoreModel,
-        },
-        GenericStoredObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType,
-    },
-    drive::{
-        items::{mcp_server::WarpDriveMCPServer, WarpDriveItem},
-        ObjectTypeAndId,
-    },
-    server::ids::SyncId,
-};
+use chrono::DateTime;
 #[cfg(not(target_family = "wasm"))]
 use diesel::{QueryDsl, RunQueryDsl, SqliteConnection};
 use serde::{Deserialize, Serialize};
@@ -34,8 +14,25 @@ use strum_macros::EnumIter;
 #[cfg(not(target_family = "wasm"))]
 pub use templatable_manager::McpIntegration;
 pub use templatable_manager::TemplatableMCPServerManager;
-use warp_core::ui::appearance::Appearance;
 use warp_core::ui::Icon;
+use warp_core::ui::appearance::Appearance;
+
+use crate::cloud_object::model::generic_string_model::{
+    GenericStringModel, GenericStringObjectId, StringModel,
+};
+use crate::cloud_object::model::json_model::{JsonModel, JsonSerializer};
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::{
+    GenericStoredObject, GenericStringObjectFormat, GenericStringObjectUniqueKey, JsonObjectType,
+};
+use crate::drive::ObjectTypeAndId;
+use crate::drive::items::WarpDriveItem;
+use crate::drive::items::mcp_server::WarpDriveMCPServer;
+#[cfg(not(target_family = "wasm"))]
+use crate::persistence::model::MCPEnvironmentVariables;
+#[cfg(not(target_family = "wasm"))]
+use crate::server::datetime_ext::DateTimeExt;
+use crate::server::ids::SyncId;
 
 cfg_if::cfg_if! {
     if #[cfg(not(feature = "local_fs"))] {
@@ -59,8 +56,7 @@ pub mod gallery;
 pub use gallery::MCPGalleryManager;
 use warpui::{AppContext, SingletonEntity as _};
 pub mod templatable;
-pub use templatable::JsonTemplate;
-pub use templatable::{TemplatableMCPServer, TemplateVariable};
+pub use templatable::{JsonTemplate, TemplatableMCPServer, TemplateVariable};
 pub mod logs;
 pub mod templatable_installation;
 pub use templatable_installation::TemplatableMCPServerInstallation;
@@ -391,12 +387,11 @@ impl MCPServer {
 
         let pointers = ["/mcp/servers", "/servers", "/mcpServers"];
         for pointer in pointers.into_iter() {
-            if let Some(value) = config.pointer(pointer) {
-                if let Ok(servers) =
+            if let Some(value) = config.pointer(pointer)
+                && let Ok(servers) =
                     serde_json::from_value::<HashMap<String, JSONMCPServer>>(value.clone())
-                {
-                    return Ok(servers);
-                }
+            {
+                return Ok(servers);
             }
         }
         serde_json::from_value::<HashMap<String, JSONMCPServer>>(config)

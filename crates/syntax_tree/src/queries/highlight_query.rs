@@ -139,10 +139,10 @@ impl HighlightQuery {
                         ByteOffset::from(cap.node.start_byte()),
                         ByteOffset::from(cap.node.end_byte()),
                     );
-                    if let Ok(value) = std::str::from_utf8(&bytes) {
-                        if !value.is_empty() {
-                            lang_name = Some(value.to_string());
-                        }
+                    if let Ok(value) = std::str::from_utf8(&bytes)
+                        && !value.is_empty()
+                    {
+                        lang_name = Some(value.to_string());
                     }
                 }
             }

@@ -1,13 +1,12 @@
-use ai::api_keys::{ApiKeyManager, ApiKeyManagerEvent, CustomEndpoint, CustomEndpointModel};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock};
+
 pub use ai::LLMId;
+use ai::api_keys::{ApiKeyManager, ApiKeyManagerEvent, CustomEndpoint, CustomEndpointModel};
 use anyhow::Context as _;
 use parking_lot::FairMutex;
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 use settings::Setting as _;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, OnceLock},
-};
 use warp_core::features::FeatureFlag;
 use warp_core::ui::icons::Icon;
 use warp_core::user_preferences::GetUserPreferences;
@@ -712,12 +711,11 @@ impl LLMPreferences {
             let s = AISettings::as_ref(&*ctx);
             let mut map = HashMap::new();
             for (key, effort) in s.byop_last_used_reasoning.iter() {
-                if let Some((api_type_str, model_id)) = key.split_once(':') {
-                    if let Some(api_type) =
+                if let Some((api_type_str, model_id)) = key.split_once(':')
+                    && let Some(api_type) =
                         crate::settings::AgentProviderApiType::from_debug_str(api_type_str)
-                    {
-                        map.insert((api_type, model_id.to_owned()), *effort);
-                    }
+                {
+                    map.insert((api_type, model_id.to_owned()), *effort);
                 }
             }
             map
@@ -791,12 +789,11 @@ impl LLMPreferences {
 
         if let Some(terminal_view_id) = terminal_view_id {
             let raw_override = self.base_llm_for_terminal_view.get(&terminal_view_id);
-            if let Some(llm_id) = raw_override {
-                if let Some(llm_info) =
+            if let Some(llm_id) = raw_override
+                && let Some(llm_info) =
                     self.model_info_for_id(&self.models_by_feature.agent_mode, llm_id)
-                {
-                    return llm_info;
-                }
+            {
+                return llm_info;
             }
         }
 
@@ -897,10 +894,10 @@ impl LLMPreferences {
     ) -> &'a LLMInfo {
         let profile = AIExecutionProfilesModel::as_ref(app).active_profile(terminal_view_id, app);
 
-        if let Some(id) = profile.data().title_model.clone() {
-            if let Some(info) = self.models_by_feature.agent_mode.info_for_id(&id) {
-                return info;
-            }
+        if let Some(id) = profile.data().title_model.clone()
+            && let Some(info) = self.models_by_feature.agent_mode.info_for_id(&id)
+        {
+            return info;
         }
 
         self.get_preferred_base_model(app, terminal_view_id)
@@ -926,10 +923,10 @@ impl LLMPreferences {
     ) -> &'a LLMInfo {
         let profile = AIExecutionProfilesModel::as_ref(app).active_profile(terminal_view_id, app);
 
-        if let Some(id) = profile.data().active_ai_model.clone() {
-            if let Some(info) = self.models_by_feature.agent_mode.info_for_id(&id) {
-                return info;
-            }
+        if let Some(id) = profile.data().active_ai_model.clone()
+            && let Some(info) = self.models_by_feature.agent_mode.info_for_id(&id)
+        {
+            return info;
         }
 
         self.get_preferred_base_model(app, terminal_view_id)
@@ -954,10 +951,10 @@ impl LLMPreferences {
     ) -> &'a LLMInfo {
         let profile = AIExecutionProfilesModel::as_ref(app).active_profile(terminal_view_id, app);
 
-        if let Some(id) = profile.data().next_command_model.clone() {
-            if let Some(info) = self.models_by_feature.agent_mode.info_for_id(&id) {
-                return info;
-            }
+        if let Some(id) = profile.data().next_command_model.clone()
+            && let Some(info) = self.models_by_feature.agent_mode.info_for_id(&id)
+        {
+            return info;
         }
 
         self.get_preferred_base_model(app, terminal_view_id)
@@ -1446,14 +1443,13 @@ impl LLMPreferences {
     }
 
     pub fn mark_new_choices_popup_as_shown(&self, view_id: EntityId) {
-        if let Some(update) = self.last_update.as_ref() {
-            if matches!(
+        if let Some(update) = self.last_update.as_ref()
+            && matches!(
                 &*update.popup_visibility_state.lock(),
                 UpdatePopupVisibilityState::WaitingToBeShown
-            ) {
-                *update.popup_visibility_state.lock() =
-                    UpdatePopupVisibilityState::Visible(view_id);
-            }
+            )
+        {
+            *update.popup_visibility_state.lock() = UpdatePopupVisibilityState::Visible(view_id);
         }
     }
 
@@ -1648,14 +1644,13 @@ impl LLMPreferences {
                             profiles.set_cli_agent_model(profile_id, None, ctx);
                         }
                     }
-                    if let Some(preferred_llm_id) = &profile.data().computer_use_model {
-                        if self
+                    if let Some(preferred_llm_id) = &profile.data().computer_use_model
+                        && self
                             .get_computer_use_available()
                             .usable_info_for_id(preferred_llm_id, ctx)
                             .is_none()
-                        {
-                            profiles.set_computer_use_model(profile_id, None, ctx);
-                        }
+                    {
+                        profiles.set_computer_use_model(profile_id, None, ctx);
                     }
                 }
             }
@@ -1702,10 +1697,10 @@ impl LLMPreferences {
         api_type: crate::settings::AgentProviderApiType,
         model_id: &str,
     ) -> crate::settings::ReasoningEffortSetting {
-        if let Some(tv) = terminal_view_id {
-            if let Some(eff) = self.reasoning_effort_per_terminal.get(&tv) {
-                return *eff;
-            }
+        if let Some(tv) = terminal_view_id
+            && let Some(eff) = self.reasoning_effort_per_terminal.get(&tv)
+        {
+            return *eff;
         }
         if let Some(eff) = self
             .last_used_reasoning
@@ -1739,9 +1734,11 @@ impl LLMPreferences {
         crate::settings::AISettings::handle(ctx).update(ctx, |settings, ctx| {
             let mut map = settings.byop_last_used_reasoning.value().0.clone();
             map.insert(key, effort);
-            report_if_error!(settings
-                .byop_last_used_reasoning
-                .set_value(crate::settings::BYOPLastUsedReasoningMap::new(map), ctx));
+            report_if_error!(
+                settings
+                    .byop_last_used_reasoning
+                    .set_value(crate::settings::BYOPLastUsedReasoningMap::new(map), ctx)
+            );
         });
 
         ctx.emit(LLMPreferencesEvent::UpdatedReasoningEffort);

@@ -2,10 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use pathfinder_geometry::vector::vec2f;
-use repo_metadata::repositories::DetectedRepositories;
-use repo_metadata::watcher::DirectoryWatcher;
 #[cfg(feature = "local_fs")]
 use repo_metadata::RepoMetadataModel;
+use repo_metadata::repositories::DetectedRepositories;
+use repo_metadata::watcher::DirectoryWatcher;
 use string_offset::CharOffset;
 use warp_core::features::FeatureFlag;
 use warp_core::ui::appearance::Appearance;
@@ -16,8 +16,7 @@ use warpui::platform::WindowStyle;
 use warpui::{App, SingletonEntity, View};
 
 use super::{FileNotebookView, FileState, MarkdownDisplayMode, SourceFile};
-use crate::auth::AuthManager;
-use crate::auth::AuthStateProvider;
+use crate::auth::{AuthManager, AuthStateProvider};
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::notebooks::context_menu::MenuSource;
 use crate::notebooks::editor::keys::NotebookKeybindings;

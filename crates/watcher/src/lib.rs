@@ -14,8 +14,8 @@ use notify_debouncer_full::notify::{
     self, EventKind, RecommendedWatcher, RecursiveMode, WatchFilter,
 };
 use notify_debouncer_full::{
-    new_debouncer_opt, DebounceEventHandler, DebounceEventResult, DebouncedEvent, Debouncer,
-    NoCache,
+    DebounceEventHandler, DebounceEventResult, DebouncedEvent, Debouncer, NoCache,
+    new_debouncer_opt,
 };
 use warp_errors::report_error;
 use warpui_core::{Entity, ModelContext};
@@ -248,10 +248,9 @@ impl DebounceEventHandler for WatcherEventHandler {
             Ok(debounce_events) => {
                 if let Ok(config_event) =
                     deduplicate_and_merge_raw_notifier_events(&debounce_events)
+                    && let Err(e) = self.tx.try_send(config_event)
                 {
-                    if let Err(e) = self.tx.try_send(config_event) {
-                        log::warn!("Failed to send WatcherEvent: {e:?}");
-                    }
+                    log::warn!("Failed to send WatcherEvent: {e:?}");
                 }
             }
             Err(e) => {

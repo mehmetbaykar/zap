@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use chrono::Local;
 use warp_editor::render::model::LineCount;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::App;
 
 use crate::code::editor::line::EditorLineLocation;
@@ -9,7 +10,6 @@ use crate::code_review::comments::{
     AttachedReviewComment, AttachedReviewCommentTarget, CommentOrigin, LineDiffContent,
     ReviewCommentBatch,
 };
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 fn line_comment(file_path: &str, line_number: usize, content: &str) -> AttachedReviewComment {
     AttachedReviewComment {

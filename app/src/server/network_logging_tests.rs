@@ -1,6 +1,6 @@
 use warpui::App;
 
-use super::{NetworkLogItem, NetworkLogModel, NETWORK_LOGGING_MAX_ITEMS};
+use super::{NETWORK_LOGGING_MAX_ITEMS, NetworkLogItem, NetworkLogModel};
 
 #[test]
 fn empty_snapshot_is_empty_string() {

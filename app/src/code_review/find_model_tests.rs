@@ -1,22 +1,6 @@
-use super::*;
-use crate::ai::request_usage_model::AIRequestUsageModel;
-use crate::auth::AuthStateProvider;
-use crate::cloud_object::model::persistence::ObjectStoreModel;
-use crate::code::editor::view::{CodeEditorRenderOptions, CodeEditorView};
-use crate::code::local_code_editor::LocalCodeEditorView;
-use crate::code_review::code_review_view::CodeReviewView;
-use crate::code_review::diff_state::DiffStateModel;
-use crate::code_review::GlobalCodeReviewModel;
-use crate::pane_group::WorkingDirectoriesModel;
-use crate::settings_view::keybindings::KeybindingChangedNotifier;
-use crate::test_util::settings::initialize_settings_for_tests;
-use crate::vim_registers::VimRegisters;
-use crate::workspace::sync_inputs::SyncedInputState;
-use crate::workspace::ActiveSession;
-use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::NotebookKeybindings;
-use repo_metadata::repositories::DetectedRepositories;
 use std::path::PathBuf;
+
+use repo_metadata::repositories::DetectedRepositories;
 use string_offset::CharOffset;
 use warp_core::ui::appearance::Appearance;
 use warp_editor::content::buffer::InitialBufferState;
@@ -25,6 +9,24 @@ use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::elements::Empty;
 use warpui::platform::WindowStyle;
 use warpui::{App, Element as _, ModelHandle, ViewHandle};
+
+use super::*;
+use crate::NotebookKeybindings;
+use crate::ai::request_usage_model::AIRequestUsageModel;
+use crate::auth::AuthStateProvider;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::code::editor::view::{CodeEditorRenderOptions, CodeEditorView};
+use crate::code::local_code_editor::LocalCodeEditorView;
+use crate::code_review::GlobalCodeReviewModel;
+use crate::code_review::code_review_view::CodeReviewView;
+use crate::code_review::diff_state::DiffStateModel;
+use crate::pane_group::WorkingDirectoriesModel;
+use crate::settings_view::keybindings::KeybindingChangedNotifier;
+use crate::test_util::settings::initialize_settings_for_tests;
+use crate::vim_registers::VimRegisters;
+use crate::workspace::ActiveSession;
+use crate::workspace::sync_inputs::SyncedInputState;
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 #[derive(Default)]
 struct TestView;

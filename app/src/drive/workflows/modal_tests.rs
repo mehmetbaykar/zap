@@ -3,13 +3,13 @@ use warpui::platform::WindowStyle;
 use warpui::{App, ViewHandle};
 
 use super::WorkflowModal;
+use crate::UserWorkspaces;
 use crate::auth::AuthStateProvider;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::editor::PlainTextEditorViewAction as EditorAction;
 use crate::settings_view::keybindings::KeybindingChangedNotifier;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workflows::workflow::{Argument, Workflow};
-use crate::UserWorkspaces;
 
 fn initialize_app(app: &mut App) {
     initialize_settings_for_tests(app);
@@ -94,17 +94,21 @@ fn test_pasting_command_no_argument_overlap_fewer_arguments() {
         modal_view.read(&app, |view, app| {
             assert_eq!(view.arguments_rows.len(), 1);
 
-            assert!(view.arguments_rows[0]
-                .description_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[0]
+                    .description_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
-            assert!(view.arguments_rows[0]
-                .default_value_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[0]
+                    .default_value_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
         });
     });
 }
@@ -150,29 +154,37 @@ fn test_pasting_command_no_argument_overlap_more_arguments() {
         modal_view.read(&app, |view, app| {
             assert_eq!(view.arguments_rows.len(), 2);
 
-            assert!(view.arguments_rows[0]
-                .description_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[0]
+                    .description_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
-            assert!(view.arguments_rows[0]
-                .default_value_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[0]
+                    .default_value_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
-            assert!(view.arguments_rows[1]
-                .description_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[1]
+                    .description_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
-            assert!(view.arguments_rows[1]
-                .default_value_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[1]
+                    .default_value_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
         });
     });
 }
@@ -260,17 +272,21 @@ fn test_pasting_command_some_argument_overlap_fewer_arguments() {
                 "default value for foo_3"
             );
 
-            assert!(view.arguments_rows[1]
-                .description_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[1]
+                    .description_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
-            assert!(view.arguments_rows[1]
-                .default_value_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[1]
+                    .default_value_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
         });
     });
 }
@@ -328,29 +344,37 @@ fn test_pasting_command_some_argument_overlap_more_arguments() {
         modal_view.read(&app, |view, app| {
             assert_eq!(view.arguments_rows.len(), 4);
 
-            assert!(view.arguments_rows[0]
-                .description_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[0]
+                    .description_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
-            assert!(view.arguments_rows[0]
-                .default_value_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[0]
+                    .default_value_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
-            assert!(view.arguments_rows[1]
-                .description_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[1]
+                    .description_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
-            assert!(view.arguments_rows[1]
-                .default_value_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[1]
+                    .default_value_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
             assert_eq!(
                 view.arguments_rows[2]
@@ -370,17 +394,21 @@ fn test_pasting_command_some_argument_overlap_more_arguments() {
                 "default value for foo_2"
             );
 
-            assert!(view.arguments_rows[3]
-                .description_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[3]
+                    .description_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
 
-            assert!(view.arguments_rows[3]
-                .default_value_editor
-                .as_ref(app)
-                .buffer_text(app)
-                .is_empty());
+            assert!(
+                view.arguments_rows[3]
+                    .default_value_editor
+                    .as_ref(app)
+                    .buffer_text(app)
+                    .is_empty()
+            );
         });
     });
 }

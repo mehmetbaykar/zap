@@ -1,36 +1,29 @@
-use std::{
-    collections::HashMap,
-    ffi::OsString,
-    future::Future,
-    path::PathBuf,
-    pin::Pin,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::collections::HashMap;
+use std::ffi::OsString;
+use std::future::Future;
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::Duration;
 
 use futures::channel::oneshot;
 use warp_completer::completer::CommandOutput;
 use warp_core::command::ExitCode;
-use warp_util::{path::ShellFamily, sync::Condition};
-use warpui::{r#async::FutureExt, AppContext, Entity, ModelContext, ModelHandle, ViewHandle};
-
-use crate::terminal::model::session::ExecuteCommandOptions;
-
-use crate::{
-    ai::ambient_agents::AmbientAgentTaskId,
-    pane_group::NewTerminalOptions,
-    root_view::{open_new_with_workspace_source, NewWorkspaceSource},
-    terminal::{
-        model::block::{BlockId, SerializedBlock},
-        shared_session::IsSharedSessionCreator,
-        shell::ShellType,
-        TerminalView,
-    },
-};
-
-use crate::ai::attachment_utils::attachments_download_dir;
+use warp_util::path::ShellFamily;
+use warp_util::sync::Condition;
+use warpui::r#async::FutureExt;
+use warpui::{AppContext, Entity, ModelContext, ModelHandle, ViewHandle};
 
 use super::AgentDriverError;
+use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::ai::attachment_utils::attachments_download_dir;
+use crate::pane_group::NewTerminalOptions;
+use crate::root_view::{NewWorkspaceSource, open_new_with_workspace_source};
+use crate::terminal::TerminalView;
+use crate::terminal::model::block::{BlockId, SerializedBlock};
+use crate::terminal::model::session::ExecuteCommandOptions;
+use crate::terminal::shared_session::IsSharedSessionCreator;
+use crate::terminal::shell::ShellType;
 
 const TERMINAL_SESSION_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -213,8 +206,10 @@ impl TerminalDriver {
         &mut self,
         command: &str,
         ctx: &mut ModelContext<Self>,
-    ) -> Result<impl Future<Output = Result<CommandHandle, AgentDriverError>> + use<>, AgentDriverError>
-    {
+    ) -> Result<
+        impl Future<Output = Result<CommandHandle, AgentDriverError>> + use<>,
+        AgentDriverError,
+    > {
         let (exit_tx, exit_rx) = oneshot::channel::<ExitCode>();
         let (start_tx, start_rx) = oneshot::channel::<BlockId>();
 
@@ -298,8 +293,10 @@ impl TerminalDriver {
         &mut self,
         target: &str,
         ctx: &mut ModelContext<Self>,
-    ) -> Result<impl Future<Output = Result<CommandHandle, AgentDriverError>> + use<>, AgentDriverError>
-    {
+    ) -> Result<
+        impl Future<Output = Result<CommandHandle, AgentDriverError>> + use<>,
+        AgentDriverError,
+    > {
         let cd_command = self.build_cd_command(target, ctx);
         self.execute_command(&cd_command, ctx)
     }

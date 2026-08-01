@@ -16,9 +16,9 @@ use warpui::clipboard::ClipboardContent;
 use warpui::elements::new_scrollable::{NewScrollable, ScrollableAppearance, SingleAxisConfig};
 use warpui::elements::{
     Border, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox, Container, CornerRadius,
-    CrossAxisAlignment, DragAxis, Draggable, DraggableState, Empty, Expanded, Fill, Flex,
-    Hoverable, MinSize, MouseStateHandle, ParentElement, Radius, SavePosition, ScrollbarWidth,
-    Shrinkable, Text, DEFAULT_UI_LINE_HEIGHT_RATIO,
+    CrossAxisAlignment, DEFAULT_UI_LINE_HEIGHT_RATIO, DragAxis, Draggable, DraggableState, Empty,
+    Expanded, Fill, Flex, Hoverable, MinSize, MouseStateHandle, ParentElement, Radius,
+    SavePosition, ScrollbarWidth, Shrinkable, Text,
 };
 use warpui::fonts::{Properties, Style, Weight};
 use warpui::keymap::Keystroke;
@@ -33,7 +33,7 @@ use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::agent_view::shortcuts::render_keystroke_with_color_overrides;
 use crate::ai::blocklist::block::cli_controller::{CLISubagentController, CLISubagentEvent};
 use crate::ai::blocklist::{
-    BlocklistAIHistoryEvent, BlocklistAIHistoryModel, QueuedQuery, QueuedQueryEvent, QueuedQueryId,
+    BlocklistAIHistoryEvent, BlocklistAIHistoryModel, QueuedQueryEvent, QueuedQueryId,
     QueuedQueryModel, QueuedQueryOrigin,
 };
 use crate::appearance::Appearance;
@@ -611,15 +611,15 @@ impl QueuedPromptsPanelView {
         QueuedQueryModel::handle(ctx).update(ctx, |model, ctx| {
             model.commit_edit(conv_id, new_text, ctx);
         });
-        if let Some(origin) = origin {
-            if !was_empty {
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::QueuedPromptEdited {
-                        origin: origin.into(),
-                    },
-                    ctx
-                );
-            }
+        if let Some(origin) = origin
+            && !was_empty
+        {
+            send_telemetry_from_ctx!(
+                TelemetryEvent::QueuedPromptEdited {
+                    origin: origin.into(),
+                },
+                ctx
+            );
         }
         ctx.emit(QueuedPromptsPanelEvent::EditEnded);
     }
@@ -809,17 +809,16 @@ impl TypedActionView for QueuedPromptsPanelView {
                 let origin = to_index.map(|idx| queue[idx].origin());
                 if let (Some(from_index), Some(to_index), Some(origin)) =
                     (from_index, to_index, origin)
+                    && from_index != to_index
                 {
-                    if from_index != to_index {
-                        send_telemetry_from_ctx!(
-                            TelemetryEvent::QueuedPromptReordered {
-                                origin: origin.into(),
-                                from_index,
-                                to_index,
-                            },
-                            ctx
-                        );
-                    }
+                    send_telemetry_from_ctx!(
+                        TelemetryEvent::QueuedPromptReordered {
+                            origin: origin.into(),
+                            from_index,
+                            to_index,
+                        },
+                        ctx
+                    );
                 }
                 ctx.notify();
             }
@@ -954,21 +953,21 @@ fn updated_index_from_vertical_drag(
 ) -> usize {
     let dragged_midpoint_y = (drag_position.min_y() + drag_position.max_y()) / 2.;
 
-    if current_index > 0 {
-        if let Some(neighbor_rect) = item_rect(current_index - 1) {
-            let neighbor_midpoint_y = (neighbor_rect.min_y() + neighbor_rect.max_y()) / 2.;
-            if dragged_midpoint_y < neighbor_midpoint_y {
-                return current_index - 1;
-            }
+    if current_index > 0
+        && let Some(neighbor_rect) = item_rect(current_index - 1)
+    {
+        let neighbor_midpoint_y = (neighbor_rect.min_y() + neighbor_rect.max_y()) / 2.;
+        if dragged_midpoint_y < neighbor_midpoint_y {
+            return current_index - 1;
         }
     }
 
-    if current_index + 1 < item_count {
-        if let Some(neighbor_rect) = item_rect(current_index + 1) {
-            let neighbor_midpoint_y = (neighbor_rect.min_y() + neighbor_rect.max_y()) / 2.;
-            if dragged_midpoint_y > neighbor_midpoint_y {
-                return current_index + 1;
-            }
+    if current_index + 1 < item_count
+        && let Some(neighbor_rect) = item_rect(current_index + 1)
+    {
+        let neighbor_midpoint_y = (neighbor_rect.min_y() + neighbor_rect.max_y()) / 2.;
+        if dragged_midpoint_y > neighbor_midpoint_y {
+            return current_index + 1;
         }
     }
 

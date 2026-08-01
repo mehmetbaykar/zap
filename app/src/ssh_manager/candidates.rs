@@ -27,7 +27,7 @@
 use std::collections::HashSet;
 
 use settings::Setting;
-use warp_ssh_manager::{load_candidates, LoadOutcome, LoadResult, SshConfigCandidate};
+use warp_ssh_manager::{LoadOutcome, LoadResult, SshConfigCandidate, load_candidates};
 use warpui::{Entity, ModelContext, SingletonEntity};
 
 use crate::settings::SshSettings;

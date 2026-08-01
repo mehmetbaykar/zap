@@ -1,5 +1,6 @@
 use warpui::{App, SingletonEntity};
 
+use crate::LaunchMode;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::execution_profiles::{
     AIExecutionProfile, AIExecutionProfileObject, AIExecutionProfileObjectModel, ActionPermission,
@@ -14,7 +15,6 @@ use crate::server::ids::{ServerId, SyncId};
 use crate::settings::PrivacySettings;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::LaunchMode;
 
 /// Install the minimal singleton graph needed to construct an
 /// `AIExecutionProfilesModel` and exercise its ObjectStoreModel interactions.

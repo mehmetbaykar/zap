@@ -8,10 +8,9 @@ use warp_core::ui::theme::WarpTheme;
 use warp_errors::report_error;
 use warpui::color::ColorU;
 
-use crate::ai::artifacts::{deserialize_artifacts, Artifact};
-use crate::ui_components::icons::Icon;
-
 use super::AmbientAgentTaskId;
+use crate::ai::artifacts::{Artifact, deserialize_artifacts};
+use crate::ui_components::icons::Icon;
 
 /// Runtime configuration snapshot for agent execution.
 ///

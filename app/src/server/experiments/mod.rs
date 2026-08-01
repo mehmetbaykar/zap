@@ -12,8 +12,7 @@
 //! for a full guide on the server-side experiment framework.
 
 use settings::Setting;
-use warpui::AppContext;
-use warpui::SingletonEntity;
+use warpui::{AppContext, SingletonEntity};
 
 use crate::features::FeatureFlag;
 use crate::terminal::warpify::settings::{SshExtensionInstallMode, WarpifySettings};

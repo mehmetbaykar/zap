@@ -2,8 +2,8 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use markdown_parser::FormattedTextFragment;
-use warpui::keymap::Keystroke;
 use warpui::r#async::{SpawnedFutureHandle, Timer};
+use warpui::keymap::Keystroke;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use crate::palette::PaletteMode;
@@ -15,10 +15,10 @@ use crate::terminal::view::init::{
     TOGGLE_AUTOEXECUTE_MODE_KEYBINDING,
 };
 use crate::util::bindings::trigger_to_keystroke;
+use crate::workspace::WorkspaceAction;
 use crate::workspace::view::{
     TOGGLE_COMMAND_PALETTE_KEYBINDING_NAME, TOGGLE_RIGHT_PANEL_BINDING_NAME,
 };
-use crate::workspace::WorkspaceAction;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 
 /// Trait for tip implementations that can be displayed to users.

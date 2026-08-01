@@ -28,14 +28,15 @@ use warpui::{
 };
 
 use crate::ai::blocklist::secret_redaction::find_secrets_in_text;
-use crate::ai::mcp::parsing::{prettify_json, resolve_json, ParsedTemplatableMCPServerResult};
+use crate::ai::mcp::parsing::{ParsedTemplatableMCPServerResult, prettify_json, resolve_json};
 use crate::ai::mcp::templatable::TemplatableMCPServerObject;
 use crate::ai::mcp::{
     MCPServer, TemplatableMCPServer, TemplatableMCPServerInstallation, TemplatableMCPServerManager,
     TransportType,
 };
 use crate::banner::{Banner, BannerTextContent};
-use crate::cloud_object::{update_manager::InitiatedBy, Space, StoredObject};
+use crate::cloud_object::update_manager::InitiatedBy;
+use crate::cloud_object::{Space, StoredObject};
 use crate::code::editor::view::{CodeEditorRenderOptions, CodeEditorView};
 use crate::persistence::ModelEvent;
 #[cfg(feature = "local_fs")]
@@ -45,15 +46,15 @@ use crate::settings_view::mcp_servers::destructive_mcp_confirmation_dialog::{
     DestructiveMCPConfirmationDialog, DestructiveMCPConfirmationDialogEvent,
     DestructiveMCPConfirmationDialogVariant,
 };
-use crate::settings_view::mcp_servers::{style, ServerCardItemId};
+use crate::settings_view::mcp_servers::{ServerCardItemId, style};
 use crate::terminal::safe_mode_settings::SafeModeSettings;
 use crate::ui_components::buttons::icon_button;
 use crate::ui_components::icons::Icon;
-use crate::view_components::action_button::{ActionButton, DangerSecondaryTheme, PrimaryTheme};
 use crate::view_components::DismissibleToast;
+use crate::view_components::action_button::{ActionButton, DangerSecondaryTheme, PrimaryTheme};
 use crate::workspace::ToastStack;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::{report_error, GlobalResourceHandlesProvider};
+use crate::{GlobalResourceHandlesProvider, report_error};
 
 const DEFAULT_JSON_TEXT: &str = r#"{
     "": {
@@ -453,10 +454,10 @@ impl MCPServersEditPageView {
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_spacing(style::EDIT_PAGE_BUTTON_SPACING);
 
-        if let Some(server_card_item_id) = self.server_card_item_id {
-            if Self::is_deletable(server_card_item_id, app) {
-                footer.add_child(ChildView::new(&self.delete_button).finish());
-            }
+        if let Some(server_card_item_id) = self.server_card_item_id
+            && Self::is_deletable(server_card_item_id, app)
+        {
+            footer.add_child(ChildView::new(&self.delete_button).finish());
         }
 
         footer.finish()
@@ -605,17 +606,18 @@ impl MCPServersEditPageView {
             };
             let global_resource_handles = GlobalResourceHandlesProvider::as_ref(ctx).get().clone();
 
-            if let Some(model_event_sender) = &global_resource_handles.model_event_sender {
-                if let Err(e) =
+            if let Some(model_event_sender) = &global_resource_handles.model_event_sender
+                && let Err(e) =
                     model_event_sender.send(ModelEvent::UpsertMCPServerEnvironmentVariables {
                         mcp_server_uuid: mcp_server.uuid.as_bytes().to_vec(),
                         environment_variables: env_vars_string,
                     })
-                {
-                    report_error!(anyhow::Error::new(e)
-                        .context("Error persisting MCP server env vars to database"));
-                };
-            }
+            {
+                report_error!(
+                    anyhow::Error::new(e)
+                        .context("Error persisting MCP server env vars to database")
+                );
+            };
         }
     }
 

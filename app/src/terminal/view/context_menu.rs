@@ -2,13 +2,13 @@ use warp_core::send_telemetry_from_ctx;
 use warpui::{SingletonEntity, UpdateView};
 
 use super::{
-    fork_label_for_query, mark_feature_used_and_write_to_user_defaults, AIAgentExchangeId,
-    AIConversationId, AgentModeRewindEntrypoint, AppContext, BlocklistAIHistoryModel, ChannelState,
-    ClipboardContent, ContextMenuAction, ContextMenuInfo, ContextMenuState, ContextMenuType,
-    EntityId, FeatureFlag, ForkAIConversationParams, ForkFromExchange,
-    ForkedConversationDestination, MenuItem, MenuItemFields, RichContentLink, TelemetryEvent,
-    TerminalAction, TerminalModel, TerminalView, Tip, TipHint, Vector2F, ViewContext,
-    CONTEXT_MENU_WIDTH,
+    AIAgentExchangeId, AIConversationId, AgentModeRewindEntrypoint, AppContext,
+    BlocklistAIHistoryModel, CONTEXT_MENU_WIDTH, ChannelState, ClipboardContent, ContextMenuAction,
+    ContextMenuInfo, ContextMenuState, ContextMenuType, EntityId, FeatureFlag,
+    ForkAIConversationParams, ForkFromExchange, ForkedConversationDestination, MenuItem,
+    MenuItemFields, RichContentLink, TelemetryEvent, TerminalAction, TerminalModel, TerminalView,
+    Tip, TipHint, Vector2F, ViewContext, fork_label_for_query,
+    mark_feature_used_and_write_to_user_defaults,
 };
 
 impl TerminalView {

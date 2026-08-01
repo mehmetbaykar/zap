@@ -2,9 +2,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use warp_workflows;
 
-use crate::{
-    cloud_object::model::generic_string_model::GenericStringObjectId, server::ids::SyncId,
-};
+use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
+use crate::server::ids::SyncId;
 
 /// Workflow model to be used inside of `warp-internal`
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
@@ -177,12 +176,8 @@ impl Workflow {
     pub fn replace_object_id(&mut self, old_id: SyncId, new_id: SyncId) -> bool {
         let mut changed = false;
         let arguments = match self {
-            Self::Command {
-                arguments, ..
-            } => arguments,
-            Self::AgentMode {
-                arguments, ..
-            } => arguments,
+            Self::Command { arguments, .. } => arguments,
+            Self::AgentMode { arguments, .. } => arguments,
         };
         for arg in arguments.iter_mut() {
             match &mut arg.arg_type {
@@ -197,11 +192,10 @@ impl Workflow {
             environment_variables,
             ..
         } = self
+            && *environment_variables == Some(old_id)
         {
-            if *environment_variables == Some(old_id) {
-                *environment_variables = Some(new_id);
-                changed = true;
-            }
+            *environment_variables = Some(new_id);
+            changed = true;
         }
         changed
     }

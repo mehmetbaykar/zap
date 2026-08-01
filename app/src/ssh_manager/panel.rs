@@ -15,28 +15,25 @@
 use std::collections::HashMap;
 
 use pathfinder_geometry::vector::Vector2F;
+use settings::Setting;
 use warp_core::ui::theme::color::internal_colors;
-use warpui::elements::{
-    AcceptedByDropTarget, Border, ChildAnchor, ConstrainedBox, Container, CornerRadius,
-    CrossAxisAlignment, Dismiss, Draggable, DraggableState, DropTarget, DropTargetData, Element,
-    Empty, Fill as ElementFill, Flex, Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle,
-    OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, SavePosition,
-    ScrollbarWidth, Stack, Text,
+use warp_ssh_manager::{
+    AuthType, KeychainSecretStore, NodeKind, SecretKind, SshNode, SshRepository, SshSecretStore,
+    SshServerInfo,
 };
-use warpui::elements::{ClippedScrollStateHandle, ClippedScrollable};
+use warpui::elements::{
+    AcceptedByDropTarget, Border, ChildAnchor, ClippedScrollStateHandle, ClippedScrollable,
+    ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Dismiss, Draggable,
+    DraggableState, DropTarget, DropTargetData, Element, Empty, Fill as ElementFill, Flex,
+    Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning, ParentAnchor,
+    ParentElement, ParentOffsetBounds, Radius, SavePosition, ScrollbarWidth, Stack, Text,
+};
 use warpui::platform::Cursor;
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::{
     AppContext, Entity, FocusContext, ModelHandle, SingletonEntity, TypedActionView, View,
     ViewContext, ViewHandle,
 };
-
-use warp_ssh_manager::{
-    AuthType, KeychainSecretStore, NodeKind, SecretKind, SshNode, SshRepository, SshSecretStore,
-    SshServerInfo,
-};
-
-use settings::Setting;
 
 use crate::editor::{
     EditorView, Event as EditorEvent, SingleLineEditorOptions, TextColors, TextOptions,
@@ -253,16 +250,16 @@ impl SshManagerPanel {
             Ok(nodes) => {
                 self.depths = compute_depths(&nodes);
                 self.nodes = sort_for_display(nodes, &self.depths);
-                if let Some(id) = self.selected_id.clone() {
-                    if !self.nodes.iter().any(|n| n.id == id) {
-                        self.selected_id = None;
-                    }
+                if let Some(id) = self.selected_id.clone()
+                    && !self.nodes.iter().any(|n| n.id == id)
+                {
+                    self.selected_id = None;
                 }
                 // If the node being renamed was deleted externally, clear rename_state
-                if let Some(rs) = self.rename_state.as_ref() {
-                    if !self.nodes.iter().any(|n| n.id == rs.node_id) {
-                        self.rename_state = None;
-                    }
+                if let Some(rs) = self.rename_state.as_ref()
+                    && !self.nodes.iter().any(|n| n.id == rs.node_id)
+                {
+                    self.rename_state = None;
                 }
             }
             Err(e) => {

@@ -1,16 +1,17 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use chrono::{Local, TimeZone};
 use pathfinder_geometry::rect::RectF;
-use pathfinder_geometry::vector::{vec2f, Vector2F};
+use pathfinder_geometry::vector::{Vector2F, vec2f};
 use remote_server::client::RemoteServerClient;
 use remote_server::proto::{
-    create_directory_response, list_directory_response, read_file_chunk_response,
-    resolve_path_response, run_command_response, write_file_chunk_response, FileSystemEntryKind,
+    FileSystemEntryKind, create_directory_response, list_directory_response,
+    read_file_chunk_response, resolve_path_response, run_command_response,
+    write_file_chunk_response,
 };
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -18,6 +19,7 @@ use warp_completer::completer::CommandExitStatus;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::{HostId, SessionId};
 use warp_util::standardized_path::StandardizedPath;
+use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::clipboard::ClipboardContent;
 use warpui::elements::{
     Border, ChildAnchor, ChildView, Clipped, ConstrainedBox, Container, CornerRadius,
@@ -28,7 +30,6 @@ use warpui::elements::{
 };
 use warpui::modals::{AlertDialogWithCallbacks, ModalButton};
 use warpui::platform::{Cursor, FilePickerConfiguration, SaveFilePickerConfiguration};
-use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::{
     AppContext, BlurContext, Entity, FocusContext, SingletonEntity, TypedActionView, View,
@@ -42,8 +43,8 @@ use crate::editor::{
     PropagateHorizontalNavigationKeys, SingleLineEditorOptions, TextOptions,
 };
 use crate::menu::{
-    Event as MenuEvent, Menu, MenuItem, MenuItemFields, SubMenu,
-    DEFAULT_WIDTH as MENU_DEFAULT_WIDTH, MENU_ITEM_VERTICAL_PADDING, SUBMENU_OVERLAP,
+    DEFAULT_WIDTH as MENU_DEFAULT_WIDTH, Event as MenuEvent, MENU_ITEM_VERTICAL_PADDING, Menu,
+    MenuItem, MenuItemFields, SUBMENU_OVERLAP, SubMenu,
 };
 use crate::remote_server::manager::RemoteServerManager;
 use crate::terminal::model::session::{ExecuteCommandOptions, Session};
@@ -563,49 +564,55 @@ impl ServerFileBrowserView {
             .and_then(|index| self.entries.get(index))
             .map(|entry| entry.path.clone());
 
-        match self.client(ctx) { Some(client) => {
-            self.loading = true;
-            if reset_tree {
-                self.status = None;
+        match self.client(ctx) {
+            Some(client) => {
+                self.loading = true;
+                if reset_tree {
+                    self.status = None;
+                }
+                ctx.notify();
+                ctx.spawn(
+                    async move {
+                        reload_directory_tree(
+                            DirectoryListingSource::Client(client),
+                            path,
+                            expanded_directories,
+                            depth_by_path,
+                        )
+                        .await
+                    },
+                    move |me, result, ctx| {
+                        me.finish_directory_reload(result, selected_path, reset_tree, ctx);
+                    },
+                );
             }
-            ctx.notify();
-            ctx.spawn(
-                async move {
-                    reload_directory_tree(
-                        DirectoryListingSource::Client(client),
-                        path,
-                        expanded_directories,
-                        depth_by_path,
-                    )
-                    .await
-                },
-                move |me, result, ctx| {
-                    me.finish_directory_reload(result, selected_path, reset_tree, ctx);
-                },
-            );
-        } _ => { match self.session.clone() { Some(session) => {
-            self.loading = true;
-            if reset_tree {
-                self.status = None;
-            }
-            ctx.notify();
-            ctx.spawn(
-                async move {
-                    reload_directory_tree(
-                        DirectoryListingSource::Session(session),
-                        path,
-                        expanded_directories,
-                        depth_by_path,
-                    )
-                    .await
-                },
-                move |me, result, ctx| {
-                    me.finish_directory_reload(result, selected_path, reset_tree, ctx);
-                },
-            );
-        } _ => {
-            self.set_listing_error(crate::t!("server-file-browser-no-session"), ctx);
-        }}}}
+            _ => match self.session.clone() {
+                Some(session) => {
+                    self.loading = true;
+                    if reset_tree {
+                        self.status = None;
+                    }
+                    ctx.notify();
+                    ctx.spawn(
+                        async move {
+                            reload_directory_tree(
+                                DirectoryListingSource::Session(session),
+                                path,
+                                expanded_directories,
+                                depth_by_path,
+                            )
+                            .await
+                        },
+                        move |me, result, ctx| {
+                            me.finish_directory_reload(result, selected_path, reset_tree, ctx);
+                        },
+                    );
+                }
+                _ => {
+                    self.set_listing_error(crate::t!("server-file-browser-no-session"), ctx);
+                }
+            },
+        }
     }
 
     fn refresh_directory_tree(&mut self, ctx: &mut ViewContext<Self>) {
@@ -649,10 +656,10 @@ impl ServerFileBrowserView {
                     self.selected_index,
                 );
                 self.sync_row_states();
-                if let Some(path) = self.pending_rename_path_after_reload.take() {
-                    if let Some(index) = self.entries.iter().position(|entry| entry.path == path) {
-                        self.start_rename(index, ctx);
-                    }
+                if let Some(path) = self.pending_rename_path_after_reload.take()
+                    && let Some(index) = self.entries.iter().position(|entry| entry.path == path)
+                {
+                    self.start_rename(index, ctx);
                 }
             }
             Err(error) => {
@@ -668,29 +675,35 @@ impl ServerFileBrowserView {
         let host_id = self.host_id.clone();
         let path_for_spawn = path.clone();
 
-        match self.client(ctx) { Some(client) => {
-            self.loading = true;
-            self.status = None;
-            ctx.notify();
-            ctx.spawn(
-                async move { resolve_path(client, path_for_spawn).await },
-                move |me, result, ctx| {
-                    me.finish_resolve_and_open(result, host_id, ctx);
-                },
-            );
-        } _ => { match self.session.clone() { Some(session) => {
-            self.loading = true;
-            self.status = None;
-            ctx.notify();
-            ctx.spawn(
-                async move { resolve_path_via_session(session, path_for_spawn).await },
-                move |me, result, ctx| {
-                    me.finish_resolve_and_open(result, host_id, ctx);
-                },
-            );
-        } _ => {
-            self.set_error(crate::t!("server-file-browser-no-session"), ctx);
-        }}}}
+        match self.client(ctx) {
+            Some(client) => {
+                self.loading = true;
+                self.status = None;
+                ctx.notify();
+                ctx.spawn(
+                    async move { resolve_path(client, path_for_spawn).await },
+                    move |me, result, ctx| {
+                        me.finish_resolve_and_open(result, host_id, ctx);
+                    },
+                );
+            }
+            _ => match self.session.clone() {
+                Some(session) => {
+                    self.loading = true;
+                    self.status = None;
+                    ctx.notify();
+                    ctx.spawn(
+                        async move { resolve_path_via_session(session, path_for_spawn).await },
+                        move |me, result, ctx| {
+                            me.finish_resolve_and_open(result, host_id, ctx);
+                        },
+                    );
+                }
+                _ => {
+                    self.set_error(crate::t!("server-file-browser-no-session"), ctx);
+                }
+            },
+        }
     }
 
     fn finish_resolve_and_open(
@@ -779,57 +792,63 @@ impl ServerFileBrowserView {
         }
 
         let path_for_spawn = path.clone();
-        match self.client(ctx) { Some(client) => {
-            self.loading = true;
-            ctx.notify();
-            ctx.spawn(
-                async move { list_directory(client, path_for_spawn).await },
-                move |me, result, ctx| {
-                    me.loading = false;
-                    match result {
-                        Ok((path, entries)) => {
-                            let entries = entries_with_depth(entries, child_depth);
-                            me.loaded_directories.insert(path, entries);
-                            me.rebuild_entries();
-                        }
-                        Err(error) => {
-                            if ServerFileBrowserView::is_remote_connection_error(&error) {
-                                me.set_listing_error(error, ctx);
-                                return;
+        match self.client(ctx) {
+            Some(client) => {
+                self.loading = true;
+                ctx.notify();
+                ctx.spawn(
+                    async move { list_directory(client, path_for_spawn).await },
+                    move |me, result, ctx| {
+                        me.loading = false;
+                        match result {
+                            Ok((path, entries)) => {
+                                let entries = entries_with_depth(entries, child_depth);
+                                me.loaded_directories.insert(path, entries);
+                                me.rebuild_entries();
                             }
-                            me.status = Some(error);
-                        }
-                    }
-                    ctx.notify();
-                },
-            );
-        } _ => { match self.session.clone() { Some(session) => {
-            self.loading = true;
-            ctx.notify();
-            ctx.spawn(
-                async move { list_directory_via_session(session, path_for_spawn).await },
-                move |me, result, ctx| {
-                    me.loading = false;
-                    match result {
-                        Ok((path, entries)) => {
-                            let entries = entries_with_depth(entries, child_depth);
-                            me.loaded_directories.insert(path, entries);
-                            me.rebuild_entries();
-                        }
-                        Err(error) => {
-                            if ServerFileBrowserView::is_remote_connection_error(&error) {
-                                me.set_listing_error(error, ctx);
-                                return;
+                            Err(error) => {
+                                if ServerFileBrowserView::is_remote_connection_error(&error) {
+                                    me.set_listing_error(error, ctx);
+                                    return;
+                                }
+                                me.status = Some(error);
                             }
-                            me.status = Some(error);
                         }
-                    }
+                        ctx.notify();
+                    },
+                );
+            }
+            _ => match self.session.clone() {
+                Some(session) => {
+                    self.loading = true;
                     ctx.notify();
-                },
-            );
-        } _ => {
-            self.set_listing_error(crate::t!("server-file-browser-no-session"), ctx);
-        }}}}
+                    ctx.spawn(
+                        async move { list_directory_via_session(session, path_for_spawn).await },
+                        move |me, result, ctx| {
+                            me.loading = false;
+                            match result {
+                                Ok((path, entries)) => {
+                                    let entries = entries_with_depth(entries, child_depth);
+                                    me.loaded_directories.insert(path, entries);
+                                    me.rebuild_entries();
+                                }
+                                Err(error) => {
+                                    if ServerFileBrowserView::is_remote_connection_error(&error) {
+                                        me.set_listing_error(error, ctx);
+                                        return;
+                                    }
+                                    me.status = Some(error);
+                                }
+                            }
+                            ctx.notify();
+                        },
+                    );
+                }
+                _ => {
+                    self.set_listing_error(crate::t!("server-file-browser-no-session"), ctx);
+                }
+            },
+        }
     }
 
     fn rebuild_entries(&mut self) {
@@ -1446,15 +1465,15 @@ impl ServerFileBrowserView {
     fn remove_deleted_entry(&mut self, path: &str) {
         let child_prefix = child_path_prefix(path);
         self.remove_path_from_tree_state(path);
-        if let Some(parent) = remote_parent(path) {
-            if let Some(children) = self.loaded_directories.get_mut(&parent) {
-                children.retain(|entry| {
-                    entry.path != path
-                        && child_prefix
-                            .as_ref()
-                            .is_none_or(|prefix| !entry.path.starts_with(prefix))
-                });
-            }
+        if let Some(parent) = remote_parent(path)
+            && let Some(children) = self.loaded_directories.get_mut(&parent)
+        {
+            children.retain(|entry| {
+                entry.path != path
+                    && child_prefix
+                        .as_ref()
+                        .is_none_or(|prefix| !entry.path.starts_with(prefix))
+            });
         }
         self.entries.retain(|entry| {
             entry.path != path
@@ -1556,85 +1575,99 @@ impl ServerFileBrowserView {
             .and_then(|index| self.entries.get(index))
             .map(|entry| entry.path.clone());
 
-        match self.client(ctx) { Some(client) => {
-            self.loading = true;
-            ctx.notify();
-            ctx.spawn(
-                async move {
-                    fetch_directory_listings_selective(
-                        DirectoryListingSource::Client(client),
-                        directories,
-                        depth_by_path,
-                    )
-                    .await
-                },
-                move |me, result, ctx| {
-                    me.loading = false;
-                    match result {
-                        Ok(updates) => {
-                            for (canonical_path, children, depth) in updates {
-                                me.apply_directory_listing_update(canonical_path, children, depth);
+        match self.client(ctx) {
+            Some(client) => {
+                self.loading = true;
+                ctx.notify();
+                ctx.spawn(
+                    async move {
+                        fetch_directory_listings_selective(
+                            DirectoryListingSource::Client(client),
+                            directories,
+                            depth_by_path,
+                        )
+                        .await
+                    },
+                    move |me, result, ctx| {
+                        me.loading = false;
+                        match result {
+                            Ok(updates) => {
+                                for (canonical_path, children, depth) in updates {
+                                    me.apply_directory_listing_update(
+                                        canonical_path,
+                                        children,
+                                        depth,
+                                    );
+                                }
+                                me.rebuild_entries();
+                                me.selected_index = selected_index_after_rebuild(
+                                    &me.entries,
+                                    selected_path.as_deref(),
+                                    me.selected_index,
+                                );
+                                me.sync_row_states();
                             }
-                            me.rebuild_entries();
-                            me.selected_index = selected_index_after_rebuild(
-                                &me.entries,
-                                selected_path.as_deref(),
-                                me.selected_index,
-                            );
-                            me.sync_row_states();
-                        }
-                        Err(error) => {
-                            if ServerFileBrowserView::is_remote_connection_error(&error) {
-                                me.set_listing_error(error, ctx);
-                                return;
+                            Err(error) => {
+                                if ServerFileBrowserView::is_remote_connection_error(&error) {
+                                    me.set_listing_error(error, ctx);
+                                    return;
+                                }
+                                me.status = Some(error);
                             }
-                            me.status = Some(error);
                         }
-                    }
+                        ctx.notify();
+                    },
+                );
+            }
+            _ => match self.session.clone() {
+                Some(session) => {
+                    self.loading = true;
                     ctx.notify();
-                },
-            );
-        } _ => { match self.session.clone() { Some(session) => {
-            self.loading = true;
-            ctx.notify();
-            ctx.spawn(
-                async move {
-                    fetch_directory_listings_selective(
-                        DirectoryListingSource::Session(session),
-                        directories,
-                        depth_by_path,
-                    )
-                    .await
-                },
-                move |me, result, ctx| {
-                    me.loading = false;
-                    match result {
-                        Ok(updates) => {
-                            for (canonical_path, children, depth) in updates {
-                                me.apply_directory_listing_update(canonical_path, children, depth);
+                    ctx.spawn(
+                        async move {
+                            fetch_directory_listings_selective(
+                                DirectoryListingSource::Session(session),
+                                directories,
+                                depth_by_path,
+                            )
+                            .await
+                        },
+                        move |me, result, ctx| {
+                            me.loading = false;
+                            match result {
+                                Ok(updates) => {
+                                    for (canonical_path, children, depth) in updates {
+                                        me.apply_directory_listing_update(
+                                            canonical_path,
+                                            children,
+                                            depth,
+                                        );
+                                    }
+                                    me.rebuild_entries();
+                                    me.selected_index = selected_index_after_rebuild(
+                                        &me.entries,
+                                        selected_path.as_deref(),
+                                        me.selected_index,
+                                    );
+                                    me.sync_row_states();
+                                }
+                                Err(error) => {
+                                    if ServerFileBrowserView::is_remote_connection_error(&error) {
+                                        me.set_listing_error(error, ctx);
+                                        return;
+                                    }
+                                    me.status = Some(error);
+                                }
                             }
-                            me.rebuild_entries();
-                            me.selected_index = selected_index_after_rebuild(
-                                &me.entries,
-                                selected_path.as_deref(),
-                                me.selected_index,
-                            );
-                            me.sync_row_states();
-                        }
-                        Err(error) => {
-                            if ServerFileBrowserView::is_remote_connection_error(&error) {
-                                me.set_listing_error(error, ctx);
-                                return;
-                            }
-                            me.status = Some(error);
-                        }
-                    }
+                            ctx.notify();
+                        },
+                    );
+                }
+                _ => {
                     ctx.notify();
-                },
-            );
-        } _ => {
-            ctx.notify();
-        }}}}
+                }
+            },
+        }
     }
 
     fn active_upload_batch(&self) -> Option<&ServerFileUploadBatch> {
@@ -2373,17 +2406,17 @@ impl ServerFileBrowserView {
             .retain(|batch| !batch.tasks.is_empty());
         if self.upload_batches.is_empty() {
             self.active_upload_batch_index = None;
-        } else if let Some(active_index) = self.active_upload_batch_index {
-            if active_index >= self.upload_batches.len() {
-                self.active_upload_batch_index = None;
-            }
+        } else if let Some(active_index) = self.active_upload_batch_index
+            && active_index >= self.upload_batches.len()
+        {
+            self.active_upload_batch_index = None;
         }
         if self.download_batches.is_empty() {
             self.active_download_batch_index = None;
-        } else if let Some(active_index) = self.active_download_batch_index {
-            if active_index >= self.download_batches.len() {
-                self.active_download_batch_index = None;
-            }
+        } else if let Some(active_index) = self.active_download_batch_index
+            && active_index >= self.download_batches.len()
+        {
+            self.active_download_batch_index = None;
         }
         if self.upload_batches.is_empty() && self.download_batches.is_empty() {
             self.upload_progress_panel_open = false;
@@ -2530,19 +2563,19 @@ impl ServerFileBrowserView {
 
     fn finish_download_batch(&mut self, ctx: &mut ViewContext<Self>) {
         self.active_download_batch_index = None;
-        if let Some(client) = self.client(ctx) {
-            if let Some(index) = self.download_batches.iter().position(|batch| {
+        if let Some(client) = self.client(ctx)
+            && let Some(index) = self.download_batches.iter().position(|batch| {
                 batch.tasks.iter().any(|task| {
                     matches!(
                         task.status,
                         DownloadTaskStatus::Pending | DownloadTaskStatus::Downloading
                     )
                 })
-            }) {
-                self.active_download_batch_index = Some(index);
-                self.download_next_task(client, ctx);
-                return;
-            }
+            })
+        {
+            self.active_download_batch_index = Some(index);
+            self.download_next_task(client, ctx);
+            return;
         }
         if !self.has_active_upload() {
             self.stop_progress_poll();
@@ -2881,22 +2914,22 @@ impl ServerFileBrowserView {
             );
         }
 
-        if let Some(batch) = self.active_upload_batch() {
-            if batch.phase != UploadBatchPhase::Uploading {
-                column.add_child(
-                    Container::new(
-                        Text::new_inline(
-                            upload_batch_phase_label(batch.phase),
-                            appearance.ui_font_family(),
-                            11.0,
-                        )
-                        .with_color(sub_text.into())
-                        .finish(),
+        if let Some(batch) = self.active_upload_batch()
+            && batch.phase != UploadBatchPhase::Uploading
+        {
+            column.add_child(
+                Container::new(
+                    Text::new_inline(
+                        upload_batch_phase_label(batch.phase),
+                        appearance.ui_font_family(),
+                        11.0,
                     )
-                    .with_padding_top(4.0)
+                    .with_color(sub_text.into())
                     .finish(),
-                );
-            }
+                )
+                .with_padding_top(4.0)
+                .finish(),
+            );
         }
 
         let upload_task_count: usize = self
@@ -3223,10 +3256,10 @@ fn render_entry_row(
         if let Some(size) = entry.size_bytes {
             metadata_parts.push(format_file_size(size));
         }
-        if let Some(epoch_millis) = entry.modified_epoch_millis {
-            if let Some(formatted) = format_modified_epoch_millis(epoch_millis) {
-                metadata_parts.push(formatted);
-            }
+        if let Some(epoch_millis) = entry.modified_epoch_millis
+            && let Some(formatted) = format_modified_epoch_millis(epoch_millis)
+        {
+            metadata_parts.push(formatted);
         }
         let metadata = (!metadata_parts.is_empty()).then(|| {
             Text::new_inline(
@@ -3521,15 +3554,15 @@ fn append_entries_from(
     for entry in entries {
         let path = entry.path.clone();
         out.push(entry);
-        if expanded_directories.contains(&path) {
-            if let Some(children) = loaded_directories.get(&path) {
-                append_entries_from(
-                    children.clone(),
-                    expanded_directories,
-                    loaded_directories,
-                    out,
-                );
-            }
+        if expanded_directories.contains(&path)
+            && let Some(children) = loaded_directories.get(&path)
+        {
+            append_entries_from(
+                children.clone(),
+                expanded_directories,
+                loaded_directories,
+                out,
+            );
         }
     }
 }
@@ -4212,10 +4245,10 @@ fn relative_remote_path_from_base(base: &str, path: &str) -> String {
     if path == base_trimmed {
         return String::new();
     }
-    if let Some(prefix) = child_path_prefix(base_trimmed) {
-        if path.starts_with(&prefix) {
-            return path[prefix.len()..].to_string();
-        }
+    if let Some(prefix) = child_path_prefix(base_trimmed)
+        && path.starts_with(&prefix)
+    {
+        return path[prefix.len()..].to_string();
     }
     path.to_string()
 }
@@ -4590,10 +4623,10 @@ async fn delete_remote_path(
         return execute_remote_shell_script(session, client, remote_session_id, script).await;
     }
 
-    if let Some(client) = &client {
-        if client.delete_file(path.clone()).await.is_ok() {
-            return Ok(());
-        }
+    if let Some(client) = &client
+        && client.delete_file(path.clone()).await.is_ok()
+    {
+        return Ok(());
     }
 
     if session.is_none() && client.is_none() {
@@ -4641,30 +4674,33 @@ async fn execute_remote_shell_script(
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(stderr.trim().to_string())
         }
-    } else { match (client, remote_session_id) { (Some(client), Some(session_id)) => {
-        let response = client
-            .run_command(session_id, script, None, HashMap::new())
-            .await
-            .map_err(|error| format!("{error:#}"))?;
-        match response.result {
-            Some(run_command_response::Result::Success(success))
-                if success.exit_code.unwrap_or(1) == 0 =>
-            {
-                Ok(())
+    } else {
+        match (client, remote_session_id) {
+            (Some(client), Some(session_id)) => {
+                let response = client
+                    .run_command(session_id, script, None, HashMap::new())
+                    .await
+                    .map_err(|error| format!("{error:#}"))?;
+                match response.result {
+                    Some(run_command_response::Result::Success(success))
+                        if success.exit_code.unwrap_or(1) == 0 =>
+                    {
+                        Ok(())
+                    }
+                    Some(run_command_response::Result::Success(success)) => {
+                        let stderr = String::from_utf8_lossy(&success.stderr);
+                        Err(stderr.trim().to_string())
+                    }
+                    Some(run_command_response::Result::Error(err)) => Err(err.message),
+                    None => Err(crate::t!(
+                        "server-file-browser-operation-failed",
+                        error = "empty response"
+                    )),
+                }
             }
-            Some(run_command_response::Result::Success(success)) => {
-                let stderr = String::from_utf8_lossy(&success.stderr);
-                Err(stderr.trim().to_string())
-            }
-            Some(run_command_response::Result::Error(err)) => Err(err.message),
-            None => Err(crate::t!(
-                "server-file-browser-operation-failed",
-                error = "empty response"
-            )),
+            _ => Err(crate::t!("server-file-browser-no-session")),
         }
-    } _ => {
-        Err(crate::t!("server-file-browser-no-session"))
-    }}}
+    }
 }
 
 fn child_path_prefix(path: &str) -> Option<String> {
@@ -5050,9 +5086,11 @@ mod tests {
     #[test]
     fn clear_context_menu_state_removes_items_and_selection() {
         let mut position = Some(vec2f(10.0, 20.0));
-        let mut menu_items = vec![MenuItemFields::new("Refresh")
-            .with_on_select_action(ServerFileBrowserAction::Refresh)
-            .into_item()];
+        let mut menu_items = vec![
+            MenuItemFields::new("Refresh")
+                .with_on_select_action(ServerFileBrowserAction::Refresh)
+                .into_item(),
+        ];
 
         clear_context_menu_state(&mut position, &mut menu_items);
 

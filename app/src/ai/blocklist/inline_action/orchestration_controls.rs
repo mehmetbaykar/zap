@@ -13,10 +13,10 @@ use std::collections::HashMap;
 
 use ai::agent::orchestration_config::{OrchestrationConfig, OrchestrationExecutionMode};
 use pathfinder_color::ColorU;
-use pathfinder_geometry::vector::{vec2f, Vector2F};
+use pathfinder_geometry::vector::{Vector2F, vec2f};
 use warp_cli::agent::Harness;
+use warp_core::features::FeatureFlag;
 use warp_core::ui::theme::Fill;
-use warp_errors::report_if_error;
 use warpui::elements::{
     ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex,
     Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Point, Radius,
@@ -31,25 +31,23 @@ use warpui::{
     SingletonEntity, SizeConstraint, View, ViewContext, ViewHandle,
 };
 
-use warp_core::features::FeatureFlag;
-
+use crate::LLMPreferences;
 use crate::ai::auth_secret_types::auth_secret_types_for_harness;
 use crate::ai::blocklist::inline_action::host_picker::HostPicker;
 use crate::ai::execution_profiles::model_menu_items::available_model_menu_items;
 use crate::ai::harness_display;
 use crate::ai::llms::LLMInfo;
 use crate::ai::local_harness_setup::{
-    local_harness_is_product_enabled, local_harness_product_disabled_message,
-    local_harness_setup_state, LocalHarnessSetupState,
+    LocalHarnessSetupState, local_harness_is_product_enabled,
+    local_harness_product_disabled_message, local_harness_setup_state,
 };
 use crate::appearance::Appearance;
 use crate::menu::{MenuItem, MenuItemFields};
 use crate::ui_components::blended_colors;
+use crate::view_components::FilterableDropdown;
 use crate::view_components::dropdown::{
     Dropdown, DropdownAction, DropdownItemAction, DropdownStyle,
 };
-use crate::view_components::FilterableDropdown;
-use crate::LLMPreferences;
 
 // ── Shared constants ────────────────────────────────────────────────
 
@@ -355,10 +353,10 @@ pub fn new_standard_filterable_picker_dropdown<A: OrchestrationControlAction, V:
 }
 
 /// Returns Warp base-model choices for orchestration.
-fn get_base_model_choices<'a>(
-    llm_prefs: &'a LLMPreferences,
+fn get_base_model_choices(
+    llm_prefs: &LLMPreferences,
     is_local: bool,
-) -> impl Iterator<Item = &'a LLMInfo> {
+) -> impl Iterator<Item = &LLMInfo> {
     llm_prefs
         .get_base_llm_choices_for_agent_mode()
         .filter(move |llm| is_local || !crate::ai::agent_providers::llm_id::is_byop(&llm.id))
@@ -706,10 +704,10 @@ pub fn apply_harness_change<A: OrchestrationControlAction, V: View>(
     let is_local = !state.execution_mode.is_remote();
     if is_local {
         state.sanitize_for_local_execution();
-        if state.harness_type != new_harness_type {
-            if let Some(handle) = &handles.harness_picker {
-                populate_harness_picker(handle, &state.harness_type, true, ctx);
-            }
+        if state.harness_type != new_harness_type
+            && let Some(handle) = &handles.harness_picker
+        {
+            populate_harness_picker(handle, &state.harness_type, true, ctx);
         }
     }
     // Try to restore a previously saved model for this harness.
@@ -767,14 +765,12 @@ pub fn apply_execution_mode_change<A: OrchestrationControlAction, V: View>(
         populate_harness_picker(handle, &state.harness_type, is_local, ctx);
     }
     // Pre-fill environment with the last-selected one when switching to Cloud.
-    if is_remote {
-        if let OrchestrationExecutionMode::Remote { environment_id, .. } = &state.execution_mode {
-            if environment_id.is_empty() {
-                if let Some(default_env) = resolve_default_environment_id(ctx) {
-                    state.set_environment_id(default_env);
-                }
-            }
-        }
+    if is_remote
+        && let OrchestrationExecutionMode::Remote { environment_id, .. } = &state.execution_mode
+        && environment_id.is_empty()
+        && let Some(default_env) = resolve_default_environment_id(ctx)
+    {
+        state.set_environment_id(default_env);
     }
     if !is_model_in_filtered_choices(&state.model_id, &state.harness_type, is_local, ctx) {
         let reset_id = fallback_base_model_id(ctx)
@@ -821,10 +817,10 @@ pub fn repopulate_all_pickers<A: OrchestrationControlAction, V: View>(
         populate_harness_picker(handle, &state.harness_type, is_local, ctx);
     }
     // Reset model if it disappeared from the harness's catalog.
-    if !is_model_in_filtered_choices(&state.model_id, &state.harness_type, is_local, ctx) {
-        if let Some(first_id) = first_filtered_model_id(&state.harness_type, ctx) {
-            state.model_id = first_id;
-        }
+    if !is_model_in_filtered_choices(&state.model_id, &state.harness_type, is_local, ctx)
+        && let Some(first_id) = first_filtered_model_id(&state.harness_type, ctx)
+    {
+        state.model_id = first_id;
     }
     if let Some(handle) = &handles.model_picker {
         populate_model_picker_for_harness(

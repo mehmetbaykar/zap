@@ -8,13 +8,11 @@ use std::sync::{Arc, Mutex};
 use warp_ssh_manager::{SshRepository, SshServerInfo};
 use warpui::integration::TestStep;
 use warpui::windowing::WindowManager;
-use warpui::SingletonEntity;
-use warpui::TypedActionView;
-
-use crate::ssh_manager::server_view::SshServerAction;
-use crate::workspace::{Workspace, WorkspaceAction};
+use warpui::{SingletonEntity, TypedActionView};
 
 use super::assertions::ssh_server_view;
+use crate::ssh_manager::server_view::SshServerAction;
+use crate::workspace::{Workspace, WorkspaceAction};
 
 /// Open the SSH manager's left panel.
 pub fn open_ssh_manager_panel() -> TestStep {

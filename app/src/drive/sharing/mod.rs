@@ -1,4 +1,5 @@
-use std::{borrow::Cow, str::FromStr};
+use std::borrow::Cow;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use warp_core::ui::appearance::Appearance;
@@ -7,8 +8,8 @@ use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 use warpui::{AppContext, SingletonEntity};
 
 use crate::auth::UserUid;
-use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::Owner;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::server::ids::ServerId;
 use crate::ui_components::avatar::{Avatar, AvatarContent};
 use crate::ui_components::icons::Icon;

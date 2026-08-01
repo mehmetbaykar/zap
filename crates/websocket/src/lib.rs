@@ -12,12 +12,12 @@ pub use async_tungstenite::tungstenite;
 pub use async_tungstenite::tungstenite::client::IntoClientRequest;
 #[cfg(not(target_family = "wasm"))]
 use async_tungstenite::tungstenite::http::HeaderValue;
-use futures_util::{future, SinkExt, TryStreamExt};
+use futures_util::{SinkExt, TryStreamExt, future};
 // Issue #72: re-export the native::proxy module's global proxy types to the crate
 // root, so `app::settings::network` / `app::settings::init` can reference them
 // directly via `websocket::ProxyMode`.
 #[cfg(not(target_family = "wasm"))]
-pub use imp::proxy::{set_global_proxy_config, ProxyConfig, ProxyMode};
+pub use imp::proxy::{ProxyConfig, ProxyMode, set_global_proxy_config};
 #[cfg(not(target_family = "wasm"))]
 use itertools::Itertools;
 use thiserror::Error;

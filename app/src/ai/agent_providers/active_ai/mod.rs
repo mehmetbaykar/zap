@@ -14,13 +14,14 @@
 //! With no BYOP configuration (`active_ai_model` decode failure) → `dispatch::*` returns `None`,
 //! and the caller silently no-ops (Zap has stripped out the cloud and no longer falls back to ServerApi).
 
-use minijinja::{context, Environment};
-use serde::Serialize;
 use std::sync::OnceLock;
 
+use minijinja::{Environment, context};
+use serde::Serialize;
+
 use super::oneshot::{
-    byop_oneshot_completion, resolve_active_ai_oneshot, resolve_next_command_oneshot,
-    OneshotConfig, OneshotOptions,
+    OneshotConfig, OneshotOptions, byop_oneshot_completion, resolve_active_ai_oneshot,
+    resolve_next_command_oneshot,
 };
 use crate::ai::predict::generate_am_query_suggestions::GenerateAMQuerySuggestionsResponse;
 
@@ -134,9 +135,10 @@ pub struct RenderedRequest {
 // ---------------------------------------------------------------------------
 
 pub mod prompt_suggestions {
+    use warpui::{AppContext, EntityId, SingletonEntity};
+
     use super::*;
     use crate::settings::language::{Language, LanguageSettings};
-    use warpui::{AppContext, EntityId, SingletonEntity};
 
     pub struct Input {
         pub recent_blocks: Vec<BlockSnippet>,
@@ -216,8 +218,9 @@ pub mod prompt_suggestions {
 // ---------------------------------------------------------------------------
 
 pub mod nld_predict {
-    use super::*;
     use warpui::{AppContext, EntityId};
+
+    use super::*;
 
     pub struct Input {
         pub partial_query: String,
@@ -269,8 +272,9 @@ pub mod nld_predict {
 // ---------------------------------------------------------------------------
 
 pub mod relevant_files {
-    use super::*;
     use warpui::{AppContext, EntityId};
+
+    use super::*;
 
     #[derive(Debug, Clone, Serialize)]
     pub struct FileEntry {
@@ -342,10 +346,10 @@ pub mod relevant_files {
 // ---------------------------------------------------------------------------
 
 pub mod workflow_metadata {
-    use super::*;
+    pub use parsing::WorkflowMetadataDto;
     use warpui::{AppContext, EntityId};
 
-    pub use parsing::WorkflowMetadataDto;
+    use super::*;
 
     pub struct Input {
         pub command: String,
@@ -399,8 +403,9 @@ pub mod workflow_metadata {
 // ---------------------------------------------------------------------------
 
 pub mod next_command {
-    use super::*;
     use warpui::{AppContext, EntityId};
+
+    use super::*;
 
     #[derive(Debug, Serialize)]
     struct UserRuleCtx {

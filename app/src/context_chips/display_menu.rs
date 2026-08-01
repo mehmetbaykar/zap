@@ -4,14 +4,15 @@ use std::fmt::Debug;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use fuzzy_match::{match_indices_case_insensitive, FuzzyMatchResult};
+use fuzzy_match::{FuzzyMatchResult, match_indices_case_insensitive};
 use instant::Instant;
 use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::builder::MIN_FONT_SIZE;
-use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors;
 use warp_editor::editor::NavigationKey;
+use warpui::r#async::Timer;
 use warpui::clipboard::ClipboardContent;
 use warpui::color::ColorU;
 use warpui::elements::{
@@ -24,7 +25,6 @@ use warpui::elements::{
 };
 use warpui::fonts::{Properties, Weight};
 use warpui::keymap::FixedBinding;
-use warpui::r#async::Timer;
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::units::Pixels;
 use warpui::{
@@ -37,8 +37,8 @@ use crate::editor::{
 };
 use crate::ui_components::icons::Icon;
 use crate::view_components::copyable_text_field::{
-    render_copyable_text_field, CopyButtonPlacement, CopyableTextFieldConfig,
-    COPY_FEEDBACK_DURATION,
+    COPY_FEEDBACK_DURATION, CopyButtonPlacement, CopyableTextFieldConfig,
+    render_copyable_text_field,
 };
 
 /// Trait for items that can be displayed in a generic menu
@@ -486,16 +486,14 @@ impl DisplayChipMenu {
                 self.menu_items.iter().map(|item| item.name()),
                 trimmed,
             );
-            if !already_matches_existing {
-                if let Some(synthetic) = builder(trimmed) {
-                    filtered_items.insert(
-                        0,
-                        FilteredMenuItem {
-                            item: synthetic,
-                            match_result: None,
-                        },
-                    );
-                }
+            if !already_matches_existing && let Some(synthetic) = builder(trimmed) {
+                filtered_items.insert(
+                    0,
+                    FilteredMenuItem {
+                        item: synthetic,
+                        match_result: None,
+                    },
+                );
             }
         }
 
@@ -1297,10 +1295,10 @@ impl View for DisplayChipMenu {
     }
 
     fn on_focus(&mut self, focus_ctx: &FocusContext, ctx: &mut ViewContext<Self>) {
-        if focus_ctx.is_self_focused() {
-            if let Some(ref search_input) = self.search_input {
-                ctx.focus(search_input);
-            }
+        if focus_ctx.is_self_focused()
+            && let Some(ref search_input) = self.search_input
+        {
+            ctx.focus(search_input);
         }
     }
 
@@ -1396,10 +1394,10 @@ impl View for DisplayChipMenu {
         let mut stack = Stack::new();
         stack.add_child(menu_card);
 
-        if self.should_show_environment_sidecar() {
-            if let Some((sidecar, positioning)) = self.environment_sidecar_overlay(app) {
-                stack.add_positioned_overlay_child(sidecar, positioning);
-            }
+        if self.should_show_environment_sidecar()
+            && let Some((sidecar, positioning)) = self.environment_sidecar_overlay(app)
+        {
+            stack.add_positioned_overlay_child(sidecar, positioning);
         }
 
         Dismiss::new(stack.finish())

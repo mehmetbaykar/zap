@@ -9,11 +9,11 @@ use crate::ai::blocklist::agent_view::{
     AgentViewController, AgentViewEntryOrigin, EphemeralMessageModel,
 };
 use crate::ai::blocklist::{BlocklistAIHistoryModel, ConversationSelection};
+use crate::terminal::TerminalModel;
 use crate::terminal::color::{self, Colors};
 use crate::terminal::event_listener::ChannelEventListener;
 use crate::terminal::model::test_utils::block_size;
 use crate::terminal::view::ambient_agent::AmbientAgentViewModel;
-use crate::terminal::TerminalModel;
 use crate::test_util::settings::initialize_settings_for_tests;
 
 #[test]

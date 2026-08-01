@@ -11,9 +11,9 @@ use warp_util::standardized_path::StandardizedPath;
 use warpui_core::App;
 
 use super::*;
-use crate::proto::{host_scoped_request, ClientMessage, RemoteAgentContextSnapshot, WriteFile};
-use crate::protocol::RequestId;
 use crate::HostId;
+use crate::proto::{ClientMessage, RemoteAgentContextSnapshot, WriteFile, host_scoped_request};
+use crate::protocol::RequestId;
 
 // ---------------------------------------------------------------------------
 // version_is_compatible

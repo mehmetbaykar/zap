@@ -11,7 +11,7 @@ use super::manager::{
     RemoteServerManagerEvent,
 };
 use crate::ai::blocklist::SessionContext;
-use crate::ai::codebase_auto_indexing::{should_auto_index_codebase, CodebaseAutoIndexingSurface};
+use crate::ai::codebase_auto_indexing::{CodebaseAutoIndexingSurface, should_auto_index_codebase};
 
 // Zap (de-clouded fork): upstream's `root_hash` was a `NodeHash` and this context also carried
 // an `EmbeddingConfig`, both defined by the `warp_graphql` cynic schema for talking to Warp's
@@ -636,12 +636,12 @@ impl RemoteCodebaseIndexModel {
             // rather than re-indexing the nested directory.
             return Some(remote_path);
         }
-        if let Some(remote_path) = self.active_repos_by_host.get(host_id) {
-            if self.status_for_repo(remote_path).is_some() {
-                // Remote branch: only implicit searches (no `codebase_path`) fall back to the
-                // active repo recorded by daemon navigation events.
-                return Some(remote_path.clone());
-            }
+        if let Some(remote_path) = self.active_repos_by_host.get(host_id)
+            && self.status_for_repo(remote_path).is_some()
+        {
+            // Remote branch: only implicit searches (no `codebase_path`) fall back to the
+            // active repo recorded by daemon navigation events.
+            return Some(remote_path.clone());
         }
 
         if let Some(remote_path) = self.last_git_repo_for_context(

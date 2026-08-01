@@ -6,9 +6,9 @@ use super::{
     AIAgentCitation, AIAgentExchangeId, EntrypointType, PassiveSuggestionTriggerType,
     ServerOutputId,
 };
+use crate::ObjectStoreModel;
 use crate::ai::llms::LLMId;
 use crate::server::telemetry::AgentModeCitation as CitationForTelemetry;
-use crate::ObjectStoreModel;
 
 pub trait ForTelemetry {
     type Output;

@@ -11,12 +11,13 @@
 //! The path is passed in by the caller at initialization (`set_database_path`), so this crate does not directly depend on the app
 //! layer's `database_file_path()`. When no path has been set, `with_conn` returns `Err(NotInitialized)`.
 
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
 use anyhow::{Result, anyhow};
 use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
 
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
 static CONN: OnceLock<Mutex<SqliteConnection>> = OnceLock::new();

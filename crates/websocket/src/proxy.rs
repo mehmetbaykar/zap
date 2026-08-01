@@ -13,9 +13,9 @@ use std::env;
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
-use anyhow::{bail, Context};
-use base64::engine::general_purpose::STANDARD as BASE64;
+use anyhow::{Context, bail};
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use http_body_util::Empty;
 use hyper::body::Bytes;
 use hyper_util::rt::TokioIo;
@@ -58,11 +58,14 @@ fn slot() -> &'static RwLock<ProxyConfig> {
 /// Installs the global WebSocket proxy configuration. `http_client::set_global_proxy_config`
 /// should be called alongside it at startup and on settings changes.
 pub fn set_global_proxy_config(cfg: ProxyConfig) {
-    match slot().write() { Ok(mut guard) => {
-        *guard = cfg;
-    } _ => {
-        log::error!("Failed to write WebSocket proxy configuration: RwLock is poisoned");
-    }}
+    match slot().write() {
+        Ok(mut guard) => {
+            *guard = cfg;
+        }
+        _ => {
+            log::error!("Failed to write WebSocket proxy configuration: RwLock is poisoned");
+        }
+    }
 }
 
 fn current_proxy_config() -> ProxyConfig {

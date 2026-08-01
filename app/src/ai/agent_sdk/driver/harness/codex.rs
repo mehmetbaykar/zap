@@ -26,12 +26,12 @@ use warpui::{ModelHandle, ModelSpawner};
 use super::super::terminal::{CommandHandle, TerminalDriver};
 use super::super::{AgentDriver, AgentDriverError};
 use super::json_utils::read_json_file_or_default;
-use super::{write_temp_file, HarnessRunner, SavePoint, ThirdPartyHarness};
+use super::{HarnessRunner, SavePoint, ThirdPartyHarness, write_temp_file};
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent_events::AgentEventStreamClient;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
-use crate::terminal::model::block::BlockId;
 use crate::terminal::CLIAgent;
+use crate::terminal::model::block::BlockId;
 
 pub(crate) struct CodexHarness;
 
@@ -267,10 +267,10 @@ fn prepare_codex_environment_config(
 }
 
 fn codex_config_dir() -> Result<PathBuf> {
-    if let Ok(dir) = std::env::var(CODEX_HOME_ENV) {
-        if !dir.is_empty() {
-            return Ok(PathBuf::from(dir));
-        }
+    if let Ok(dir) = std::env::var(CODEX_HOME_ENV)
+        && !dir.is_empty()
+    {
+        return Ok(PathBuf::from(dir));
     }
     dirs::home_dir()
         .map(|home| home.join(CODEX_CONFIG_DIR))

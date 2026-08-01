@@ -1,4 +1,6 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
 use chrono::Local;
 use lazy_static::lazy_static;
@@ -6,30 +8,23 @@ use regex::Regex;
 use warp_core::features::FeatureFlag;
 use warpui::{AppContext, SingletonEntity};
 
-use crate::{
-    ai::{
-        agent::{
-            conversation::AIConversationId, AIAgentAttachment, AIAgentContext,
-            DocumentContentAttachmentSource, DriveObjectPayload,
-        },
-        block_context::BlockContext,
-        blocklist::BlocklistAIContextModel,
-        document::ai_document_model::{AIDocumentId, AIDocumentModel},
-        facts::AIFactObjectModel,
-        skills::list_skills,
-    },
-    cloud_object::{
-        model::{
-            generic_string_model::{GenericStringObjectId, StoredStringObject},
-            persistence::ObjectStoreModel,
-        },
-        GenericStoredObject, GenericStringObjectFormat, JsonObjectType, ObjectType,
-    },
-    terminal::{
-        model::{block::BlockId, session::active_session::ActiveSession},
-        TerminalView,
-    },
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::{
+    AIAgentAttachment, AIAgentContext, DocumentContentAttachmentSource, DriveObjectPayload,
 };
+use crate::ai::block_context::BlockContext;
+use crate::ai::blocklist::BlocklistAIContextModel;
+use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel};
+use crate::ai::facts::AIFactObjectModel;
+use crate::ai::skills::list_skills;
+use crate::cloud_object::model::generic_string_model::{GenericStringObjectId, StoredStringObject};
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::{
+    GenericStoredObject, GenericStringObjectFormat, JsonObjectType, ObjectType,
+};
+use crate::terminal::TerminalView;
+use crate::terminal::model::block::BlockId;
+use crate::terminal::model::session::active_session::ActiveSession;
 lazy_static! {
     // Regex to match <block:[block_id]> patterns
     pub static ref BLOCK_CONTEXT_ATTACHMENT_REGEX: Regex = Regex::new(r"<block:([^>]+)>")
@@ -178,19 +173,18 @@ pub(super) fn parse_context_attachments(
     }
 
     // Add pending AI document as attachment if present
-    if let Some(document_id) = context_model.pending_document_id() {
-        if let Some(content) = AIDocumentModel::as_ref(ctx).get_document_content(&document_id, ctx)
-        {
-            let document_id_str = document_id.to_string();
-            let attachment = AIAgentAttachment::DocumentContent {
-                document_id: document_id_str.clone(),
-                content,
-                source: DocumentContentAttachmentSource::PlanEdited,
-                line_range: None,
-            };
-            // Use the document ID as the reference key
-            referenced_attachments.insert(document_id_str, attachment);
-        }
+    if let Some(document_id) = context_model.pending_document_id()
+        && let Some(content) = AIDocumentModel::as_ref(ctx).get_document_content(&document_id, ctx)
+    {
+        let document_id_str = document_id.to_string();
+        let attachment = AIAgentAttachment::DocumentContent {
+            document_id: document_id_str.clone(),
+            content,
+            source: DocumentContentAttachmentSource::PlanEdited,
+            line_range: None,
+        };
+        // Use the document ID as the reference key
+        referenced_attachments.insert(document_id_str, attachment);
     }
 
     referenced_attachments

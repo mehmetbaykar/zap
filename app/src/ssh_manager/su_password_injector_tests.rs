@@ -1,7 +1,8 @@
-use super::{
-    is_su_to_root, should_spawn_su_password_injector, PASSWORD_PROMPT_REGEX, SU_ROOT_CMD_REGEX,
-};
 use zeroize::Zeroizing;
+
+use super::{
+    PASSWORD_PROMPT_REGEX, SU_ROOT_CMD_REGEX, is_su_to_root, should_spawn_su_password_injector,
+};
 
 fn pw_matches(input: &str) -> bool {
     PASSWORD_PROMPT_REGEX.is_match(input.as_bytes())

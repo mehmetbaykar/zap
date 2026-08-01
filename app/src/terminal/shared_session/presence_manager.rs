@@ -8,8 +8,8 @@ use itertools::{Either, Itertools};
 use pathfinder_color::ColorU;
 use rand::Rng;
 use warpui::assets::asset_cache::{AssetCache, AssetState};
-use warpui::image_cache::ImageType;
 use warpui::r#async::SpawnedFutureHandle;
+use warpui::image_cache::ImageType;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use crate::auth::UserUid;
@@ -353,10 +353,10 @@ impl PresenceManager {
     pub fn get_participant(&self, id: &ParticipantId) -> Option<&Participant> {
         if let Some(viewer) = self.present_viewers.get(id) {
             return Some(viewer);
-        } else if let Some(sharer) = self.sharer.as_ref() {
-            if self.sharer_id == *id {
-                return Some(sharer);
-            }
+        } else if let Some(sharer) = self.sharer.as_ref()
+            && self.sharer_id == *id
+        {
+            return Some(sharer);
         }
         None
     }
@@ -539,7 +539,9 @@ impl PresenceManager {
 
         let Some(participant) = participant else {
             if self.id != update.participant_id {
-                log::warn!("Received shared session participant presence update for participant that doesn't exist");
+                log::warn!(
+                    "Received shared session participant presence update for participant that doesn't exist"
+                );
             }
             return;
         };
@@ -560,7 +562,9 @@ impl PresenceManager {
             self.role = Some(role);
         } else {
             let Some(participant) = self.present_viewers.get_mut(participant_id) else {
-                log::warn!("Received shared session participant role update for participant that doesn't exist");
+                log::warn!(
+                    "Received shared session participant role update for participant that doesn't exist"
+                );
                 return;
             };
             participant.role = Some(role);
@@ -588,10 +592,10 @@ impl PresenceManager {
         }
 
         // Ensure viewer doesn't already have requested role
-        if let Some(old_role) = self.viewer_role(&participant_id) {
-            if role == old_role {
-                return;
-            }
+        if let Some(old_role) = self.viewer_role(&participant_id)
+            && role == old_role
+        {
+            return;
         }
 
         self.role_requests

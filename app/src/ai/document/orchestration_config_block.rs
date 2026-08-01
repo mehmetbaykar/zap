@@ -2,9 +2,11 @@
 //! an active `OrchestrationConfigSnapshot`. Shows a "Use orchestration"
 //! toggle and local harness/model dropdowns.
 
+use std::collections::HashMap;
+
 use ai::agent::orchestration_config::{OrchestrationConfigStatus, OrchestrationExecutionMode};
 use pathfinder_color::ColorU;
-use std::collections::HashMap;
+use warp_core::ui::theme::WarpTheme;
 use warpui::elements::{
     ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Flex, Hoverable,
     MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Radius, Text,
@@ -13,17 +15,16 @@ use warpui::fonts::{Properties, Weight};
 use warpui::platform::Cursor;
 use warpui::{AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext};
 
+use crate::BlocklistAIHistoryModel;
 use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::blocklist::BlocklistAIHistoryEvent;
 use crate::ai::blocklist::inline_action::orchestration_controls::{
     self as oc, OrchestrationControlAction, OrchestrationEditState, OrchestrationPickerHandles,
 };
-use crate::ai::blocklist::BlocklistAIHistoryEvent;
 use crate::ai::document::ai_document_model::AIDocumentModel;
 use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
 use crate::appearance::Appearance;
 use crate::ui_components::blended_colors;
-use crate::BlocklistAIHistoryModel;
-use warp_core::ui::theme::WarpTheme;
 
 /// Renders a pill-shaped toggle switch (36×18) matching the Figma mock.
 fn render_pill_toggle(is_on: bool, theme: &WarpTheme) -> Box<dyn Element> {
@@ -166,10 +167,9 @@ impl OrchestrationConfigBlockView {
                     conversation_id: cid,
                     ..
                 } = event
+                    && *cid == me.conversation_id
                 {
-                    if *cid == me.conversation_id {
-                        me.refresh_from_model(ctx);
-                    }
+                    me.refresh_from_model(ctx);
                 }
             },
         );
@@ -179,16 +179,16 @@ impl OrchestrationConfigBlockView {
         // default entry since the cloud harness-availability service
         // was stripped from this fork).
         ctx.subscribe_to_model(&LLMPreferences::handle(ctx), |me, _, event, ctx| {
-            if let LLMPreferencesEvent::UpdatedAvailableLLMs = event {
-                if let Some(handle) = &me.pickers.model_picker {
-                    oc::populate_model_picker_for_harness(
-                        handle,
-                        &me.edit_state.model_id,
-                        &me.edit_state.harness_type,
-                        true,
-                        ctx,
-                    );
-                }
+            if let LLMPreferencesEvent::UpdatedAvailableLLMs = event
+                && let Some(handle) = &me.pickers.model_picker
+            {
+                oc::populate_model_picker_for_harness(
+                    handle,
+                    &me.edit_state.model_id,
+                    &me.edit_state.harness_type,
+                    true,
+                    ctx,
+                );
             }
         });
 
@@ -217,15 +217,15 @@ impl OrchestrationConfigBlockView {
             return;
         }
         let history = BlocklistAIHistoryModel::as_ref(ctx);
-        if let Some(conv) = history.conversation(&self.conversation_id) {
-            if let Some((config, status)) = conv.orchestration_config_for_plan(&self.plan_id) {
-                self.edit_state = OrchestrationEditState::from_orchestration_config(config);
-                self.is_approved = status.is_approved();
-                if self.pickers_initialized {
-                    oc::repopulate_all_pickers(&mut self.edit_state, &self.pickers, ctx);
-                }
-                ctx.notify();
+        if let Some(conv) = history.conversation(&self.conversation_id)
+            && let Some((config, status)) = conv.orchestration_config_for_plan(&self.plan_id)
+        {
+            self.edit_state = OrchestrationEditState::from_orchestration_config(config);
+            self.is_approved = status.is_approved();
+            if self.pickers_initialized {
+                oc::repopulate_all_pickers(&mut self.edit_state, &self.pickers, ctx);
             }
+            ctx.notify();
         }
     }
 

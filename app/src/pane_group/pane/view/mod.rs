@@ -1,35 +1,31 @@
 pub mod header;
 pub mod header_content;
 
-use crate::pane_group::pane::ActionOrigin;
-use crate::{
-    appearance::Appearance,
-    pane_group::{Direction, SplitPaneState, TabBarHoverIndex},
-    settings::{PaneSettings, PaneSettingsChangedEvent},
-};
-use pathfinder_geometry::rect::RectF;
-
-use super::{
-    BackingView, PaneConfiguration, PaneConfigurationEvent, PaneId, PaneStack, PaneStackEvent,
-};
 use header::PaneHeader;
-use warpui::{
-    elements::{
-        Border, ConstrainedBox, Container, DropTarget, DropTargetData, Flex, MainAxisSize,
-        ParentElement, SavePosition, Shrinkable,
-    },
-    presenter::ChildView,
-    AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
-    ViewContext, ViewHandle,
-};
-
-use crate::pane_group::focus_state::{PaneFocusHandle, PaneGroupFocusEvent};
-
 pub use header::PaneHeaderAction;
 pub use header::PaneHeaderAction::CustomAction as PaneHeaderCustomAction;
 pub use header_content::{
     HeaderContent, HeaderRenderContext, StandardHeader, StandardHeaderOptions,
 };
+use pathfinder_geometry::rect::RectF;
+use warpui::elements::{
+    Border, ConstrainedBox, Container, DropTarget, DropTargetData, Flex, MainAxisSize,
+    ParentElement, SavePosition, Shrinkable,
+};
+use warpui::presenter::ChildView;
+use warpui::{
+    AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
+    ViewContext, ViewHandle,
+};
+
+use super::{
+    BackingView, PaneConfiguration, PaneConfigurationEvent, PaneId, PaneStack, PaneStackEvent,
+};
+use crate::appearance::Appearance;
+use crate::pane_group::focus_state::{PaneFocusHandle, PaneGroupFocusEvent};
+use crate::pane_group::pane::ActionOrigin;
+use crate::pane_group::{Direction, SplitPaneState, TabBarHoverIndex};
+use crate::settings::{PaneSettings, PaneSettingsChangedEvent};
 
 /// Keeps a dragged pane's header finite when its preview receives unbounded constraints.
 const DRAG_PREVIEW_HEADER_MAX_WIDTH: f32 = 400.;
@@ -181,12 +177,12 @@ impl<P: BackingView> PaneView<P> {
     /// Handles events from the pane stack model.
     fn handle_pane_stack_event(&mut self, event: &PaneStackEvent<P>, ctx: &mut ViewContext<Self>) {
         // Set the focus handle for newly added views
-        if let PaneStackEvent::ViewAdded(view) = event {
-            if let Some(focus_handle) = &self.focus_handle {
-                view.update(ctx, |child, ctx| {
-                    child.set_focus_handle(focus_handle.clone(), ctx);
-                });
-            }
+        if let PaneStackEvent::ViewAdded(view) = event
+            && let Some(focus_handle) = &self.focus_handle
+        {
+            view.update(ctx, |child, ctx| {
+                child.set_focus_handle(focus_handle.clone(), ctx);
+            });
         }
 
         let new_child = self.child(ctx);

@@ -1,13 +1,14 @@
+use settings::Setting;
+use warpui::{App, SingletonEntity};
+
 use super::{
+    CollapsibleElementState, CollapsibleExpansionState,
     default_collapsible_state_for_orchestration_action,
     default_collapsible_state_for_orchestration_message, received_message_collapsible_id,
-    CollapsibleElementState, CollapsibleExpansionState,
 };
 use crate::ai::agent::AIAgentActionType;
 use crate::settings::{AISettings, OrchestrationMessageDisplayMode};
 use crate::test_util::settings::initialize_settings_for_tests;
-use settings::Setting;
-use warpui::{App, SingletonEntity};
 
 #[test]
 fn reasoning_auto_collapses_when_user_has_not_manually_toggled() {
@@ -86,11 +87,13 @@ fn orchestration_send_message_starts_collapsed() {
 
 #[test]
 fn non_orchestration_actions_do_not_get_collapsible_state_defaults() {
-    assert!(default_collapsible_state_for_orchestration_action(
-        &AIAgentActionType::OpenCodeReview,
-        OrchestrationMessageDisplayMode::AlwaysCollapse,
-    )
-    .is_none());
+    assert!(
+        default_collapsible_state_for_orchestration_action(
+            &AIAgentActionType::OpenCodeReview,
+            OrchestrationMessageDisplayMode::AlwaysCollapse,
+        )
+        .is_none()
+    );
 }
 
 #[test]

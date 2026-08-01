@@ -1,27 +1,24 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use warp_core::features::FeatureFlag;
 use warpui::{AppContext, ModelContext, SingletonEntity};
 
-use crate::{
-    ai::{
-        agent::{
-            conversation::AIConversationId, AIAgentAttachment, AIAgentContext, AIAgentInput,
-            CloneRepositoryURL, EntrypointType, RequestMetadata, UserQueryMode,
-        },
-        blocklist::agent_view::AgentViewEntryOrigin,
-    },
-    search::slash_command_menu::static_commands::commands,
-    terminal::input::slash_commands::SlashCommandTrigger,
-    BlocklistAIHistoryModel,
-};
-
 use super::{
-    add_pending_file_attachments, input_context_for_request, parse_context_attachments,
-    BlocklistAIController, BlocklistAIControllerEvent, RequestInput,
+    BlocklistAIController, BlocklistAIControllerEvent, RequestInput, add_pending_file_attachments,
+    input_context_for_request, parse_context_attachments,
 };
+use crate::BlocklistAIHistoryModel;
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::{
+    AIAgentAttachment, AIAgentContext, AIAgentInput, CloneRepositoryURL, EntrypointType,
+    RequestMetadata, UserQueryMode,
+};
+use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::ai::blocklist::context_model::{PendingAttachment, PendingFile};
 use crate::ai::blocklist::queued_query::{QueuedQueryId, QueuedQueryModel};
+use crate::search::slash_command_menu::static_commands::commands;
+use crate::terminal::input::slash_commands::SlashCommandTrigger;
 
 pub enum SlashCommandRequest {
     CreateNewProject {

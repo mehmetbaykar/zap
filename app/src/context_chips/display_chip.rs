@@ -1,16 +1,46 @@
 use std::borrow::Cow;
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use pathfinder_color::ColorU;
+use pathfinder_geometry::vector::{Vector2F, vec2f};
+use warp_core::features::FeatureFlag;
+use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors;
+use warpui::elements::{
+    Border, ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
+    DEFAULT_UI_LINE_HEIGHT_RATIO, Empty, Flex, Hoverable, MouseStateHandle, OffsetPositioning,
+    ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Stack, Text,
+};
+use warpui::fonts::{Cache, FamilyId, Properties, Weight};
+use warpui::keymap::Keystroke;
+use warpui::platform::Cursor;
+use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
+use warpui::{
+    AppContext, Element, Entity, EntityId, Gradient, ModelHandle, SingletonEntity, TypedActionView,
+    View, ViewContext, ViewHandle,
+};
+
+use super::directory_fetcher::{
+    DirectoryFetcher, DirectoryFetcherEvent, DirectoryItem, DirectoryType,
+};
+use super::display_menu::{
+    ChipMenuType, DisplayChipMenu, FixedFooter, GenericMenuItem, PromptDisplayMenuEvent,
+};
+use super::{
+    ChipResult, ChipValue, ContextChipKind, agent_view_chip_color, github_pr_display_text_from_url,
+    render_text_from_kind,
+};
 use crate::ai::blocklist::agent_view::AgentViewController;
 use crate::ai::blocklist::prompt::plan_and_todo_list::{PlanAndTodoListEvent, PlanAndTodoListView};
-use crate::ai::{
-    blocklist::{BlocklistAIContextModel, BlocklistAIInputModel},
-    document::ai_document_model::{AIDocumentId, AIDocumentVersion},
-};
+use crate::ai::blocklist::{BlocklistAIContextModel, BlocklistAIInputModel};
+use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
+use crate::appearance::Appearance;
 use crate::code::editor::{add_color, remove_color};
 use crate::code_review::diff_state::DiffStats;
+use crate::completer::SessionContext;
 use crate::context_chips::git_branch_on_click::{
-    is_plausible_new_branch_name, GitBranchOnClickValue,
+    GitBranchOnClickValue, is_plausible_new_branch_name,
 };
 use crate::context_chips::node_version_popup::{NodeVersionPopupEvent, NodeVersionPopupView};
 use crate::context_chips::spacing;
@@ -27,40 +57,8 @@ use crate::util::bindings::keybinding_name_to_display_string;
 use crate::util::truncation::truncate_from_beginning;
 use crate::view_components::action_button::{ActionButtonTheme, NakedTheme};
 use crate::view_components::{FeaturePopup, NewFeaturePopupEvent, NewFeaturePopupLabel};
-use pathfinder_color::ColorU;
-use pathfinder_geometry::vector::{vec2f, Vector2F};
-use std::path::PathBuf;
-use warp_core::ui::theme::Fill;
-use warp_core::{features::FeatureFlag, ui::theme::color::internal_colors};
-use warpui::elements::Empty;
-use warpui::keymap::Keystroke;
-use warpui::platform::Cursor;
-use warpui::ui_components::components::UiComponentStyles;
-use warpui::ui_components::components::{Coords, UiComponent};
-use warpui::{
-    elements::{
-        Border, ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius,
-        CrossAxisAlignment, Flex, Hoverable, MouseStateHandle, OffsetPositioning, ParentAnchor,
-        ParentElement, ParentOffsetBounds, Radius, Stack, Text, DEFAULT_UI_LINE_HEIGHT_RATIO,
-    },
-    fonts::{Cache, FamilyId, Properties, Weight},
-    AppContext, Element, Entity, EntityId, Gradient, ModelHandle, SingletonEntity, TypedActionView,
-    View, ViewContext, ViewHandle,
-};
-
-use crate::appearance::Appearance;
-use crate::completer::SessionContext;
-use crate::{send_telemetry_from_ctx, TelemetryEvent};
-
-use super::{
-    agent_view_chip_color,
-    directory_fetcher::{DirectoryFetcher, DirectoryFetcherEvent, DirectoryItem, DirectoryType},
-    display_menu::{
-        ChipMenuType, DisplayChipMenu, FixedFooter, GenericMenuItem, PromptDisplayMenuEvent,
-    },
-    github_pr_display_text_from_url, render_text_from_kind, ChipResult, ChipValue, ContextChipKind,
-};
 use crate::workspace::view::TOGGLE_RIGHT_PANEL_BINDING_NAME;
+use crate::{TelemetryEvent, send_telemetry_from_ctx};
 
 /// Helper function to render git diff stats content (file icon or +- icons, file count, bullet, +/- counts)
 /// Used by both the context chips and the AI control panel
@@ -400,15 +398,15 @@ impl GitLineChanges {
 
         let words: Vec<&str> = line.split_whitespace().collect();
         for (i, word) in words.iter().enumerate() {
-            if let Ok(num) = word.parse::<u32>() {
-                if let Some(next_word) = words.get(i + 1) {
-                    if next_word.starts_with("file") {
-                        files_changed = num;
-                    } else if next_word.starts_with("insertion") {
-                        lines_added = num;
-                    } else if next_word.starts_with("deletion") {
-                        lines_removed = num;
-                    }
+            if let Ok(num) = word.parse::<u32>()
+                && let Some(next_word) = words.get(i + 1)
+            {
+                if next_word.starts_with("file") {
+                    files_changed = num;
+                } else if next_word.starts_with("insertion") {
+                    lines_added = num;
+                } else if next_word.starts_with("deletion") {
+                    lines_removed = num;
                 }
             }
         }
@@ -889,20 +887,21 @@ impl DisplayChip {
                 ctx.subscribe_to_view(&menu_view, |me, _, event, ctx| match event {
                     PromptDisplayMenuEvent::MenuAction(generic_event) => {
                         let action_item = generic_event.action_item.as_any();
-                        let command =
-                            if let Some(git_branch) = action_item.downcast_ref::<GitBranch>() {
-                                git_branch.prompt_chip_command()
-                            } else if let Some(create_branch) =
-                                action_item.downcast_ref::<CreateGitBranch>()
-                            {
-                                create_branch.prompt_chip_command()
-                            } else {
-                                log::warn!(
+                        let command = if let Some(git_branch) =
+                            action_item.downcast_ref::<GitBranch>()
+                        {
+                            git_branch.prompt_chip_command()
+                        } else if let Some(create_branch) =
+                            action_item.downcast_ref::<CreateGitBranch>()
+                        {
+                            create_branch.prompt_chip_command()
+                        } else {
+                            log::warn!(
                                 "MenuAction event should contain a GitBranch or CreateGitBranch \
                                  action item"
                             );
-                                return;
-                            };
+                            return;
+                        };
                         ctx.emit(PromptDisplayChipEvent::TryExecuteCommand(command));
                         me.close_git_branch_menu(ctx);
                         ctx.notify();
@@ -1583,15 +1582,15 @@ impl DisplayChip {
             }
 
             let mut stack = Stack::new().with_child(chip_element.finish());
-            if state.is_hovered() {
-                if let Some(tooltip_text) = tooltip_text.clone() {
-                    let tool_tip = appearance
-                        .ui_builder()
-                        .tool_tip(tooltip_text)
-                        .build()
-                        .finish();
-                    stack.add_positioned_overlay_child(tool_tip, udi_tooltip_positioning());
-                }
+            if state.is_hovered()
+                && let Some(tooltip_text) = tooltip_text.clone()
+            {
+                let tool_tip = appearance
+                    .ui_builder()
+                    .tool_tip(tooltip_text)
+                    .build()
+                    .finish();
+                stack.add_positioned_overlay_child(tool_tip, udi_tooltip_positioning());
             }
             stack.finish()
         })
@@ -2019,17 +2018,18 @@ impl View for DisplayChip {
     }
 
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
-        match self.render_chip(app) { Some(chip) => {
-            if self.is_in_agent_view {
-                chip
-            } else {
-                Container::new(chip)
-                    .with_margin_right(CHIP_MARGIN_RIGHT)
-                    .finish()
+        match self.render_chip(app) {
+            Some(chip) => {
+                if self.is_in_agent_view {
+                    chip
+                } else {
+                    Container::new(chip)
+                        .with_margin_right(CHIP_MARGIN_RIGHT)
+                        .finish()
+                }
             }
-        } _ => {
-            Empty::new().finish()
-        }}
+            _ => Empty::new().finish(),
+        }
     }
 }
 

@@ -12,12 +12,10 @@ use warp::integration_testing::sftp;
 use warp::integration_testing::sftp::{ConnectionState, Dialog, SftpBrowserAction};
 use warp::integration_testing::terminal::wait_until_bootstrapped_single_pane_for_tab;
 use warp::integration_testing::view_getters::{pane_group_view, workspace_view};
-use warpui::{
-    async_assert, async_assert_eq, integration::AssertionCallback, integration::StepDataMap,
-    integration::TestStep, TypedActionView,
-};
+use warpui::integration::{AssertionCallback, StepDataMap, TestStep};
+use warpui::{TypedActionView, async_assert, async_assert_eq};
 
-use super::{new_builder, Builder};
+use super::{Builder, new_builder};
 
 /// Asserts the SFTP browser view exists and is accessible.
 ///

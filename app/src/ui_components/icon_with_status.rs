@@ -3,12 +3,10 @@ use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::icons::Icon as WarpIcon;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::{Fill as WarpThemeFill, WarpTheme};
-use warpui::{
-    assets::asset_cache::AssetSource,
-    elements::{
-        CacheOption, ChildAnchor, ConstrainedBox, Container, CornerRadius, Element, Image,
-        OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Stack,
-    },
+use warpui::assets::asset_cache::AssetSource;
+use warpui::elements::{
+    CacheOption, ChildAnchor, ConstrainedBox, Container, CornerRadius, Element, Image,
+    OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Stack,
 };
 
 use crate::ai::agent::conversation::{ConversationStatus, StatusColorStyle};

@@ -1,26 +1,25 @@
 use std::collections::{HashMap, HashSet};
-
 use std::fs;
 
-use crate::code_review::diff_state::DiffMode;
-use crate::remote_server::diff_state_tracker::DiffModelKey;
 use warp_util::standardized_path::StandardizedPath;
 use warpui::App;
 
 use super::super::diff_state_tracker::RemoteDiffStateManager;
 use super::super::proto::{
+    BundledSkillMetadata, CreateDirectory, ErrorCode, HomeSkillMetadata, ListDirectory,
+    ReadFileChunk, RemoteAgentContextSnapshot, RemoteContextFileProto, RemoteSkillProto,
+    ResolvePath, ServerMessage, WriteFileChunk, WriteFileResponse, WriteFileSuccess,
     list_directory_response, read_file_chunk_response, remote_skill_proto, resolve_path_response,
-    server_message, write_file_chunk_response, write_file_response, BundledSkillMetadata,
-    CreateDirectory, ErrorCode, HomeSkillMetadata, ListDirectory, ReadFileChunk,
-    RemoteAgentContextSnapshot, RemoteContextFileProto, RemoteSkillProto, ResolvePath,
-    ServerMessage, WriteFileChunk, WriteFileResponse, WriteFileSuccess,
+    server_message, write_file_chunk_response, write_file_response,
 };
 use super::super::protocol::RequestId;
 #[cfg(feature = "local_fs")]
 use super::super::server_buffer_tracker::ServerBufferTracker;
 use super::{
-    invalid_request_response, requested_repo_path, ConnectionId, PendingFileOps, ServerModel,
+    ConnectionId, PendingFileOps, ServerModel, invalid_request_response, requested_repo_path,
 };
+use crate::code_review::diff_state::DiffMode;
+use crate::remote_server::diff_state_tracker::DiffModelKey;
 
 #[test]
 fn requested_repo_path_requires_a_path() {

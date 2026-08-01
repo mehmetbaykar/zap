@@ -4,12 +4,12 @@ use warp_editor::model::CoreEditorModel;
 use warp_editor::render::model::{
     BlockItem, HitTestOptions, LineCount, Location, RenderLineLocation,
 };
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::units::Pixels;
 use warpui::{AppContext, ViewContext};
 
 use super::{CodeReviewView, CodeReviewViewState, FILE_HEADER_HEIGHT};
 use crate::code::editor::line::EditorLineLocation;
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CodeReviewVisibleAnchorForTest {
@@ -364,12 +364,13 @@ impl CodeReviewView {
         // Test helper: probe by both the raw path (wrapped as a local
         // `LocalOrRemotePath`) and by the repo-joined absolute path.
         let local_path = LocalOrRemotePath::Local(PathBuf::from(path));
-        let editor = match self.editor_for_path(&local_path, ctx) { Some(editor) => {
-            editor
-        } _ => {
-            let absolute_path = self.repo_path()?.join(path);
-            self.editor_for_path(&absolute_path, ctx)?
-        }};
+        let editor = match self.editor_for_path(&local_path, ctx) {
+            Some(editor) => editor,
+            _ => {
+                let absolute_path = self.repo_path()?.join(path);
+                self.editor_for_path(&absolute_path, ctx)?
+            }
+        };
         let text = editor
             .as_ref(ctx)
             .editor()

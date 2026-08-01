@@ -1,56 +1,49 @@
-use std::{
-    any::Any,
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-    time::Duration,
-};
+use std::any::Any;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use itertools::Itertools;
 use parking_lot::Mutex;
+#[cfg(feature = "local_fs")]
+use repo_metadata::DirectoryWatcher;
 use settings::Setting as _;
+use warp_completer::completer::{CommandExitStatus, CommandOutput};
 use warp_core::command::ExitCode;
 use warpui::{App, SingletonEntity};
 use warpui_extras::user_preferences;
 
+use super::{ChipUpdateStatus, CurrentPrompt, PromptContext};
+use crate::auth::{AuthManager, AuthStateProvider};
 #[cfg(feature = "local_fs")]
 use crate::code_review::diff_state::DiffStats;
 #[cfg(feature = "local_fs")]
 use crate::code_review::git_repo_model::{GitRepoStatusModel, GitStatusMetadata};
 #[cfg(feature = "local_fs")]
 use crate::code_review::github_repo_model::GitHubRepoModel;
+use crate::context_chips::context_chip::{ChipFingerprintInput, Environment};
 #[cfg(feature = "local_fs")]
 use crate::context_chips::display_chip::GitBranchTrackingStatus;
+use crate::context_chips::prompt::Prompt;
+use crate::context_chips::{
+    ChipAvailability, ChipDisabledReason, ChipRuntimeCapabilities, ContextChipKind,
+};
+use crate::features::FeatureFlag;
+use crate::menu::MenuItem;
+use crate::settings::WarpPromptSeparator;
 #[cfg(windows)]
 use crate::system::SystemInfo;
+use crate::terminal::History;
+use crate::terminal::model::block::BlockMetadata;
+use crate::terminal::model::session::{
+    CommandExecutor, ExecuteCommandOptions, SessionId, SessionInfo, Sessions,
+};
+use crate::terminal::session_settings::{GithubPrPromptChipDefaultValidation, SessionSettings};
+use crate::terminal::shell::Shell;
+use crate::terminal::view::PromptPosition;
 #[cfg(feature = "local_fs")]
 use crate::util::git::PrInfo;
-use crate::{
-    auth::{AuthManager, AuthStateProvider},
-    context_chips::{
-        context_chip::{ChipFingerprintInput, Environment},
-        prompt::Prompt,
-        ChipAvailability, ChipDisabledReason, ChipRuntimeCapabilities, ContextChipKind,
-    },
-    features::FeatureFlag,
-    menu::MenuItem,
-    settings::WarpPromptSeparator,
-    terminal::{
-        model::{
-            block::BlockMetadata,
-            session::{CommandExecutor, ExecuteCommandOptions, SessionId, SessionInfo, Sessions},
-        },
-        session_settings::{GithubPrPromptChipDefaultValidation, SessionSettings},
-        shell::Shell,
-        view::PromptPosition,
-        History,
-    },
-};
-#[cfg(feature = "local_fs")]
-use repo_metadata::DirectoryWatcher;
-use warp_completer::completer::{CommandExitStatus, CommandOutput};
-
-use super::{ChipUpdateStatus, CurrentPrompt, PromptContext};
 
 #[cfg(feature = "local_fs")]
 fn git_status_metadata(branch: &str) -> GitStatusMetadata {
@@ -335,18 +328,26 @@ fn test_github_pr_chip_runtime_policy_configuration() {
     );
     assert_eq!(policy.shell_command_timeout(), Some(Duration::from_secs(5)));
     assert!(policy.suppress_on_failure());
-    assert!(policy
-        .fingerprint_inputs()
-        .contains(&ChipFingerprintInput::SessionId));
-    assert!(policy
-        .fingerprint_inputs()
-        .contains(&ChipFingerprintInput::WorkingDirectory));
-    assert!(policy
-        .fingerprint_inputs()
-        .contains(&ChipFingerprintInput::GitBranch));
-    assert!(policy
-        .fingerprint_inputs()
-        .contains(&ChipFingerprintInput::RequiredExecutablesPresence));
+    assert!(
+        policy
+            .fingerprint_inputs()
+            .contains(&ChipFingerprintInput::SessionId)
+    );
+    assert!(
+        policy
+            .fingerprint_inputs()
+            .contains(&ChipFingerprintInput::WorkingDirectory)
+    );
+    assert!(
+        policy
+            .fingerprint_inputs()
+            .contains(&ChipFingerprintInput::GitBranch)
+    );
+    assert!(
+        policy
+            .fingerprint_inputs()
+            .contains(&ChipFingerprintInput::RequiredExecutablesPresence)
+    );
     assert_eq!(
         chip.availability(&ChipRuntimeCapabilities {
             session_is_local: Some(false),
@@ -358,9 +359,11 @@ fn test_github_pr_chip_runtime_policy_configuration() {
         policy.invalidate_on_commands(),
         &["git".to_string(), "gh".to_string(), "gt".to_string()]
     );
-    assert!(policy
-        .fingerprint_inputs()
-        .contains(&ChipFingerprintInput::InvalidatingCommandCount));
+    assert!(
+        policy
+            .fingerprint_inputs()
+            .contains(&ChipFingerprintInput::InvalidatingCommandCount)
+    );
 }
 
 #[test]

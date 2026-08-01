@@ -28,9 +28,9 @@ use warp_cli::skill::SkillSpec;
 use warp_core::ui::theme::color::internal_colors;
 use warpui::clipboard::ClipboardContent;
 use warpui::elements::{
-    resizable_state_handle, Align, Border, ChildView, ConstrainedBox, Container, CornerRadius,
-    CrossAxisAlignment, Element, Flex, MainAxisAlignment, MainAxisSize, MouseStateHandle,
-    ParentElement, Radius, Resizable, ResizableStateHandle, Shrinkable, Text,
+    Align, Border, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Element,
+    Flex, MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Radius, Resizable,
+    ResizableStateHandle, Shrinkable, Text, resizable_state_handle,
 };
 use warpui::fonts::{Properties, Weight};
 use warpui::ui_components::components::UiComponent;
@@ -45,21 +45,17 @@ use crate::ai::agent_conversations_model::{AgentConversationEntry, AgentRunDispl
 use crate::ai::agent_management::details_action_buttons::{
     ActionButtonsConfig, AgentDetailsButtonEvent, ConversationActionButtonsRow,
 };
-use crate::ai::agent_management::telemetry::{AgentManagementTelemetryEvent, OpenedFrom};
+use crate::ai::agent_management::telemetry::AgentManagementTelemetryEvent;
 use crate::ai::ambient_agents::task::TaskPrincipalInfo;
 use crate::ai::ambient_agents::{AmbientAgentTask, AmbientAgentTaskId};
 use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
-use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::ai::document::ai_document_model::AIDocumentModel;
 use crate::ai::harness_display;
 use crate::appearance::Appearance;
 use crate::send_telemetry_from_ctx;
-use crate::ui_components::icons::Icon;
-use crate::util::bindings::CustomAction;
 use crate::util::time_format::{format_approx_duration_from_now, human_readable_precise_duration};
-use crate::view_components::action_button::{ActionButton, ButtonSize, SecondaryTheme};
-use crate::view_components::copyable_text_field::COPY_FEEDBACK_DURATION;
 use crate::view_components::DismissibleToast;
+use crate::view_components::copyable_text_field::COPY_FEEDBACK_DURATION;
 use crate::workspace::{ForkedConversationDestination, ToastStack, WorkspaceAction};
 
 const FIELD_SPACING: f32 = 16.0;
@@ -204,12 +200,7 @@ impl ConversationDetailsData {
         open_action: Option<WorkspaceAction>,
         copy_link_url: Option<String>,
     ) -> Self {
-        let creator = entry
-            .display
-            .creator
-            .name
-            .clone()
-            .map(PrincipalInfo::new);
+        let creator = entry.display.creator.name.clone().map(PrincipalInfo::new);
         let executor = entry.display.executor.as_ref().and_then(|e| {
             let display_name = e.name.clone().or_else(|| e.uid.clone())?;
             Some(PrincipalInfo {
@@ -495,19 +486,22 @@ impl ConversationDetailsPanel {
         }
     }
 
-    pub fn set_conversation_details(&mut self, data: ConversationDetailsData, ctx: &mut ViewContext<Self>) {
+    pub fn set_conversation_details(
+        &mut self,
+        data: ConversationDetailsData,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.last_copied = None;
 
         if self.show_actions {
             let config = match &data.mode {
                 PanelMode::Task { task_id, .. } => ActionButtonsConfig {
                     open_action: data.open_action.clone(),
-                    cancel_task_id: task_id
-                        .filter(|_| {
-                            data.display_status()
-                                .map(|s| s.is_cancellable())
-                                .unwrap_or(false)
-                        }),
+                    cancel_task_id: task_id.filter(|_| {
+                        data.display_status()
+                            .map(|s| s.is_cancellable())
+                            .unwrap_or(false)
+                    }),
                     fork_conversation_id: None,
                     view_details_item_id: None,
                     copy_link_url: data.copy_link_url.clone(),
@@ -529,7 +523,8 @@ impl ConversationDetailsPanel {
         self.artifact_buttons = if data.artifacts.is_empty() {
             None
         } else {
-            let view = ctx.add_typed_action_view(|ctx| ArtifactButtonsRow::new(&data.artifacts, ctx));
+            let view =
+                ctx.add_typed_action_view(|ctx| ArtifactButtonsRow::new(&data.artifacts, ctx));
             ctx.subscribe_to_view(&view, |me, _, event, ctx| {
                 me.handle_artifact_buttons_event(event, ctx);
             });
@@ -540,7 +535,11 @@ impl ConversationDetailsPanel {
         ctx.notify();
     }
 
-    fn handle_action_buttons_event(&mut self, event: &AgentDetailsButtonEvent, ctx: &mut ViewContext<Self>) {
+    fn handle_action_buttons_event(
+        &mut self,
+        event: &AgentDetailsButtonEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
         match event {
             AgentDetailsButtonEvent::Open => {
                 if let Some(action) = self.data.open_action.clone() {
@@ -588,7 +587,11 @@ impl ConversationDetailsPanel {
         }
     }
 
-    fn handle_artifact_buttons_event(&mut self, event: &ArtifactButtonsRowEvent, ctx: &mut ViewContext<Self>) {
+    fn handle_artifact_buttons_event(
+        &mut self,
+        event: &ArtifactButtonsRowEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
         match event {
             ArtifactButtonsRowEvent::OpenPlan { document_uid } => {
                 send_telemetry_from_ctx!(
@@ -624,7 +627,8 @@ impl ConversationDetailsPanel {
             ArtifactButtonsRowEvent::OpenPullRequest { url } => {
                 send_telemetry_from_ctx!(
                     AgentManagementTelemetryEvent::ArtifactClicked {
-                        artifact_type: crate::ai::agent_management::telemetry::ArtifactType::PullRequest
+                        artifact_type:
+                            crate::ai::agent_management::telemetry::ArtifactType::PullRequest
                     },
                     ctx
                 );
@@ -692,7 +696,12 @@ impl ConversationDetailsPanel {
         )
     }
 
-    fn render_field_row(&self, label: &str, value: String, appearance: &Appearance) -> Box<dyn Element> {
+    fn render_field_row(
+        &self,
+        label: &str,
+        value: String,
+        appearance: &Appearance,
+    ) -> Box<dyn Element> {
         let theme = appearance.theme();
         let label_text = Text::new_inline(
             label.to_string(),
@@ -701,10 +710,14 @@ impl ConversationDetailsPanel {
         )
         .with_color(theme.nonactive_ui_text_color().into())
         .finish();
-        let value_text = Text::new_inline(value, appearance.ui_font_family(), appearance.ui_font_size())
-            .with_color(theme.active_ui_text_color().into())
-            .soft_wrap(true)
-            .finish();
+        let value_text = Text::new_inline(
+            value,
+            appearance.ui_font_family(),
+            appearance.ui_font_size(),
+        )
+        .with_color(theme.active_ui_text_color().into())
+        .soft_wrap(true)
+        .finish();
 
         Flex::column()
             .with_cross_axis_alignment(CrossAxisAlignment::Start)
@@ -837,7 +850,7 @@ impl ConversationDetailsPanel {
             appearance.ui_font_family(),
             appearance.ui_font_size(),
         )
-        .with_color(theme.ansi_fg_red().into())
+        .with_color(theme.ansi_fg_red())
         .soft_wrap(true)
         .finish();
 
@@ -868,7 +881,11 @@ impl ConversationDetailsPanel {
             fields.push(self.render_field_row("Creator", creator.display_name.clone(), appearance));
         }
         if let Some(executor) = &self.data.executor {
-            fields.push(self.render_field_row("Executor", executor.display_name.clone(), appearance));
+            fields.push(self.render_field_row(
+                "Executor",
+                executor.display_name.clone(),
+                appearance,
+            ));
         }
         if let Some(created_at) = self.data.created_at {
             fields.push(self.render_field_row(
@@ -979,7 +996,8 @@ impl TypedActionView for ConversationDetailsPanel {
             }
             ConversationDetailsPanelAction::CopyDirectory => {
                 if let Some(directory) = self.data.directory() {
-                    ctx.clipboard().write(ClipboardContent::plain_text(directory));
+                    ctx.clipboard()
+                        .write(ClipboardContent::plain_text(directory));
                     self.mark_copied(CopyButtonKind::Directory, ctx);
                 }
             }
@@ -989,7 +1007,9 @@ impl TypedActionView for ConversationDetailsPanel {
                         server_conversation_id,
                         ..
                     } => server_conversation_id.clone(),
-                    PanelMode::Task { conversation_id, .. } => conversation_id.clone(),
+                    PanelMode::Task {
+                        conversation_id, ..
+                    } => conversation_id.clone(),
                 };
                 if let Some(id) = id {
                     ctx.clipboard().write(ClipboardContent::plain_text(id));

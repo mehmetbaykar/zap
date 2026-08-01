@@ -2,18 +2,18 @@ use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::Vector2F;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::Fill;
-use warpui::{
-    elements::{
-        ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex,
-        Hoverable, MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable, Text,
-    },
-    fonts::{Properties, Weight::Bold},
-    platform::Cursor,
-    text_layout::ClipConfig,
-    AppContext, Element, EventContext, SingletonEntity,
+use warpui::elements::{
+    ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex, Hoverable,
+    MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable, Text,
 };
+use warpui::fonts::Properties;
+use warpui::fonts::Weight::Bold;
+use warpui::platform::Cursor;
+use warpui::text_layout::ClipConfig;
+use warpui::{AppContext, Element, EventContext, SingletonEntity};
 
-use crate::ui_components::{blended_colors, icons::Icon};
+use crate::ui_components::blended_colors;
+use crate::ui_components::icons::Icon;
 
 /// Renders a clickable card with an optional leading icon, title/subtitle,
 /// a trailing chevron, and an optional extra trailing element (e.g. a dismiss

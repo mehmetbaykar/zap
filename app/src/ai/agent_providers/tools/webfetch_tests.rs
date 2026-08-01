@@ -177,9 +177,11 @@ fn default_format_is_markdown() {
 
 #[test]
 fn accept_header_negotiation_for_markdown() {
-    assert!(FetchFormat::Markdown
-        .accept_header()
-        .starts_with("text/markdown;q=1.0"));
+    assert!(
+        FetchFormat::Markdown
+            .accept_header()
+            .starts_with("text/markdown;q=1.0")
+    );
 }
 
 // ---------------------------------------------------------------------------

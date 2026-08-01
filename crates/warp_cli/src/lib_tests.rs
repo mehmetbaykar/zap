@@ -1,6 +1,6 @@
-use super::*;
 use clap::Parser;
 
+use super::*;
 use crate::agent::{AgentCommand, Harness};
 // Zap Wave 7-2: the `environment` CLI was physically removed along with the cloud ambient agent's main body.
 

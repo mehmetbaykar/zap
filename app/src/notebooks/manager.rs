@@ -1,5 +1,5 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use futures_util::stream::AbortHandle;
@@ -8,10 +8,10 @@ use warp_errors::report_error;
 use warpui::r#async::SpawnedFutureHandle;
 use warpui::{Entity, EntityId, ModelContext, SingletonEntity, WeakViewHandle, WindowId};
 
-use super::notebook::NotebookView;
 use super::NotebookObject;
-use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
+use super::notebook::NotebookView;
 use crate::cloud_object::Owner;
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
 use crate::drive::ZapDriveObjectSettings;
 use crate::pane_group::{NotebookPane, PaneContent};
 use crate::server::ids::SyncId;
@@ -139,10 +139,10 @@ impl NotebookManager {
         event: &ObjectStoreEvent,
         ctx: &mut ModelContext<Self>,
     ) {
-        if let ObjectStoreEvent::ObjectUpdated { type_and_id, .. } = event {
-            if let Some(notebook_id) = type_and_id.as_notebook_id() {
-                self.update_raw_text_for_notebook(notebook_id, ctx);
-            }
+        if let ObjectStoreEvent::ObjectUpdated { type_and_id, .. } = event
+            && let Some(notebook_id) = type_and_id.as_notebook_id()
+        {
+            self.update_raw_text_for_notebook(notebook_id, ctx);
         }
     }
 

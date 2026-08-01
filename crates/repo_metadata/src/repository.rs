@@ -10,20 +10,20 @@ use futures::future::ready;
 #[cfg(feature = "local_fs")]
 use ignore::gitignore::Gitignore;
 use warp_util::standardized_path::StandardizedPath;
-use warpui_core::r#async::{BoxFuture, SpawnedFutureHandle};
 #[cfg(feature = "local_fs")]
 use warpui_core::SingletonEntity;
+use warpui_core::r#async::{BoxFuture, SpawnedFutureHandle};
 use warpui_core::{Entity, ModelContext, ModelHandle};
 
 #[cfg(feature = "local_fs")]
 use crate::watcher::DirectoryWatcher;
 use crate::watcher::TaskQueue;
+use crate::{RepoMetadataError, RepositoryUpdate};
 #[cfg(feature = "local_fs")]
 use crate::{
     entry::{matches_gitignores, should_ignore_git_path},
     gitignores_for_directory,
 };
-use crate::{RepoMetadataError, RepositoryUpdate};
 
 /// Trait for entities that want to subscribe to repository file changes.
 pub trait RepositorySubscriber: Send + Sync {
@@ -309,16 +309,16 @@ impl Repository {
         if let Some(external_git_dir) = &self.external_git_directory {
             paths.push(external_git_dir.clone());
         }
-        if let Some(common_git_dir) = &self.common_git_directory {
-            if let Some(common_local) = common_git_dir.to_local_path() {
-                let refs_dir = common_local.join("refs");
-                if let Ok(refs_std) = StandardizedPath::from_local_canonicalized(&refs_dir) {
-                    paths.push(refs_std);
-                }
-                let config_file = common_local.join("config");
-                if let Ok(config_std) = StandardizedPath::from_local_canonicalized(&config_file) {
-                    paths.push(config_std);
-                }
+        if let Some(common_git_dir) = &self.common_git_directory
+            && let Some(common_local) = common_git_dir.to_local_path()
+        {
+            let refs_dir = common_local.join("refs");
+            if let Ok(refs_std) = StandardizedPath::from_local_canonicalized(&refs_dir) {
+                paths.push(refs_std);
+            }
+            let config_file = common_local.join("config");
+            if let Ok(config_std) = StandardizedPath::from_local_canonicalized(&config_file) {
+                paths.push(config_std);
             }
         }
         paths
@@ -418,13 +418,14 @@ impl Repository {
         subscriber_id: SubscriberId,
         ctx: &mut ModelContext<Self>,
     ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
-        match self.subscribers.remove(&subscriber_id) { Some(mut subscriber) => {
-            let future = subscriber.on_scan(self, ctx);
-            self.subscribers.insert(subscriber_id, subscriber);
-            Some(future)
-        } _ => {
-            None
-        }}
+        match self.subscribers.remove(&subscriber_id) {
+            Some(mut subscriber) => {
+                let future = subscriber.on_scan(self, ctx);
+                self.subscribers.insert(subscriber_id, subscriber);
+                Some(future)
+            }
+            _ => None,
+        }
     }
 
     /// Notifies a specific subscriber about file changes.
@@ -435,13 +436,14 @@ impl Repository {
         update: &RepositoryUpdate,
         ctx: &mut ModelContext<Self>,
     ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
-        match self.subscribers.remove(&subscriber_id) { Some(mut subscriber) => {
-            let future = subscriber.on_files_updated(self, update, ctx);
-            self.subscribers.insert(subscriber_id, subscriber);
-            Some(future)
-        } _ => {
-            None
-        }}
+        match self.subscribers.remove(&subscriber_id) {
+            Some(mut subscriber) => {
+                let future = subscriber.on_files_updated(self, update, ctx);
+                self.subscribers.insert(subscriber_id, subscriber);
+                Some(future)
+            }
+            _ => None,
+        }
     }
 
     /// Returns the subscriber IDs for this repository.

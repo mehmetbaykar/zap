@@ -8,11 +8,10 @@
 
 use warpui::{AppContext, ModelHandle, View, ViewContext, ViewHandle};
 
+use super::{DetachType, PaneId, ShareableLink, ShareableLinkError};
 use crate::app_state::LeafContents;
 use crate::pane_group::{BackingView, PaneConfiguration, PaneContent, PaneGroup, PaneView};
 use crate::sftp_manager::browser::SftpBrowserView;
-
-use super::{DetachType, PaneId, ShareableLink, ShareableLinkError};
 
 /// SFTP file browser pane content
 pub struct SftpPane {

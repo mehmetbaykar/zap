@@ -5,19 +5,14 @@
 //! a toast with a clickable "Open PR" link.
 
 use warp_core::ui::appearance::Appearance;
-use warpui::{
-    elements::{
-        ClippedScrollStateHandle, Container, Element, Flex, MouseStateHandle, ParentElement, Text,
-    },
-    SingletonEntity, ViewContext,
+use warpui::elements::{
+    ClippedScrollStateHandle, Container, Element, Flex, MouseStateHandle, ParentElement, Text,
 };
+use warpui::{SingletonEntity, ViewContext};
 
 use crate::code_review::git_dialog::{
-    render_branch_section, render_file_changes_box, should_send_git_ops_ai_request, show_toast,
-    user_facing_git_error, GitDialog, GitDialogAction, GitDialogEvent, GitDialogMode,
-};
-use crate::code_review::telemetry_event::{
-    CodeReviewTelemetryEvent, GitDialogStatus, GitOperationKind,
+    GitDialog, GitDialogAction, GitDialogEvent, GitDialogMode, render_branch_section,
+    render_file_changes_box, should_send_git_ops_ai_request, show_toast, user_facing_git_error,
 };
 use crate::report_error;
 use crate::ui_components::icons::Icon;

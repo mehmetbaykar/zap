@@ -7,14 +7,13 @@ pub use model_impl::*;
 use warp_core::features::FeatureFlag;
 use warpui::{AppContext, ViewContext};
 
-use crate::terminal::shared_session::ParticipantId;
-
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{
     AIAgentExchangeId, AIAgentInput, AIAgentOutput, CancellationReason, PassiveSuggestionTrigger,
     PassiveSuggestionTriggerType, RenderableAIError, ServerOutputId, Shared,
 };
 use crate::ai::llms::LLMId;
+use crate::terminal::shared_session::ParticipantId;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PassiveRequestType {
@@ -224,10 +223,10 @@ pub mod testing {
     use super::{AIBlockModel, AIBlockOutputStatus, OutputStatusUpdateCallback};
     use crate::ai::agent::conversation::AIConversationId;
     use crate::ai::agent::{AIAgentInput, AIAgentOutput, ServerOutputId, Shared};
+    use crate::ai::blocklist::AIBlock;
     use crate::ai::blocklist::model::{
         AIRequestType, PassiveRequestType, PassiveSuggestionTriggerType,
     };
-    use crate::ai::blocklist::AIBlock;
     use crate::ai::llms::LLMId;
 
     pub struct FakeAIBlockModel {

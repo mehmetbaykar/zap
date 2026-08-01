@@ -222,9 +222,10 @@ fn retain_at_context_attachments_in_query_drops_deleted_prefix_reference() {
 
         model.read(&app, |m, _| {
             assert!(!m.pending_at_context_attachments().contains_key("@commit"));
-            assert!(m
-                .pending_at_context_attachments()
-                .contains_key("@commit (4)"));
+            assert!(
+                m.pending_at_context_attachments()
+                    .contains_key("@commit (4)")
+            );
         });
     });
 }

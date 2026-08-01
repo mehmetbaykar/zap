@@ -26,7 +26,7 @@ use ai::skills::ParsedSkill;
 use chrono::{DateTime, Local, TimeDelta};
 use comment::ReviewComment;
 use derivative::Derivative;
-use markdown_parser::{parse_markdown, FormattedTable, FormattedText, FormattedTextInline};
+use markdown_parser::{FormattedTable, FormattedText, FormattedTextInline, parse_markdown};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use task::TaskId;
@@ -35,10 +35,11 @@ use uuid::Uuid;
 use warp_core::channel::ChannelState;
 use warp_core::features::FeatureFlag;
 use warp_editor::render::model::LineCount;
-use warp_multi_agent_api::{diff_hunk as diff_hunk_api, AgentEvent, AgentType};
+use warp_multi_agent_api::{AgentEvent, AgentType, diff_hunk as diff_hunk_api};
 
 pub use self::api::{MaybeAIAgentOutputMessage, MessageToAIAgentOutputMessageError};
 use super::llms::LLMId;
+use crate::TelemetryEvent;
 use crate::ai::api_error::{AIApiError, DeserializationError};
 use crate::ai::block_context::BlockContext;
 use crate::ai::blocklist::block::view_impl::output::are_all_text_sections_empty;
@@ -52,7 +53,6 @@ use crate::search::slash_command_menu::static_commands::commands;
 use crate::terminal::model::block::BlockId;
 use crate::terminal::shared_session::ParticipantId;
 use crate::terminal::shell::ShellType;
-use crate::TelemetryEvent;
 
 /// A server supplied ID for a specific AI generated output.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
@@ -609,13 +609,13 @@ impl AIAgentOutput {
                 }
                 AIAgentOutputMessageType::Action(action) => {
                     // Include action results from the action model if available
-                    if let Some(action_model) = action_model {
-                        if let Some(action_result) = action_model.get_action_result(&action.id) {
-                            result.push(format!("{}", MarkdownActionResult(&action_result.result)));
-                            // Add an extra newline after tool call results for readability
-                            result.push(String::new());
-                            last_was_action = true;
-                        }
+                    if let Some(action_model) = action_model
+                        && let Some(action_result) = action_model.get_action_result(&action.id)
+                    {
+                        result.push(format!("{}", MarkdownActionResult(&action_result.result)));
+                        // Add an extra newline after tool call results for readability
+                        result.push(String::new());
+                        last_was_action = true;
                     }
                 }
                 AIAgentOutputMessageType::TodoOperation(operation) => {
@@ -733,8 +733,7 @@ impl RenderableAIError {
     const TRANSIENT_NETWORK_ERROR_MESSAGE: &'static str =
         "Zap lost connection while receiving the agent response. This is usually temporary.";
     /// User-facing message shown when an agent-issued command exits the shell.
-    pub const AGENT_EXITED_SHELL_MESSAGE: &'static str =
-        "The shell exited while the agent was running a command, so the run could not continue. Ensure the agent is not asked to run commands or source scripts that can exit the shell.";
+    pub const AGENT_EXITED_SHELL_MESSAGE: &'static str = "The shell exited while the agent was running a command, so the run could not continue. Ensure the agent is not asked to run commands or source scripts that can exit the shell.";
     /// Creates a transient network error. `kind` is the structured cause (including the raw API
     /// error where one exists), preserved so user reports can disambiguate the different causes
     /// behind the shared user-facing copy.
@@ -1251,10 +1250,10 @@ impl<'a> std::fmt::Display for MarkdownActionResult<'a> {
                     for file in files {
                         writeln!(f, "**{}**", file.file_name)?;
                         let content = &file.content;
-                        if let AnyFileContent::StringContent(text) = content {
-                            if !text.trim().is_empty() {
-                                writeln!(f, "```\n{text}\n```\n")?;
-                            }
+                        if let AnyFileContent::StringContent(text) = content
+                            && !text.trim().is_empty()
+                        {
+                            writeln!(f, "```\n{text}\n```\n")?;
                         }
                     }
                     if !failed_files.is_empty() {
@@ -3009,8 +3008,7 @@ impl AIAgentInput {
     pub fn has_custom_display_query(&self) -> bool {
         matches!(
             self,
-            AIAgentInput::InitProjectRules { .. }
-                | AIAgentInput::InvokeSkill { .. }
+            AIAgentInput::InitProjectRules { .. } | AIAgentInput::InvokeSkill { .. }
         )
     }
 }

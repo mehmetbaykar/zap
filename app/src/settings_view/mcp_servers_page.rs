@@ -14,10 +14,11 @@ use crate::ai::mcp::{
     TemplatableMCPServerManager,
 };
 use crate::appearance::Appearance;
-use crate::cloud_object::update_manager::InitiatedBy;
 use crate::cloud_object::Space;
+use crate::cloud_object::update_manager::InitiatedBy;
 use crate::modal::{Modal, ModalViewState};
 use crate::report_error;
+use crate::settings_view::SettingsSection;
 use crate::settings_view::mcp_servers::edit_page::{
     MCPServersEditPageView, MCPServersEditPageViewEvent,
 };
@@ -27,9 +28,8 @@ use crate::settings_view::mcp_servers::installation_modal::{
 use crate::settings_view::mcp_servers::list_page::{
     MCPServersListPageView, MCPServersListPageViewEvent,
 };
-use crate::settings_view::mcp_servers::{style, ServerCardItemId};
+use crate::settings_view::mcp_servers::{ServerCardItemId, style};
 use crate::settings_view::settings_page::{MatchData, PageType, SettingsPageMeta, SettingsWidget};
-use crate::settings_view::SettingsSection;
 use crate::view_components::DismissibleToast;
 use crate::workspace::ToastStack;
 
@@ -170,13 +170,12 @@ impl MCPServersSettingsPageView {
             ServerCardItemId::FileBasedMCP(uuid) => {
                 if let Some(installation) =
                     FileBasedMCPManager::as_ref(ctx).get_installation_by_uuid(uuid)
+                    && let Some(hash) = installation.hash()
                 {
-                    if let Some(hash) = installation.hash() {
-                        TemplatableMCPServerManager::handle(ctx).update(ctx, |manager, ctx| {
-                            manager.shutdown_server(uuid, ctx);
-                            manager.purge_file_based_server_credentials(&vec![hash], ctx);
-                        });
-                    }
+                    TemplatableMCPServerManager::handle(ctx).update(ctx, |manager, ctx| {
+                        manager.shutdown_server(uuid, ctx);
+                        manager.purge_file_based_server_credentials(&vec![hash], ctx);
+                    });
                 }
                 self.add_toast(&message, ctx);
             }

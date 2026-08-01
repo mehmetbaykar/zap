@@ -2,36 +2,32 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use itertools::Itertools;
+use warp_core::features::FeatureFlag;
 use warpui::r#async::FutureExt as AsyncFutureExt;
 use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
 
+use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{
-    conversation::AIConversationId, AIAgentAction, AIAgentActionType, FileGlobResult,
-    FileGlobV2Match, FileGlobV2Result,
+    AIAgentAction, AIAgentActionResultType, AIAgentActionType, FileGlobResult, FileGlobV2Match,
+    FileGlobV2Result,
 };
 use crate::ai::blocklist::BlocklistAIPermissions;
 use crate::ai::paths::{host_native_absolute_path, join_paths, shell_native_absolute_path};
+use crate::terminal::ShellLaunchData;
+use crate::terminal::model::session::active_session::ActiveSession;
 use crate::terminal::model::session::command_executor::shell_quote_arg;
-use crate::terminal::model::session::ExecuteCommandOptions;
-use crate::{
-    ai::agent::AIAgentActionResultType,
-    send_telemetry_from_app_ctx,
-    terminal::{
-        model::session::active_session::ActiveSession, model::session::Session, shell::ShellType,
-        ShellLaunchData,
-    },
-    TelemetryEvent,
-};
-use warp_core::features::FeatureFlag;
+use crate::terminal::model::session::{ExecuteCommandOptions, Session};
+use crate::terminal::shell::ShellType;
+use crate::{TelemetryEvent, send_telemetry_from_app_ctx};
 
 const FILE_GLOB_TIMEOUT: Duration = Duration::from_secs(10);
 
 use super::{
-    get_server_output_id, is_git_repository, ActionExecution, AnyActionExecution,
-    ExecuteActionInput, PreprocessActionInput,
+    ActionExecution, AnyActionExecution, ExecuteActionInput, PreprocessActionInput,
+    get_server_output_id, is_git_repository,
 };
 
 pub struct FileGlobExecutor {

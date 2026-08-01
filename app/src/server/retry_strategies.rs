@@ -1,11 +1,10 @@
 use std::future::Future;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use thiserror::Error;
-use warpui::duration_with_jitter;
 use warpui::r#async::Timer;
-use warpui::RetryOption;
+use warpui::{RetryOption, duration_with_jitter};
 
 /// Common duration for a periodic poll. In our app, we generally have the following to update the same data:
 /// - RTC messages

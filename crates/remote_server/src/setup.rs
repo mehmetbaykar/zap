@@ -293,7 +293,7 @@ pub fn parse_uname_output(
         other => {
             return Err(Error::UnsupportedOs {
                 os: other.to_string(),
-            })
+            });
         }
     };
 
@@ -303,7 +303,7 @@ pub fn parse_uname_output(
         other => {
             return Err(Error::UnsupportedArch {
                 arch: other.to_string(),
-            })
+            });
         }
     };
 

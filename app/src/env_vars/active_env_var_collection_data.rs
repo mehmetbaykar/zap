@@ -1,18 +1,14 @@
-use crate::{
-    cloud_object::{
-        breadcrumbs::ContainingObject,
-        model::{persistence::ObjectStoreEvent, view::ObjectStoreViewModel},
-        Owner, Revision, Space, StoredObject,
-    },
-    drive::sharing::{ContentEditability, SharingAccessLevel},
-    env_vars::EnvVarCollectionObject,
-    server::ids::{ClientId, SyncId},
-    AppContext, ObjectStoreModel,
-};
-
 use warpui::{Entity, ModelContext, SingletonEntity};
 
 use super::EnvVarCollectionObjectModel;
+use crate::cloud_object::breadcrumbs::ContainingObject;
+use crate::cloud_object::model::persistence::ObjectStoreEvent;
+use crate::cloud_object::model::view::ObjectStoreViewModel;
+use crate::cloud_object::{Owner, Revision, Space, StoredObject};
+use crate::drive::sharing::{ContentEditability, SharingAccessLevel};
+use crate::env_vars::EnvVarCollectionObject;
+use crate::server::ids::{ClientId, SyncId};
+use crate::{AppContext, ObjectStoreModel};
 
 #[derive(Default, Clone)]
 pub enum ActiveEnvVarCollection {
@@ -65,12 +61,11 @@ impl ActiveEnvVarCollectionData {
         event: &ObjectStoreEvent,
         ctx: &mut ModelContext<Self>,
     ) {
-        if let ObjectStoreEvent::ObjectMoved { type_and_id, .. } = event {
-            if let Some(env_var_collection_id) = type_and_id.as_generic_string_object_id() {
-                if self.is_active_env_var_collection(env_var_collection_id) {
-                    ctx.emit(ActiveEnvVarCollectionDataEvent::BreadcrumbsChanged)
-                }
-            }
+        if let ObjectStoreEvent::ObjectMoved { type_and_id, .. } = event
+            && let Some(env_var_collection_id) = type_and_id.as_generic_string_object_id()
+            && self.is_active_env_var_collection(env_var_collection_id)
+        {
+            ctx.emit(ActiveEnvVarCollectionDataEvent::BreadcrumbsChanged)
         }
     }
 

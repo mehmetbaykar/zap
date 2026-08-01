@@ -1,23 +1,8 @@
-use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::ambient_agents::{
-    conversation_output_status_from_conversation, AmbientAgentTaskId, AmbientConversationStatus,
-};
-use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
-use crate::ai::blocklist::{format_credits, BlocklistAIHistoryModel};
-use crate::appearance::Appearance;
-use crate::settings::ai::{AISettings, AISettingsChangedEvent};
-use crate::ui_components::blended_colors;
-use crate::util::time_format::human_readable_precise_duration;
-use crate::view_components::action_button::{ActionButton, PrimaryTheme};
-use crate::workspace::WorkspaceAction;
-use crate::workspaces::user_workspaces::UserWorkspaces;
 use std::path::Path;
+
 #[cfg(not(target_family = "wasm"))]
 use warp_cli::agent::Harness;
 use warp_core::paths::home_relative_path;
-
-#[cfg(not(target_family = "wasm"))]
-use crate::ai::ambient_agents::AmbientAgentTask;
 use warp_core::ui::icons::Icon;
 use warp_core::ui::theme::{AnsiColorIdentifier, Fill};
 use warpui::elements::{
@@ -29,6 +14,22 @@ use warpui::{
     AppContext, Element, Entity, EntityId, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
+
+use crate::ai::agent::conversation::AIConversationId;
+#[cfg(not(target_family = "wasm"))]
+use crate::ai::ambient_agents::AmbientAgentTask;
+use crate::ai::ambient_agents::{
+    AmbientAgentTaskId, AmbientConversationStatus, conversation_output_status_from_conversation,
+};
+use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
+use crate::ai::blocklist::{BlocklistAIHistoryModel, format_credits};
+use crate::appearance::Appearance;
+use crate::settings::ai::{AISettings, AISettingsChangedEvent};
+use crate::ui_components::blended_colors;
+use crate::util::time_format::human_readable_precise_duration;
+use crate::view_components::action_button::{ActionButton, PrimaryTheme};
+use crate::workspace::WorkspaceAction;
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 /// Metadata collected for display in the tombstone.
 #[derive(Default)]
@@ -372,10 +373,10 @@ impl ConversationEndedTombstoneView {
             parts.push(format!("Run time: {run_time}"));
         }
 
-        if !UserWorkspaces::as_ref(app).is_byo_api_key_enabled() {
-            if let Some(credits) = &self.display_data.credits {
-                parts.push(format!("Credits used: {credits}"));
-            }
+        if !UserWorkspaces::as_ref(app).is_byo_api_key_enabled()
+            && let Some(credits) = &self.display_data.credits
+        {
+            parts.push(format!("Credits used: {credits}"));
         }
 
         if parts.is_empty() {

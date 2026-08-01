@@ -1,6 +1,6 @@
 use std::any::Any;
-use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
+use std::sync::mpsc::SyncSender;
 
 use parking_lot::FairMutex;
 #[cfg(windows)]
@@ -51,11 +51,7 @@ pub(crate) fn terminal_view_restored_blocks(
                     .collect();
                 // Because there are multiple conversations that may have interleaved timestamps, we need to sort by start_ts
                 items.sort_by_key(|item| item.start_ts());
-                if items.is_empty() {
-                    None
-                } else {
-                    Some(items)
-                }
+                if items.is_empty() { None } else { Some(items) }
             }
             _ => None,
         })

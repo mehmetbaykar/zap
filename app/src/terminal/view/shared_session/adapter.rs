@@ -18,9 +18,9 @@ use crate::terminal::shared_session::protocol::{
     ParticipantId, ParticipantList, Role, SessionId, SessionSourceType,
 };
 use crate::terminal::shared_session::render_util::{
-    participant_avatar_for_selected_block, ParticipantAvatarParams,
+    ParticipantAvatarParams, participant_avatar_for_selected_block,
 };
-use crate::terminal::view::{throttle, TerminalAction, TerminalView};
+use crate::terminal::view::{TerminalAction, TerminalView, throttle};
 use crate::ui_components::icons::Icon;
 
 /// The kind of shared session this is.
@@ -316,20 +316,19 @@ impl Adapter {
             );
         }
 
-        if let Some(sharer) = self.presence_manager.as_ref(app).get_sharer() {
-            if let Some(mouse_state_handle) = self
+        if let Some(sharer) = self.presence_manager.as_ref(app).get_sharer()
+            && let Some(mouse_state_handle) = self
                 .sharer()
                 .map(|s| s.block_selection_mouse_state_handle.clone())
-            {
-                avatars.insert(
-                    sharer.id().clone(),
-                    participant_avatar_for_selected_block(
-                        ParticipantAvatarParams::new(sharer, is_self_reconnecting),
-                        mouse_state_handle,
-                        app,
-                    ),
-                );
-            }
+        {
+            avatars.insert(
+                sharer.id().clone(),
+                participant_avatar_for_selected_block(
+                    ParticipantAvatarParams::new(sharer, is_self_reconnecting),
+                    mouse_state_handle,
+                    app,
+                ),
+            );
         }
 
         avatars

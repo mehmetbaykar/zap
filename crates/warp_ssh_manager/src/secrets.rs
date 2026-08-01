@@ -109,9 +109,10 @@ impl SshSecretStore for KeychainSecretStore {
 pub(crate) mod test_support {
     //! In-process in-memory mock that bypasses the OS keychain — for CI / unit tests.
 
-    use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;
+
+    use super::*;
 
     #[derive(Default)]
     pub struct InMemorySecretStore {

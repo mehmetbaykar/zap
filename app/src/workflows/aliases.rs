@@ -7,8 +7,8 @@ use warp_core::define_settings_group;
 use warp_core::settings::{RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud};
 use warpui::{AppContext, ModelContext, SingletonEntity};
 
-use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
 use crate::cloud_object::StoredObject as _;
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
 use crate::drive::ObjectTypeAndId;
 use crate::report_error;
 use crate::server::ids::SyncId;

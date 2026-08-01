@@ -24,9 +24,9 @@
 //! Then it synthesizes a pair of `Message::ToolCall` (carrier, tool=None) + `Message::ToolCallResult`
 //! to unblock the upstream model.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use warp_multi_agent_api as api;

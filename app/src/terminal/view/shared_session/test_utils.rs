@@ -1,17 +1,19 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use crate::terminal::shared_session::protocol::SessionSourceType;
-use crate::terminal::shared_session::protocol::{ParticipantId, ParticipantList, SessionId};
-use crate::terminal::shared_session::SharedSessionStatus;
 use warpui::platform::WindowStyle;
 use warpui::{App, ViewHandle};
 
+use crate::GlobalResourceHandles;
 use crate::auth::UserUid;
 use crate::editor::ReplicaId;
 use crate::pane_group::{NewTerminalOptions, PaneGroup, PanesLayout};
 use crate::terminal::TerminalView;
+use crate::terminal::shared_session::SharedSessionStatus;
+use crate::terminal::shared_session::protocol::{
+    ParticipantId, ParticipantList, SessionId, SessionSourceType,
+};
 use crate::test_util::terminal::initialize_app_for_terminal_view;
-use crate::GlobalResourceHandles;
 
 /// Creates a terminal view that is created via the terminal manager
 /// for shared session viewers. That is, it has all of the relevant models

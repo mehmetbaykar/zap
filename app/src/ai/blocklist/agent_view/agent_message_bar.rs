@@ -10,6 +10,7 @@ use warpui::platform::OperatingSystem;
 use warpui::{AppContext, Entity, ModelHandle, SingletonEntity, View, ViewContext};
 
 use super::{AgentViewState, EphemeralMessageModel, EphemeralMessageModelEvent};
+use crate::BlocklistAIHistoryModel;
 use crate::ai::agent::conversation::AIConversation;
 use crate::ai::agent::{
     AIAgentExchangeId, AIAgentOutputStatus, FinishedAIAgentOutput, RenderableAIError,
@@ -21,10 +22,8 @@ use crate::ai::blocklist::{
     BlocklistAIInputEvent, BlocklistAIInputModel,
 };
 use crate::ai::document::ai_document_model::{AIDocumentModel, AIDocumentModelEvent};
-use crate::ai::mcp::{
-    templatable_manager::{FigmaMcpStatus, TemplatableMCPServerManagerEvent},
-    TemplatableMCPServerManager,
-};
+use crate::ai::mcp::TemplatableMCPServerManager;
+use crate::ai::mcp::templatable_manager::{FigmaMcpStatus, TemplatableMCPServerManagerEvent};
 use crate::ai::request_usage_model::{AIRequestUsageModel, AIRequestUsageModelEvent};
 use crate::search::slash_command_menu::static_commands::commands;
 use crate::settings::{InputSettings, InputSettingsChangedEvent};
@@ -46,10 +45,9 @@ use crate::terminal::input::{InputAction, SET_INPUT_MODE_AGENT_ACTION_NAME};
 use crate::terminal::model::TerminalModel;
 use crate::terminal::view::TerminalAction;
 use crate::util::bindings::keybinding_name_to_keystroke;
-use crate::workspace::tab_settings::{TabSettings, TabSettingsChangedEvent};
 #[cfg(not(target_family = "wasm"))]
 use crate::workspace::WorkspaceAction;
-use crate::BlocklistAIHistoryModel;
+use crate::workspace::tab_settings::{TabSettings, TabSettingsChangedEvent};
 
 const FIGMA_ICON_SIZE: f32 = 14.;
 
@@ -207,14 +205,12 @@ impl AgentMessageBar {
             ctx.subscribe_to_model(
                 &TemplatableMCPServerManager::handle(ctx),
                 |_, model, event, ctx| {
-                    if let TemplatableMCPServerManagerEvent::StateChanged { uuid, .. } = event {
-                        if let Some(figma_mcp_uuid) =
+                    if let TemplatableMCPServerManagerEvent::StateChanged { uuid, .. } = event
+                        && let Some(figma_mcp_uuid) =
                             model.as_ref(ctx).get_figma_installation_uuid()
-                        {
-                            if uuid == &figma_mcp_uuid {
-                                ctx.notify();
-                            }
-                        }
+                        && uuid == &figma_mcp_uuid
+                    {
+                        ctx.notify();
                     }
                 },
             );
@@ -573,21 +569,19 @@ impl MessageProvider<AgentMessageArgs<'_>> for ZeroStateMessageProducer {
         if show_zero_state_hints
             && !is_ambient_agent
             && !has_conversation_been_updated_since_agent_view_entry
-        {
-            if let Some(conversations_keystroke) =
+            && let Some(conversations_keystroke) =
                 keybinding_name_to_keystroke(commands::CONVERSATIONS.name, app)
-            {
-                items.push(MessageItem::clickable(
-                    vec![
-                        MessageItem::keystroke(conversations_keystroke),
-                        MessageItem::text(crate::t!("agent-message-bar-open-conversation")),
-                    ],
-                    |ctx| {
-                        ctx.dispatch_typed_action(InputAction::ToggleConversationsMenu);
-                    },
-                    mouse_states.toggle_conversation_menu.clone(),
-                ));
-            }
+        {
+            items.push(MessageItem::clickable(
+                vec![
+                    MessageItem::keystroke(conversations_keystroke),
+                    MessageItem::text(crate::t!("agent-message-bar-open-conversation")),
+                ],
+                |ctx| {
+                    ctx.dispatch_typed_action(InputAction::ToggleConversationsMenu);
+                },
+                mouse_states.toggle_conversation_menu.clone(),
+            ));
         }
 
         // Code review only works locally.

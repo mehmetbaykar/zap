@@ -1,4 +1,5 @@
-use std::{ffi::OsString, fs};
+use std::ffi::OsString;
+use std::fs;
 
 use tempfile::TempDir;
 use warp_cli::agent::Harness;
@@ -11,7 +12,7 @@ use super::{
     validate_local_harness_shell,
 };
 use crate::ai::agent_sdk::driver::OZ_MESSAGE_LISTENER_MANAGED_EXTERNALLY_ENV;
-use crate::ai::ambient_agents::task::{normalize_orchestrator_agent_name, HarnessConfig};
+use crate::ai::ambient_agents::task::{HarnessConfig, normalize_orchestrator_agent_name};
 use crate::ai::local_harness_setup::LOCAL_CODEX_HARNESS_DISABLED_MESSAGE;
 use crate::terminal::shell::ShellType;
 
@@ -294,9 +295,11 @@ async fn prepare_local_codex_child_launch_succeeds_when_testing_flag_is_enabled(
         prepared.command,
         "codex --dangerously-bypass-approvals-and-sandbox 'hello world'"
     );
-    assert!(!prepared
-        .env_vars
-        .contains_key(&OsString::from("ANTHROPIC_MODEL")));
+    assert!(
+        !prepared
+            .env_vars
+            .contains_key(&OsString::from("ANTHROPIC_MODEL"))
+    );
     assert_eq!(prepared.run_id, prepared.task_id.to_string());
     assert!(!fake_home.path().join(".codex").exists());
 }
@@ -333,15 +336,21 @@ async fn prepare_local_claude_child_merges_anthropic_model_env_var() {
         prepared.env_vars.get(&OsString::from("ANTHROPIC_MODEL")),
         Some(&OsString::from("opus"))
     );
-    assert!(!prepared
-        .env_vars
-        .contains_key(&OsString::from(OZ_MESSAGE_LISTENER_MANAGED_EXTERNALLY_ENV)));
-    assert!(!prepared
-        .env_vars
-        .contains_key(&OsString::from("OZ_PARENT_LISTENER_MANAGED_EXTERNALLY")));
-    assert!(prepared
-        .command
-        .contains("run message send --sender-run-id"));
+    assert!(
+        !prepared
+            .env_vars
+            .contains_key(&OsString::from(OZ_MESSAGE_LISTENER_MANAGED_EXTERNALLY_ENV))
+    );
+    assert!(
+        !prepared
+            .env_vars
+            .contains_key(&OsString::from("OZ_PARENT_LISTENER_MANAGED_EXTERNALLY"))
+    );
+    assert!(
+        prepared
+            .command
+            .contains("run message send --sender-run-id")
+    );
     assert!(prepared.command.contains("OZ_PARENT_RUN_ID"));
 }
 
@@ -373,9 +382,11 @@ async fn prepare_local_claude_child_no_anthropic_model_when_empty() {
     .await
     .unwrap();
 
-    assert!(!prepared
-        .env_vars
-        .contains_key(&OsString::from("ANTHROPIC_MODEL")));
+    assert!(
+        !prepared
+            .env_vars
+            .contains_key(&OsString::from("ANTHROPIC_MODEL"))
+    );
 }
 
 #[tokio::test]

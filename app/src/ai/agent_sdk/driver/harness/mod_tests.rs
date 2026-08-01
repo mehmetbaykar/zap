@@ -1,6 +1,6 @@
 use warp_cli::agent::Harness;
 
-use super::{harness_kind, validate_cli_installed, HarnessKind};
+use super::{HarnessKind, harness_kind, validate_cli_installed};
 use crate::ai::agent_sdk::driver::AgentDriverError;
 use crate::terminal::CLIAgent;
 

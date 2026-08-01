@@ -1,40 +1,72 @@
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::mpsc::SyncSender;
+
+use ai::api_keys::{ApiKeyManager, ApiKeyManagerEvent};
+use anyhow::Result;
+use cfg_if::cfg_if;
+use lazy_static::lazy_static;
+use onboarding::{AgentOnboardingEvent, AgentOnboardingView, OnboardingIntention};
+use parking_lot::Mutex;
+use pathfinder_geometry::rect::RectF;
+use pathfinder_geometry::vector::{Vector2F, vec2f};
+use serde::{Deserialize, Serialize};
+use settings::Setting as _;
+use warp_core::context_flag::ContextFlag;
+use warp_core::user_preferences::GetUserPreferences as _;
+use warpui::elements::{
+    Border, ChildAnchor, OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Stack,
+};
+use warpui::keymap::{EditableBinding, FixedBinding, Keystroke};
+use warpui::platform::{WindowBounds, WindowStyle};
+use warpui::presenter::ChildView;
+use warpui::rendering::OnGPUDeviceSelected;
+use warpui::ui_components::components::UiComponentStyles;
+use warpui::windowing::WindowManager;
+use warpui::{
+    AddWindowOptions, AppContext, DisplayId, Element, Entity, EntityId, FocusContext,
+    NextNewWindowsHasThisWindowsBoundsUponClose, SingletonEntity, TypedActionView, View,
+    ViewContext, ViewHandle, WindowId, id,
+};
+
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::blocklist::SerializedBlockListItem;
+use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
+use crate::ai::onboarding::build_onboarding_models;
+use crate::app_state::{AppState, PaneUuid, WindowSnapshot};
 use crate::appearance::Appearance;
 use crate::auth::provider_keys_modal::{ProviderKeysModalEvent, ProviderKeysModalView};
-use crate::auth::AuthOverrideWarningModalVariant;
-use crate::auth::AuthState;
-use crate::auth::AuthStateProvider;
-use crate::auth::NeedsSsoLinkView;
-use crate::auth::{AuthManager, AuthManagerEvent};
-use crate::autoupdate::{AutoupdateState, AutoupdateStateEvent};
+use crate::auth::{
+    AuthManager, AuthManagerEvent, AuthOverrideWarningModal, AuthOverrideWarningModalEvent,
+    AuthOverrideWarningModalVariant, AuthState, AuthStateProvider, AuthView, AuthViewVariant,
+    NeedsSsoLinkView, UserAuthenticationError,
+};
+#[cfg(target_family = "wasm")]
+use crate::auth::{WebHandoffEvent, WebHandoffView};
+use crate::autoupdate::{AutoupdateState, AutoupdateStateEvent, RequestType, UpdateReady};
+use crate::changelog_model::ChangelogRequestType;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::{GenericStringObjectFormat, JsonObjectType, ObjectType};
 use crate::drive::export::ExportManager;
 use crate::drive::items::WarpDriveItemId;
 use crate::drive::{ObjectTypeAndId, ZapDriveObjectArgs, ZapDriveObjectSettings};
 use crate::experiments::{BlockOnboarding, Experiment};
+use crate::features::FeatureFlag;
 use crate::interval_timer::IntervalTimer;
 use crate::launch_configs::launch_config;
 use crate::linear::LinearIssueWork;
 use crate::modal::{Modal, ModalEvent};
 use crate::notebooks::manager::NotebookSource;
-use crate::settings::apply_onboarding_settings;
-use crate::settings::AISettings;
-use ai::api_keys::{ApiKeyManager, ApiKeyManagerEvent};
-use onboarding::{AgentOnboardingEvent, AgentOnboardingView, OnboardingIntention};
-
-use crate::auth::UserAuthenticationError;
+use crate::pane_group::{NewTerminalOptions, PanesLayout};
 use crate::persistence::ModelEvent;
-use crate::report_if_error;
 use crate::server::ids::SyncId;
-use crate::server::telemetry::LaunchConfigUiLocation;
-use crate::settings::QuakeModeSettings;
-use crate::settings::ThemeSettings;
+use crate::server::telemetry::{LaunchConfigUiLocation, TelemetryEvent};
+use crate::server_time::ServerTime;
+use crate::settings::{AISettings, QuakeModeSettings, ThemeSettings, apply_onboarding_settings};
 use crate::settings_view::custom_inference_modal::{CustomEndpointModal, CustomEndpointModalEvent};
-use crate::settings_view::flags;
 use crate::settings_view::mcp_servers_page::MCPServersSettingsPage;
-use crate::settings_view::SettingsSection;
+use crate::settings_view::{SettingsSection, flags};
 use crate::terminal::available_shells::AvailableShell;
 use crate::terminal::general_settings::GeneralSettings;
 use crate::terminal::keys_settings::KeysSettings;
@@ -44,63 +76,16 @@ use crate::themes::onboarding_theme_picker_themes;
 use crate::themes::theme::{AnsiColorIdentifier, Blend, Fill, ThemeKind, WarpThemeConfig};
 use crate::uri::{OpenMCPSettingsArgs, OpenSettingsArgs};
 use crate::util::bindings::{self, is_binding_pty_compliant};
-use crate::util::traffic_lights::{traffic_light_data, TrafficLightData, TrafficLightMouseStates};
+use crate::util::traffic_lights::{TrafficLightData, TrafficLightMouseStates, traffic_light_data};
 use crate::view_components::DismissibleToast;
 use crate::window_settings::WindowSettings;
 use crate::workspace::hoa_onboarding::mark_hoa_onboarding_completed;
-use crate::workspace::WorkspaceAction;
+use crate::workspace::view::OnboardingTutorial;
+use crate::workspace::{PaneViewLocator, Workspace, WorkspaceAction, WorkspaceRegistry};
 use crate::{
-    app_state::{AppState, PaneUuid, WindowSnapshot},
-    autoupdate::{RequestType, UpdateReady},
-    changelog_model::ChangelogRequestType,
-    pane_group::{NewTerminalOptions, PanesLayout},
-    send_telemetry_from_ctx,
-    server::telemetry::TelemetryEvent,
-    server_time::ServerTime,
-    UpdateQuakeModeEventArg,
+    ChannelState, GlobalResourceHandles, GlobalResourceHandlesProvider, UpdateQuakeModeEventArg,
+    report_if_error, send_telemetry_from_app_ctx, send_telemetry_from_ctx,
 };
-use crate::{
-    auth::{AuthOverrideWarningModal, AuthOverrideWarningModalEvent},
-    auth::{AuthView, AuthViewVariant},
-    workspace::{view::OnboardingTutorial, PaneViewLocator, Workspace, WorkspaceRegistry},
-};
-use crate::{features::FeatureFlag, ChannelState};
-use crate::{send_telemetry_from_app_ctx, GlobalResourceHandles, GlobalResourceHandlesProvider};
-use anyhow::Result;
-use cfg_if::cfg_if;
-use lazy_static::lazy_static;
-use parking_lot::Mutex;
-use pathfinder_geometry::rect::RectF;
-use pathfinder_geometry::vector::{vec2f, Vector2F};
-use serde::{Deserialize, Serialize};
-use settings::Setting as _;
-use std::path::Path;
-use std::sync::mpsc::SyncSender;
-use std::sync::Arc;
-use std::{collections::HashMap, path::PathBuf};
-use warp_core::context_flag::ContextFlag;
-use warp_core::user_preferences::GetUserPreferences as _;
-use warpui::keymap::{EditableBinding, FixedBinding, Keystroke};
-use warpui::ui_components::components::UiComponentStyles;
-use warpui::windowing::WindowManager;
-
-use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
-use crate::ai::onboarding::build_onboarding_models;
-
-use warpui::elements::{
-    Border, ChildAnchor, OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Stack,
-};
-use warpui::rendering::OnGPUDeviceSelected;
-use warpui::{id, AddWindowOptions, DisplayId, EntityId, SingletonEntity};
-use warpui::{
-    platform::{WindowBounds, WindowStyle},
-    presenter::ChildView,
-    AppContext, Element, Entity, TypedActionView, View, ViewContext, ViewHandle, WindowId,
-};
-use warpui::{FocusContext, NextNewWindowsHasThisWindowsBoundsUponClose};
-
-#[cfg(target_family = "wasm")]
-use crate::auth::{WebHandoffEvent, WebHandoffView};
 
 /// Returns the product name for the current channel, used as the initial window title and as the
 /// quake/transferred window title.
@@ -503,13 +488,16 @@ fn open_launch_config(arg: &OpenLaunchConfigArg, ctx: &mut AppContext) {
 }
 
 fn send_feedback(_: &(), ctx: &mut AppContext) {
-    match active_workspace(ctx) { Some(workspace) => {
-        workspace.update(ctx, |workspace, ctx| {
-            workspace.handle_action(&WorkspaceAction::SendFeedback, ctx);
-        });
-    } _ => {
-        ctx.open_url(&crate::util::links::feedback_form_url());
-    }}
+    match active_workspace(ctx) {
+        Some(workspace) => {
+            workspace.update(ctx, |workspace, ctx| {
+                workspace.handle_action(&WorkspaceAction::SendFeedback, ctx);
+            });
+        }
+        _ => {
+            ctx.open_url(&crate::util::links::feedback_form_url());
+        }
+    }
 }
 
 /// Creates a new window with the transferred pane group.
@@ -574,13 +562,16 @@ pub fn create_transferred_window(
     let pane_group_id = transferred_tab.pane_group.id();
     ctx.transfer_view_tree_to_window(pane_group_id, source_window_id, new_window_id);
 
-    match WorkspaceRegistry::as_ref(ctx).get(new_window_id, ctx) { Some(new_workspace) => {
-        new_workspace.update(ctx, |workspace, ctx| {
-            workspace.adopt_transferred_pane_group(transferred_tab.pane_group.clone(), ctx);
-        });
-    } _ => {
-        log::warn!("Failed to find workspace in newly created window {new_window_id:?}");
-    }}
+    match WorkspaceRegistry::as_ref(ctx).get(new_window_id, ctx) {
+        Some(new_workspace) => {
+            new_workspace.update(ctx, |workspace, ctx| {
+                workspace.adopt_transferred_pane_group(transferred_tab.pane_group.clone(), ctx);
+            });
+        }
+        _ => {
+            log::warn!("Failed to find workspace in newly created window {new_window_id:?}");
+        }
+    }
     new_window_id
 }
 
@@ -1672,10 +1663,7 @@ impl RootView {
         result: &Result<UpdateReady>,
         ctx: &mut ViewContext<Self>,
     ) {
-        if let Ok(UpdateReady::Yes {
-            new_version, ..
-        }) = result
-        {
+        if let Ok(UpdateReady::Yes { new_version, .. }) = result {
             log::info!("Update ready for channel version {new_version:?}");
             if new_version.update_by.is_some() {
                 log::info!("Update ready, there is an update-by time, checking local time.");
@@ -2079,10 +2067,10 @@ impl RootView {
 
         let mut quake_mode_state = QUAKE_STATE.lock();
         // If the window we are focusing is the Quake Mode window, then update the QuakeModeState.
-        if let Some(mode) = quake_mode_state.as_mut() {
-            if mode.window_id == window_id {
-                mode.window_state = WindowState::Open;
-            }
+        if let Some(mode) = quake_mode_state.as_mut()
+            && mode.window_id == window_id
+        {
+            mode.window_state = WindowState::Open;
         }
 
         ctx.windows().show_window_and_focus_app(window_id);

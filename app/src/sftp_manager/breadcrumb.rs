@@ -7,9 +7,9 @@
 use std::path::{Component, PathBuf};
 
 use warp_core::ui::appearance::Appearance;
+use warpui::Element;
 use warpui::elements::{ConstrainedBox, Container, Hoverable, SavePosition, Text};
 use warpui::platform::Cursor;
-use warpui::Element;
 
 use crate::sftp_manager::browser::SftpBrowserAction;
 use crate::ui_components::icons::Icon;
@@ -48,7 +48,7 @@ pub fn render_breadcrumb(current_path: &PathBuf, appearance: &Appearance) -> Vec
         // Separator (added after the first segment)
         if i > 0 {
             let sep_icon =
-                ConstrainedBox::new(Icon::ChevronRight.to_warpui_icon(sub_color.into()).finish())
+                ConstrainedBox::new(Icon::ChevronRight.to_warpui_icon(sub_color).finish())
                     .with_width(12.0)
                     .with_height(12.0)
                     .finish();

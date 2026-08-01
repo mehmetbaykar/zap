@@ -8,6 +8,7 @@ use warp_core::send_telemetry_from_ctx;
 use warp_errors::report_error;
 use warpui::{Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
 
+use crate::BlocklistAIHistoryModel;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::{
@@ -21,10 +22,9 @@ use crate::ai::blocklist::{
     BlocklistAIActionEvent, BlocklistAIActionModel, BlocklistAIController, BlocklistAIHistoryEvent,
 };
 use crate::server::telemetry::{CLISubagentControlState, TelemetryEvent};
+use crate::terminal::TerminalModel;
 use crate::terminal::model::block::BlockId;
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
-use crate::terminal::TerminalModel;
-use crate::BlocklistAIHistoryModel;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum UserTakeOverReason {
@@ -338,29 +338,27 @@ impl CLISubagentController {
                 )> = None;
                 if let (Some((block_id, conversation_id)), Some(task_id)) =
                     (upgrade_target.as_ref(), upgraded_task_id.as_ref())
+                    && let Some(block) = terminal_model.block_list_mut().mut_block_from_id(block_id)
                 {
-                    if let Some(block) = terminal_model.block_list_mut().mut_block_from_id(block_id)
-                    {
-                        match block.set_agent_interaction_mode_for_agent_monitored_command(
-                            task_id,
-                            *conversation_id,
-                        ) {
-                            Ok(()) => {
-                                let action_id = block.requested_command_action_id().cloned();
-                                emit_spawn_event_for = Some((
-                                    block_id.clone(),
-                                    task_id.clone(),
-                                    *conversation_id,
-                                    action_id,
-                                ));
-                            }
-                            Err(e) => {
-                                log::error!(
-                                    "[byop] BYOP LRC monitor fallback: \
+                    match block.set_agent_interaction_mode_for_agent_monitored_command(
+                        task_id,
+                        *conversation_id,
+                    ) {
+                        Ok(()) => {
+                            let action_id = block.requested_command_action_id().cloned();
+                            emit_spawn_event_for = Some((
+                                block_id.clone(),
+                                task_id.clone(),
+                                *conversation_id,
+                                action_id,
+                            ));
+                        }
+                        Err(e) => {
+                            log::error!(
+                                "[byop] BYOP LRC monitor fallback: \
                                      set_agent_interaction_mode_for_agent_monitored_command \
                                      failed: {e:?}"
-                                );
-                            }
+                            );
                         }
                     }
                 }
@@ -626,16 +624,14 @@ impl CLISubagentController {
         // finishes or the user hands control back. We do NOT use ManuallyCancelled here
         // because that would mark the conversation (and ambient task) as cancelled,
         // which is incorrect since the conversation is still proceeding.
-        if should_cancel_conversation {
-            if let Some(conversation_id) = conversation_id {
-                self.controller.update(ctx, |controller, ctx| {
-                    controller.cancel_conversation_progress(
-                        conversation_id,
-                        CancellationReason::CLISubagentUserTakeover,
-                        ctx,
-                    );
-                });
-            }
+        if should_cancel_conversation && let Some(conversation_id) = conversation_id {
+            self.controller.update(ctx, |controller, ctx| {
+                controller.cancel_conversation_progress(
+                    conversation_id,
+                    CancellationReason::CLISubagentUserTakeover,
+                    ctx,
+                );
+            });
         }
 
         ctx.emit(CLISubagentEvent::UpdatedControl {
@@ -682,15 +678,17 @@ impl CLISubagentController {
         drop(terminal_model);
         if let Some(agent_view_controller) = &self.agent_view_controller {
             agent_view_controller.update(ctx, |controller, ctx| {
-                if !controller.is_inline() {
-                    if let Err(e) = controller.try_enter_inline_agent_view(
+                if !controller.is_inline()
+                    && let Err(e) = controller.try_enter_inline_agent_view(
                         conversation_id,
                         AgentViewEntryOrigin::LongRunningCommand,
                         ctx,
-                    ) {
-                        report_error!(anyhow::Error::new(e)
-                            .context("Failed to enter inline agent view for LRC handoff"));
-                    }
+                    )
+                {
+                    report_error!(
+                        anyhow::Error::new(e)
+                            .context("Failed to enter inline agent view for LRC handoff")
+                    );
                 }
             });
         }
@@ -806,8 +804,10 @@ impl CLISubagentController {
                     task_id,
                     *conversation_id,
                 ) {
-                    report_error!(anyhow::Error::new(e)
-                        .context("Could not update interaction mode to agent-monitored"));
+                    report_error!(
+                        anyhow::Error::new(e)
+                            .context("Could not update interaction mode to agent-monitored")
+                    );
                     return;
                 };
 
@@ -919,8 +919,7 @@ impl CLISubagentEvent {
             | Self::UpdatedControl { block_id, .. }
             | Self::UpdatedInstruction { block_id }
             | Self::UpdatedLastSnapshot { block_id } => Some(block_id),
-            Self::ToggledHideResponses
-            | Self::ControlHandedBackAfterTransfer => None,
+            Self::ToggledHideResponses | Self::ControlHandedBackAfterTransfer => None,
         }
     }
 }

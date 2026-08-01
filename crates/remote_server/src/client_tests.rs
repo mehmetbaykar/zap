@@ -5,17 +5,16 @@ use warpui_core::r#async::executor;
 
 use super::*;
 use crate::proto::{
+    BufferConflictDetected, ClientMessage, CodebaseIndexStatus, CodebaseIndexStatusState,
+    CodebaseIndexStatusUpdated, CodebaseIndexStatusesSnapshot, DeleteFileResponse,
+    DeleteFileSuccess, ErrorCode, FileOperationError, FileSystemEntryKind, GetDiffStateResponse,
+    InitializeResponse, OpenBufferResponse, OpenBufferSuccess, ReadFileChunkResponse,
+    ReadFileChunkSuccess, RemoteAgentContextSnapshot, RemoteContextFileProto, ResolvePathResponse,
+    ResolvePathSuccess, RunCommandResponse, RunCommandSuccess, SaveBufferResponse,
+    SaveBufferSuccess, ServerMessage, WriteFile, WriteFileChunkResponse, WriteFileChunkSuccess,
     client_message, delete_file_response, host_scoped_request, open_buffer_response,
-    read_file_chunk_response,
-    resolve_path_response, run_command_response, save_buffer_response, server_message,
-    session_scoped_request, write_file_chunk_response, ClientMessage, CodebaseIndexStatus,
-    CodebaseIndexStatusState, CodebaseIndexStatusUpdated, CodebaseIndexStatusesSnapshot,
-    DeleteFileResponse, DeleteFileSuccess, ErrorCode, FileSystemEntryKind, GetDiffStateResponse,
-    BufferConflictDetected, FileOperationError, InitializeResponse, OpenBufferResponse,
-    OpenBufferSuccess, ReadFileChunkResponse, ReadFileChunkSuccess,
-    RemoteAgentContextSnapshot, RemoteContextFileProto, ResolvePathResponse, ResolvePathSuccess,
-    RunCommandResponse, RunCommandSuccess, SaveBufferResponse, SaveBufferSuccess, ServerMessage,
-    WriteFile, WriteFileChunkResponse, WriteFileChunkSuccess,
+    read_file_chunk_response, resolve_path_response, run_command_response, save_buffer_response,
+    server_message, session_scoped_request, write_file_chunk_response,
 };
 use crate::protocol;
 

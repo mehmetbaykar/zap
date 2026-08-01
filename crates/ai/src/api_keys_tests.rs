@@ -148,11 +148,13 @@ fn expired_grok_tokens() -> GrokTokens {
 #[test]
 fn grok_is_expired_semantics() {
     // Past hard expiry.
-    assert!(GrokTokens {
-        expires_at: Some(SystemTime::now() - Duration::from_secs(1)),
-        ..Default::default()
-    }
-    .is_expired());
+    assert!(
+        GrokTokens {
+            expires_at: Some(SystemTime::now() - Duration::from_secs(1)),
+            ..Default::default()
+        }
+        .is_expired()
+    );
     // Still valid, even if near expiry (within the proactive lead window).
     assert!(!grok_tokens("tok", Some(60)).is_expired());
     // Unknown expiry is never considered expired.

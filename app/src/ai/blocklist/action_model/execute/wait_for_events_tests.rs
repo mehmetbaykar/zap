@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use super::{
-    watchdog_timeout_for_stamped_seconds, CLIENT_WATCHDOG_SAFETY_MARGIN,
-    DEFAULT_ORCHESTRATED_IDLE_TIMEOUT_SECONDS, HARD_FLOOR,
+    CLIENT_WATCHDOG_SAFETY_MARGIN, DEFAULT_ORCHESTRATED_IDLE_TIMEOUT_SECONDS, HARD_FLOOR,
+    watchdog_timeout_for_stamped_seconds,
 };
 
 #[test]

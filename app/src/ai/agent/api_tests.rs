@@ -8,6 +8,7 @@ use settings::manager::SettingsManager;
 use warpui::{App, SingletonEntity};
 
 use super::collect_user_rules;
+use crate::NetworkStatus;
 use crate::ai::facts::{AIFact, AIFactObject, AIFactObjectModel, AIMemory};
 use crate::auth::AuthStateProvider;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
@@ -21,7 +22,6 @@ use crate::settings::AISettings;
 use crate::system::SystemStats;
 use crate::workspaces::user_profiles::UserProfiles;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::NetworkStatus;
 
 fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_| NetworkStatus::new());

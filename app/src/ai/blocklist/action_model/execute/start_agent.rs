@@ -1,7 +1,7 @@
 //! Local-only executor for `AIAgentActionType::StartAgent`.
 
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use shell_words::split as split_shell_words;
 use warp_cli::agent::Harness;
 use warp_core::execution_mode::AppExecutionMode;

@@ -2,44 +2,42 @@
 //!
 //! Hosted codebase indexing and its team/plan policy UI intentionally do not live here.
 
-#[cfg(feature = "local_fs")]
-use super::features::external_editor::ExternalEditorView;
-use super::{
-    settings_page::{
-        build_sub_header, render_body_item, render_separator, MatchData, PageType,
-        SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, HEADER_PADDING,
-    },
-    LocalOnlyIconState, SettingsAction, SettingsSection, ToggleState,
-};
-use crate::{
-    appearance::Appearance, settings::CodeSettings, terminal::general_settings::GeneralSettings,
-    workspace::tab_settings::TabSettings,
-};
-use ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
-use lsp::supported_servers::LSPServerType;
-use lsp::{LspManagerModel, LspManagerModelEvent, LspServerModel, LspState};
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use warp_core::{features::FeatureFlag, settings::ToggleableSetting as _};
+
+use ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
+use lsp::supported_servers::LSPServerType;
+use lsp::{LspManagerModel, LspManagerModelEvent, LspServerModel, LspState};
+use warp_core::features::FeatureFlag;
+use warp_core::settings::ToggleableSetting as _;
 use warp_errors::report_if_error;
+use warpui::elements::{
+    ChildView, Container, CornerRadius, CrossAxisAlignment, Element, Empty, Flex,
+    MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable,
+};
+use warpui::fonts::Weight;
+use warpui::keymap::ContextPredicate;
+use warpui::platform::Cursor;
+use warpui::ui_components::button::ButtonVariant;
+use warpui::ui_components::components::{UiComponent, UiComponentStyles};
+use warpui::ui_components::switch::SwitchStateHandle;
 use warpui::{
-    elements::{
-        ChildView, Container, CornerRadius, CrossAxisAlignment, Element, Empty, Flex,
-        MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable,
-    },
-    fonts::Weight,
-    keymap::ContextPredicate,
-    platform::Cursor,
-    ui_components::{
-        button::ButtonVariant,
-        components::{UiComponent, UiComponentStyles},
-        switch::SwitchStateHandle,
-    },
     Action, AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
+
+#[cfg(feature = "local_fs")]
+use super::features::external_editor::ExternalEditorView;
+use super::settings_page::{
+    HEADER_PADDING, MatchData, PageType, SettingsPageMeta, SettingsPageViewHandle, SettingsWidget,
+    build_sub_header, render_body_item, render_separator,
+};
+use super::{LocalOnlyIconState, SettingsAction, SettingsSection, ToggleState};
+use crate::appearance::Appearance;
+use crate::settings::CodeSettings;
+use crate::terminal::general_settings::GeneralSettings;
+use crate::workspace::tab_settings::TabSettings;
 
 pub struct CodeSettingsPageView {
     page: PageType<Self>,
@@ -214,9 +212,11 @@ impl TypedActionView for CodeSettingsPageView {
             }
             CodeSettingsPageAction::ToggleShowCodeReviewDiffStats => {
                 TabSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .show_code_review_diff_stats
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .show_code_review_diff_stats
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 ctx.notify();
             }
@@ -252,9 +252,11 @@ impl TypedActionView for CodeSettingsPageView {
             }
             CodeSettingsPageAction::ToggleAutoOpenCodeReviewPane => {
                 GeneralSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .auto_open_code_review_pane_on_first_agent_change
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .auto_open_code_review_pane_on_first_agent_change
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 ctx.notify();
             }
@@ -297,11 +299,11 @@ impl LspManagementWidget {
         let can_restart = !matches!(server_state, LspState::Starting | LspState::Stopping { .. });
         let (status, status_color) = match server_state {
             LspState::Available { .. } if server.has_pending_tasks() => {
-                ("Busy", appearance.theme().ansi_fg_yellow().into())
+                ("Busy", appearance.theme().ansi_fg_yellow())
             }
-            LspState::Available { .. } => ("Available", appearance.theme().ansi_fg_green().into()),
-            LspState::Starting => ("Starting", appearance.theme().ansi_fg_yellow().into()),
-            LspState::Stopping { .. } => ("Stopping", appearance.theme().ansi_fg_yellow().into()),
+            LspState::Available { .. } => ("Available", appearance.theme().ansi_fg_green()),
+            LspState::Starting => ("Starting", appearance.theme().ansi_fg_yellow()),
+            LspState::Stopping { .. } => ("Stopping", appearance.theme().ansi_fg_yellow()),
             LspState::Stopped {
                 manually_stopped: true,
             } => (
@@ -314,7 +316,7 @@ impl LspManagementWidget {
                 "Stopped",
                 appearance.theme().disabled_ui_text_color().into_solid(),
             ),
-            LspState::Failed { .. } => ("Failed", appearance.theme().ansi_fg_red().into()),
+            LspState::Failed { .. } => ("Failed", appearance.theme().ansi_fg_red()),
         };
         let mouse_states = self
             .row_mouse_states

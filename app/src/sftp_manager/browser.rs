@@ -7,13 +7,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use pathfinder_geometry::vector::Vector2F;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::icons::Icon;
 use warp_ssh_manager::{KeychainSecretStore, SshRepository};
+use warpui::r#async::SpawnedFutureHandle;
 use warpui::elements::{
     Align, Border, ChildAnchor, ChildView, ClippedScrollStateHandle, ClippedScrollable,
     ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, DispatchEventResult, Element,
@@ -22,20 +23,10 @@ use warpui::elements::{
     ScrollbarWidth, Shrinkable, Stack, Text,
 };
 use warpui::platform::{Cursor, FilePickerConfiguration, SaveFilePickerConfiguration};
-use warpui::r#async::SpawnedFutureHandle;
 use warpui::{
     AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
-
-use crate::editor::{
-    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextColors, TextOptions,
-};
-use crate::pane_group::focus_state::PaneFocusHandle;
-use crate::pane_group::pane::view;
-use crate::pane_group::{BackingView, PaneConfiguration, PaneEvent};
-use crate::view_components::DismissibleToast;
-use crate::workspace::ToastStack;
 
 use super::context_menu::ContextMenuState;
 use super::sftp_backend::{LiveSftpBackend, SftpBackend};
@@ -45,6 +36,14 @@ use super::types::{
     ConnectionState, Dialog, FileEntry, FileEntryType, TransferDirection, TransferState,
     TransferTask,
 };
+use crate::editor::{
+    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextColors, TextOptions,
+};
+use crate::pane_group::focus_state::PaneFocusHandle;
+use crate::pane_group::pane::view;
+use crate::pane_group::{BackingView, PaneConfiguration, PaneEvent};
+use crate::view_components::DismissibleToast;
+use crate::workspace::ToastStack;
 
 /// Toolbar button size
 const TOOLBAR_BTN_SIZE: f32 = 28.0;
@@ -371,30 +370,27 @@ impl SftpBrowserView {
             None => return,
         };
         let path = self.current_path.clone();
-        match sftp.list_dir(&path) {
-            Ok(mut entries) => {
-                entries.sort_by(|a, b| match (a.file_type, b.file_type) {
-                    (FileEntryType::Directory, FileEntryType::Directory) => {
-                        a.name.to_lowercase().cmp(&b.name.to_lowercase())
-                    }
-                    (
-                        FileEntryType::Directory,
-                        FileEntryType::File | FileEntryType::Symlink | FileEntryType::Other,
-                    ) => std::cmp::Ordering::Less,
-                    (
-                        FileEntryType::File | FileEntryType::Symlink | FileEntryType::Other,
-                        FileEntryType::Directory,
-                    ) => std::cmp::Ordering::Greater,
-                    (
-                        FileEntryType::File | FileEntryType::Symlink | FileEntryType::Other,
-                        FileEntryType::File | FileEntryType::Symlink | FileEntryType::Other,
-                    ) => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                });
-                self.entries = entries;
-                self.selected.clear();
-                self.sync_row_mouse_handles();
-            }
-            Err(_) => {}
+        if let Ok(mut entries) = sftp.list_dir(&path) {
+            entries.sort_by(|a, b| match (a.file_type, b.file_type) {
+                (FileEntryType::Directory, FileEntryType::Directory) => {
+                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
+                }
+                (
+                    FileEntryType::Directory,
+                    FileEntryType::File | FileEntryType::Symlink | FileEntryType::Other,
+                ) => std::cmp::Ordering::Less,
+                (
+                    FileEntryType::File | FileEntryType::Symlink | FileEntryType::Other,
+                    FileEntryType::Directory,
+                ) => std::cmp::Ordering::Greater,
+                (
+                    FileEntryType::File | FileEntryType::Symlink | FileEntryType::Other,
+                    FileEntryType::File | FileEntryType::Symlink | FileEntryType::Other,
+                ) => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            });
+            self.entries = entries;
+            self.selected.clear();
+            self.sync_row_mouse_handles();
         }
         let path = self.current_path.display();
         let title = format!("SFTP: {path}");
@@ -544,7 +540,7 @@ impl SftpBrowserView {
         ctx: &mut ViewContext<Self>,
         op: impl FnOnce() -> T + Send + 'static,
         callback: impl FnOnce(&mut Self, Result<T, tokio::task::JoinError>, &mut ViewContext<Self>)
-            + 'static,
+        + 'static,
     ) -> Option<SpawnedFutureHandle> {
         #[cfg(any(test, feature = "integration_tests"))]
         {
@@ -1010,9 +1006,9 @@ impl SftpBrowserView {
             .iter()
             .enumerate()
             .filter(|(_, entry)| {
-                self.search_filter.as_ref().map_or(true, |filter| {
-                    entry.name.to_lowercase().contains(&filter.to_lowercase())
-                })
+                self.search_filter
+                    .as_ref()
+                    .is_none_or(|filter| entry.name.to_lowercase().contains(&filter.to_lowercase()))
             })
             .map(|(i, _)| i)
             .collect();
@@ -2045,8 +2041,9 @@ fn make_editor(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     // ============================================================
     // normalize_remote_path tests

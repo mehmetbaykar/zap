@@ -1,23 +1,20 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use ai::skills::SkillProvider;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
-use warpui::{
-    elements::{
-        Border, ChildView, Clipped, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox,
-        Container, CornerRadius, CrossAxisAlignment, Element, Fill as ElementFill, Flex, Hoverable,
-        MainAxisSize, MouseStateHandle, Padding, ParentElement, Radius, SavePosition, ScrollTarget,
-        ScrollToPositionMode, ScrollbarWidth, Shrinkable, Text,
-    },
-    platform::Cursor,
-    text_layout::ClipConfig,
-    AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
+use warpui::elements::{
+    Border, ChildView, Clipped, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox,
+    Container, CornerRadius, CrossAxisAlignment, Element, Fill as ElementFill, Flex, Hoverable,
+    MainAxisSize, MouseStateHandle, Padding, ParentElement, Radius, SavePosition, ScrollTarget,
+    ScrollToPositionMode, ScrollbarWidth, Shrinkable, Text,
 };
+use warpui::platform::Cursor;
+use warpui::text_layout::ClipConfig;
+use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
 use crate::ai::skills::{
     SkillInventoryDuplicate, SkillInventoryItem, SkillManager, SkillManagerEvent,
@@ -375,7 +372,7 @@ impl SkillManagerPanel {
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_spacing(4.0)
             .with_child(self.render_filter_button(
-                crate::t!("skill-manager-filter-all").into(),
+                crate::t!("skill-manager-filter-all"),
                 active_filter.is_none(),
                 None,
                 appearance,
@@ -409,7 +406,7 @@ impl SkillManagerPanel {
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_spacing(4.0)
             .with_child(self.render_filter_button(
-                crate::t!("skill-manager-filter-all").into(),
+                crate::t!("skill-manager-filter-all"),
                 self.provider_filter.is_none(),
                 None,
                 appearance,

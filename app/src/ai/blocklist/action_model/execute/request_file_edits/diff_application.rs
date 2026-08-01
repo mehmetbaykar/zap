@@ -1,34 +1,28 @@
-﻿//! Module containing helper code to apply suggested diffs from an LLM
+//! Module containing helper code to apply suggested diffs from an LLM
 //! to a set of files on the user's filesystem.
 
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    future::Future,
-    sync::Arc,
-};
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::sync::Arc;
 
 use ai::diff_validation::{
-    fuzzy_match_diffs, fuzzy_match_v4a_diffs, AIRequestedCodeDiff, DiffDelta, DiffMatchFailures,
-    DiffType, ParsedDiff, SearchAndReplace, V4AHunk,
+    AIRequestedCodeDiff, DiffDelta, DiffMatchFailures, DiffType, ParsedDiff, SearchAndReplace,
+    V4AHunk, fuzzy_match_diffs, fuzzy_match_v4a_diffs,
 };
 use itertools::Itertools;
 use vec1::Vec1;
 use warpui::r#async::executor::Background;
 
-use crate::{
-    ai::{
-        agent::{AIIdentifiers, FileEdit},
-        blocklist::SessionContext,
-        paths::host_native_absolute_path,
-    },
-    auth::AuthState,
-    safe_debug, safe_warn, send_telemetry_on_executor,
-};
-
 use super::telemetry::{
     DiffInvalidFileEvent, DiffMatchFailedEvent, MissingLineNumbersEvent,
     RequestFileEditsTelemetryEvent,
 };
+use crate::ai::agent::{AIIdentifiers, FileEdit};
+use crate::ai::blocklist::SessionContext;
+use crate::ai::paths::host_native_absolute_path;
+use crate::auth::AuthState;
+use crate::{safe_debug, safe_warn, send_telemetry_on_executor};
 
 /// Result of reading a file from disk or a remote server.
 ///
@@ -642,25 +636,25 @@ async fn apply_search_replace<F, Fut>(
 
             // Add warnings from the failure info - the `DiffMatchFailures` type includes both
             // fatal and non-fatal errors.
-            if let Some(failures) = fuzzy_match_diffs.failures.as_ref() {
-                if failures.missing_line_numbers > 0 {
-                    result.warnings.push(DiffWarning::MissingLineNumbers {
-                        count: failures.missing_line_numbers,
-                    });
-                }
+            if let Some(failures) = fuzzy_match_diffs.failures.as_ref()
+                && failures.missing_line_numbers > 0
+            {
+                result.warnings.push(DiffWarning::MissingLineNumbers {
+                    count: failures.missing_line_numbers,
+                });
             }
 
-            if fuzzy_match_diffs.warrants_failure() {
-                if let Some(failures) = fuzzy_match_diffs.failures.as_ref() {
-                    safe_warn!(
-                        safe: ("Failure(s) applying diff: {failures:?}"),
-                        full: ("Failure(s) applying diff for {absolute_path:?}: {failures:?}")
-                    );
-                    result.errors.push(DiffApplicationError::UnmatchedDiffs {
-                        file: file_path.clone(),
-                        match_failures: *failures,
-                    });
-                }
+            if fuzzy_match_diffs.warrants_failure()
+                && let Some(failures) = fuzzy_match_diffs.failures.as_ref()
+            {
+                safe_warn!(
+                    safe: ("Failure(s) applying diff: {failures:?}"),
+                    full: ("Failure(s) applying diff for {absolute_path:?}: {failures:?}")
+                );
+                result.errors.push(DiffApplicationError::UnmatchedDiffs {
+                    file: file_path.clone(),
+                    match_failures: *failures,
+                });
             }
             result.diffs.push(fuzzy_match_diffs);
         }
@@ -810,17 +804,17 @@ async fn apply_v4a_update<F, Fut>(
     } else {
         // Normal case: no rename or rename to non-existent file
         let diffs = fuzzy_match_v4a_diffs(&file_path, &deltas, rename_to, file_content);
-        if diffs.warrants_failure() {
-            if let Some(failures) = diffs.failures.as_ref() {
-                safe_warn!(
-                    safe: ("Failure(s) applying V4A diff: {failures:?}"),
-                    full: ("Failure(s) applying V4A diff for {absolute_path:?}: {failures:?}")
-                );
-                result.errors.push(DiffApplicationError::UnmatchedDiffs {
-                    file: file_path.clone(),
-                    match_failures: *failures,
-                });
-            }
+        if diffs.warrants_failure()
+            && let Some(failures) = diffs.failures.as_ref()
+        {
+            safe_warn!(
+                safe: ("Failure(s) applying V4A diff: {failures:?}"),
+                full: ("Failure(s) applying V4A diff for {absolute_path:?}: {failures:?}")
+            );
+            result.errors.push(DiffApplicationError::UnmatchedDiffs {
+                file: file_path.clone(),
+                match_failures: *failures,
+            });
         }
         result.diffs.push(diffs);
     }

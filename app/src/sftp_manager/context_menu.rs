@@ -6,12 +6,12 @@
 
 use pathfinder_geometry::vector::Vector2F;
 use warp_core::ui::appearance::Appearance;
+use warpui::Element;
 use warpui::elements::{
     Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Dismiss, Flex, Hoverable,
     MainAxisSize, ParentElement, Radius, SavePosition, Text,
 };
 use warpui::platform::Cursor;
-use warpui::Element;
 
 /// Context menu width
 const CONTEXT_MENU_WIDTH: f32 = 150.0;
@@ -184,9 +184,10 @@ pub fn render_context_menu(state: &ContextMenuState, appearance: &Appearance) ->
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use pathfinder_geometry::vector::Vector2F;
     use warpui::TypedActionView;
+
+    use super::*;
 
     // ============================================================
     // ContextMenuState tests
@@ -299,9 +300,10 @@ mod tests {
     /// Rendering does not panic after triggering ContextMenu through the browser view
     #[test]
     fn test_render_context_menu_via_browser() {
+        use warp_core::ui::appearance::Appearance;
+
         use crate::settings_view::keybindings::KeybindingChangedNotifier;
         use crate::test_util::settings::initialize_settings_for_tests;
-        use warp_core::ui::appearance::Appearance;
 
         warpui::App::test((), |mut app| async move {
             initialize_settings_for_tests(&mut app);

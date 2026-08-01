@@ -8,7 +8,7 @@ use std::rc::{self, Rc};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use futures::future::join_all;
 use futures::prelude::*;
@@ -22,14 +22,16 @@ use rustc_hash::FxHashMap;
 use warp_errors::report_error;
 
 use super::{
-    autotracking, ActionCallback, BlurContext, FocusContext, GlobalActionCallback, GlobalShortcut,
+    ActionCallback, BlurContext, FocusContext, GlobalActionCallback, GlobalShortcut,
     InvalidationCallback, Observation, PendingUnsubscribes, RefCounts, Subscription, TaskCallback,
-    TypedActionCallback, ViewType,
+    TypedActionCallback, ViewType, autotracking,
 };
 use crate::accessibility::{AccessibilityVerbosity, ActionAccessibilityContent};
 use crate::actions::StandardAction;
-use crate::assets::asset_cache::{AssetCache, AssetHandle, AssetSource, AssetState};
 use crate::assets::AssetProvider;
+use crate::assets::asset_cache::{AssetCache, AssetHandle, AssetSource, AssetState};
+use crate::r#async::executor::{self, Background, Foreground, ForegroundTask};
+use crate::r#async::{FutureId, SpawnableOutput, Timer, block_on};
 use crate::core::{ActionType, StoredView, Window};
 use crate::event::KeyState;
 use crate::fonts::{self, ExternalFontFamily, FallbackFontModel, RequestedFallbackFontSource};
@@ -50,18 +52,16 @@ use crate::platform::{
     TerminationMode, WindowBounds, WindowContext, WindowOptions, WindowStyle,
 };
 use crate::presenter::{CursorUpdate, DispatchedActionKind};
-use crate::r#async::executor::{self, Background, Foreground, ForegroundTask};
-use crate::r#async::{block_on, FutureId, SpawnableOutput, Timer};
 use crate::util::post_inc;
 use crate::windowing::{self, WindowCallbacks, WindowManager};
 use crate::{
-    assets, rendering, AccessibilityData, Action, AddSingletonModel, AddWindowOptions, AnyModel,
-    AnyModelHandle, ApplicationBundleInfo, Clipboard, CurrentRenderWindowGuard, CursorInfo, Effect,
-    Element, Entity, EntityId, EntityIdMap, EntityIdSet, Event, GetSingletonModelHandle,
-    ModelAsRef, ModelContext, ModelHandle, NextNewWindowsHasThisWindowsBoundsUponClose, Presenter,
-    ReadModel, ReadView, Scene, SingletonEntity, SpawnedFuture, TaskId, TypedActionView,
-    UpdateModel, UpdateView, View, ViewAsRef, ViewContext, ViewHandle, WindowId,
-    WindowInvalidation, ZoomFactor,
+    AccessibilityData, Action, AddSingletonModel, AddWindowOptions, AnyModel, AnyModelHandle,
+    ApplicationBundleInfo, Clipboard, CurrentRenderWindowGuard, CursorInfo, Effect, Element,
+    Entity, EntityId, EntityIdMap, EntityIdSet, Event, GetSingletonModelHandle, ModelAsRef,
+    ModelContext, ModelHandle, NextNewWindowsHasThisWindowsBoundsUponClose, Presenter, ReadModel,
+    ReadView, Scene, SingletonEntity, SpawnedFuture, TaskId, TypedActionView, UpdateModel,
+    UpdateView, View, ViewAsRef, ViewContext, ViewHandle, WindowId, WindowInvalidation, ZoomFactor,
+    assets, rendering,
 };
 
 #[cfg(feature = "tui")]
@@ -2546,46 +2546,44 @@ impl AppContext {
                             *shift = modifiers.shift;
                         }
 
-                        if let Some(presenter) = ctx.presenter(window_id) {
-                            if let Some(key_code) = key_code {
-                                // Based on the key code in question and the new state of the modifier key,
-                                // we can infer whether it was pressed or released.
-                                let key_pressed = match key_code {
-                                    KeyCode::ShiftLeft | KeyCode::ShiftRight => {
-                                        Some(modifiers.shift)
-                                    }
-                                    KeyCode::ControlLeft | KeyCode::ControlRight => {
-                                        Some(modifiers.ctrl)
-                                    }
-                                    KeyCode::AltLeft | KeyCode::AltRight => Some(modifiers.alt),
-                                    KeyCode::SuperLeft | KeyCode::SuperRight => Some(modifiers.cmd),
-                                    KeyCode::Fn => Some(modifiers.func),
-                                    _ => None,
-                                };
-                                if let Some(key_pressed) = key_pressed {
-                                    // Note: this can be slightly incorrect in a particular edge case where the user
-                                    // uses 2 physical keys corresponding to the same logical modifer. For example:
-                                    // 1. The user holds down right-alt - we fire the right-alt pressed event
-                                    // 2. The user then holds down left-alt - we fire the left-alt pressed event
-                                    // 3. The user lets go of left-alt - we would incorrectly fire the left-alt pressed event (since the logical state is still true)
-                                    // 4. The user lets go of right-alt - we correctly fire the right-alt released event
-                                    // This is a known limitation due to the underlying APIs being limited (we must use lower-level Apple
-                                    // APIs to get the exact physical key states, which we currently don't do).
-                                    let key_state = if key_pressed {
-                                        KeyState::Pressed
-                                    } else {
-                                        KeyState::Released
-                                    };
-
-                                    ctx.handle_window_event(
-                                        Event::ModifierKeyChanged {
-                                            key_code,
-                                            state: key_state,
-                                        },
-                                        window_id,
-                                        presenter.clone(),
-                                    );
+                        if let Some(presenter) = ctx.presenter(window_id)
+                            && let Some(key_code) = key_code
+                        {
+                            // Based on the key code in question and the new state of the modifier key,
+                            // we can infer whether it was pressed or released.
+                            let key_pressed = match key_code {
+                                KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(modifiers.shift),
+                                KeyCode::ControlLeft | KeyCode::ControlRight => {
+                                    Some(modifiers.ctrl)
                                 }
+                                KeyCode::AltLeft | KeyCode::AltRight => Some(modifiers.alt),
+                                KeyCode::SuperLeft | KeyCode::SuperRight => Some(modifiers.cmd),
+                                KeyCode::Fn => Some(modifiers.func),
+                                _ => None,
+                            };
+                            if let Some(key_pressed) = key_pressed {
+                                // Note: this can be slightly incorrect in a particular edge case where the user
+                                // uses 2 physical keys corresponding to the same logical modifer. For example:
+                                // 1. The user holds down right-alt - we fire the right-alt pressed event
+                                // 2. The user then holds down left-alt - we fire the left-alt pressed event
+                                // 3. The user lets go of left-alt - we would incorrectly fire the left-alt pressed event (since the logical state is still true)
+                                // 4. The user lets go of right-alt - we correctly fire the right-alt released event
+                                // This is a known limitation due to the underlying APIs being limited (we must use lower-level Apple
+                                // APIs to get the exact physical key states, which we currently don't do).
+                                let key_state = if key_pressed {
+                                    KeyState::Pressed
+                                } else {
+                                    KeyState::Released
+                                };
+
+                                ctx.handle_window_event(
+                                    Event::ModifierKeyChanged {
+                                        key_code,
+                                        state: key_state,
+                                    },
+                                    window_id,
+                                    presenter.clone(),
+                                );
                             }
                         }
                     }
@@ -2612,11 +2610,10 @@ impl AppContext {
                     _ => (),
                 };
 
-                match ctx.presenter(window_id) { Some(presenter) => {
-                    ctx.handle_window_event(event, window_id, presenter)
-                } _ => {
-                    crate::windowing::EventDispatchResult::default()
-                }}
+                match ctx.presenter(window_id) {
+                    Some(presenter) => ctx.handle_window_event(event, window_id, presenter),
+                    _ => crate::windowing::EventDispatchResult::default(),
+                }
             }),
             resize_callback: Box::new(move |window, ctx| {
                 let origin = window.origin();
@@ -3014,24 +3011,25 @@ impl AppContext {
         let view_id = EntityId::new();
         self.pending_flushes += 1;
         let mut ctx = ViewContext::new(self, window_id, view_id);
-        let handle = match build_view(&mut ctx) { Some(view) => {
-            if let Some(window) = self.windows.get_mut(&window_id) {
-                window
-                    .views
-                    .insert(view_id, StoredView::Gui(Box::new(view)));
-            } else {
-                panic!("Window does not exist");
+        let handle = match build_view(&mut ctx) {
+            Some(view) => {
+                if let Some(window) = self.windows.get_mut(&window_id) {
+                    window
+                        .views
+                        .insert(view_id, StoredView::Gui(Box::new(view)));
+                } else {
+                    panic!("Window does not exist");
+                }
+                self.view_to_window.insert(view_id, window_id);
+                self.window_invalidations
+                    .entry(window_id)
+                    .or_default()
+                    .updated
+                    .insert(view_id);
+                Some(ViewHandle::new(window_id, view_id, &self.ref_counts))
             }
-            self.view_to_window.insert(view_id, window_id);
-            self.window_invalidations
-                .entry(window_id)
-                .or_default()
-                .updated
-                .insert(view_id);
-            Some(ViewHandle::new(window_id, view_id, &self.ref_counts))
-        } _ => {
-            None
-        }};
+            _ => None,
+        };
         self.flush_effects();
         handle
     }
@@ -3349,14 +3347,13 @@ impl AppContext {
                 stack.extend(children.iter().copied());
             }
 
-            if let Some(current_window_id) = self.view_to_window.get(&view_id).copied() {
-                if let Some(view) = self
+            if let Some(current_window_id) = self.view_to_window.get(&view_id).copied()
+                && let Some(view) = self
                     .windows
                     .get(&current_window_id)
                     .and_then(|window| window.views.get(&view_id))
-                {
-                    stack.extend(view.child_view_ids(self));
-                }
+            {
+                stack.extend(view.child_view_ids(self));
             }
         }
 
@@ -3423,22 +3420,21 @@ impl AppContext {
                     .unwrap_or(handle_window_id);
 
                 // Focus the root view if the view being removed is focused
-                if let Some(focused_view_id) = self.focused_view_id(current_window_id) {
-                    if view_id == focused_view_id {
-                        if let Some(root_view_id) = self.root_view_id(current_window_id) {
-                            self.focus(current_window_id, root_view_id);
-                        }
-                    }
+                if let Some(focused_view_id) = self.focused_view_id(current_window_id)
+                    && view_id == focused_view_id
+                    && let Some(root_view_id) = self.root_view_id(current_window_id)
+                {
+                    self.focus(current_window_id, root_view_id);
                 }
 
                 self.subscriptions.remove(&view_id);
                 self.observations.remove(&view_id);
-                if let Some(parent_id) = self.structural_child_to_parent.remove(&view_id) {
-                    if let Some(children) = self.structural_parent_to_children.get_mut(&parent_id) {
-                        children.remove(&view_id);
-                        if children.is_empty() {
-                            self.structural_parent_to_children.remove(&parent_id);
-                        }
+                if let Some(parent_id) = self.structural_child_to_parent.remove(&view_id)
+                    && let Some(children) = self.structural_parent_to_children.get_mut(&parent_id)
+                {
+                    children.remove(&view_id);
+                    if children.is_empty() {
+                        self.structural_parent_to_children.remove(&parent_id);
                     }
                 }
                 self.structural_parent_to_children.remove(&view_id);
@@ -3556,21 +3552,16 @@ impl AppContext {
                 is_composing,
                 ..
             } = &event
+                && let Some(focused_view_id) = self.focused_view_id(window_id)
             {
-                if let Some(focused_view_id) = self.focused_view_id(window_id) {
-                    let responder_chain = self.view_ancestors(window_id, focused_view_id);
-                    match self.dispatch_keystroke(
-                        window_id,
-                        &responder_chain,
-                        keystroke,
-                        *is_composing,
-                    ) {
-                        Ok(handled) => {
-                            keystroke_handled = handled;
-                        }
-                        Err(error) => {
-                            report_error!(error.context("error dispatching keystroke"));
-                        }
+                let responder_chain = self.view_ancestors(window_id, focused_view_id);
+                match self.dispatch_keystroke(window_id, &responder_chain, keystroke, *is_composing)
+                {
+                    Ok(handled) => {
+                        keystroke_handled = handled;
+                    }
+                    Err(error) => {
+                        report_error!(error.context("error dispatching keystroke"));
                     }
                 }
             }
@@ -3586,11 +3577,12 @@ impl AppContext {
         // Only dispatch `self_or_child_interacted_with` if:
         // (1) the event was handled by a view in the responder chain, and
         // (2) the event is a valid interaction (we exclude mouse and scroll movements to reduce noise)
-        if handled && !matches!(event, Event::MouseMoved { .. } | Event::ScrollWheel { .. }) {
-            if let Some(focused_view_id) = self.focused_view_id(window_id) {
-                let responder_chain = self.view_ancestors(window_id, focused_view_id);
-                self.dispatch_self_or_child_interacted_with(window_id, &responder_chain);
-            }
+        if handled
+            && !matches!(event, Event::MouseMoved { .. } | Event::ScrollWheel { .. })
+            && let Some(focused_view_id) = self.focused_view_id(window_id)
+        {
+            let responder_chain = self.view_ancestors(window_id, focused_view_id);
+            self.dispatch_self_or_child_interacted_with(window_id, &responder_chain);
         }
 
         crate::windowing::EventDispatchResult {
@@ -3820,10 +3812,10 @@ impl AppContext {
 
                 // If the font is loading, collect the future so we can wait
                 // for it to resolve.
-                if let AssetState::Loading { ref handle } = asset {
-                    if let Some(future) = handle.when_loaded(asset_cache) {
-                        futures.push(future);
-                    }
+                if let AssetState::Loading { ref handle } = asset
+                    && let Some(future) = handle.when_loaded(asset_cache)
+                {
+                    futures.push(future);
                 }
                 // We need to load the asset again once the future has resolved,
                 // so collect the asset source.
@@ -3963,13 +3955,14 @@ impl AppContext {
             for mut subscription in subscriptions {
                 let alive = match &mut subscription {
                     Subscription::FromModel { model_id, callback } => {
-                        match self.models.remove(model_id) { Some(mut model) => {
-                            callback(model.as_any_mut(), payload.as_ref(), self, *model_id);
-                            self.models.insert(*model_id, model);
-                            true
-                        } _ => {
-                            false
-                        }}
+                        match self.models.remove(model_id) {
+                            Some(mut model) => {
+                                callback(model.as_any_mut(), payload.as_ref(), self, *model_id);
+                                self.models.insert(*model_id, model);
+                                true
+                            }
+                            _ => false,
+                        }
                     }
                     Subscription::FromView {
                         window_id: stored_window_id,
@@ -3985,28 +3978,29 @@ impl AppContext {
                             .windows
                             .get_mut(&current_window_id)
                             .and_then(|window| window.views.remove(view_id))
-                        { Some(mut view) => {
-                            callback(
-                                view.as_any_mut(),
-                                payload.as_ref(),
-                                self,
-                                current_window_id,
-                                *view_id,
-                            );
+                        {
+                            Some(mut view) => {
+                                callback(
+                                    view.as_any_mut(),
+                                    payload.as_ref(),
+                                    self,
+                                    current_window_id,
+                                    *view_id,
+                                );
 
-                            // XXX We need to check whether window is None
-                            // once again because callback could
-                            // potentially erase the window (i.e. if we
-                            // handle the Terminal exit event)
-                            if let Some(window) = self.windows.get_mut(&current_window_id) {
-                                window.views.insert(*view_id, view);
-                                true
-                            } else {
-                                false
+                                // XXX We need to check whether window is None
+                                // once again because callback could
+                                // potentially erase the window (i.e. if we
+                                // handle the Terminal exit event)
+                                if let Some(window) = self.windows.get_mut(&current_window_id) {
+                                    window.views.insert(*view_id, view);
+                                    true
+                                } else {
+                                    false
+                                }
                             }
-                        } _ => {
-                            false
-                        }}
+                            _ => false,
+                        }
                     }
                     Subscription::FromApp { callback } => {
                         callback(payload.as_ref(), self, entity_id);
@@ -4045,34 +4039,37 @@ impl AppContext {
     fn notify_model_observers(&mut self, observed_id: EntityId) {
         // TODO: Apply the same deferred unsubscribe pattern used in `emit_event` to support
         // unobserving from inside an observation callback.
-        if let Some(observations) = self.observations.remove(&observed_id) {
-            if self.models.contains_key(&observed_id) {
-                for mut observation in observations {
-                    let alive = match &mut observation {
-                        Observation::FromModel { model_id, callback } => {
-                            match self.models.remove(model_id) { Some(mut model) => {
+        if let Some(observations) = self.observations.remove(&observed_id)
+            && self.models.contains_key(&observed_id)
+        {
+            for mut observation in observations {
+                let alive = match &mut observation {
+                    Observation::FromModel { model_id, callback } => {
+                        match self.models.remove(model_id) {
+                            Some(mut model) => {
                                 callback(model.as_any_mut(), observed_id, self, *model_id);
                                 self.models.insert(*model_id, model);
                                 true
-                            } _ => {
-                                false
-                            }}
+                            }
+                            _ => false,
                         }
-                        Observation::FromView {
-                            window_id: stored_window_id,
-                            view_id,
-                            callback,
-                        } => {
-                            let current_window_id = self
-                                .view_to_window
-                                .get(view_id)
-                                .copied()
-                                .unwrap_or(*stored_window_id);
-                            match self
-                                .windows
-                                .get_mut(&current_window_id)
-                                .and_then(|w| w.views.remove(view_id))
-                            { Some(mut view) => {
+                    }
+                    Observation::FromView {
+                        window_id: stored_window_id,
+                        view_id,
+                        callback,
+                    } => {
+                        let current_window_id = self
+                            .view_to_window
+                            .get(view_id)
+                            .copied()
+                            .unwrap_or(*stored_window_id);
+                        match self
+                            .windows
+                            .get_mut(&current_window_id)
+                            .and_then(|w| w.views.remove(view_id))
+                        {
+                            Some(mut view) => {
                                 callback(
                                     view.as_any_mut(),
                                     observed_id,
@@ -4084,22 +4081,21 @@ impl AppContext {
                                     window.views.insert(*view_id, view);
                                 }
                                 true
-                            } _ => {
-                                false
-                            }}
+                            }
+                            _ => false,
                         }
-                        Observation::FromApp { callback } => {
-                            callback(observed_id, self);
-                            true
-                        }
-                    };
-
-                    if alive {
-                        self.observations
-                            .entry(observed_id)
-                            .or_default()
-                            .push(observation);
                     }
+                    Observation::FromApp { callback } => {
+                        callback(observed_id, self);
+                        true
+                    }
+                };
+
+                if alive {
+                    self.observations
+                        .entry(observed_id)
+                        .or_default()
+                        .push(observation);
                 }
             }
         }
@@ -4260,18 +4256,21 @@ impl AppContext {
                 loop {
                     match stream.next().await {
                         Some(item) => {
-                            match app.upgrade() { Some(app) => {
-                                let mut app = app.borrow_mut();
+                            match app.upgrade() {
+                                Some(app) => {
+                                    let mut app = app.borrow_mut();
 
-                                // If the entity that spawned the stream no longer exists, terminate
-                                // the stream.
-                                if app.relay_task_output(task_id, Box::new(item)).is_err() {
-                                    app.stream_completed(task_id);
+                                    // If the entity that spawned the stream no longer exists, terminate
+                                    // the stream.
+                                    if app.relay_task_output(task_id, Box::new(item)).is_err() {
+                                        app.stream_completed(task_id);
+                                        break;
+                                    }
+                                }
+                                _ => {
                                     break;
                                 }
-                            } _ => {
-                                break;
-                            }}
+                            }
                         }
                         None => {
                             if let Some(app) = app.upgrade() {
@@ -4302,9 +4301,9 @@ impl AppContext {
     pub fn open_file_picker(
         &mut self,
         callback: impl FnOnce(Result<Vec<String>, FilePickerError>, &mut AppContext)
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
         config: FilePickerConfiguration,
     ) {
         self.platform_delegate
@@ -4385,14 +4384,17 @@ impl AppContext {
                 mut on_item,
                 on_done,
             } => {
-                match self.models.remove(&model_id) { Some(mut model) => {
-                    on_item(model.as_any_mut(), output, self, model_id);
-                    self.models.insert(model_id, model);
-                } _ => {
-                    result = Err(anyhow!(
-                        "Unable to retrieve model when relaying task output from stream"
-                    ));
-                }}
+                match self.models.remove(&model_id) {
+                    Some(mut model) => {
+                        on_item(model.as_any_mut(), output, self, model_id);
+                        self.models.insert(model_id, model);
+                    }
+                    _ => {
+                        result = Err(anyhow!(
+                            "Unable to retrieve model when relaying task output from stream"
+                        ));
+                    }
+                }
                 // Streams go through different code paths compared to Futures.
                 // Even if the stream halts after this call, we still need to
                 // refer to the task callback in stream completed.
@@ -4434,18 +4436,21 @@ impl AppContext {
                     .windows
                     .get_mut(&window_id)
                     .and_then(|w| w.views.remove(&view_id))
-                { Some(mut view) => {
-                    on_item(view.as_any_mut(), output, self, window_id, view_id);
-                    self.windows
-                        .get_mut(&window_id)
-                        .ok_or_else(|| anyhow!("Unable to retrieve window for view"))?
-                        .views
-                        .insert(view_id, view);
-                } _ => {
-                    result = Err(anyhow!(
-                        "Unable to retrieve view when relaying task output from stream"
-                    ));
-                }}
+                {
+                    Some(mut view) => {
+                        on_item(view.as_any_mut(), output, self, window_id, view_id);
+                        self.windows
+                            .get_mut(&window_id)
+                            .ok_or_else(|| anyhow!("Unable to retrieve window for view"))?
+                            .views
+                            .insert(view_id, view);
+                    }
+                    _ => {
+                        result = Err(anyhow!(
+                            "Unable to retrieve view when relaying task output from stream"
+                        ));
+                    }
+                }
                 // Streams go through different code paths compared to Futures.
                 // Even if the stream halts after this call, we still need to
                 // refer to the task callback in stream completed.
@@ -4598,22 +4603,25 @@ impl UpdateModel for AppContext {
         T: Entity,
         F: FnOnce(&mut T, &mut ModelContext<T>) -> S,
     {
-        match self.models.remove(&handle.id()) { Some(mut model) => {
-            self.pending_flushes += 1;
-            let mut ctx = ModelContext::new(self, handle.id());
-            let result = update(
-                model
-                    .as_any_mut()
-                    .downcast_mut()
-                    .expect("Downcast is type safe"),
-                &mut ctx,
-            );
-            self.models.insert(handle.id(), model);
-            self.flush_effects();
-            result
-        } _ => {
-            panic!("Circular model update");
-        }}
+        match self.models.remove(&handle.id()) {
+            Some(mut model) => {
+                self.pending_flushes += 1;
+                let mut ctx = ModelContext::new(self, handle.id());
+                let result = update(
+                    model
+                        .as_any_mut()
+                        .downcast_mut()
+                        .expect("Downcast is type safe"),
+                    &mut ctx,
+                );
+                self.models.insert(handle.id(), model);
+                self.flush_effects();
+                result
+            }
+            _ => {
+                panic!("Circular model update");
+            }
+        }
     }
 }
 
@@ -4626,11 +4634,12 @@ impl UpdateView for AppContext {
         self.pending_flushes += 1;
         let window_id = handle.window_id(self);
         let mut view = if let Some(window) = self.windows.get_mut(&window_id) {
-            match window.views.remove(&handle.id()) { Some(view) => {
-                view
-            } _ => {
-                panic!("Circular view update");
-            }}
+            match window.views.remove(&handle.id()) {
+                Some(view) => view,
+                _ => {
+                    panic!("Circular view update");
+                }
+            }
         } else {
             panic!("Window does not exist");
         };

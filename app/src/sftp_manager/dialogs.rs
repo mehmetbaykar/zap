@@ -14,12 +14,11 @@ use warpui::elements::{
     Radius, SavePosition, Shrinkable, Text,
 };
 use warpui::platform::Cursor;
-use warpui::Element;
-use warpui::ViewHandle;
+use warpui::{Element, ViewHandle};
 
 use crate::editor::EditorView;
 use crate::sftp_manager::browser::SftpBrowserAction;
-use crate::sftp_manager::types::{format_size, Dialog, FileEntry, TransferDirection};
+use crate::sftp_manager::types::{Dialog, FileEntry, TransferDirection, format_size};
 
 /// Dialog maximum width
 const DIALOG_MAX_WIDTH: f32 = 360.0;

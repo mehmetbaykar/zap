@@ -6,16 +6,16 @@ use shell_words::quote as shell_quote;
 use uuid::Uuid;
 use warp_cli::agent::Harness;
 
-use crate::ai::agent_sdk::driver::harness::{
-    harness_kind, remove_claude_externally_managed_listener_env_vars, HarnessKind,
-};
 use crate::ai::agent_sdk::driver::AgentDriverError;
+use crate::ai::agent_sdk::driver::harness::{
+    HarnessKind, harness_kind, remove_claude_externally_managed_listener_env_vars,
+};
 use crate::ai::agent_sdk::{task_env_vars, validate_cli_installed};
-use crate::ai::ambient_agents::task::{normalize_orchestrator_agent_name, HarnessConfig};
+use crate::ai::ambient_agents::task::{HarnessConfig, normalize_orchestrator_agent_name};
 use crate::ai::ambient_agents::{AgentConfigSnapshot, AmbientAgentTaskId};
 use crate::ai::local_harness_setup::local_harness_product_disabled_message;
 use crate::terminal::cli_agent_sessions::plugin_manager::{
-    plugin_manager_for, CliAgentPluginManager,
+    CliAgentPluginManager, plugin_manager_for,
 };
 use crate::terminal::shell::ShellType;
 

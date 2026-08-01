@@ -28,11 +28,11 @@ use crate::ai::document::ai_document_model::AIDocumentId;
 use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
 #[cfg(feature = "local_fs")]
 use crate::code_review::github_repo_model::GitHubRepoModel;
+use crate::terminal::TerminalModel;
 use crate::terminal::event::{BlockCompletedEvent, BlockType};
 use crate::terminal::model::block::{BlockId, BlockMetadata};
 use crate::terminal::model::session::Sessions;
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
-use crate::terminal::TerminalModel;
 use crate::util::git::{PrInfo, RepositoryInfo};
 
 /// A non-image file picked via the "attach file" button, stored until query submission.
@@ -206,29 +206,28 @@ fn read_pending_file_for_context(file: &PendingFile) -> Option<FileContext> {
     let metadata_size = std::fs::metadata(&file.file_path).ok().map(|m| m.len());
 
     // 1) text-like: try UTF-8
-    if is_text_like(file) {
-        if let Some(size) = metadata_size {
-            if size as usize <= MAX_INLINE_TEXT_FILE_BYTES {
-                match std::fs::read(&file.file_path) {
-                    Ok(bytes) => {
-                        if let Ok(content) = std::str::from_utf8(&bytes) {
-                            return Some(FileContext::new(
-                                full_path,
-                                AnyFileContent::StringContent(content.to_owned()),
-                                None,
-                                None,
-                            ));
-                        }
-                        // text-like but contents aren't UTF-8 → fall through to the binary path
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to read attached file {} for inline context: {e}",
-                            file.file_path.display()
-                        );
-                        return None;
-                    }
+    if is_text_like(file)
+        && let Some(size) = metadata_size
+        && size as usize <= MAX_INLINE_TEXT_FILE_BYTES
+    {
+        match std::fs::read(&file.file_path) {
+            Ok(bytes) => {
+                if let Ok(content) = std::str::from_utf8(&bytes) {
+                    return Some(FileContext::new(
+                        full_path,
+                        AnyFileContent::StringContent(content.to_owned()),
+                        None,
+                        None,
+                    ));
                 }
+                // text-like but contents aren't UTF-8 → fall through to the binary path
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to read attached file {} for inline context: {e}",
+                    file.file_path.display()
+                );
+                return None;
             }
         }
     }
@@ -237,42 +236,40 @@ fn read_pending_file_for_context(file: &PendingFile) -> Option<FileContext> {
     let mime = file.mime_type.to_ascii_lowercase();
     let is_multimodal_mime =
         mime.starts_with("image/") || mime == "application/pdf" || mime.starts_with("audio/");
-    if is_multimodal_mime {
-        if let Some(size) = metadata_size {
-            if size as usize <= MAX_INLINE_BINARY_FILE_BYTES {
-                match std::fs::read(&file.file_path) {
-                    Ok(bytes) => {
-                        return Some(FileContext::new(
-                            full_path,
-                            AnyFileContent::BinaryContent(bytes),
-                            None,
-                            None,
-                        ));
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to read attached file {} for inline context: {e}",
-                            file.file_path.display()
-                        );
-                        return None;
-                    }
+    if is_multimodal_mime && let Some(size) = metadata_size {
+        if size as usize <= MAX_INLINE_BINARY_FILE_BYTES {
+            match std::fs::read(&file.file_path) {
+                Ok(bytes) => {
+                    return Some(FileContext::new(
+                        full_path,
+                        AnyFileContent::BinaryContent(bytes),
+                        None,
+                        None,
+                    ));
                 }
-            } else {
-                log::warn!(
-                    "Attached file {} ({} bytes) exceeds {} byte multimodal cap; \
-                     sending placeholder only (path/mime/size) — AI can use read_files instead",
-                    file.file_path.display(),
-                    size,
-                    MAX_INLINE_BINARY_FILE_BYTES
-                );
-                // Oversized multimodal file: store empty BinaryContent; the placeholder still carries size (from metadata)
-                return Some(FileContext::new(
-                    full_path,
-                    AnyFileContent::BinaryContent(Vec::new()),
-                    None,
-                    None,
-                ));
+                Err(e) => {
+                    log::warn!(
+                        "Failed to read attached file {} for inline context: {e}",
+                        file.file_path.display()
+                    );
+                    return None;
+                }
             }
+        } else {
+            log::warn!(
+                "Attached file {} ({} bytes) exceeds {} byte multimodal cap; \
+                     sending placeholder only (path/mime/size) — AI can use read_files instead",
+                file.file_path.display(),
+                size,
+                MAX_INLINE_BINARY_FILE_BYTES
+            );
+            // Oversized multimodal file: store empty BinaryContent; the placeholder still carries size (from metadata)
+            return Some(FileContext::new(
+                full_path,
+                AnyFileContent::BinaryContent(Vec::new()),
+                None,
+                None,
+            ));
         }
     }
 
@@ -657,11 +654,10 @@ impl BlocklistAIContextModel {
             if FeatureFlag::AgentViewBlockContext.is_enabled() {
                 for block_id in &self.auto_attached_agent_view_user_block_ids {
                     // Skip if already in pending_context_block_ids to avoid duplicates
-                    if !self.pending_context_block_ids.contains(block_id) {
-                        if let Some(block_context) = self.transform_block_to_context(block_id, true)
-                        {
-                            context.push(block_context);
-                        }
+                    if !self.pending_context_block_ids.contains(block_id)
+                        && let Some(block_context) = self.transform_block_to_context(block_id, true)
+                    {
+                        context.push(block_context);
                     }
                 }
             }
@@ -684,10 +680,10 @@ impl BlocklistAIContextModel {
             // - binary (PDF / audio / other) → BinaryContent → goes through the BYOP user_context Binary
             //   ContentPart upgrade path (warp-own discards it outright in convert.rs:759, no side effects)
             for attachment in &self.pending_attachments {
-                if let PendingAttachment::File(file) = attachment {
-                    if let Some(file_context) = read_pending_file_for_context(file) {
-                        context.push(AIAgentContext::File(file_context));
-                    }
+                if let PendingAttachment::File(file) = attachment
+                    && let Some(file_context) = read_pending_file_for_context(file)
+                {
+                    context.push(AIAgentContext::File(file_context));
                 }
             }
         }
@@ -727,14 +723,14 @@ impl BlocklistAIContextModel {
         let pwd = block_metadata
             .current_working_directory()
             .map(|s| PathBuf::from(s.to_owned()));
-        if let Some(session_id) = block_metadata.session_id() {
-            if let Some(active_session) = sessions.as_ref(ctx).get(session_id) {
-                self.update_directory_context(
-                    pwd.map(|p| p.to_string_lossy().to_string()),
-                    active_session.home_dir().map(|sq| sq.to_owned()),
-                    ctx,
-                );
-            }
+        if let Some(session_id) = block_metadata.session_id()
+            && let Some(active_session) = sessions.as_ref(ctx).get(session_id)
+        {
+            self.update_directory_context(
+                pwd.map(|p| p.to_string_lossy().to_string()),
+                active_session.home_dir().map(|sq| sq.to_owned()),
+                ctx,
+            );
         }
     }
 

@@ -692,10 +692,10 @@ impl ProjectContextModel {
     #[cfg(feature = "local_fs")]
     fn fast_path_lookup(&self, cwd: &Path) -> Option<ProjectRulesResult> {
         // 1) Cache hit path: stat the stamps once, and if all match, reuse the cache (without re-reading files).
-        if let Some(entry) = self.fast_path_cache.borrow().get(cwd).cloned() {
-            if Self::fast_path_entry_still_valid(&entry) {
-                return Self::result_from_fast_path_entry(&entry);
-            }
+        if let Some(entry) = self.fast_path_cache.borrow().get(cwd).cloned()
+            && Self::fast_path_entry_still_valid(&entry)
+        {
+            return Self::result_from_fast_path_entry(&entry);
         }
 
         // 2) Cache miss / invalid: synchronous scan. The `FAST_PATH_BUDGET` is a hard cutoff; the UI never janks.
@@ -727,10 +727,10 @@ impl ProjectContextModel {
             }
 
             // Record the directory mtime so we can later detect the two kinds of changes "a rule file was added/deleted in the directory".
-            if let Ok(meta) = std::fs::metadata(&current) {
-                if let Ok(mtime) = meta.modified() {
-                    walked_dir_stamps.push((current.clone(), mtime));
-                }
+            if let Ok(meta) = std::fs::metadata(&current)
+                && let Ok(mtime) = meta.modified()
+            {
+                walked_dir_stamps.push((current.clone(), mtime));
             }
 
             // At this level, find the first rule file by priority. Aligned with RuleAtPath::respected_rule() semantics.

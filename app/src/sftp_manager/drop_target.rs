@@ -8,9 +8,12 @@
 use std::any::Any;
 use std::path::PathBuf;
 
+use warpui::elements::Point;
+use warpui::event::DispatchedEvent;
+use warpui::geometry::vector::Vector2F;
 use warpui::{
-    elements::Point, event::DispatchedEvent, geometry::vector::Vector2F, AfterLayoutContext,
-    AppContext, Element, Event, EventContext, LayoutContext, PaintContext, SizeConstraint,
+    AfterLayoutContext, AppContext, Element, Event, EventContext, LayoutContext, PaintContext,
+    SizeConstraint,
 };
 
 use super::browser::SftpBrowserAction;

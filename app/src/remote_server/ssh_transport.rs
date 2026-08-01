@@ -9,18 +9,17 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
-use warpui::r#async::{executor, FutureExt as _};
-
+use anyhow::{Result, anyhow};
 use remote_server::client::RemoteServerClient;
 use remote_server::manager::RemoteServerExitStatus;
 use remote_server::setup::{
-    parse_uname_output, remote_server_daemon_dir, PreinstallCheckResult, RemotePlatform,
+    PreinstallCheckResult, RemotePlatform, parse_uname_output, remote_server_daemon_dir,
 };
-use remote_server::ssh::{ssh_args, SshCommandError};
+use remote_server::ssh::{SshCommandError, ssh_args};
 use remote_server::transport::{
     Connection, ControlPath, Error, InstallOutcome, InstallSource, RemoteTransport,
 };
+use warpui::r#async::{FutureExt as _, executor};
 
 #[path = "ssh_transport/installation.rs"]
 pub(crate) mod installation;
@@ -429,7 +428,9 @@ async fn dev_install_local_binary(socket_path: &Path) -> Result<()> {
         ));
     }
 
-    log::info!("dev remote-server: uploading local cross-compiled artifact to {remote_binary} (scp -C compression; hundreds of MB may take several minutes)");
+    log::info!(
+        "dev remote-server: uploading local cross-compiled artifact to {remote_binary} (scp -C compression; hundreds of MB may take several minutes)"
+    );
     // The dev artifact is hundreds of MB, so use DEV_UPLOAD_TIMEOUT (far larger than SCP_INSTALL_TIMEOUT),
     // to avoid the large-file upload being interrupted by the 120s timeout and falling back to downloading a stale release.
     remote_server::ssh::scp_upload(
@@ -572,7 +573,9 @@ impl RemoteTransport for SshTransport {
             // intact. Release builds skip this entire block, leaving behavior
             // unchanged.
             if remote_server::setup::is_dev_source_build() {
-                log::info!("dev remote-server: detected DEBUG source build, switching to local cross-compile install");
+                log::info!(
+                    "dev remote-server: detected DEBUG source build, switching to local cross-compile install"
+                );
                 match dev_install_local_binary(&socket_path).await {
                     Ok(()) => {
                         let mut outcome = InstallOutcome {

@@ -13,15 +13,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ::channel_versions::{ParsedVersion, VersionInfo};
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use rand::Rng as _;
 use settings::Setting as _;
 use warp_core::execution_mode::AppExecutionMode;
 use warp_errors::report_if_error;
 use warpui::accessibility::{AccessibilityContent, WarpA11yRole};
-use warpui::platform::TerminationMode;
 use warpui::r#async::Timer;
+use warpui::platform::TerminationMode;
 use warpui::windowing::state::ApplicationStage;
 use warpui::windowing::{self, WindowManager};
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, ViewContext};
@@ -33,7 +33,7 @@ use crate::features::FeatureFlag;
 use crate::server::telemetry::TelemetryEvent;
 use crate::settings::AutoupdateSettings;
 use crate::workspace::Workspace;
-use crate::{send_telemetry_from_ctx, send_telemetry_sync_from_app_ctx, ChannelState};
+use crate::{ChannelState, send_telemetry_from_ctx, send_telemetry_sync_from_app_ctx};
 
 /// SHA-256 verification shared across all three platforms after an OSS download completes:
 /// 1. If no matching asset is found in the cached release, skip (degrade to no verification);
@@ -65,8 +65,9 @@ pub(crate) fn verify_oss_asset_sha256(
         return Ok(());
     };
 
-    use sha2::{Digest as _, Sha256};
     use std::io::Read as _;
+
+    use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
     let mut file = std::fs::File::open(path)
         .with_context(|| format!("failed to open downloaded file: {}", path.display()))?;

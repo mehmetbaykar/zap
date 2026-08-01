@@ -4,26 +4,21 @@ use warpui::{App, SingletonEntity};
 
 use super::*;
 use crate::auth::AuthStateProvider;
-use crate::cloud_object::{Owner, StoredObjectMetadata, StoredObjectPermissions};
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::model::view::ObjectStoreViewModel;
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::cloud_object::{Owner, Revision, StoredObjectMetadata, StoredObjectPermissions};
+use crate::network::NetworkStatus;
 use crate::notebooks::manager::NotebookManager;
-use crate::notebooks::{NotebookObject, NotebookObjectModel};
+use crate::notebooks::{NotebookId, NotebookObject, NotebookObjectModel};
+use crate::search::data_source::Query;
 use crate::server::ids::SyncId::{self};
 use crate::settings::AISettings;
+use crate::system::SystemStats;
 use crate::workflows::workflow::Workflow;
-use crate::workflows::{WorkflowObject, WorkflowObjectModel};
-use crate::{
-    cloud_object::update_manager::UpdateManager,
-    cloud_object::{
-        model::{persistence::ObjectStoreModel, view::ObjectStoreViewModel},
-        Revision,
-    },
-    network::NetworkStatus,
-    notebooks::NotebookId,
-    search::data_source::Query,
-    system::SystemStats,
-    workflows::WorkflowId,
-    workspaces::{user_profiles::UserProfiles, user_workspaces::UserWorkspaces},
-};
+use crate::workflows::{WorkflowId, WorkflowObject, WorkflowObjectModel};
+use crate::workspaces::user_profiles::UserProfiles;
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 fn mock_metadata() -> StoredObjectMetadata {
     let mut metadata = StoredObjectMetadata::mock();

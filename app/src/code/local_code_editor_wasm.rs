@@ -8,18 +8,18 @@ use warp_core::ui::appearance::Appearance;
 use warp_editor::content::buffer::InitialBufferState;
 use warp_editor::render::model::LineCount;
 use warp_util::file::{FileLoadError, FileSaveError};
+use warp_util::local_or_remote_path::LocalOrRemotePath as BufferFileLocation;
 use warpui::elements::MouseStateHandle;
 use warpui::{
     AppContext, Element, Entity, TypedActionView, View, ViewContext, ViewHandle, WindowId,
 };
 
+use super::ImmediateSaveError;
 pub use super::diff_viewer::DisplayMode;
 use super::editor::view::CodeEditorView;
-use super::ImmediateSaveError;
 use crate::code::editor::EditorReviewComment;
 use crate::code_review::comments::CommentId;
 use crate::terminal::TerminalView;
-use warp_util::local_or_remote_path::LocalOrRemotePath as BufferFileLocation;
 
 #[derive(Debug)]
 pub enum LocalCodeEditorEvent {

@@ -8,85 +8,72 @@ mod pending_response_streams;
 pub mod response_stream;
 pub(super) mod shared_session;
 mod slash_command;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use ai::skills::{ParsedSkill, SkillPathOrigin, SkillReference};
+use anyhow::anyhow;
+use chrono::{DateTime, Local};
 use input_context::{input_context_for_request, parse_context_attachments};
+use itertools::Itertools;
+use parking_lot::FairMutex;
+use pending_response_streams::PendingResponseStreams;
 pub use slash_command::*;
+use warp_core::assertions::safe_assert;
+use warp_multi_agent_api::client_action::{Action, UpdateTaskDescription};
+use warp_multi_agent_api::{ClientAction, Task, ToolType, message};
+use warpui::r#async::SpawnedFutureHandle;
+use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
 
 use self::response_stream::{PendingTitleGeneration, ResponseStream, ResponseStreamEvent};
-use super::agent_view::AgentViewEntryOrigin;
-use super::ResponseStreamId;
-use super::{
-    action_model::{BlocklistAIActionEvent, BlocklistAIActionModel},
-    agent_view::{AgentViewController, AgentViewControllerEvent},
-    context_model::{BlocklistAIContextModel, PendingAttachment, PendingFile},
-    history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel},
-    input_model::InputConfig,
-    queued_query::{QueuedQueryId, QueuedQueryModel},
-    BlocklistAIInputModel, InputType,
-};
+use super::action_model::{BlocklistAIActionEvent, BlocklistAIActionModel};
+use super::agent_view::{AgentViewController, AgentViewControllerEvent, AgentViewEntryOrigin};
+use super::context_model::{BlocklistAIContextModel, PendingAttachment, PendingFile};
+use super::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
+use super::input_model::InputConfig;
+use super::queued_query::{QueuedQueryId, QueuedQueryModel};
+use super::{BlocklistAIInputModel, InputType, ResponseStreamId};
 use crate::ai::agent::api::{self, ServerConversationToken};
-use crate::ai::agent::conversation::{AIConversation, ConversationStatus};
+use crate::ai::agent::conversation::{AIConversation, AIConversationId, ConversationStatus};
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::{
-    AIAgentActionResult, CancellationOutcome, CancellationReason, PassiveSuggestionResultType,
-    PassiveSuggestionTrigger, PassiveSuggestionTriggerType, RunningCommand,
+    AIAgentActionResult, AIAgentActionResultType, AIAgentAttachment, AIAgentContext,
+    AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus, AIIdentifiers, CancellationOutcome,
+    CancellationReason, DocumentContentAttachmentSource, EntrypointType, FileContext,
+    FinishedAIAgentOutput, MessageId, PassiveSuggestionResultType, PassiveSuggestionTrigger,
+    PassiveSuggestionTriggerType, RenderableAIError, RequestCost, RequestMetadata, RunningCommand,
+    StaticQueryType, UserQueryMode,
 };
-use crate::ai::agent::{DocumentContentAttachmentSource, FileContext};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::api_error::AIApiError;
 use crate::ai::byop_readiness::{
-    BlockedByopReadinessError, PendingByopToolResultsError, ReadinessCategory,
-    ReadinessDiagnosticCoalescer, ReadinessDiagnosticContext, ReadinessDiagnosticLevel,
-    ReadinessTriggerLayer, BLOCKED_BYOP_REQUEST_MESSAGE,
+    BLOCKED_BYOP_REQUEST_MESSAGE, BlockedByopReadinessError, PendingByopToolResultsError,
+    ReadinessCategory, ReadinessDiagnosticCoalescer, ReadinessDiagnosticContext,
+    ReadinessDiagnosticLevel, ReadinessTriggerLayer,
 };
 use crate::ai::document::ai_document_model::{
     AIDocumentId, AIDocumentModel, AIDocumentUserEditStatus,
 };
-use crate::ai::llms::LLMId;
-use crate::ai::{
-    agent::{
-        conversation::AIConversationId, AIAgentActionResultType, AIAgentAttachment, AIAgentContext,
-        AIAgentExchangeId, AIAgentInput, AIAgentOutputStatus, AIIdentifiers, EntrypointType,
-        FinishedAIAgentOutput, MessageId, RenderableAIError, RequestCost, RequestMetadata,
-        StaticQueryType, UserQueryMode,
-    },
-    llms::LLMPreferences,
-};
+use crate::ai::llms::{LLMId, LLMPreferences};
+use crate::ai::skills::{ActiveSkillLookupError, SkillManager};
 use crate::features::FeatureFlag;
 use crate::global_resource_handles::GlobalResourceHandlesProvider;
 use crate::network::NetworkStatus;
 use crate::notebooks::editor::model::FileLinkResolutionContext;
 use crate::persistence::ModelEvent;
 use crate::search::slash_command_menu::static_commands::commands;
+use crate::send_telemetry_from_ctx;
+use crate::server::telemetry::TelemetryEvent;
+use crate::terminal::ShellLaunchData;
 use crate::terminal::model::block::{
-    formatted_terminal_contents_for_input, BlockId, CURSOR_MARKER,
+    BlockId, CURSOR_MARKER, formatted_terminal_contents_for_input,
 };
+use crate::terminal::model::session::SessionType;
+use crate::terminal::model::session::active_session::ActiveSession;
+use crate::terminal::model::terminal_model::TerminalModel;
+use crate::terminal::shared_session::ParticipantId;
 use crate::terminal::ssh::util::InteractiveSshCommand;
 use crate::terminal::view::inline_banner::ZeroStatePromptSuggestionType;
-use crate::terminal::{
-    model::session::{active_session::ActiveSession, SessionType},
-    model::terminal_model::TerminalModel,
-    shared_session::ParticipantId,
-    ShellLaunchData,
-};
-use crate::{send_telemetry_from_ctx, server::telemetry::TelemetryEvent};
-use ai::skills::{ParsedSkill, SkillPathOrigin, SkillReference};
-
-use crate::ai::skills::{ActiveSkillLookupError, SkillManager};
-use anyhow::anyhow;
-use chrono::{DateTime, Local};
-use itertools::Itertools;
-use parking_lot::FairMutex;
-use pending_response_streams::PendingResponseStreams;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use warp_core::assertions::safe_assert;
-use warp_multi_agent_api::{
-    client_action::{Action, UpdateTaskDescription},
-    message, ClientAction, Task, ToolType,
-};
-use warpui::r#async::SpawnedFutureHandle;
-
-use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
 
 #[derive(Debug, Clone)]
 pub struct SessionContext {
@@ -1242,19 +1229,18 @@ impl BlocklistAIController {
         };
 
         // Persist the updated visibility for each promoted block
-        if !promoted_blocks.is_empty() {
-            if let Some(sender) = GlobalResourceHandlesProvider::as_ref(ctx)
+        if !promoted_blocks.is_empty()
+            && let Some(sender) = GlobalResourceHandlesProvider::as_ref(ctx)
                 .get()
                 .model_event_sender
                 .as_ref()
-            {
-                for (block_id, agent_view_visibility) in promoted_blocks {
-                    if let Err(e) = sender.send(ModelEvent::UpdateBlockAgentViewVisibility {
-                        block_id: block_id.to_string(),
-                        agent_view_visibility: agent_view_visibility.into(),
-                    }) {
-                        log::error!("Error sending UpdateBlockAgentViewVisibility event: {e:?}");
-                    }
+        {
+            for (block_id, agent_view_visibility) in promoted_blocks {
+                if let Err(e) = sender.send(ModelEvent::UpdateBlockAgentViewVisibility {
+                    block_id: block_id.to_string(),
+                    agent_view_visibility: agent_view_visibility.into(),
+                }) {
+                    log::error!("Error sending UpdateBlockAgentViewVisibility event: {e:?}");
                 }
             }
         }
@@ -3108,8 +3094,7 @@ impl BlocklistAIController {
             // request UI path so the user can see the failure reason.
             if let Some(persistence_err) =
                 error.downcast_ref::<crate::ai::agent::conversation::UpdateConversationError>()
-            {
-                if matches!(
+                && matches!(
                     persistence_err,
                     crate::ai::agent::conversation::UpdateConversationError::ByopPreflightPersistenceUnavailable(_)
                     | crate::ai::agent::conversation::UpdateConversationError::ByopPreflightPersistenceSend(_)
@@ -3135,7 +3120,6 @@ impl BlocklistAIController {
                         ctx,
                     );
                 }
-            }
             return Err(error);
         }
 
@@ -3563,19 +3547,18 @@ impl BlocklistAIController {
                                         warp_multi_agent_api::response_event::stream_finished::Reason::Done(_)
                                     ) | None
                                 );
-                                if completed_successfully {
-                                    if let Some(pending_title_generation) =
+                                if completed_successfully
+                                    && let Some(pending_title_generation) =
                                         response_stream.update(ctx, |response_stream, _| {
                                             response_stream.take_pending_title_generation()
                                         })
-                                    {
-                                        self.start_title_generation(
-                                            pending_title_generation,
-                                            stream_id.clone(),
-                                            conversation_id,
-                                            ctx,
-                                        );
-                                    }
+                                {
+                                    self.start_title_generation(
+                                        pending_title_generation,
+                                        stream_id.clone(),
+                                        conversation_id,
+                                        ctx,
+                                    );
                                 }
                                 // Zap BYOP local session compaction: grab the summarization flag before stream finished
                                 let summarize_overflow =

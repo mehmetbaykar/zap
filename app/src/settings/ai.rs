@@ -14,14 +14,14 @@ use regex::Regex;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use settings::{
-    define_settings_group, RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud,
+    RespectUserSyncSetting, Setting, SupportedPlatforms, SyncToCloud, define_settings_group,
 };
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use warp_core::execution_mode::AppExecutionMode;
 use warp_core::features::FeatureFlag;
-use warpui::platform::keyboard::KeyCode;
 use warpui::platform::OperatingSystem;
+use warpui::platform::keyboard::KeyCode;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, UpdateModel};
 
 use crate::ai::request_usage_model::RequestLimitInfo;
@@ -1293,10 +1293,10 @@ impl settings_value::SettingsValue for ToolbarCommandMap {
 
     fn from_file_value(value: &serde_json::Value) -> Option<Self> {
         // Try map format first (using from_value to preserve insertion order), then legacy array format.
-        if value.is_object() {
-            if let Ok(map) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
-                return Some(ToolbarCommandMap::new(map));
-            }
+        if value.is_object()
+            && let Ok(map) = serde_json::from_value::<IndexMap<String, String>>(value.clone())
+        {
+            return Some(ToolbarCommandMap::new(map));
         }
         if let Some(arr) = value.as_array() {
             let result: IndexMap<String, String> = arr
@@ -1353,12 +1353,11 @@ impl settings_value::SettingsValue for BYOPLastUsedReasoningMap {
     }
 
     fn from_file_value(value: &serde_json::Value) -> Option<Self> {
-        if value.is_object() {
-            if let Ok(map) =
+        if value.is_object()
+            && let Ok(map) =
                 serde_json::from_value::<IndexMap<String, ReasoningEffortSetting>>(value.clone())
-            {
-                return Some(Self::new(map));
-            }
+        {
+            return Some(Self::new(map));
         }
         None
     }
@@ -2529,10 +2528,11 @@ impl AISettings {
             .rev()
             .find(|cycle| cycle.end_date < Utc::now());
 
-        if let Some(cycle) = most_recent_completed_cycle {
-            if cycle.was_quota_exceeded && !cycle.banner_state.dismissed {
-                return true;
-            }
+        if let Some(cycle) = most_recent_completed_cycle
+            && cycle.was_quota_exceeded
+            && !cycle.banner_state.dismissed
+        {
+            return true;
         }
 
         false
@@ -2548,9 +2548,10 @@ impl AISettings {
             }
         }
 
-        report_if_error!(self
-            .ai_request_quota_info
-            .set_value(AIRequestQuotaInfo { cycle_history }, ctx));
+        report_if_error!(
+            self.ai_request_quota_info
+                .set_value(AIRequestQuotaInfo { cycle_history }, ctx)
+        );
     }
 
     /// Updates the quota info based on the latest RequestLimitInfo.
@@ -2576,12 +2577,12 @@ impl AISettings {
         let mut updated_existing_cycle = false;
 
         // Find or create a cycle that matches the current period
-        if let Some(current_cycle) = cycle_history.last_mut() {
-            if now <= current_cycle.end_date {
-                // Update existing cycle
-                current_cycle.was_quota_exceeded = is_quota_exceeded;
-                updated_existing_cycle = true;
-            }
+        if let Some(current_cycle) = cycle_history.last_mut()
+            && now <= current_cycle.end_date
+        {
+            // Update existing cycle
+            current_cycle.was_quota_exceeded = is_quota_exceeded;
+            updated_existing_cycle = true;
         }
 
         // Only create a new cycle if we didn't update an existing one
@@ -2596,9 +2597,10 @@ impl AISettings {
             cycle_history.push(new_cycle);
         }
 
-        report_if_error!(self
-            .ai_request_quota_info
-            .set_value(AIRequestQuotaInfo { cycle_history }, ctx));
+        report_if_error!(
+            self.ai_request_quota_info
+                .set_value(AIRequestQuotaInfo { cycle_history }, ctx)
+        );
     }
 
     pub fn is_command_denylist_editable(&self, app: &AppContext) -> bool {
@@ -2699,9 +2701,10 @@ impl AISettings {
             }
         };
 
-        report_if_error!(self
-            .voice_input_toggle_key
-            .set_value(voice_input_toggle_key, ctx));
+        report_if_error!(
+            self.voice_input_toggle_key
+                .set_value(voice_input_toggle_key, ctx)
+        );
 
         report_if_error!(self.explicitly_interacted_with_voice.set_value(true, ctx));
 
@@ -2727,9 +2730,10 @@ impl AISettings {
 
         let mut map = self.cli_agent_footer_enabled_commands.value().0.clone();
         map.insert(command.to_string(), String::new());
-        report_if_error!(self
-            .cli_agent_footer_enabled_commands
-            .set_value(ToolbarCommandMap::new(map), ctx));
+        report_if_error!(
+            self.cli_agent_footer_enabled_commands
+                .set_value(ToolbarCommandMap::new(map), ctx)
+        );
     }
 
     pub fn remove_cli_agent_footer_enabled_command(
@@ -2740,9 +2744,10 @@ impl AISettings {
         let command = command.trim();
         let mut map = self.cli_agent_footer_enabled_commands.value().0.clone();
         map.shift_remove(command);
-        report_if_error!(self
-            .cli_agent_footer_enabled_commands
-            .set_value(ToolbarCommandMap::new(map), ctx));
+        report_if_error!(
+            self.cli_agent_footer_enabled_commands
+                .set_value(ToolbarCommandMap::new(map), ctx)
+        );
     }
 
     pub fn set_cli_agent_for_command(
@@ -2757,9 +2762,10 @@ impl AISettings {
         }
         let value = agent.map(|a| a.to_serialized_name()).unwrap_or_default();
         map.insert(pattern.to_string(), value);
-        report_if_error!(self
-            .cli_agent_footer_enabled_commands
-            .set_value(ToolbarCommandMap::new(map), ctx));
+        report_if_error!(
+            self.cli_agent_footer_enabled_commands
+                .set_value(ToolbarCommandMap::new(map), ctx)
+        );
     }
 
     /// Whether the feature-intro popover with the given stable key has been seen.
@@ -2814,9 +2820,10 @@ impl AISettings {
     ) {
         let mut map = self.plugin_update_chip_dismissed_for_version_map.clone();
         map.insert(key.to_owned(), version);
-        report_if_error!(self
-            .plugin_update_chip_dismissed_for_version_map
-            .set_value(map, ctx));
+        report_if_error!(
+            self.plugin_update_chip_dismissed_for_version_map
+                .set_value(map, ctx)
+        );
     }
 
     // ── Per-agent settings ──

@@ -1,12 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use ai::skills::{get_provider_for_path, ParsedSkill, SkillProvider, SkillReference, SkillScope};
+use ai::skills::{ParsedSkill, SkillProvider, SkillReference, SkillScope, get_provider_for_path};
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::{DirectoryWatcher, RepoMetadataModel};
 use tempfile::TempDir;
@@ -298,8 +296,9 @@ fn remote_home_provider_variants_are_available_for_provider_selection() {
             .unwrap();
 
         assert_eq!(descriptor.provider, SkillProvider::Agents);
-        assert!(handle.read(&app, |manager, _| manager
-            .skill_exists_for_any_provider(&descriptor, &[SkillProvider::Claude])));
+        assert!(handle.read(&app, |manager, _| {
+            manager.skill_exists_for_any_provider(&descriptor, &[SkillProvider::Claude])
+        }));
         assert_eq!(
             handle.read(&app, |manager, _| manager
                 .best_supported_provider(&descriptor, &[SkillProvider::Claude])),
@@ -354,8 +353,9 @@ fn remote_home_provider_variants_are_scoped_to_the_descriptor_host() {
             .find(|skill| skill.name == "deploy")
             .unwrap();
 
-        assert!(!handle.read(&app, |manager, _| manager
-            .skill_exists_for_any_provider(&descriptor, &[SkillProvider::Claude])));
+        assert!(!handle.read(&app, |manager, _| {
+            manager.skill_exists_for_any_provider(&descriptor, &[SkillProvider::Claude])
+        }));
         assert_eq!(
             handle.read(&app, |manager, _| manager
                 .best_supported_provider(&descriptor, &[SkillProvider::Claude])),
@@ -542,9 +542,11 @@ Run `{{warp_cli_binary_name}}` to open {{settings_file_path}}.
     let skill = skills.get("test-skill").unwrap();
 
     let expected_cli = ChannelState::channel().cli_command_name();
-    assert!(skill
-        .content
-        .contains(&format!("Run `{expected_cli}` to open ")));
+    assert!(
+        skill
+            .content
+            .contains(&format!("Run `{expected_cli}` to open "))
+    );
 }
 
 #[test]
@@ -576,12 +578,14 @@ Use {{skill_dir}} and {{settings_schema_path}}.
         LocalOrRemotePath::Local(skill_dir.join("SKILL.md"))
     );
     assert!(skill.content.contains(&skill_dir.display().to_string()));
-    assert!(skill.content.contains(
-        &resources_dir
-            .join("settings_schema.json")
-            .display()
-            .to_string()
-    ));
+    assert!(
+        skill.content.contains(
+            &resources_dir
+                .join("settings_schema.json")
+                .display()
+                .to_string()
+        )
+    );
 }
 
 #[test]
@@ -1065,18 +1069,18 @@ fn warp_control_direct_read_respects_warp_control_feature() {
             );
         });
 
-        assert!(handle.read(&app, |manager, _| manager
-            .skill_by_reference(&reference)
-            .is_some()));
-        assert!(handle.read(&app, |manager, ctx| manager
-            .active_skill_by_reference(&reference, ctx)
-            .is_none()));
+        assert!(handle.read(&app, |manager, _| {
+            manager.skill_by_reference(&reference).is_some()
+        }));
+        assert!(handle.read(&app, |manager, ctx| {
+            manager.active_skill_by_reference(&reference, ctx).is_none()
+        }));
 
         drop(warp_control_cli);
         let warp_control_cli_enabled = FeatureFlag::WarpControlCli.override_enabled(true);
-        assert!(handle.read(&app, |manager, ctx| manager
-            .active_skill_by_reference(&reference, ctx)
-            .is_some()));
+        assert!(handle.read(&app, |manager, ctx| {
+            manager.active_skill_by_reference(&reference, ctx).is_some()
+        }));
         drop(warp_control_cli_enabled);
     });
 }
@@ -1291,11 +1295,13 @@ fn remote_home_skills_are_host_scoped_replaceable_and_path_invokable() {
                 .map(|skill| &skill.reference),
             Some(&first_reference)
         );
-        assert!(handle
-            .read(&app, |manager, ctx| manager
-                .get_skills_for_working_directory(None, ctx))
-            .iter()
-            .all(|skill| skill.name != "deploy"));
+        assert!(
+            handle
+                .read(&app, |manager, ctx| manager
+                    .get_skills_for_working_directory(None, ctx))
+                .iter()
+                .all(|skill| skill.name != "deploy")
+        );
 
         handle.update(&mut app, |manager, _| {
             manager.set_remote_home_skills(
@@ -1304,24 +1310,28 @@ fn remote_home_skills_are_host_scoped_replaceable_and_path_invokable() {
                 Vec::new(),
             );
         });
-        assert!(handle.read(&app, |manager, ctx| manager
-            .active_skill_by_reference_with_origin(
-                &first_reference,
-                &SkillPathOrigin::Remote {
-                    host_id: first_host.clone(),
-                },
-                ctx,
-            )
-            .is_err()));
-        assert!(handle.read(&app, |manager, ctx| manager
-            .active_skill_by_reference_with_origin(
-                &second_reference,
-                &SkillPathOrigin::Remote {
-                    host_id: second_host.clone(),
-                },
-                ctx,
-            )
-            .is_ok()));
+        assert!(handle.read(&app, |manager, ctx| {
+            manager
+                .active_skill_by_reference_with_origin(
+                    &first_reference,
+                    &SkillPathOrigin::Remote {
+                        host_id: first_host.clone(),
+                    },
+                    ctx,
+                )
+                .is_err()
+        }));
+        assert!(handle.read(&app, |manager, ctx| {
+            manager
+                .active_skill_by_reference_with_origin(
+                    &second_reference,
+                    &SkillPathOrigin::Remote {
+                        host_id: second_host.clone(),
+                    },
+                    ctx,
+                )
+                .is_ok()
+        }));
         assert_eq!(
             handle.read(&app, |manager, _| manager.skill_paths_by_name("deploy")),
             vec![second_skill_path]

@@ -1,12 +1,15 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use super::release_assets_directory_url;
-use super::{DownloadProgress, DownloadReady, ProgressCallback, ReadyForRelaunch};
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use channel_versions::VersionInfo;
 use instant::Duration;
 use warp_core::channel::{Channel, ChannelState};
+
+use super::{
+    DownloadProgress, DownloadReady, ProgressCallback, ReadyForRelaunch,
+    release_assets_directory_url,
+};
 
 lazy_static::lazy_static! {
     /// Stores the path to the current executable.
@@ -432,13 +435,19 @@ impl PackageManager {
                 )
             }
             Self::Yum { package_name } => {
-                format!("Please run: after downloading the .rpm, `sudo yum install ./{package_name}-*.rpm`")
+                format!(
+                    "Please run: after downloading the .rpm, `sudo yum install ./{package_name}-*.rpm`"
+                )
             }
             Self::Dnf { package_name } => {
-                format!("Please run: after downloading the .rpm, `sudo dnf install ./{package_name}-*.rpm`")
+                format!(
+                    "Please run: after downloading the .rpm, `sudo dnf install ./{package_name}-*.rpm`"
+                )
             }
             Self::Zypper { package_name } => {
-                format!("Please run: after downloading the .rpm, `sudo zypper install ./{package_name}-*.rpm`")
+                format!(
+                    "Please run: after downloading the .rpm, `sudo zypper install ./{package_name}-*.rpm`"
+                )
             }
             Self::PacmanOfficial { package_name } => {
                 format!("Please run: `sudo pacman -Syu {package_name}`")

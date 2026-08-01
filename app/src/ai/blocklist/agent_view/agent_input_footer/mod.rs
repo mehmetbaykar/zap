@@ -4,104 +4,44 @@ pub mod editor;
 mod reasoning_depth_selector;
 pub mod toolbar_item;
 
-use crate::{
-    ai::{
-        blocklist::{
-            history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel},
-            prompt::prompt_alert::PromptAlertView,
-            usage::icon_for_context_window_usage,
-            BlocklistAIInputModel,
-        },
-        execution_profiles::profiles::AIExecutionProfilesModel,
-        // Zap (Phase 3c A1): `AIRequestUsageModel` (cloud AI-request quota/credits tracking)
-        // was removed along with the rest of the subscription quota subsystem.
-    },
-    appearance::Appearance,
-    completer::SessionContext,
-    context_chips::{
-        self,
-        display_chip::{DisplayChip, DisplayChipConfig, PromptChipShellCommand},
-        prompt_type::PromptType,
-        ContextChipKind,
-    },
-    features::FeatureFlag,
-    network::NetworkStatus,
-    send_telemetry_from_ctx,
-    server::telemetry::{PluginChipTelemetryKind, TelemetryEvent},
-    settings::{AISettings, AISettingsChangedEvent},
-    settings_view::SettingsSection,
-    terminal::{
-        cli_agent_sessions::{
-            listener::session_supports_rich_status, CLIAgentInputState, CLIAgentSessionsModel,
-            CLIAgentSessionsModelEvent,
-        },
-        input::{models::InlineModelSelectorTab, MenuPositioningProvider},
-        profile_model_selector::{ProfileModelSelector, ProfileModelSelectorEvent},
-        session_settings::{SessionSettings, SessionSettingsChangedEvent, ToolbarChipSelection},
-        shared_session::SharedSessionStatus,
-        view::ambient_agent::{AmbientAgentViewModel, ModelSelector},
-        view::init::OPEN_CLI_AGENT_RICH_INPUT_KEYBINDING,
-        view::TerminalAction,
-        CLIAgent, TerminalModel,
-    },
-    ui_components::{icon_with_status::render_cli_agent_logo, icons::Icon},
-    view_components::{
-        action_button::{
-            ActionButton, ActionButtonTheme, AdjoinedSide, ButtonSize, KeystrokeSource,
-            TooltipAlignment,
-        },
-        DismissibleToast,
-    },
-    workspace::{view::TOGGLE_PROJECT_EXPLORER_BINDING_NAME, ToastStack},
-    workspaces::user_workspaces::UserWorkspaces,
-};
-use toolbar_item::AgentToolbarItemKind;
-// Zap Wave 7-3:`warp_cli::agent::Harness` import was removed with the hosted-mode footer.
-
-use std::sync::Arc;
-
-#[cfg(not(target_family = "wasm"))]
-use crate::terminal::local_shell::LocalShellState;
-#[cfg(not(target_family = "wasm"))]
-use crate::terminal::ShellLaunchData;
-#[cfg(feature = "voice_input")]
-use crate::voice::transcriber::TranscribeError;
-use ai::document::{AIDocumentId, AIDocumentVersion};
-use parking_lot::FairMutex;
-use pathfinder_color::ColorU;
-use pathfinder_geometry::vector::Vector2F;
-use settings::Setting;
-use settings::ToggleableSetting;
 #[cfg(not(target_family = "wasm"))]
 use std::env;
 #[cfg(not(target_family = "wasm"))]
 use std::path::PathBuf;
+// Zap Wave 7-3:`warp_cli::agent::Harness` import was removed with the hosted-mode footer.
+use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use std::time::Duration;
+
+use ai::document::{AIDocumentId, AIDocumentVersion};
+use parking_lot::FairMutex;
+use pathfinder_color::ColorU;
+use pathfinder_geometry::vector::Vector2F;
+use settings::{Setting, ToggleableSetting};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs;
+use toolbar_item::AgentToolbarItemKind;
 #[cfg(feature = "voice_input")]
 use voice_input::{StartListeningError, VoiceSessionResult};
-
-use warp_core::ui::{
-    color::{blend::Blend, contrast::MinimumAllowedContrast, ContrastingColor},
-    theme::{color::internal_colors, Fill},
-};
+use warp_core::ui::color::ContrastingColor;
+use warp_core::ui::color::blend::Blend;
+use warp_core::ui::color::contrast::MinimumAllowedContrast;
+use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors;
 use warp_errors::report_if_error;
 #[cfg(feature = "voice_input")]
 use warpui::r#async::SpawnedFutureHandle;
+#[cfg(not(target_family = "wasm"))]
+use warpui::r#async::Timer;
+use warpui::elements::{
+    ChildView, Clipped, ConstrainedBox, Container, CrossAxisAlignment, DispatchEventResult,
+    Element, EventHandler, Flex, MainAxisAlignment, MainAxisSize, ParentElement, Shrinkable, Wrap,
+    WrapFill, WrapFillEntireRun,
+};
 use warpui::{
-    elements::{
-        ChildView, Clipped, ConstrainedBox, Container, CrossAxisAlignment, DispatchEventResult,
-        Element, EventHandler, Flex, MainAxisAlignment, MainAxisSize, ParentElement, Shrinkable,
-        Wrap, WrapFill, WrapFillEntireRun,
-    },
     AppContext, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
-
-#[cfg(not(target_family = "wasm"))]
-use warpui::r#async::Timer;
 
 // Zap Wave 7-3:`EnvironmentSelector` / `EnvironmentSelectorEvent` re-export was removed
 // with the hosted-mode footer.
@@ -111,14 +51,70 @@ pub(crate) use self::reasoning_depth_selector::{
 #[cfg(not(target_family = "wasm"))]
 use crate::server::telemetry::PluginChipTelemetryAction;
 #[cfg(not(target_family = "wasm"))]
+use crate::terminal::ShellLaunchData;
+#[cfg(not(target_family = "wasm"))]
 use crate::terminal::cli_agent_sessions::plugin_manager::{
-    compare_versions, plugin_manager_for, plugin_manager_for_with_shell, CliAgentPluginManager,
-    PluginInstallError, PluginModalKind,
+    CliAgentPluginManager, PluginInstallError, PluginModalKind, compare_versions,
+    plugin_manager_for, plugin_manager_for_with_shell,
 };
 #[cfg(not(target_family = "wasm"))]
+use crate::terminal::local_shell::LocalShellState;
+#[cfg(not(target_family = "wasm"))]
 use crate::view_components::ToastLink;
+#[cfg(feature = "voice_input")]
+use crate::voice::transcriber::TranscribeError;
 #[cfg(not(target_family = "wasm"))]
 use crate::workspace::WorkspaceAction;
+use crate::{
+    ai::{
+        blocklist::{
+            BlocklistAIInputModel,
+            history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel},
+            prompt::prompt_alert::PromptAlertView,
+            usage::icon_for_context_window_usage,
+        },
+        execution_profiles::profiles::AIExecutionProfilesModel,
+        // Zap (Phase 3c A1): `AIRequestUsageModel` (cloud AI-request quota/credits tracking)
+        // was removed along with the rest of the subscription quota subsystem.
+    },
+    appearance::Appearance,
+    completer::SessionContext,
+    context_chips::{
+        self, ContextChipKind,
+        display_chip::{DisplayChip, DisplayChipConfig, PromptChipShellCommand},
+        prompt_type::PromptType,
+    },
+    features::FeatureFlag,
+    network::NetworkStatus,
+    send_telemetry_from_ctx,
+    server::telemetry::{PluginChipTelemetryKind, TelemetryEvent},
+    settings::{AISettings, AISettingsChangedEvent},
+    settings_view::SettingsSection,
+    terminal::{
+        CLIAgent, TerminalModel,
+        cli_agent_sessions::{
+            CLIAgentInputState, CLIAgentSessionsModel, CLIAgentSessionsModelEvent,
+            listener::session_supports_rich_status,
+        },
+        input::{MenuPositioningProvider, models::InlineModelSelectorTab},
+        profile_model_selector::{ProfileModelSelector, ProfileModelSelectorEvent},
+        session_settings::{SessionSettings, SessionSettingsChangedEvent, ToolbarChipSelection},
+        shared_session::SharedSessionStatus,
+        view::TerminalAction,
+        view::ambient_agent::{AmbientAgentViewModel, ModelSelector},
+        view::init::OPEN_CLI_AGENT_RICH_INPUT_KEYBINDING,
+    },
+    ui_components::{icon_with_status::render_cli_agent_logo, icons::Icon},
+    view_components::{
+        DismissibleToast,
+        action_button::{
+            ActionButton, ActionButtonTheme, AdjoinedSide, ButtonSize, KeystrokeSource,
+            TooltipAlignment,
+        },
+    },
+    workspace::{ToastStack, view::TOGGLE_PROJECT_EXPLORER_BINDING_NAME},
+    workspaces::user_workspaces::UserWorkspaces,
+};
 
 // Zap Wave 7-3: removed the hosted-mode footer gap constant with the old footer.
 
@@ -481,31 +477,30 @@ impl AgentInputFooter {
                 // When a session starts, update the install chip label and
                 // start a debounce timer for non-auto-install agents.
                 #[cfg(not(target_family = "wasm"))]
-                if let CLIAgentSessionsModelEvent::Started { .. } = event {
-                    if let Some(agent) = me.cli_agent(ctx) {
-                        let label = format!("Enable {} notifications", agent.display_name());
-                        me.install_plugin_button.update(ctx, |button, ctx| {
-                            button.set_label(label, ctx);
-                        });
-                        if let Some(manager) = plugin_manager_for(agent) {
-                            if !manager.can_auto_install() {
-                                ctx.spawn(
-                                    Timer::after(PLUGIN_CHIP_DEBOUNCE),
-                                    |me, _, ctx: &mut ViewContext<Self>| {
-                                        let suppress = CLIAgentSessionsModel::as_ref(ctx)
-                                            .session(me.terminal_view_id)
-                                            .is_some_and(|s| {
-                                                s.listener.is_some()
-                                                    && session_supports_rich_status(s)
-                                            });
-                                        if !suppress {
-                                            me.plugin_chip_ready = true;
-                                            ctx.notify();
-                                        }
-                                    },
-                                );
-                            }
-                        }
+                if let CLIAgentSessionsModelEvent::Started { .. } = event
+                    && let Some(agent) = me.cli_agent(ctx)
+                {
+                    let label = format!("Enable {} notifications", agent.display_name());
+                    me.install_plugin_button.update(ctx, |button, ctx| {
+                        button.set_label(label, ctx);
+                    });
+                    if let Some(manager) = plugin_manager_for(agent)
+                        && !manager.can_auto_install()
+                    {
+                        ctx.spawn(
+                            Timer::after(PLUGIN_CHIP_DEBOUNCE),
+                            |me, _, ctx: &mut ViewContext<Self>| {
+                                let suppress = CLIAgentSessionsModel::as_ref(ctx)
+                                    .session(me.terminal_view_id)
+                                    .is_some_and(|s| {
+                                        s.listener.is_some() && session_supports_rich_status(s)
+                                    });
+                                if !suppress {
+                                    me.plugin_chip_ready = true;
+                                    ctx.notify();
+                                }
+                            },
+                        );
                     }
                 }
 
@@ -885,10 +880,10 @@ impl AgentInputFooter {
         }
 
         #[cfg(not(target_family = "wasm"))]
-        if let Some(manager) = plugin_manager_for(session.agent) {
-            if !manager.can_auto_install() {
-                return true;
-            }
+        if let Some(manager) = plugin_manager_for(session.agent)
+            && !manager.can_auto_install()
+        {
+            return true;
         }
         if session.is_remote() {
             return true;
@@ -1938,9 +1933,11 @@ impl TypedActionView for AgentInputFooter {
             AgentInputFooterAction::ToggleAutodetectionSetting => {
                 let ai_settings = AISettings::handle(ctx);
                 ai_settings.update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .ai_autodetection_enabled_internal
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .ai_autodetection_enabled_internal
+                            .toggle_and_save_value(ctx)
+                    );
                 });
             }
             AgentInputFooterAction::InstallPlugin => {
@@ -2012,16 +2009,16 @@ impl TypedActionView for AgentInputFooter {
             AgentInputFooterAction::DismissPluginChip => {
                 let chip_kind = self.plugin_chip_kind(ctx);
                 let is_update = matches!(chip_kind, Some(PluginChipKind::Update));
-                if let Some(agent) = self.cli_agent(ctx) {
-                    if let Some(kind) = chip_kind {
-                        send_telemetry_from_ctx!(
-                            TelemetryEvent::CLIAgentPluginChipDismissed {
-                                cli_agent: agent.into(),
-                                chip_kind: kind.into(),
-                            },
-                            ctx
-                        );
-                    }
+                if let Some(agent) = self.cli_agent(ctx)
+                    && let Some(kind) = chip_kind
+                {
+                    send_telemetry_from_ctx!(
+                        TelemetryEvent::CLIAgentPluginChipDismissed {
+                            cli_agent: agent.into(),
+                            chip_kind: kind.into(),
+                        },
+                        ctx
+                    );
                 }
                 let session = CLIAgentSessionsModel::as_ref(ctx)
                     .session(self.terminal_view_id)

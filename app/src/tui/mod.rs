@@ -12,4 +12,3 @@ use crate::TuiMountFn;
 pub(crate) fn init(mount: TuiMountFn, ctx: &mut AppContext) {
     mount(ctx);
 }
-

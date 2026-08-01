@@ -43,11 +43,11 @@ pub(crate) fn launch_daemon(identity_key: &str, ctx: &mut warpui::AppContext) {
     let socket_path = proxy::socket_path(identity_key);
     let pid_path = proxy::pid_path(identity_key);
 
-    if let Some(parent) = socket_path.parent() {
-        if let Err(error) = proxy::ensure_private_daemon_dir(parent) {
-            log::error!("Daemon: failed to create private directory: {error:#}");
-            return;
-        }
+    if let Some(parent) = socket_path.parent()
+        && let Err(error) = proxy::ensure_private_daemon_dir(parent)
+    {
+        log::error!("Daemon: failed to create private directory: {error:#}");
+        return;
     }
     if socket_path.exists() {
         let _ = std::fs::remove_file(&socket_path);
@@ -136,8 +136,8 @@ pub(super) async fn handle_daemon_connection(
     spawner: warpui::ModelSpawner<ServerModel>,
     exec: std::sync::Arc<executor::Background>,
 ) {
-    use futures::io::{AsyncWriteExt, BufReader, BufWriter};
     use futures::AsyncReadExt as _;
+    use futures::io::{AsyncWriteExt, BufReader, BufWriter};
 
     let (conn_tx, conn_rx) = async_channel::unbounded::<remote_server::proto::ServerMessage>();
 

@@ -11,8 +11,9 @@
 //! it panics. Production code installs it via `app/src/lib.rs::init_common`; in the
 //! unit-test process we need to install it ourselves.
 
-use super::*;
 use std::sync::Once;
+
+use super::*;
 
 static INSTALL_CRYPTO_PROVIDER: Once = Once::new();
 

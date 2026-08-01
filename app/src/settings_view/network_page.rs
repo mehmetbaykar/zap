@@ -9,25 +9,21 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use settings::Setting;
-use warpui::{
-    elements::{
-        Align, ConstrainedBox, Container, CrossAxisAlignment, Element, Flex, MainAxisAlignment,
-        MainAxisSize, MouseStateHandle, ParentElement, Text,
-    },
-    fonts::{Properties, Weight},
-    ui_components::{
-        button::ButtonVariant,
-        components::{Coords, UiComponent, UiComponentStyles},
-    },
-    AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
+use warpui::elements::{
+    Align, ConstrainedBox, Container, CrossAxisAlignment, Element, Flex, MainAxisAlignment,
+    MainAxisSize, MouseStateHandle, ParentElement, Text,
 };
+use warpui::fonts::{Properties, Weight};
+use warpui::ui_components::button::ButtonVariant;
+use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
+use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
-use super::settings_page::{
-    render_body_item, render_page_title, render_sub_header_with_description, AdditionalInfo,
-    LocalOnlyIconState, MatchData, PageType, SettingsPageEvent, SettingsPageMeta,
-    SettingsPageViewHandle, SettingsWidget, ToggleState,
-};
 use super::SettingsSection;
+use super::settings_page::{
+    AdditionalInfo, LocalOnlyIconState, MatchData, PageType, SettingsPageEvent, SettingsPageMeta,
+    SettingsPageViewHandle, SettingsWidget, ToggleState, render_body_item, render_page_title,
+    render_sub_header_with_description,
+};
 use crate::appearance::Appearance;
 use crate::editor::{EditorView, InteractionState, SingleLineEditorOptions, TextOptions};
 use crate::report_if_error;
@@ -195,7 +191,7 @@ impl NetworkPageView {
         );
 
         let mut me = Self {
-            page: PageType::new_monolith(NetworkPageWidget::default(), None, false),
+            page: PageType::new_monolith(NetworkPageWidget, None, false),
             mode_dropdown,
             url_editor,
             username_editor,

@@ -25,10 +25,10 @@ use crate::cloud_object::update_manager::{InitiatedBy, UpdateManager};
 use crate::cloud_object::{
     GenericStringObjectFormat, JsonObjectType, Owner, Space, StoredObjectEventEntrypoint,
 };
-use crate::env_vars::manager::EnvVarCollectionSource;
 use crate::env_vars::EnvVarCollectionObject;
-use crate::notebooks::manager::NotebookSource;
+use crate::env_vars::manager::EnvVarCollectionSource;
 use crate::notebooks::NotebookObject;
+use crate::notebooks::manager::NotebookSource;
 use crate::server::ids::{ClientId, ServerId, SyncId};
 use crate::workflows::manager::WorkflowOpenSource;
 use crate::workflows::{WorkflowObject, WorkflowViewMode};

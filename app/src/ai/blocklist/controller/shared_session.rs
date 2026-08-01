@@ -1,16 +1,17 @@
 // Local display logic for BlocklistAIController's shared sessions.
 use itertools::Itertools;
+use warp_multi_agent_api::client_action::Action;
+use warp_multi_agent_api::message::Message;
 use warp_multi_agent_api::response_event::ClientActions;
-use warp_multi_agent_api::{client_action::Action, message::Message};
+use warpui::{AppContext, ModelContext, SingletonEntity};
 
 use super::response_stream::ResponseStreamId;
 use super::{BlocklistAIController, RequestInput};
-use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::agent::AIAgentActionId;
+use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
 use crate::terminal::shared_session::ParticipantId;
-use warpui::{AppContext, ModelContext, SingletonEntity};
 
 #[derive(Default)]
 pub(super) struct SharedSessionState {
@@ -255,24 +256,24 @@ impl BlocklistAIController {
                             _ => None,
                         };
 
-                        if let Some(input_ctx) = ctx_opt {
-                            if let Some(dir) = &input_ctx.directory {
-                                self.context_model.update(ctx, |context_model, ctx| {
-                                    context_model.update_directory_context(
-                                        if dir.pwd.is_empty() {
-                                            None
-                                        } else {
-                                            Some(dir.pwd.clone())
-                                        },
-                                        if dir.home.is_empty() {
-                                            None
-                                        } else {
-                                            Some(dir.home.clone())
-                                        },
-                                        ctx,
-                                    );
-                                });
-                            }
+                        if let Some(input_ctx) = ctx_opt
+                            && let Some(dir) = &input_ctx.directory
+                        {
+                            self.context_model.update(ctx, |context_model, ctx| {
+                                context_model.update_directory_context(
+                                    if dir.pwd.is_empty() {
+                                        None
+                                    } else {
+                                        Some(dir.pwd.clone())
+                                    },
+                                    if dir.home.is_empty() {
+                                        None
+                                    } else {
+                                        Some(dir.home.clone())
+                                    },
+                                    ctx,
+                                );
+                            });
                         }
                     }
                 }

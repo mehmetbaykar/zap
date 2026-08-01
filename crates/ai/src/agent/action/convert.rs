@@ -7,6 +7,7 @@ use warp_core::features::FeatureFlag;
 use warp_multi_agent_api as api;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 
+use crate::agent::FileLocations;
 use crate::agent::action::{
     AIAgentActionType, AIAgentPtyWriteMode, CommentSide, FileEdit, InsertReviewComment,
     InsertedCommentLine, InsertedCommentLocation, ReadFilesRequest, ReadSkillRequest,
@@ -14,7 +15,6 @@ use crate::agent::action::{
 };
 use crate::agent::action_result::{AnyFileContent, FileContext};
 use crate::agent::convert::ToolToAIAgentActionError;
-use crate::agent::FileLocations;
 use crate::diff_validation::{ParsedDiff, V4AHunk};
 use crate::document::{AIDocumentId, DEFAULT_PLANNING_DOCUMENT_TITLE};
 use crate::skills::SkillReference;

@@ -1,23 +1,19 @@
+use ai::agent::action_result::{AnyFileContent, FileContext};
+use ai::skills::SkillReference;
+#[cfg(feature = "local_fs")]
+use ai::skills::parse_skill;
+use futures::future::{BoxFuture, FutureExt};
+use warp_util::local_or_remote_path::LocalOrRemotePath;
+use warpui::{Entity, ModelContext, SingletonEntity};
+
 use super::{ActionExecution, AnyActionExecution, ExecuteActionInput, PreprocessActionInput};
 #[cfg(feature = "local_fs")]
 use crate::ai::agent::AIAgentActionResultType;
+use crate::ai::agent::{AIAgentActionType, ReadSkillRequest, ReadSkillResult};
 #[cfg(feature = "local_fs")]
 use crate::ai::skills::extract_skill_parent_directory;
 use crate::ai::skills::{SkillManager, SkillTelemetryEvent};
 use crate::send_telemetry_from_ctx;
-use ai::agent::action_result::AnyFileContent;
-#[cfg(feature = "local_fs")]
-use ai::skills::parse_skill;
-use ai::skills::SkillReference;
-use warp_util::local_or_remote_path::LocalOrRemotePath;
-use warpui::{ModelContext, SingletonEntity};
-
-use crate::ai::agent::AIAgentActionType;
-use crate::ai::agent::ReadSkillRequest;
-use crate::ai::agent::ReadSkillResult;
-use ai::agent::action_result::FileContext;
-use futures::future::{BoxFuture, FutureExt};
-use warpui::Entity;
 
 pub struct ReadSkillExecutor;
 
@@ -68,22 +64,21 @@ impl ReadSkillExecutor {
         // the `SkillReference::SkillPath(name)` slot (to avoid a proto schema change).
         // Here, on a cache miss, look up the real SKILL.md path by name, covering all skills the Skill manager
         // can see (file skills + bundled skills).
-        if let SkillReference::Path(p) = skill_ref {
-            if let Some(candidate_name) = name_candidate(p) {
-                if let Some(skill) = manager.find_skill_by_name(candidate_name) {
-                    send_telemetry_from_ctx!(
-                        SkillTelemetryEvent::Read {
-                            reference: skill_ref.clone(),
-                            name: Some(skill.name.clone()),
-                            scope: Some(skill.scope),
-                            provider: Some(skill.provider),
-                            error: false,
-                        },
-                        ctx
-                    );
-                    return success_execution(skill);
-                }
-            }
+        if let SkillReference::Path(p) = skill_ref
+            && let Some(candidate_name) = name_candidate(p)
+            && let Some(skill) = manager.find_skill_by_name(candidate_name)
+        {
+            send_telemetry_from_ctx!(
+                SkillTelemetryEvent::Read {
+                    reference: skill_ref.clone(),
+                    name: Some(skill.name.clone()),
+                    scope: Some(skill.scope),
+                    provider: Some(skill.provider),
+                    error: false,
+                },
+                ctx
+            );
+            return success_execution(skill);
         }
 
         // Cache miss fallback: for references in `SkillReference::Path` form,
@@ -105,30 +100,27 @@ impl ReadSkillExecutor {
         // in fs-less builds like WASM `extract_skill_parent_directory` / `parse_skill`
         // don't exist, so there's nothing to read from disk anyway.
         #[cfg(feature = "local_fs")]
-        if let SkillReference::Path(path) = skill_ref {
-            if extract_skill_parent_directory(path).is_ok() {
-                if let Some(path) = path.to_local_path().map(ToOwned::to_owned) {
-                    let skill_ref_for_async = skill_ref.clone();
-                    return ActionExecution::new_async(
-                        async move { parse_skill(&path) },
-                        move |parsed, _app| match parsed {
-                            Ok(skill) => {
-                                AIAgentActionResultType::ReadSkill(ReadSkillResult::Success {
-                                    content: FileContext::new(
-                                        skill.path.display_path(),
-                                        AnyFileContent::StringContent(skill.content.clone()),
-                                        skill.line_range.clone(),
-                                        None,
-                                    ),
-                                })
-                            }
-                            Err(err) => AIAgentActionResultType::ReadSkill(ReadSkillResult::Error(
-                                format!("Skill not found: {skill_ref_for_async:?} ({err})"),
-                            )),
-                        },
-                    );
-                }
-            }
+        if let SkillReference::Path(path) = skill_ref
+            && extract_skill_parent_directory(path).is_ok()
+            && let Some(path) = path.to_local_path().map(ToOwned::to_owned)
+        {
+            let skill_ref_for_async = skill_ref.clone();
+            return ActionExecution::new_async(
+                async move { parse_skill(&path) },
+                move |parsed, _app| match parsed {
+                    Ok(skill) => AIAgentActionResultType::ReadSkill(ReadSkillResult::Success {
+                        content: FileContext::new(
+                            skill.path.display_path(),
+                            AnyFileContent::StringContent(skill.content.clone()),
+                            skill.line_range.clone(),
+                            None,
+                        ),
+                    }),
+                    Err(err) => AIAgentActionResultType::ReadSkill(ReadSkillResult::Error(
+                        format!("Skill not found: {skill_ref_for_async:?} ({err})"),
+                    )),
+                },
+            );
         }
 
         send_telemetry_from_ctx!(

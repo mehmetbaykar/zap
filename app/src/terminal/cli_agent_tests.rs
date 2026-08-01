@@ -4,14 +4,15 @@ use std::path::PathBuf;
 use chrono::Local;
 use smol_str::SmolStr;
 use warp_editor::render::model::LineCount;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warp_util::path::EscapeChar;
 use warpui::App;
 
 #[cfg(unix)]
 use super::cli_agent_search_dirs;
 use super::{
-    build_diff_hunk_prompt, build_review_prompt, build_selection_line_range_prompt,
-    build_selection_substring_prompt, CLIAgent, UBER_TEAM_UID,
+    CLIAgent, UBER_TEAM_UID, build_diff_hunk_prompt, build_review_prompt,
+    build_selection_line_range_prompt, build_selection_substring_prompt,
 };
 use crate::ai::agent::{AgentReviewCommentBatch, DiffSetHunk};
 use crate::code::editor::line::EditorLineLocation;
@@ -22,7 +23,6 @@ use crate::server::ids::ServerId;
 use crate::workspaces::team::Team;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::workspaces::workspace::Workspace;
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 /// Helper to build an alias map from pairs.
 fn aliases(pairs: &[(&str, &str)]) -> HashMap<SmolStr, String> {

@@ -12,9 +12,9 @@ use self::internal_colors::{
     neutral_4,
 };
 use super::{AnsiColor, AnsiColorIdentifier, Fill, TerminalColors, WarpTheme};
-use crate::ui::color::blend::Blend;
-use crate::ui::color::contrast::{pick_best_foreground_color, MinimumAllowedContrast};
 use crate::ui::color::Opacity;
+use crate::ui::color::blend::Blend;
+use crate::ui::color::contrast::{MinimumAllowedContrast, pick_best_foreground_color};
 
 const BLOCK_SELECTION_OPACITY: Opacity = 10;
 
@@ -109,10 +109,10 @@ impl WarpTheme {
     /// Doesn't allow gradients because these surfaces will often be too small
     /// for the gradients to look appealing.
     pub fn surface_3(&self) -> Fill {
-        if let Some(ref ui) = self.ui_colors {
-            if let Some(color) = ui.surface_3 {
-                return Fill::Solid(color);
-            }
+        if let Some(ref ui) = self.ui_colors
+            && let Some(color) = ui.surface_3
+        {
+            return Fill::Solid(color);
         }
         Fill::Solid(neutral_3(self))
     }
@@ -122,10 +122,10 @@ impl WarpTheme {
     /// Doesn't allow gradients because these surfaces will often be too small
     /// for the gradients to look appealing.
     pub fn surface_2(&self) -> Fill {
-        if let Some(ref ui) = self.ui_colors {
-            if let Some(color) = ui.surface_2 {
-                return Fill::Solid(color);
-            }
+        if let Some(ref ui) = self.ui_colors
+            && let Some(color) = ui.surface_2
+        {
+            return Fill::Solid(color);
         }
         Fill::Solid(neutral_2(self))
     }
@@ -135,10 +135,10 @@ impl WarpTheme {
     /// Doesn't allow gradients because these surfaces will often be too small
     /// for the gradients to look appealing.
     pub fn surface_1(&self) -> Fill {
-        if let Some(ref ui) = self.ui_colors {
-            if let Some(color) = ui.surface_1 {
-                return Fill::Solid(color);
-            }
+        if let Some(ref ui) = self.ui_colors
+            && let Some(color) = ui.surface_1
+        {
+            return Fill::Solid(color);
         }
         Fill::Solid(neutral_1(self))
     }
@@ -164,10 +164,10 @@ impl WarpTheme {
     }
 
     pub fn outline(&self) -> Fill {
-        if let Some(ref ui) = self.ui_colors {
-            if let Some(color) = ui.border {
-                return Fill::Solid(color);
-            }
+        if let Some(ref ui) = self.ui_colors
+            && let Some(color) = ui.border
+        {
+            return Fill::Solid(color);
         }
         fg_overlay_2(self)
     }
@@ -267,10 +267,10 @@ impl WarpTheme {
     }
 
     pub fn split_pane_border_color(&self) -> Fill {
-        if let Some(ref ui) = self.ui_colors {
-            if let Some(color) = ui.split_pane_border {
-                return Fill::Solid(color);
-            }
+        if let Some(ref ui) = self.ui_colors
+            && let Some(color) = ui.split_pane_border
+        {
+            return Fill::Solid(color);
         }
         fg_overlay_3(self)
     }
@@ -307,10 +307,10 @@ impl WarpTheme {
     }
 
     pub fn block_selection_color(&self) -> Fill {
-        if let Some(ref ui) = self.ui_colors {
-            if let Some(color) = ui.selection {
-                return Fill::Solid(color);
-            }
+        if let Some(ref ui) = self.ui_colors
+            && let Some(color) = ui.selection
+        {
+            return Fill::Solid(color);
         }
         accent_overlay_2(self)
     }

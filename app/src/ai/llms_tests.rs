@@ -1,6 +1,7 @@
 use warpui::App;
 
 use super::*;
+use crate::LaunchMode;
 use crate::ai::agent_providers::AgentProviderSecrets;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::mcp::TemplatableMCPServerManager;
@@ -9,7 +10,6 @@ use crate::cloud_object::update_manager::UpdateManager;
 use crate::terminal::input::models::query_model_picker_choices;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::LaunchMode;
 
 // -- DisableReason::should_clear_preference tests --
 
@@ -243,9 +243,11 @@ fn custom_llm_infos_built_from_endpoints() {
         infos[0].description.as_deref(),
         Some("Custom · My Endpoint")
     );
-    assert!(infos[0]
-        .host_configs
-        .contains_key(&LLMModelHost::CustomEndpoint));
+    assert!(
+        infos[0]
+            .host_configs
+            .contains_key(&LLMModelHost::CustomEndpoint)
+    );
     assert_eq!(infos[1].display_name, "llama");
     assert_eq!(infos[1].id.as_str(), "uuid-2");
 }

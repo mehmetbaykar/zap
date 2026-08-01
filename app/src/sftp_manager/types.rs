@@ -4,8 +4,8 @@
 //! date: 2026-05-26
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// File entry type (UI layer)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,9 +171,10 @@ pub fn format_size(size: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::Ordering;
+
+    use super::*;
 
     /// Test format_size with zero bytes
     #[test]

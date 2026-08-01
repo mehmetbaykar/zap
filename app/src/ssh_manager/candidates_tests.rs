@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use warp_ssh_manager::SshConfigCandidate;
 
 use super::{
-    fake_load_result_error, fake_load_result_loaded, fake_load_result_not_found, CandidateRow,
-    CandidatesViewModel,
+    CandidateRow, CandidatesViewModel, fake_load_result_error, fake_load_result_loaded,
+    fake_load_result_not_found,
 };
 
 fn cand(alias: &str) -> SshConfigCandidate {
@@ -343,10 +343,11 @@ fn rows_when_collapsed_with_error_returns_header_only() {
 
 #[test]
 fn refresh_clears_state_when_auto_discovery_disabled() {
-    use crate::settings::SshSettings;
-    use crate::test_util::settings::initialize_settings_for_tests;
     use settings::Setting;
     use warpui::{App, SingletonEntity};
+
+    use crate::settings::SshSettings;
+    use crate::test_util::settings::initialize_settings_for_tests;
 
     App::test((), |mut app| async move {
         initialize_settings_for_tests(&mut app);

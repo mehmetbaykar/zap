@@ -5,17 +5,14 @@
 //!
 //! From Phase 3, add a "Connect" button → emit OpenSshTerminal → SecretInjector.
 
-use crate::editor::{
-    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextColors, TextOptions,
-};
-use crate::pane_group::focus_state::PaneFocusHandle;
-use crate::pane_group::pane::view;
-use crate::pane_group::{BackingView, PaneConfiguration, PaneEvent};
-use crate::ssh_manager::{SshTreeChangedEvent, SshTreeChangedNotifier};
-use crate::view_components::dropdown::{Dropdown, DropdownItem};
 use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
+use warp_ssh_manager::{
+    AuthType, ConnectionStatus, KeychainSecretStore, NodeKind, OneKeyCredentialKind, SecretKind,
+    SshNode, SshOneKeyCredential, SshRepository, SshSecretStore, SshSecretStoreError,
+    SshServerInfo,
+};
 use warpui::elements::{
     Align, Border, ChildAnchor, ChildView, ClippedScrollStateHandle, ClippedScrollable,
     ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Dismiss, Element, Fill, Flex,
@@ -30,13 +27,16 @@ use warpui::{
     AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
-
-use warp_ssh_manager::{
-    AuthType, ConnectionStatus, KeychainSecretStore, NodeKind, OneKeyCredentialKind, SecretKind,
-    SshNode, SshOneKeyCredential, SshRepository, SshSecretStore, SshSecretStoreError,
-    SshServerInfo,
-};
 use zeroize::Zeroizing;
+
+use crate::editor::{
+    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextColors, TextOptions,
+};
+use crate::pane_group::focus_state::PaneFocusHandle;
+use crate::pane_group::pane::view;
+use crate::pane_group::{BackingView, PaneConfiguration, PaneEvent};
+use crate::ssh_manager::{SshTreeChangedEvent, SshTreeChangedNotifier};
+use crate::view_components::dropdown::{Dropdown, DropdownItem};
 
 const FIELD_LABEL_MARGIN_TOP: f32 = 6.0;
 const FIELD_LABEL_MARGIN_BOTTOM: f32 = 4.0;
@@ -529,23 +529,21 @@ impl SshServerView {
                 self.onekey_credentials = Vec::new();
             }
         }
-        if let Some(selected_id) = self.selected_onekey_credential_id.as_ref() {
-            if !self
+        if let Some(selected_id) = self.selected_onekey_credential_id.as_ref()
+            && !self
                 .onekey_credentials
                 .iter()
                 .any(|credential| credential.id == *selected_id)
-            {
-                self.selected_onekey_credential_id = None;
-            }
+        {
+            self.selected_onekey_credential_id = None;
         }
-        if let Some(managed_id) = self.managed_onekey_credential_id.as_ref() {
-            if !self
+        if let Some(managed_id) = self.managed_onekey_credential_id.as_ref()
+            && !self
                 .onekey_credentials
                 .iter()
                 .any(|credential| credential.id == *managed_id)
-            {
-                self.managed_onekey_credential_id = None;
-            }
+        {
+            self.managed_onekey_credential_id = None;
         }
         self.rebuild_onekey_credential_dropdown(ctx);
         self.sync_onekey_manager_row_states();
@@ -2026,10 +2024,8 @@ impl TypedActionView for SshServerView {
                     if self.managed_onekey_credential_id.is_none() || !self.show_onekey_manager {
                         self.set_managed_onekey_form_from_credential(&credential, ctx);
                     }
-                } else {
-                    if !self.show_onekey_manager {
-                        self.clear_managed_onekey_form(ctx);
-                    }
+                } else if !self.show_onekey_manager {
+                    self.clear_managed_onekey_form(ctx);
                 }
                 self.rebuild_onekey_credential_dropdown(ctx);
                 ctx.notify();

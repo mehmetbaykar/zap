@@ -4,9 +4,9 @@
 //! with the real implementation in `super::message_view`.
 use std::hash::Hash;
 
-use super::consts::{PRUNE_MINIMUM, PRUNE_PROTECT, PRUNE_PROTECTED_TOOLS};
-use super::overflow::{usable, ModelLimit};
 use super::CompactionConfig;
+use super::consts::{PRUNE_MINIMUM, PRUNE_PROTECT, PRUNE_PROTECTED_TOOLS};
+use super::overflow::{ModelLimit, usable};
 
 /// The message role — used for turn detection and select.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

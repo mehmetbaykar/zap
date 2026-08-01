@@ -3,7 +3,7 @@ use warp_core::features::FeatureFlag;
 use warpui::{Entity, ModelContext, SingletonEntity, WindowId};
 
 use super::hoa_onboarding;
-use super::view::feature_intro_modal::{FeatureIntroId, FEATURE_INTROS};
+use super::view::feature_intro_modal::{FEATURE_INTROS, FeatureIntroId};
 use crate::auth::{AuthManager, AuthManagerEvent};
 use crate::channel::{Channel, ChannelState};
 // Zap (localization, Phase 5): `PreferencesSyncer` has been physically removed.
@@ -146,10 +146,11 @@ impl OneTimeModalModel {
         }
 
         self.active_feature_intro = intro;
-        if intro.is_some() && self.target_window_id.is_none() {
-            if let Some(window_id) = ctx.windows().active_window() {
-                self.target_window_id = Some(window_id);
-            }
+        if intro.is_some()
+            && self.target_window_id.is_none()
+            && let Some(window_id) = ctx.windows().active_window()
+        {
+            self.target_window_id = Some(window_id);
         }
         ctx.emit(OneTimeModalEvent::VisibilityChanged {
             is_open: intro.is_some(),

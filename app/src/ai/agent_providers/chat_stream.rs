@@ -42,12 +42,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use ai::agent::convert::ConvertToAPITypeError;
 use futures::StreamExt;
-use instant::Instant;
-use serde_json::{json, Value};
-use uuid::Uuid;
-use warp_multi_agent_api as api;
-
 use genai::adapter::AdapterKind;
 use genai::chat::{
     Binary, BinarySource, CacheControl, ChatMessage, ChatOptions, ChatRequest, ChatRole,
@@ -56,24 +52,10 @@ use genai::chat::{
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget, WebConfig};
 use http_client::current_proxy_config;
-
-use crate::ai::agent::api::{RequestParams, ResponseStream};
-use crate::ai::agent::{AIAgentActionResult, AIAgentInput, RunningCommand, UserQueryMode};
-use crate::ai::api_error::AIApiError;
-use crate::ai::byop_compaction;
-use crate::ai::byop_readiness::{
-    classify_projection, AcceptedRepair, BlockedByopReadinessError, LiveToolCall,
-    LiveToolCallState, ProjectedToolCall, ProjectedToolResult, ProjectionItem, ReadinessCategory,
-    ReadinessContext, ReadinessDiagnosticCoalescer, ReadinessDiagnosticContext,
-    ReadinessDiagnosticLevel, ReadinessReport, ReadinessState, ReadinessTriggerLayer,
-    RedactedToolKind, RepairSource, RepairStateStatus, TerminalResultKind, ToolCallKey,
-    ToolCallRef, ToolResultSource,
-};
-use crate::settings::AgentProviderApiType;
-use ai::agent::convert::ConvertToAPITypeError;
-
-use super::openai_compatible::OpenAiCompatibleError;
-use super::tools;
+use instant::Instant;
+use serde_json::{Value, json};
+use uuid::Uuid;
+use warp_multi_agent_api as api;
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -82,11 +64,24 @@ use super::tools;
 // selecting system/{anthropic,gpt,beast,gemini,kimi,codex,trinity,default}.j2 by the LLMId model family,
 // and rendering the AIAgentContext already collected by the warp client (env / git / skills / project_rules / codebase / current_time)
 // into the system, so the BYOP path also has environment information comparable to warp's own path.
-
 use super::attachment_caps;
-use super::prompt_renderer;
-use super::user_context;
-use crate::ai::agent::AIAgentContext;
+use super::openai_compatible::OpenAiCompatibleError;
+use super::{prompt_renderer, tools, user_context};
+use crate::ai::agent::api::{RequestParams, ResponseStream};
+use crate::ai::agent::{
+    AIAgentActionResult, AIAgentContext, AIAgentInput, RunningCommand, UserQueryMode,
+};
+use crate::ai::api_error::AIApiError;
+use crate::ai::byop_compaction;
+use crate::ai::byop_readiness::{
+    AcceptedRepair, BlockedByopReadinessError, LiveToolCall, LiveToolCallState, ProjectedToolCall,
+    ProjectedToolResult, ProjectionItem, ReadinessCategory, ReadinessContext,
+    ReadinessDiagnosticCoalescer, ReadinessDiagnosticContext, ReadinessDiagnosticLevel,
+    ReadinessReport, ReadinessState, ReadinessTriggerLayer, RedactedToolKind, RepairSource,
+    RepairStateStatus, TerminalResultKind, ToolCallKey, ToolCallRef, ToolResultSource,
+    classify_projection,
+};
+use crate::settings::AgentProviderApiType;
 
 /// Extracts the most recent `UserQuery.context` from input (equivalent to the one warp's `convert_to.rs::convert_input` takes).
 fn latest_input_context(input: &[AIAgentInput]) -> &[AIAgentContext] {
@@ -362,10 +357,10 @@ fn flush_assistant_buffer(
     messages: &mut Vec<ChatMessage>,
     outbound_tool_groups: &mut Vec<OutboundAssistantToolGroup>,
 ) {
-    if let Some(group) = buf.flush_into_with_group(messages) {
-        if !group.tool_call_keys.is_empty() {
-            outbound_tool_groups.push(group);
-        }
+    if let Some(group) = buf.flush_into_with_group(messages)
+        && !group.tool_call_keys.is_empty()
+    {
+        outbound_tool_groups.push(group);
     }
 }
 
@@ -498,12 +493,11 @@ fn collect_linearized_task_messages(tasks: &[api::Task]) -> Vec<&api::Message> {
         out: &mut Vec<&'a api::Message>,
         seen_user_queries: &mut HashSet<(&'a str, &'a str)>,
     ) {
-        if let Some(api::message::Message::UserQuery(u)) = &msg.message {
-            if !msg.request_id.is_empty()
-                && !seen_user_queries.insert((msg.request_id.as_str(), u.query.as_str()))
-            {
-                return;
-            }
+        if let Some(api::message::Message::UserQuery(u)) = &msg.message
+            && !msg.request_id.is_empty()
+            && !seen_user_queries.insert((msg.request_id.as_str(), u.query.as_str()))
+        {
+            return;
         }
         out.push(msg);
     }
@@ -520,12 +514,11 @@ fn collect_linearized_task_messages(tasks: &[api::Task]) -> Vec<&api::Message> {
         }
         for msg in &task.messages {
             push_msg(msg, out, seen_user_queries);
-            if let Some(api::message::Message::ToolCall(tc)) = &msg.message {
-                if let Some(api::message::tool_call::Tool::Subagent(sub)) = &tc.tool {
-                    if let Some(subtask) = by_id.get(sub.task_id.as_str()) {
-                        dfs(subtask, by_id, visited_tasks, out, seen_user_queries);
-                    }
-                }
+            if let Some(api::message::Message::ToolCall(tc)) = &msg.message
+                && let Some(api::message::tool_call::Tool::Subagent(sub)) = &tc.tool
+                && let Some(subtask) = by_id.get(sub.task_id.as_str())
+            {
+                dfs(subtask, by_id, visited_tasks, out, seen_user_queries);
             }
         }
     }
@@ -742,10 +735,10 @@ fn build_serializer_readiness_projection(
     let mut builder = SerializerProjectionBuilder::new();
 
     for (idx, msg) in all_msgs.iter().enumerate() {
-        if let Some(head_end) = summarize_head_end {
-            if idx >= head_end {
-                continue;
-            }
+        if let Some(head_end) = summarize_head_end
+            && idx >= head_end
+        {
+            continue;
         }
 
         if hidden_msg_ids.contains(&msg.id) {
@@ -1263,13 +1256,12 @@ fn build_chat_request(
             // by iterating all_msgs and checking the marker
             let mut out = std::collections::HashSet::new();
             for msg in &all_msgs {
-                if let Some(api::message::Message::ToolCallResult(_)) = &msg.message {
-                    if s.marker(&msg.id)
+                if let Some(api::message::Message::ToolCallResult(_)) = &msg.message
+                    && s.marker(&msg.id)
                         .and_then(|m| m.tool_output_compacted_at)
                         .is_some()
-                    {
-                        out.insert(msg.id.clone());
-                    }
+                {
+                    out.insert(msg.id.clone());
                 }
             }
             out
@@ -1324,10 +1316,10 @@ fn build_chat_request(
 
     for (idx, msg) in all_msgs.iter().enumerate() {
         // Summary request: the tail interval isn't sent upstream (only head + SUMMARY_TEMPLATE appended at the end)
-        if let Some(head_end) = summarize_head_end {
-            if idx >= head_end {
-                continue;
-            }
+        if let Some(head_end) = summarize_head_end
+            && idx >= head_end
+        {
+            continue;
         }
         if hidden_msg_ids.contains(&msg.id) {
             if let Some(summary_text) = summary_inserts.get(&msg.id) {
@@ -1697,10 +1689,10 @@ fn build_chat_request(
     // is extremely high; the 1h write of 2× base amortized over many reuses is effectively near 0 — and it also blocks the
     // 1h-after-5m ordering error caused by an external reverse proxy injecting 5m on system (letting this one 1h tools breakpoint take over
     // the entire tools+system static prefix).
-    if matches!(api_type, AgentProviderApiType::Anthropic) {
-        if let Some(last_tool) = tools_array.last_mut() {
-            last_tool.cache_control = Some(CacheControl::Ephemeral1h);
-        }
+    if matches!(api_type, AgentProviderApiType::Anthropic)
+        && let Some(last_tool) = tools_array.last_mut()
+    {
+        last_tool.cache_control = Some(CacheControl::Ephemeral1h);
     }
 
     // Outbound message text is passed through to `serde_json` for JSON escaping; we no longer do aggressive character-level
@@ -1786,10 +1778,7 @@ fn should_replace_tool_response(existing: &ToolResponse, candidate: &ToolRespons
 /// Strips userinfo and query/fragment from a user-configured URL before it
 /// reaches the log: self-hosted proxies sometimes embed keys there.
 pub(crate) fn url_for_log(raw: &str) -> String {
-    let no_query = raw
-        .split(|c: char| c == '?' || c == '#')
-        .next()
-        .unwrap_or(raw);
+    let no_query = raw.split(['?', '#']).next().unwrap_or(raw);
     match no_query.split_once("://") {
         Some((scheme, rest)) => {
             let host_part = rest.split_once('@').map_or(rest, |(_, host)| host);
@@ -2287,17 +2276,15 @@ fn repair_tool_call_pairs_for_accepted_history_gaps(
         for key in &group.tool_call_keys {
             let cid = &key.tool_call_id;
             let mut response = responses_by_call_id.remove(cid);
-            if call_id_counts.get(cid) == Some(&1) {
-                if let Some(late_response) = late_responses_by_unique_call_id.remove(cid) {
-                    response = match response {
+            if call_id_counts.get(cid) == Some(&1)
+                && let Some(late_response) = late_responses_by_unique_call_id.remove(cid)
+            {
+                response = match response {
+                    Some(existing) if !should_replace_tool_response(&existing, &late_response) => {
                         Some(existing)
-                            if !should_replace_tool_response(&existing, &late_response) =>
-                        {
-                            Some(existing)
-                        }
-                        _ => Some(late_response),
-                    };
-                }
+                    }
+                    _ => Some(late_response),
+                };
             }
 
             match response {
@@ -2382,10 +2369,10 @@ fn repair_placeholder_content(source: RepairSource) -> String {
 /// Empty messages don't trigger it, to avoid injecting content into an empty conversation out of nowhere.
 fn ensure_ends_with_user(messages: &mut Vec<ChatMessage>) {
     use genai::chat::ChatRole;
-    if let Some(last) = messages.last() {
-        if last.role == ChatRole::Assistant {
-            messages.push(ChatMessage::user("Continue."));
-        }
+    if let Some(last) = messages.last()
+        && last.role == ChatRole::Assistant
+    {
+        messages.push(ChatMessage::user("Continue."));
     }
 }
 
@@ -2403,17 +2390,16 @@ fn serialize_outgoing_tool_call(
     // tool oneof = None, with the original `<fn_name>\n<args_str>` encoded in server_message_data.
     // This must be recognized first, before the main match, otherwise it falls through to None=>"warp_internal_empty" below,
     // and the upstream model seeing a non-existent tool name would be more confused and would not know which call failed.
-    if tc.tool.is_none() {
-        if let Some((fn_name, raw_args)) = server_message_data.split_once('\n') {
-            if !fn_name.is_empty() {
-                // When raw_args is invalid JSON (e.g. model emitted \e or \` escape),
-                // fall back to an empty object so the provider receives valid JSON
-                // rather than a JSON string wrapping the invalid content (which causes
-                // "Invalid \escape" 400 on the next turn).
-                let args_value = serde_json::from_str(raw_args).unwrap_or_else(|_| json!({}));
-                return (fn_name.to_owned(), args_value);
-            }
-        }
+    if tc.tool.is_none()
+        && let Some((fn_name, raw_args)) = server_message_data.split_once('\n')
+        && !fn_name.is_empty()
+    {
+        // When raw_args is invalid JSON (e.g. model emitted \e or \` escape),
+        // fall back to an empty object so the provider receives valid JSON
+        // rather than a JSON string wrapping the invalid content (which causes
+        // "Invalid \escape" 400 on the next turn).
+        let args_value = serde_json::from_str(raw_args).unwrap_or_else(|_| json!({}));
+        return (fn_name.to_owned(), args_value);
     }
 
     // Most old implementations return (String, String); here it is changed to (String, Value), parsing the string once more.
@@ -3046,18 +3032,18 @@ pub(super) fn build_client(
             // When WebConfig has no proxy set, reqwest reads macOS SystemConfiguration or HTTP_PROXY / HTTPS_PROXY environment variables.
         }
         http_client::ProxyMode::Custom => {
-            if !proxy_cfg.url.is_empty() {
-                if let Err(err) = web_config.set_proxy_settings(
+            if !proxy_cfg.url.is_empty()
+                && let Err(err) = web_config.set_proxy_settings(
                     &proxy_cfg.url,
                     &proxy_cfg.username,
                     &proxy_cfg.password,
                     &proxy_cfg.no_proxy,
-                ) {
-                    log::warn!(
-                        "[byop] proxy URL '{}' is invalid; skipping proxy config: {err}",
-                        url_for_log(&proxy_cfg.url)
-                    );
-                }
+                )
+            {
+                log::warn!(
+                    "[byop] proxy URL '{}' is invalid; skipping proxy config: {err}",
+                    url_for_log(&proxy_cfg.url)
+                );
             }
         }
     }
@@ -3073,8 +3059,8 @@ pub(super) fn build_client(
 ///
 /// The application name is always taken from `ChannelState::app_id().application_name()`, ensuring consistency with the `AppId`
 /// the entry bin registers (`bin/oss.rs` registers "Zap").
-fn build_user_agent_header(
-) -> Result<reqwest::header::HeaderValue, reqwest::header::InvalidHeaderValue> {
+fn build_user_agent_header()
+-> Result<reqwest::header::HeaderValue, reqwest::header::InvalidHeaderValue> {
     let app_name = warp_core::channel::ChannelState::app_id()
         .application_name()
         .to_owned();
@@ -3204,12 +3190,10 @@ fn build_chat_options(
         api_type,
         AgentProviderApiType::OpenAi | AgentProviderApiType::OpenAiResp
     ) && opencode_compatible_cache_provider(base_url)
+        && let Some(cid) = conversation_id
+        && !cid.is_empty()
     {
-        if let Some(cid) = conversation_id {
-            if !cid.is_empty() {
-                opts = opts.with_prompt_cache_key(cid.to_owned());
-            }
-        }
+        opts = opts.with_prompt_cache_key(cid.to_owned());
     }
 
     // **Thinking-depth level dispatch** (aligned with how Zed `LanguageModelRequest::thinking_allowed` handles each
@@ -3977,16 +3961,14 @@ pub async fn generate_byop_output(
                                 }
                             }
                         }
+                    } else if let Some(id) = text_msg_id.clone() {
+                        yield Ok(make_append_event(&current_task_id, &id, AppendKind::Text(c.content)));
                     } else {
-                        if let Some(id) = text_msg_id.clone() {
-                            yield Ok(make_append_event(&current_task_id, &id, AppendKind::Text(c.content)));
-                        } else {
-                            let new_id = Uuid::new_v4().to_string();
-                            let mut msg = make_agent_output_message(&current_task_id, &request_id, c.content);
-                            msg.id = new_id.clone();
-                            text_msg_id = Some(new_id);
-                            yield Ok(make_add_messages_event(&current_task_id, vec![msg]));
-                        }
+                        let new_id = Uuid::new_v4().to_string();
+                        let mut msg = make_agent_output_message(&current_task_id, &request_id, c.content);
+                        msg.id = new_id.clone();
+                        text_msg_id = Some(new_id);
+                        yield Ok(make_add_messages_event(&current_task_id, vec![msg]));
                     }
                 }
                 ChatStreamEvent::Chunk(_) => {}
@@ -4036,8 +4018,8 @@ pub async fn generate_byop_output(
                             let elapsed_ok = last
                                 .map(|t| now.duration_since(t).as_millis() as u64 >= TOOL_ARGS_UPDATE_THROTTLE_MS)
                                 .unwrap_or(true);
-                            if elapsed_ok {
-                                if let Ok(parsed) =
+                            if elapsed_ok
+                                && let Ok(parsed) =
                                     parse_incoming_tool_call(&call, mcp_context.as_ref())
                                 {
                                     let mut updated = make_tool_call_message(
@@ -4055,9 +4037,7 @@ pub async fn generate_byop_output(
                                     ));
                                 }
                                 // reparse failure (intermediate state): silent, wait for the next chunk.
-                            }
-                        } else { match parse_incoming_tool_call(&call, mcp_context.as_ref())
-                        { Ok(parsed) => {
+                        } else if let Ok(parsed) = parse_incoming_tool_call(&call, mcp_context.as_ref()) {
                             // First successful parse → immediately emit the placeholder card.
                             // Every chunk reparses before a placeholder is emitted (i.e. "retry on every
                             // chunk"), so even if the first frame's args are incomplete, any later chunk that is complete
@@ -4080,7 +4060,7 @@ pub async fn generate_byop_output(
                                 &current_task_id,
                                 vec![placeholder],
                             ));
-                        } _ => {}}}
+                        }
                         // First-frame parse failure (args still incomplete / unknown tool): don't emit yet,
                         // retry on the next chunk or take the old path at End, to avoid visual jitter.
                     }
@@ -4094,24 +4074,22 @@ pub async fn generate_byop_output(
                     end_count += 1;
                     // Truncation detection (previously the stop reason was captured by
                     // genai but never inspected here).
-                    if let Some(reason) = end.captured_stop_reason.as_ref() {
-                        if matches!(reason, genai::chat::StopReason::MaxTokens(_)) {
+                    if let Some(reason) = end.captured_stop_reason.as_ref()
+                        && matches!(reason, genai::chat::StopReason::MaxTokens(_)) {
                             truncated_by_token_limit = true;
                             log::warn!(
                                 "[byop] generation truncated by token limit (stop_reason={reason:?}) — \
                                  tool args / text may be incomplete"
                             );
                         }
-                    }
                     // genai >= 0.4.0's captured_content contains tool_calls.
                     // Prefer the tool_calls in captured_content (more complete),
                     // otherwise use the tool_bufs accumulated during streaming.
                     if let Some(content) = end.captured_content.as_ref() {
-                        if let Some(text) = content.first_text() {
-                            if !text.is_empty() {
+                        if let Some(text) = content.first_text()
+                            && !text.is_empty() {
                                 captured_assistant_text = Some(text.to_owned());
                             }
-                        }
                         let mut captured_order: Vec<String> = Vec::new();
                         for call in content.tool_calls() {
                             if !captured_order.contains(&call.call_id) {
@@ -5337,8 +5315,9 @@ fn make_finished_done(
 
 #[cfg(test)]
 mod assistant_buffer_tests {
-    use super::*;
     use genai::chat::{ChatRole, ToolCall};
+
+    use super::*;
 
     fn reasoning_part(msg: &ChatMessage) -> Option<&str> {
         for p in msg.content.parts() {
@@ -5560,9 +5539,10 @@ mod dashscope_thinking_tests {
 /// - OpenAI / OpenAiResp: `reasoning_effort: "none"` (GPT-5 accepts it)
 #[cfg(test)]
 mod build_chat_options_off_tests {
+    use genai::chat::ReasoningEffort as GE;
+
     use super::*;
     use crate::settings::ReasoningEffortSetting as R;
-    use genai::chat::ReasoningEffort as GE;
 
     fn opts(api_type: AgentProviderApiType, model: &str, effort: R) -> genai::chat::ChatOptions {
         build_chat_options(
@@ -5693,8 +5673,9 @@ mod build_chat_options_off_tests {
 
 #[cfg(test)]
 mod adapter_routing_tests {
-    use super::*;
     use genai::adapter::AdapterKind;
+
+    use super::*;
 
     const OPENAI_HOST: &str = "https://api.openai.com/v1/";
     const ANTHROPIC_HOST: &str = "https://api.anthropic.com/v1/";
@@ -5846,8 +5827,9 @@ mod ollama_endpoint_tests {
 /// the upstream hash will necessarily differ → 100% miss. Conversely, consistent output does not guarantee a hit either.
 #[cfg(test)]
 mod cache_boundary_stability_tests {
-    use super::*;
     use genai::chat::{ChatMessage, ChatRole};
+
+    use super::*;
 
     /// Build a typical multi-turn conversation messages sequence:
     /// system + user_1 + assistant_1 + user_2 + assistant_2 + user_3
@@ -6177,16 +6159,17 @@ mod cache_boundary_stability_tests {
 
 #[cfg(test)]
 mod serializer_readiness_tests {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+
     use super::*;
     use crate::ai::agent::task::TaskId;
     use crate::ai::agent::{AIAgentActionId, AIAgentActionResultType, RequestCommandOutputResult};
     use crate::ai::byop_compaction::state::{CompactionState, CompletedCompaction};
     use crate::ai::byop_readiness::{
-        PendingByopToolResultsError, RepairRecord, RepairState, ToolCallKey, ToolCallRef,
-        BLOCKED_BYOP_REQUEST_MESSAGE,
+        BLOCKED_BYOP_REQUEST_MESSAGE, PendingByopToolResultsError, RepairRecord, RepairState,
+        ToolCallKey, ToolCallRef,
     };
-    use std::collections::{HashMap, HashSet};
-    use std::sync::Arc;
 
     fn kind() -> RedactedToolKind {
         RedactedToolKind::new("shell")
@@ -6842,9 +6825,11 @@ mod serializer_readiness_tests {
     #[test]
     fn strict_request_body_checker_rejects_orphans_duplicates_and_early_boundaries() {
         let orphan = vec![ChatMessage::user("hi"), tool_response("a")];
-        assert!(strict_chat_completions_ordering_errors(&orphan)
-            .iter()
-            .any(|error| error.contains("orphan")));
+        assert!(
+            strict_chat_completions_ordering_errors(&orphan)
+                .iter()
+                .any(|error| error.contains("orphan"))
+        );
 
         let duplicate = vec![
             ChatMessage::user("hi"),
@@ -6852,9 +6837,11 @@ mod serializer_readiness_tests {
             tool_response("a"),
             tool_response("a"),
         ];
-        assert!(strict_chat_completions_ordering_errors(&duplicate)
-            .iter()
-            .any(|error| error.contains("duplicate")));
+        assert!(
+            strict_chat_completions_ordering_errors(&duplicate)
+                .iter()
+                .any(|error| error.contains("duplicate"))
+        );
 
         let early_boundary = vec![
             ChatMessage::user("hi"),
@@ -6862,9 +6849,11 @@ mod serializer_readiness_tests {
             ChatMessage::user("too soon"),
             tool_response("a"),
         ];
-        assert!(strict_chat_completions_ordering_errors(&early_boundary)
-            .iter()
-            .any(|error| error.contains("before pending")));
+        assert!(
+            strict_chat_completions_ordering_errors(&early_boundary)
+                .iter()
+                .any(|error| error.contains("before pending"))
+        );
 
         let out_of_order = vec![
             ChatMessage::user("hi"),
@@ -6872,9 +6861,11 @@ mod serializer_readiness_tests {
             tool_response("b"),
             tool_response("a"),
         ];
-        assert!(strict_chat_completions_ordering_errors(&out_of_order)
-            .iter()
-            .any(|error| error.contains("out-of-order")));
+        assert!(
+            strict_chat_completions_ordering_errors(&out_of_order)
+                .iter()
+                .any(|error| error.contains("out-of-order"))
+        );
     }
 
     #[test]
@@ -7047,9 +7038,11 @@ mod serializer_readiness_tests {
             payload["note"],
             "tool result was unavailable in repaired conversation history"
         );
-        assert!(!response
-            .content
-            .contains("(tool execution result not preserved)"));
+        assert!(
+            !response
+                .content
+                .contains("(tool execution result not preserved)")
+        );
         assert!(
             params.tasks[0].messages.iter().all(|message| !matches!(
                 message.message,
@@ -7230,9 +7223,10 @@ mod serializer_readiness_tests {
 /// a missing result must first be blocked by readiness; it cannot reach here to fill in a placeholder.
 #[cfg(test)]
 mod accepted_history_repair_tests {
+    use genai::chat::{ChatMessage, ChatRole, ToolCall};
+
     use super::*;
     use crate::ai::byop_readiness::{RepairRecord, ToolCallKey, ToolCallRef};
-    use genai::chat::{ChatMessage, ChatRole, ToolCall};
 
     fn make_tool_call(call_id: &str) -> ToolCall {
         ToolCall {

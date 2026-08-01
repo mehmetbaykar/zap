@@ -1,6 +1,6 @@
 use ai::agent::action_result::AIAgentActionResultType;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use warp_core::features::FeatureFlag;
 use warpui::{Entity, ModelContext};
 

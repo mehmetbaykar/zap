@@ -1,19 +1,19 @@
-use std::{collections::HashSet, sync::Arc, time::Duration};
-
-use warp_multi_agent_api as api;
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
 
 use instant::Instant;
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
-use warp_core::{
-    features::FeatureFlag,
-    ui::{appearance::Appearance, theme::Fill},
-};
+use warp_core::features::FeatureFlag;
+use warp_core::ui::appearance::Appearance;
+use warp_core::ui::theme::Fill;
+use warp_multi_agent_api as api;
+use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::elements::shimmering_text::ShimmeringTextStateHandle;
 use warpui::elements::{Border, Container, Empty, Flex, MouseStateHandle, ParentElement, Text};
 use warpui::keymap::Keystroke;
 use warpui::presenter::ChildView;
-use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::{
     AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
     ViewContext, ViewHandle,
@@ -22,14 +22,15 @@ use warpui::{
 use super::cli_controller::{CLISubagentController, CLISubagentEvent, UserTakeOverReason};
 use super::model::{AIBlockModel, AIBlockModelImpl, AIBlockOutputStatus};
 use super::view_impl::common::{
+    AutoExecuteButtonProps, ButtonProps, ForceRefreshButtonProps, LOAD_OUTPUT_MESSAGE,
+    MaybeShimmeringText, WAITING_FOR_USER_INPUT_MESSAGE, WarpingIndicatorProps, WarpingProps,
     render_switch_control_to_user_button, render_warping_indicator, render_warping_indicator_base,
-    AutoExecuteButtonProps, ButtonProps, ForceRefreshButtonProps, MaybeShimmeringText,
-    WarpingIndicatorProps, WarpingProps, LOAD_OUTPUT_MESSAGE, WAITING_FOR_USER_INPUT_MESSAGE,
 };
+use crate::ai::AgentTip;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{
-    icons, AIAgentExchangeId, AIAgentOutput, AIAgentOutputMessageType, CancellationReason,
-    SummarizationType,
+    AIAgentExchangeId, AIAgentOutput, AIAgentOutputMessageType, CancellationReason,
+    SummarizationType, icons,
 };
 use crate::ai::agent_tips::AITipModel;
 use crate::ai::blocklist::agent_view::child_agent_status_card::ChildAgentStatusCard;
@@ -42,29 +43,28 @@ use crate::ai::blocklist::summarization_cancel_dialog::{
     self, SummarizationCancelDialog, SummarizationCancelDialogEvent,
 };
 use crate::ai::blocklist::{
-    ai_brand_color, BlocklistAIActionEvent, BlocklistAIActionModel, BlocklistAIContextEvent,
+    BlocklistAIActionEvent, BlocklistAIActionModel, BlocklistAIContextEvent,
     BlocklistAIContextModel, BlocklistAIController, BlocklistAIHistoryEvent, BlocklistAIInputEvent,
-    BlocklistAIInputModel, QueuedQueryEvent, QueuedQueryModel, ResponseStreamId,
+    BlocklistAIInputModel, QueuedQueryEvent, QueuedQueryModel, ResponseStreamId, ai_brand_color,
 };
 use crate::ai::llms::LLMPreferences;
-use crate::ai::AgentTip;
 use crate::server::telemetry::TelemetryEvent;
 use crate::settings::{InputModeSettings, InputSettings};
 use crate::settings_view::keybindings::KeybindingChangedNotifier;
+use crate::terminal::input::SET_INPUT_MODE_TERMINAL_ACTION_NAME;
 use crate::terminal::input::buffer_model::{InputBufferModel, InputBufferUpdateEvent};
 use crate::terminal::input::slash_command_model::SlashCommandModel;
 use crate::terminal::input::suggestions_mode_model::InputSuggestionsModeModel;
-use crate::terminal::input::SET_INPUT_MODE_TERMINAL_ACTION_NAME;
 use crate::terminal::model::block::LONG_RUNNING_COMMAND_DURATION_MS;
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
 use crate::terminal::view::ambient_agent::{AmbientAgentViewModel, AmbientAgentViewModelEvent};
 use crate::terminal::warpify::render::LEFT_STRIPE_WIDTH;
 use crate::terminal::{
-    TerminalModel, CANCEL_COMMAND_KEYBINDING, TOGGLE_AUTOEXECUTE_MODE_KEYBINDING,
-    TOGGLE_HIDE_CLI_RESPONSES_KEYBINDING, TOGGLE_QUEUE_NEXT_PROMPT_KEYBINDING,
+    CANCEL_COMMAND_KEYBINDING, TOGGLE_AUTOEXECUTE_MODE_KEYBINDING,
+    TOGGLE_HIDE_CLI_RESPONSES_KEYBINDING, TOGGLE_QUEUE_NEXT_PROMPT_KEYBINDING, TerminalModel,
 };
 use crate::util::bindings::keybinding_name_to_keystroke;
-use crate::{send_telemetry_from_app_ctx, BlocklistAIHistoryModel};
+use crate::{BlocklistAIHistoryModel, send_telemetry_from_app_ctx};
 
 pub fn init(app: &mut AppContext) {
     summarization_cancel_dialog::init(app);
@@ -908,16 +908,21 @@ fn render_agent_tip(tip: &AgentTip, app: &AppContext) -> Box<dyn Element> {
 
     let mut fragments = tip.to_formatted_text(app);
 
-    match (tip.action.clone(), action_text.clone()) { (Some(action), Some(text)) => {
-        fragments.push(FormattedTextFragment::plain_text(" "));
-        fragments.push(FormattedTextFragment::hyperlink_action(text, action));
-    } _ => if let Some(link_target) = tip.link.clone() {
-        fragments.push(FormattedTextFragment::plain_text(" "));
-        fragments.push(FormattedTextFragment::hyperlink(
-            crate::t!("common-learn-more"),
-            link_target,
-        ));
-    }}
+    match (tip.action.clone(), action_text.clone()) {
+        (Some(action), Some(text)) => {
+            fragments.push(FormattedTextFragment::plain_text(" "));
+            fragments.push(FormattedTextFragment::hyperlink_action(text, action));
+        }
+        _ => {
+            if let Some(link_target) = tip.link.clone() {
+                fragments.push(FormattedTextFragment::plain_text(" "));
+                fragments.push(FormattedTextFragment::hyperlink(
+                    crate::t!("common-learn-more"),
+                    link_target,
+                ));
+            }
+        }
+    }
 
     let formatted_text =
         markdown_parser::FormattedText::new(vec![FormattedTextLine::Line(fragments)]);
@@ -1020,12 +1025,13 @@ fn resolve_fallback_warping_message<V: View>(
             conv.exchange_with_id(exchange_id)
         })
         .is_some_and(|exchange| exchange.has_user_query());
-    if is_fallback.is_none() && !is_new_user_query {
-        if let Some(prev) = latest_model_used_before_exchange(model, app) {
-            is_fallback = Some(prev.is_fallback);
-            if !prev.model_display_name.is_empty() {
-                display_name = Some(prev.model_display_name);
-            }
+    if is_fallback.is_none()
+        && !is_new_user_query
+        && let Some(prev) = latest_model_used_before_exchange(model, app)
+    {
+        is_fallback = Some(prev.is_fallback);
+        if !prev.model_display_name.is_empty() {
+            display_name = Some(prev.model_display_name);
         }
     }
     if !is_fallback.unwrap_or(false) {
@@ -1080,38 +1086,43 @@ impl View for BlocklistAIStatusBar {
                 },
                 app,
             )
-        } else { match (
-            self.render_warping_indicator_for_latest_exchange(app),
-            self.ephemeral_message_model
-                .as_ref(app)
-                .current_message()
-                .is_none(),
-        ) { (Some(warping_indicator), true) => {
-            warping_indicator
-        } _ => if self
-            .ambient_agent_view_model
-            .as_ref()
-            .is_some_and(|ambient_agent_view_model| {
-                ambient_agent_view_model
-                    .as_ref(app)
-                    .is_waiting_for_session()
-            })
-        {
-            // Don't render warping indicator - the loading screen is shown in the main view
-            return Empty::new().finish();
-        } else if agent_view_controller.is_active() {
-            // The new orchestration pill bar in the agent view header
-            // replaces the legacy child-agent status card rows; when
-            // it's enabled, render only the message bar here.
-            let mut column = Flex::column();
-            if !FeatureFlag::OrchestrationPillBar.is_enabled() {
-                column = column.with_child(ChildView::new(&self.child_agent_status_card).finish());
-            }
-            column = column.with_child(ChildView::new(&self.agent_message_bar).finish());
-            return column.finish();
         } else {
-            return Empty::new().finish();
-        }}};
+            match (
+                self.render_warping_indicator_for_latest_exchange(app),
+                self.ephemeral_message_model
+                    .as_ref(app)
+                    .current_message()
+                    .is_none(),
+            ) {
+                (Some(warping_indicator), true) => warping_indicator,
+                _ => {
+                    if self.ambient_agent_view_model.as_ref().is_some_and(
+                        |ambient_agent_view_model| {
+                            ambient_agent_view_model
+                                .as_ref(app)
+                                .is_waiting_for_session()
+                        },
+                    ) {
+                        // Don't render warping indicator - the loading screen is shown in the main view
+                        return Empty::new().finish();
+                    } else if agent_view_controller.is_active() {
+                        // The new orchestration pill bar in the agent view header
+                        // replaces the legacy child-agent status card rows; when
+                        // it's enabled, render only the message bar here.
+                        let mut column = Flex::column();
+                        if !FeatureFlag::OrchestrationPillBar.is_enabled() {
+                            column = column
+                                .with_child(ChildView::new(&self.child_agent_status_card).finish());
+                        }
+                        column =
+                            column.with_child(ChildView::new(&self.agent_message_bar).finish());
+                        return column.finish();
+                    } else {
+                        return Empty::new().finish();
+                    }
+                }
+            }
+        };
 
         let appearance = Appearance::as_ref(app);
         let theme = appearance.theme();

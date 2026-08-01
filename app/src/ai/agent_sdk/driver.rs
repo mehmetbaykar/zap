@@ -1,69 +1,56 @@
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    ffi::OsString,
-    future::Future,
-    io::{self, Write},
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
-    },
-    thread,
-    time::Duration,
-};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
+use std::future::Future;
+use std::io::{self, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
-use crate::ai::llms::{LLMId, LLMPreferences};
-use crate::ai::mcp::MCPServerState;
-
-use crate::ai::agent_sdk::driver::harness::{
-    task_env_vars, HarnessKind, HarnessRunner, SavePoint, ThirdPartyHarness,
-};
-use crate::terminal::cli_agent_sessions::plugin_manager::{
-    plugin_manager_for, CliAgentPluginManager,
-};
-use crate::terminal::cli_agent_sessions::{
-    CLIAgentSessionStatus, CLIAgentSessionsModel, CLIAgentSessionsModelEvent,
-};
-use crate::{
-    ai::{
-        agent::{
-            AIAgentExchange, AIAgentInput, AIAgentOutput, CancellationReason, RenderableAIError,
-        },
-        agent_events::DisabledAgentEventStreamClient,
-        ambient_agents::{
-            conversation_output_status_from_conversation, AmbientAgentTaskId,
-            AmbientConversationStatus,
-        },
-        blocklist::{
-            agent_view::AgentViewEntryOrigin, BlocklistAIHistoryEvent, BlocklistAIHistoryModel,
-            BlocklistAIPermissions,
-        },
-        execution_profiles::profiles::AIExecutionProfilesModel,
-        mcp::{
-            parsing::{normalize_mcp_json, ParsedTemplatableMCPServerResult},
-            templatable_manager::TemplatableMCPServerManagerEvent,
-            TemplatableMCPServerInstallation, TemplatableMCPServerManager,
-        },
-    },
-    server::ids::{ServerId, SyncId},
-};
 use anyhow::Context as _;
-use futures::{
-    channel::oneshot,
-    future::{self, Either},
-    FutureExt as _,
-};
+use futures::FutureExt as _;
+use futures::channel::oneshot;
+use futures::future::{self, Either};
 use oneshot::{Canceled, Receiver, Sender};
 use uuid::Uuid;
 use warp_cli::agent::{Harness, OutputFormat};
 use warp_cli::mcp::MCPSpec;
-use warp_core::{features::FeatureFlag, safe_debug, safe_info};
+use warp_core::features::FeatureFlag;
+use warp_core::{safe_debug, safe_info};
 use warp_errors::report_if_error;
 use warp_managed_secrets::ManagedSecretValue;
-use warpui::{
-    r#async::{FutureExt, TimeoutError},
-    Entity, ModelContext, ModelHandle, ModelSpawner, SingletonEntity,
+use warpui::r#async::{FutureExt, TimeoutError};
+use warpui::{Entity, ModelContext, ModelHandle, ModelSpawner, SingletonEntity};
+
+use crate::ai::agent::{
+    AIAgentExchange, AIAgentInput, AIAgentOutput, CancellationReason, RenderableAIError,
+};
+use crate::ai::agent_events::DisabledAgentEventStreamClient;
+use crate::ai::agent_sdk::driver::harness::{
+    HarnessKind, HarnessRunner, SavePoint, ThirdPartyHarness, task_env_vars,
+};
+use crate::ai::ambient_agents::{
+    AmbientAgentTaskId, AmbientConversationStatus, conversation_output_status_from_conversation,
+};
+use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
+use crate::ai::blocklist::{
+    BlocklistAIHistoryEvent, BlocklistAIHistoryModel, BlocklistAIPermissions,
+};
+use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
+use crate::ai::llms::{LLMId, LLMPreferences};
+use crate::ai::mcp::parsing::{ParsedTemplatableMCPServerResult, normalize_mcp_json};
+use crate::ai::mcp::templatable_manager::TemplatableMCPServerManagerEvent;
+use crate::ai::mcp::{
+    MCPServerState, TemplatableMCPServerInstallation, TemplatableMCPServerManager,
+};
+use crate::server::ids::{ServerId, SyncId};
+use crate::terminal::cli_agent_sessions::plugin_manager::{
+    CliAgentPluginManager, plugin_manager_for,
+};
+use crate::terminal::cli_agent_sessions::{
+    CLIAgentSessionStatus, CLIAgentSessionsModel, CLIAgentSessionsModelEvent,
 };
 
 pub(crate) mod harness;
@@ -127,10 +114,10 @@ impl<T: Send + 'static> IdleTimeoutSender<T> {
 
     /// End the run by sending `value` immediately.
     fn end_run_now(&self, value: T) {
-        if let Ok(mut guard) = self.tx_cell.lock() {
-            if let Some(sender) = guard.take() {
-                let _ = sender.send(value);
-            }
+        if let Ok(mut guard) = self.tx_cell.lock()
+            && let Some(sender) = guard.take()
+        {
+            let _ = sender.send(value);
         }
     }
 
@@ -152,11 +139,11 @@ impl<T: Send + 'static> IdleTimeoutSender<T> {
             if generation.load(Ordering::SeqCst) != current_gen {
                 return;
             }
-            if let Ok(mut guard) = tx_cell.lock() {
-                if let Some(sender) = guard.take() {
-                    // Send the value after the idle timeout expires.
-                    let _ = sender.send(value);
-                }
+            if let Ok(mut guard) = tx_cell.lock()
+                && let Some(sender) = guard.take()
+            {
+                // Send the value after the idle timeout expires.
+                let _ = sender.send(value);
             }
         });
     }
@@ -1020,10 +1007,10 @@ impl AgentDriver {
         // Install plugins before running the harness command.
         let plugin_manager: Option<Box<dyn CliAgentPluginManager>> =
             plugin_manager_for(harness.cli_agent());
-        if let Some(manager) = plugin_manager {
-            if let Err(e) = manager.install().await {
-                log::warn!("Plugin installation failed (continuing): {e}");
-            }
+        if let Some(manager) = plugin_manager
+            && let Err(e) = manager.install().await
+        {
+            log::warn!("Plugin installation failed (continuing): {e}");
         }
 
         Ok(exit_rx)
@@ -1124,14 +1111,18 @@ impl AgentDriver {
 
         // Final save after the command finishes.
         log::debug!("Triggering final save of harness conversation data");
-        report_if_error!(runner
-            .save_conversation(SavePoint::Final, foreground)
-            .await
-            .context("Failed to save harness conversation (final)"));
-        report_if_error!(runner
-            .cleanup(foreground)
-            .await
-            .context("Failed to clean up harness runtime state"));
+        report_if_error!(
+            runner
+                .save_conversation(SavePoint::Final, foreground)
+                .await
+                .context("Failed to save harness conversation (final)")
+        );
+        report_if_error!(
+            runner
+                .cleanup(foreground)
+                .await
+                .context("Failed to clean up harness runtime state")
+        );
 
         let exit_code = command_result?;
         log::debug!("Agent harness exited with status {exit_code}");
@@ -1262,8 +1253,8 @@ impl AgentDriver {
                         return;
                     };
 
-                    if !written_conversation_id {
-                        if let Some(token) = token_opt {
+                    if !written_conversation_id
+                        && let Some(token) = token_opt {
                             report_if_error!(output::with_stdout_buffered(|buf| match me.output_format {
                                 OutputFormat::Json | OutputFormat::Ndjson => output::json::conversation_started(&token, buf),
                                 OutputFormat::Text | OutputFormat::Pretty => output::text::conversation_started(&token, buf),
@@ -1274,7 +1265,6 @@ impl AgentDriver {
                                 *guard = Some(token);
                             }
                         }
-                    }
 
                     // Once the outputs are fully streamed from the server, write them to stdout.
                     if exchange.output_status.is_finished() {
@@ -1494,15 +1484,18 @@ impl AgentDriver {
                             log::debug!(
                                 "Triggering post-turn harness session update from CLI agent event"
                             );
-                            report_if_error!(runner
-                                .handle_session_update(&spawner)
-                                .await
-                                .context("Failed to update harness state from CLI session event"));
+                            report_if_error!(
+                                runner.handle_session_update(&spawner).await.context(
+                                    "Failed to update harness state from CLI session event"
+                                )
+                            );
                             log::debug!("Triggering post-turn save of harness conversation data");
-                            report_if_error!(runner
-                                .save_conversation(SavePoint::PostTurn, &spawner)
-                                .await
-                                .context("Failed to save harness conversation (post-turn)"));
+                            report_if_error!(
+                                runner
+                                    .save_conversation(SavePoint::PostTurn, &spawner)
+                                    .await
+                                    .context("Failed to save harness conversation (post-turn)")
+                            );
                         },
                         |_, _, _| {},
                     );
@@ -1534,9 +1527,11 @@ impl SingletonEntity for AgentDriver {}
 
 /// Write the run ID to stdout using the appropriate output format.
 pub(super) fn write_run_started(run_id: &str, output_format: OutputFormat) {
-    report_if_error!(output::with_stdout_buffered(|buf| match output_format {
-        OutputFormat::Json | OutputFormat::Ndjson => output::json::run_started(run_id, buf),
-        OutputFormat::Text | OutputFormat::Pretty => output::text::run_started(run_id, buf),
-    })
-    .context("Failed to write run ID"));
+    report_if_error!(
+        output::with_stdout_buffered(|buf| match output_format {
+            OutputFormat::Json | OutputFormat::Ndjson => output::json::run_started(run_id, buf),
+            OutputFormat::Text | OutputFormat::Pretty => output::text::run_started(run_id, buf),
+        })
+        .context("Failed to write run ID")
+    );
 }

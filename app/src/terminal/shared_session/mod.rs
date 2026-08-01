@@ -2,19 +2,17 @@ use byte_unit::Byte;
 use instant::Duration;
 use serde::{Deserialize, Serialize};
 use warpui::keymap::ContextPredicate;
-use warpui::{id, AppContext};
+use warpui::{AppContext, id};
 
 use crate::editor::{InteractionState, ReplicaId};
 
 pub mod protocol;
 pub use protocol::ParticipantId;
-
 use protocol::{Role, Scrollback, ScrollbackBlock, SessionSourceType};
 
-use super::{
-    model::{block::SerializedBlock, terminal_model::BlockIndex},
-    GridType, TerminalModel,
-};
+use super::model::block::SerializedBlock;
+use super::model::terminal_model::BlockIndex;
+use super::{GridType, TerminalModel};
 
 pub mod ai_agent;
 pub mod participant_avatar_view;

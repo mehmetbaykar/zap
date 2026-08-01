@@ -7,19 +7,18 @@ use uuid::Uuid;
 use warp_core::ui::appearance::Appearance;
 use warpui::{AppContext, SingletonEntity as _};
 
-use crate::{
-    cloud_object::{
-        model::{
-            generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
-            json_model::{JsonModel, JsonSerializer},
-            persistence::ObjectStoreModel,
-        },
-        GenericStoredObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, UniquePer,
-    },
-    drive::items::WarpDriveItem,
-    server::{datetime_ext::DateTimeExt, ids::SyncId},
+use crate::cloud_object::model::generic_string_model::{
+    GenericStringModel, GenericStringObjectId, StringModel,
 };
+use crate::cloud_object::model::json_model::{JsonModel, JsonSerializer};
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::{
+    GenericStoredObject, GenericStringObjectFormat, GenericStringObjectUniqueKey, JsonObjectType,
+    UniquePer,
+};
+use crate::drive::items::WarpDriveItem;
+use crate::server::datetime_ext::DateTimeExt;
+use crate::server::ids::SyncId;
 
 const UNIQUENESS_KEY_PREFIX: &str = "templatable_mcp_server";
 
@@ -70,12 +69,11 @@ impl TemplatableMCPServer {
     ) -> Option<HashMap<String, serde_json::Value>> {
         const POINTERS: [&str; 4] = ["/mcp/servers", "/servers", "/mcpServers", "/mcp_servers"];
         for pointer in POINTERS {
-            if let Some(value) = config.pointer(pointer) {
-                if let Ok(servers) =
+            if let Some(value) = config.pointer(pointer)
+                && let Ok(servers) =
                     serde_json::from_value::<HashMap<String, serde_json::Value>>(value.clone())
-                {
-                    return Some(servers);
-                }
+            {
+                return Some(servers);
             }
         }
         None

@@ -39,15 +39,15 @@ pub struct RepoContents<'a> {
 use warp_util::standardized_path::StandardizedPath;
 
 use crate::entry::{
-    matches_force_included_path, BudgetExceededBehavior, BuildTreeError, BuildTreeOptions, Entry,
-    FileId, IgnoredPathStrategy,
+    BudgetExceededBehavior, BuildTreeError, BuildTreeOptions, Entry, FileId, IgnoredPathStrategy,
+    matches_force_included_path,
 };
 use crate::repository::Repository;
 use crate::standing_queries::{
     StandingQueryDefinitions, StandingQueryResults, StandingQueryResultsDelta,
 };
 use crate::telemetry::RepoMetadataTelemetryEvent;
-use crate::{gitignores_for_directory, matches_gitignores, RepoMetadataError};
+use crate::{RepoMetadataError, gitignores_for_directory, matches_gitignores};
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
         use notify_debouncer_full::notify::RecursiveMode;
@@ -70,8 +70,8 @@ use crate::file_tree_store::{
     FileTreeState,
 };
 use crate::file_tree_update::{
-    flatten_entry_metadata, DirectoryNodeMetadata, FileNodeMetadata, FileTreeEntryUpdate,
-    MetadataUpdateType, RepoMetadataUpdate, RepoNodeMetadata,
+    DirectoryNodeMetadata, FileNodeMetadata, FileTreeEntryUpdate, MetadataUpdateType,
+    RepoMetadataUpdate, RepoNodeMetadata, flatten_entry_metadata,
 };
 
 /// Maximum depth to traverse when building file trees
@@ -769,38 +769,38 @@ impl LocalRepoMetadataModel {
                     extra_dirs: HashSet::new(),
                 },
             );
-            if let Some(ref watcher) = self.watcher {
-                if !is_unsafe_watch_root(&local_path) {
-                    let watch_path = local_path.clone();
-                    // Build the gitignore set (root + global) and force-included
-                    // path list so the descend filter prunes gitignored subtrees
-                    // while still watching registered force-included paths (e.g.
-                    // skills).
-                    let gitignores = crate::gitignores_for_directory(&watch_path);
-                    let force_included_paths = self.force_included_paths.clone();
-                    let had_previous = previous.is_some();
-                    let previous_extra: Vec<PathBuf> = previous
-                        .map(|prev| {
-                            prev.extra_dirs
-                                .iter()
-                                .filter_map(|dir| dir.to_local_path())
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    watcher.update(ctx, |watcher, _ctx| {
-                        if had_previous {
-                            std::mem::drop(watcher.unregister_path(&watch_path));
-                        }
-                        for dir in &previous_extra {
-                            std::mem::drop(watcher.unregister_path(dir));
-                        }
-                        std::mem::drop(watcher.register_path(
-                            &watch_path,
-                            repo_watch_filter(gitignores, force_included_paths),
-                            recursive_mode,
-                        ));
-                    });
-                }
+            if let Some(ref watcher) = self.watcher
+                && !is_unsafe_watch_root(&local_path)
+            {
+                let watch_path = local_path.clone();
+                // Build the gitignore set (root + global) and force-included
+                // path list so the descend filter prunes gitignored subtrees
+                // while still watching registered force-included paths (e.g.
+                // skills).
+                let gitignores = crate::gitignores_for_directory(&watch_path);
+                let force_included_paths = self.force_included_paths.clone();
+                let had_previous = previous.is_some();
+                let previous_extra: Vec<PathBuf> = previous
+                    .map(|prev| {
+                        prev.extra_dirs
+                            .iter()
+                            .filter_map(|dir| dir.to_local_path())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                watcher.update(ctx, |watcher, _ctx| {
+                    if had_previous {
+                        std::mem::drop(watcher.unregister_path(&watch_path));
+                    }
+                    for dir in &previous_extra {
+                        std::mem::drop(watcher.unregister_path(dir));
+                    }
+                    std::mem::drop(watcher.register_path(
+                        &watch_path,
+                        repo_watch_filter(gitignores, force_included_paths),
+                        recursive_mode,
+                    ));
+                });
             }
         }
 
@@ -1846,7 +1846,6 @@ mod tests;
 #[cfg(all(test, feature = "local_fs"))]
 mod is_unsafe_watch_root_tests {
     use super::is_unsafe_watch_root;
-    use std::path::Path;
 
     #[test]
     fn rejects_home_and_its_ancestors() {

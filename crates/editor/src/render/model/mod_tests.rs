@@ -5,7 +5,7 @@ use markdown_parser::{FormattedTextStyles, Hyperlink};
 use rangemap::RangeSet;
 use string_offset::CharOffset;
 use sum_tree::SumTree;
-use vec1::{vec1, Vec1};
+use vec1::{Vec1, vec1};
 use warpui_core::assets::asset_cache::AssetSource;
 use warpui_core::color::ColorU;
 use warpui_core::elements::ListIndentLevel;
@@ -18,15 +18,15 @@ use warpui_core::units::{IntoPixels, Pixels};
 use super::debug::Describe;
 use super::test_utils::{layout_paragraph, layout_paragraphs};
 use super::{
-    table_offset_map, BlockItem, BlockLocation, CellLayout, HiddenBlockConfig, ImageBlockConfig,
-    LaidOutTable, ParagraphBlock, RenderState, TableBlockConfig, TableStyle, COMMAND_SPACING,
-    DEFAULT_BLOCK_SPACINGS,
+    BlockItem, BlockLocation, COMMAND_SPACING, CellLayout, DEFAULT_BLOCK_SPACINGS,
+    HiddenBlockConfig, ImageBlockConfig, LaidOutTable, ParagraphBlock, RenderState,
+    TableBlockConfig, TableStyle, table_offset_map,
 };
 use crate::content::edit::ParsedUrl;
 use crate::content::text::{
-    table_cell_offset_maps, BufferBlockStyle, CodeBlockType, FormattedTable, FormattedTextFragment,
+    BufferBlockStyle, CodeBlockType, FormattedTable, FormattedTextFragment, table_cell_offset_maps,
 };
-use crate::render::model::test_utils::{laid_out_paragraph, mock_paragraph, TEST_STYLES};
+use crate::render::model::test_utils::{TEST_STYLES, laid_out_paragraph, mock_paragraph};
 use crate::render::model::{
     ColumnUnit, Height, LayoutSummary, LineCount, RenderedSelection, SoftWrapPoint, TEXT_SPACING,
 };
@@ -763,9 +763,11 @@ fn test_scroll_snapshot() {
     assert_eq!(model.height().as_f32(), 24. * 3.);
 
     // Restore the scroll position at the new height. It should still start at the same content.
-    assert!(model
-        .viewport
-        .scroll_to(scroll_position.to_scroll_top(&model), model.height()));
+    assert!(
+        model
+            .viewport
+            .scroll_to(scroll_position.to_scroll_top(&model), model.height())
+    );
     // The reduced content height clamps the restored position to the last viewport.
     assert_eq!(model.viewport.scroll_top().as_f32(), 12.);
 
@@ -777,9 +779,11 @@ fn test_scroll_snapshot() {
     assert_eq!(model.height().as_f32(), 60. + 80. + 24.);
 
     // Restore the scroll position at the new height.
-    assert!(model
-        .viewport
-        .scroll_to(scroll_position.to_scroll_top(&model), model.height()));
+    assert!(
+        model
+            .viewport
+            .scroll_to(scroll_position.to_scroll_top(&model), model.height())
+    );
     // The new scroll position is at the start of the second paragraph.
     assert_eq!(model.viewport.scroll_top().as_f32(), 60.);
 }

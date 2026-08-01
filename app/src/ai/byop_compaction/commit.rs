@@ -5,13 +5,12 @@
 
 use warp_multi_agent_api as api;
 
-use crate::ai::agent::conversation::AIConversation;
-
-use super::algorithm::{prune_decisions, select, MessageRef};
+use super::algorithm::{MessageRef, prune_decisions, select};
 use super::config::CompactionConfig;
 use super::message_view::{build_tool_name_lookup, project};
 use super::overflow::ModelLimit;
 use super::state::CompletedCompaction;
+use crate::ai::agent::conversation::AIConversation;
 
 /// Searches backward from the conversation's root task for the last `Message::AgentOutput` —
 /// it is the summary text the model just emitted.

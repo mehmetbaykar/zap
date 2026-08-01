@@ -1,65 +1,58 @@
 //! Implementation of terminal panes.
-#[cfg(feature = "local_fs")]
-use crate::pane_group::CodeSource;
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
 use std::sync::mpsc::SyncSender;
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use warp_cli::agent::Harness;
+use warp_core::execution_mode::AppExecutionMode;
 use warp_multi_agent_api as multi_agent_api;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
-
 use warpui::{
     AppContext, EntityId, ModelHandle, SingletonEntity, ViewContext, ViewHandle, WindowId,
 };
 
-use crate::{
-    ai::{
-        agent::conversation::{AIConversationId, ConversationStatus},
-        blocklist::BlocklistAIHistoryModel,
-        conversation_utils,
-        llms::LLMPreferences,
-        skills::SkillManager,
-    },
-    app_state::{AmbientAgentPaneSnapshot, LeafContents, TerminalPaneSnapshot},
-    pane_group::{self, Direction, Event::OpenConversationHistory, PaneGroup},
-    persistence::{BlockCompleted, ModelEvent},
-    session_management::SessionNavigationData,
-    terminal::cli_agent_sessions::CLIAgentSessionsModel,
-    terminal::{
-        general_settings::GeneralSettings, shared_session::SharedSessionStatus, view::Event,
-        TerminalManager, TerminalView,
-    },
-    view_components::ToastFlavor,
-    workspace::{sync_inputs::SyncedInputState, PaneViewLocator, WorkspaceRegistry},
-    AIExecutionProfilesModel,
-};
-
-#[cfg(feature = "local_fs")]
-use crate::ai::blocklist::BlocklistAIHistoryEvent;
-
-use warp_core::execution_mode::AppExecutionMode;
-
 #[cfg(not(target_family = "wasm"))]
-use super::local_harness_launch::{prepare_local_harness_child_launch, PreparedLocalHarnessLaunch};
-use crate::ai::agent::StartAgentExecutionMode;
-use crate::ai::ambient_agents::task::normalize_orchestrator_agent_name;
-use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
-use crate::ai::blocklist::StartAgentRequest;
-use crate::pane_group::child_agent::{
-    create_error_child_agent_conversation, ErrorChildAgentConversationRequest,
-};
-#[cfg(not(target_family = "wasm"))]
-use crate::pane_group::child_agent::{
-    create_hidden_child_agent_conversation, HiddenChildAgentConversation,
-    HiddenChildAgentConversationRequest, HiddenChildAgentTaskContext,
-};
-
+use super::local_harness_launch::{PreparedLocalHarnessLaunch, prepare_local_harness_child_launch};
 use super::{
     DetachType, PaneConfiguration, PaneContent, PaneId, PaneStackEvent, PaneView, ShareableLink,
     ShareableLinkError, TerminalPaneId,
 };
+use crate::AIExecutionProfilesModel;
+use crate::ai::agent::StartAgentExecutionMode;
+use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
+use crate::ai::ambient_agents::task::normalize_orchestrator_agent_name;
+#[cfg(feature = "local_fs")]
+use crate::ai::blocklist::BlocklistAIHistoryEvent;
+use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
+use crate::ai::blocklist::{BlocklistAIHistoryModel, StartAgentRequest};
+use crate::ai::conversation_utils;
+use crate::ai::llms::LLMPreferences;
+use crate::ai::skills::SkillManager;
+use crate::app_state::{AmbientAgentPaneSnapshot, LeafContents, TerminalPaneSnapshot};
+#[cfg(feature = "local_fs")]
+use crate::pane_group::CodeSource;
+use crate::pane_group::Event::OpenConversationHistory;
+use crate::pane_group::child_agent::{
+    ErrorChildAgentConversationRequest, create_error_child_agent_conversation,
+};
+#[cfg(not(target_family = "wasm"))]
+use crate::pane_group::child_agent::{
+    HiddenChildAgentConversation, HiddenChildAgentConversationRequest, HiddenChildAgentTaskContext,
+    create_hidden_child_agent_conversation,
+};
+use crate::pane_group::{self, Direction, PaneGroup};
+use crate::persistence::{BlockCompleted, ModelEvent};
+use crate::session_management::SessionNavigationData;
+use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
+use crate::terminal::general_settings::GeneralSettings;
+use crate::terminal::shared_session::SharedSessionStatus;
+use crate::terminal::view::Event;
+use crate::terminal::{TerminalManager, TerminalView};
+use crate::view_components::ToastFlavor;
+use crate::workspace::sync_inputs::SyncedInputState;
+use crate::workspace::{PaneViewLocator, WorkspaceRegistry};
 
 pub type TerminalPaneView = PaneView<TerminalView>;
 
@@ -240,14 +233,13 @@ impl PaneContent for TerminalPane {
         });
 
         if SyncedInputState::as_ref(ctx).should_sync_this_pane_group(ctx.view_id(), ctx.window_id())
+            && let Some(active_pane_view) = group.active_session_view(ctx)
         {
-            if let Some(active_pane_view) = group.active_session_view(ctx) {
-                let event = active_pane_view
-                    .as_ref(ctx)
-                    .create_sync_event_based_on_terminal_state(ctx);
+            let event = active_pane_view
+                .as_ref(ctx)
+                .create_sync_event_based_on_terminal_state(ctx);
 
-                group.send_sync_event_to_session(terminal_pane_id, &event, ctx);
-            }
+            group.send_sync_event_to_session(terminal_pane_id, &event, ctx);
         }
 
         let terminal_view_id = self.terminal_view(ctx).id();
@@ -666,14 +658,13 @@ fn discard_child_agent_pane_for_conversation(
     if discard_child_agent_pane_in_group(group, conversation_id, ctx) {
         return true;
     }
-    if let Some(split_off_pane_group) = pane_group_hosting_split_off_child(conversation_id, ctx) {
-        if split_off_pane_group.id() != ctx.view_id()
-            && split_off_pane_group.update(ctx, |pane_group, ctx| {
-                discard_child_agent_pane_in_group(pane_group, conversation_id, ctx)
-            })
-        {
-            return true;
-        }
+    if let Some(split_off_pane_group) = pane_group_hosting_split_off_child(conversation_id, ctx)
+        && split_off_pane_group.id() != ctx.view_id()
+        && split_off_pane_group.update(ctx, |pane_group, ctx| {
+            discard_child_agent_pane_in_group(pane_group, conversation_id, ctx)
+        })
+    {
+        return true;
     }
 
     let Some(owner_terminal_view_id) = owner_terminal_view_id else {
@@ -701,15 +692,10 @@ fn kill_agent_conversation(
 ) {
     let state = agent_conversation_action_state(conversation_id, ctx);
 
-    if let Some(state) = state {
-        if state.is_in_progress {
-            stop_local_agent_conversation(
-                group,
-                state.owner_terminal_view_id,
-                conversation_id,
-                ctx,
-            );
-        }
+    if let Some(state) = state
+        && state.is_in_progress
+    {
+        stop_local_agent_conversation(group, state.owner_terminal_view_id, conversation_id, ctx);
     }
 
     let owner_terminal_view_id = state
@@ -837,16 +823,16 @@ fn handle_terminal_view_event(
                     Some(pane) => {
                         if *GeneralSettings::as_ref(ctx).restore_session
                             && AppExecutionMode::as_ref(ctx).can_save_session()
+                            && let Some(sender) = &group.model_event_sender
                         {
-                            if let Some(sender) = &group.model_event_sender {
-                                let block_completed_event = ModelEvent::SaveBlock(BlockCompleted {
-                                    pane_id: pane.session_uuid(),
-                                    block: block.clone(),
-                                    is_local: *is_local,
-                                });
+                            let block_completed_event = ModelEvent::SaveBlock(BlockCompleted {
+                                pane_id: pane.session_uuid(),
+                                block: block.clone(),
+                                is_local: *is_local,
+                            });
 
-                                let sender_clone = sender.clone();
-                                let _ = ctx.spawn(async move {
+                            let sender_clone = sender.clone();
+                            let _ = ctx.spawn(async move {
                                 // Sending over a sync sender can block the current thread, so we do this async.
                                 sender_clone.send(block_completed_event)
                             }, move |_, res, _| {
@@ -854,7 +840,6 @@ fn handle_terminal_view_event(
                                     log::error!("Error sending block completed event for terminal id {terminal_pane_id:?} {err:?}");
                                 }
                             });
-                            }
                         }
                         ctx.emit(pane_group::Event::ActiveSessionChanged);
                     }
@@ -1164,18 +1149,17 @@ fn handle_terminal_view_event(
                     true
                 };
 
-                if should_open {
-                    if let Some(conversation_id) =
+                if should_open
+                    && let Some(conversation_id) =
                         crate::ai::document::ai_document_model::AIDocumentModel::as_ref(ctx)
                             .get_conversation_id_for_document_id(document_id)
-                    {
-                        group.open_ai_document_pane(
-                            conversation_id,
-                            *document_id,
-                            *document_version,
-                            ctx,
-                        );
-                    }
+                {
+                    group.open_ai_document_pane(
+                        conversation_id,
+                        *document_id,
+                        *document_version,
+                        ctx,
+                    );
                 }
             }
             Event::OpenAgentProfileEditor { profile_id } => {

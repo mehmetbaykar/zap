@@ -1,7 +1,6 @@
 mod v1;
 
 use serde::Deserialize;
-use warp_errors::report_error;
 
 use crate::terminal::CLIAgent;
 

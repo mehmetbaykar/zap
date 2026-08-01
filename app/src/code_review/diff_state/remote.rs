@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use instant::Instant;
 use remote_server::manager::{RemoteServerManager, RemoteServerManagerEvent};
-use warp_core::{send_telemetry_from_ctx, HostId, SessionId};
+use warp_core::{HostId, SessionId, send_telemetry_from_ctx};
 use warp_util::remote_path::RemotePath;
 use warp_util::standardized_path::StandardizedPath;
 use warpui::{ModelContext, SingletonEntity};
@@ -24,7 +24,7 @@ use super::{
     GitFileStatus,
 };
 use crate::ai::agent_providers::oneshot::{
-    byop_oneshot_completion, resolve_active_ai_oneshot, OneshotOptions,
+    OneshotOptions, byop_oneshot_completion, resolve_active_ai_oneshot,
 };
 use crate::code_review::telemetry_event::CodeReviewTelemetryEvent;
 use crate::remote_server::diff_state_proto::{try_decode_file_delta, try_decode_snapshot};

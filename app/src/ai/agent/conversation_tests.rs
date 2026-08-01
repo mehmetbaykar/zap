@@ -4,23 +4,22 @@ use warp_core::features::FeatureFlag;
 use warp_multi_agent_api as api;
 
 use super::{
-    artifact_from_fork_proto, AIConversation, AIConversationAutoexecuteMode, AIConversationId,
-    ConversationStatus, RestoreConversationError, TaskId,
+    AIConversation, AIConversationAutoexecuteMode, AIConversationId, ConversationStatus,
+    RestoreConversationError, TaskId, artifact_from_fork_proto,
 };
 use crate::ai::artifacts::Artifact;
-use crate::ai::blocklist::{
-    block::cli_controller::LongRunningCommandControlState, SerializedBlockListItem,
-};
+use crate::ai::blocklist::SerializedBlockListItem;
+use crate::ai::blocklist::block::cli_controller::LongRunningCommandControlState;
 use crate::ai::byop_readiness::{
     InvalidRepairState, RepairRecord, RepairSource, RepairState, RepairStateLoadError,
     RepairStateStatus, ToolCallKey,
 };
-use crate::persistence::model::AgentConversationData;
 use crate::persistence::ModelEvent;
+use crate::persistence::model::AgentConversationData;
+use crate::terminal::model::BlockId;
 use crate::terminal::model::block::{
     AgentInteractionMetadata, AgentViewVisibility, SerializedAIMetadata, SerializedBlock,
 };
-use crate::terminal::model::BlockId;
 
 fn restored_conversation(conversation_data: Option<AgentConversationData>) -> AIConversation {
     AIConversation::new_restored(
@@ -1349,10 +1348,12 @@ fn is_done_only_includes_success_error_cancelled() {
     assert!(ConversationStatus::Cancelled.is_done());
 
     assert!(!ConversationStatus::InProgress.is_done());
-    assert!(!ConversationStatus::Blocked {
-        blocked_action: "approve".to_string()
-    }
-    .is_done());
+    assert!(
+        !ConversationStatus::Blocked {
+            blocked_action: "approve".to_string()
+        }
+        .is_done()
+    );
     assert!(!ConversationStatus::WaitingForEvents.is_done());
 }
 
@@ -1365,10 +1366,12 @@ fn is_waiting_for_events_returns_true_only_for_waiting_for_events_variant() {
     assert!(!ConversationStatus::Success.is_waiting_for_events());
     assert!(!ConversationStatus::Error.is_waiting_for_events());
     assert!(!ConversationStatus::Cancelled.is_waiting_for_events());
-    assert!(!ConversationStatus::Blocked {
-        blocked_action: "approve".to_string()
-    }
-    .is_waiting_for_events());
+    assert!(
+        !ConversationStatus::Blocked {
+            blocked_action: "approve".to_string()
+        }
+        .is_waiting_for_events()
+    );
 }
 
 /// A conversation that was yielded via `wait_for_events` at shutdown

@@ -104,16 +104,16 @@ pub fn sanitize_predict(raw: &str) -> Option<String> {
         }
     }
     let quotes = ['"', '\'', '`', '“', '”', '‘', '’'];
-    if let Some(c) = s.chars().next() {
-        if quotes.contains(&c) {
-            s.remove(0);
-        }
+    if let Some(c) = s.chars().next()
+        && quotes.contains(&c)
+    {
+        s.remove(0);
     }
-    if let Some(c) = s.chars().last() {
-        if quotes.contains(&c) {
-            let new_len = s.len() - c.len_utf8();
-            s.truncate(new_len);
-        }
+    if let Some(c) = s.chars().last()
+        && quotes.contains(&c)
+    {
+        let new_len = s.len() - c.len_utf8();
+        s.truncate(new_len);
     }
     let s = s.trim().to_owned();
     if s.is_empty() || s.chars().count() > PREDICT_MAX_LEN {

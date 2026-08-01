@@ -1,6 +1,7 @@
+use warpui::{App, EntityId};
+
 use super::*;
 use crate::ai::blocklist::BlocklistAIHistoryModel;
-use warpui::{App, EntityId};
 
 #[test]
 fn descendant_conversation_ids_in_spawn_order_flattens_nested_children_preorder() {

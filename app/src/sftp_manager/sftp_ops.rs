@@ -10,12 +10,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use warp_ssh_manager::SshRepository;
 use warp_ssh_manager::secrets::SshSecretStore;
 use warp_ssh_manager::types::{AuthType, ResolvedSshAuth, SshServerInfo};
-use warp_ssh_manager::SshRepository;
+use zap_sftp::Sftp;
 use zap_sftp::session::{AuthMethod, SftpSession};
 use zap_sftp::types::OpenOptions;
-use zap_sftp::Sftp;
 
 use super::types::{FileEntry, FileEntryType};
 
@@ -506,12 +506,12 @@ fn build_auth_method(
 
 /// Expand a leading ~ in the path to the user's home directory
 fn shellexpand_path(path: &str) -> String {
-    if path.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
-            let home_path = home.display();
-            let suffix = &path[2..];
-            return format!("{home_path}/{suffix}");
-        }
+    if path.starts_with("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        let home_path = home.display();
+        let suffix = &path[2..];
+        return format!("{home_path}/{suffix}");
     }
     path.to_string()
 }

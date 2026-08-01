@@ -15,9 +15,9 @@
 
 use std::path::Path;
 
-use crate::ai::agent_providers::oneshot::{byop_oneshot_completion, OneshotConfig, OneshotOptions};
+use crate::ai::agent_providers::oneshot::{OneshotConfig, OneshotOptions, byop_oneshot_completion};
 use crate::code_review::diff_state::CommitChainMode;
-use crate::util::git::{self, get_branch_commit_messages, get_diff_for_pr, Commit, PrInfo};
+use crate::util::git::{self, Commit, PrInfo, get_branch_commit_messages, get_diff_for_pr};
 
 /// Runs the commit chain — always commits, then optionally pushes, then
 /// optionally creates a PR per `mode` — and returns the post-chain delta
@@ -159,8 +159,7 @@ async fn create_pr_with_ai_content(
             &body_options,
         ),
     ) {
-        Ok((title, body)) if !title.trim().is_empty() && !body.trim().is_empty() =>
-        {
+        Ok((title, body)) if !title.trim().is_empty() && !body.trim().is_empty() => {
             git::create_pr(repo_path, Some(title.trim()), Some(body.trim()), path_env).await
         }
         Ok(_) => {

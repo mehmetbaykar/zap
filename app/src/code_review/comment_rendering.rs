@@ -7,10 +7,11 @@ use std::rc::Rc;
 
 use chrono::{Duration, Local};
 use pathfinder_color::ColorU;
-use warp_core::ui::theme::color::internal_colors::{neutral_1, neutral_2, text_sub};
 use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors::{neutral_1, neutral_2, text_sub};
 use warp_editor::content::buffer::InitialBufferState;
 use warp_editor::render::element::VerticalExpansionBehavior;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::elements::new_scrollable::ScrollableAppearance;
 use warpui::elements::{
     Border, ChildView, Container, CornerRadius, CrossAxisAlignment, Flex, Hoverable,
@@ -31,7 +32,6 @@ use crate::code_review::comments::{
 use crate::editor::InteractionState;
 use crate::notebooks::editor::view::RichTextEditorView;
 use crate::util::time_format::human_readable_approx_duration;
-use warp_util::local_or_remote_path::LocalOrRemotePath;
 
 /// Configuration for making the comment header clickable.
 pub(crate) struct HeaderClickHandler {

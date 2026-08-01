@@ -10,18 +10,18 @@ use super::common::{
     add_workflow_info_overlay, wrap_input_with_terminal_padding_and_focus_handler,
 };
 use super::{Input, InputAction, InputDropTargetData};
-use crate::ai::blocklist::agent_view::shortcuts::{
-    render_agent_shortcuts_view, AgentShortcutsViewContext,
-};
-use crate::ai::blocklist::agent_view::AgentViewState;
+use crate::BlocklistAIHistoryModel;
 use crate::ai::blocklist::InputType;
+use crate::ai::blocklist::agent_view::AgentViewState;
+use crate::ai::blocklist::agent_view::shortcuts::{
+    AgentShortcutsViewContext, render_agent_shortcuts_view,
+};
 use crate::appearance::Appearance;
 use crate::context_chips::spacing::{self};
 use crate::features::FeatureFlag;
 use crate::settings::InputModeSettings;
 use crate::terminal::settings::TerminalSettings;
 use crate::terminal::view::TerminalAction;
-use crate::BlocklistAIHistoryModel;
 
 impl Input {
     /// Renders the input when there is an active `AgentView`.
@@ -55,14 +55,13 @@ impl Input {
 
         if FeatureFlag::ImageAsContext.is_enabled()
             && matches!(ai_input_model.input_type(), InputType::AI)
+            && let Some(images) = self.render_attachment_chips(appearance)
         {
-            if let Some(images) = self.render_attachment_chips(appearance) {
-                column.add_child(
-                    Container::new(images)
-                        .with_margin_top(spacing::UDI_CHIP_MARGIN)
-                        .finish(),
-                );
-            }
+            column.add_child(
+                Container::new(images)
+                    .with_margin_top(spacing::UDI_CHIP_MARGIN)
+                    .finish(),
+            );
         }
 
         let terminal_spacing = TerminalSettings::as_ref(app)
@@ -90,15 +89,14 @@ impl Input {
         ));
 
         if let Some(selected_workflow_state) = self.workflows_state.selected_workflow_state.as_ref()
+            && selected_workflow_state.should_show_more_info_view
         {
-            if selected_workflow_state.should_show_more_info_view {
-                add_workflow_info_overlay(
-                    &mut stack,
-                    selected_workflow_state,
-                    self.size_info(app).pane_height_px().as_f32(),
-                    menu_positioning,
-                );
-            }
+            add_workflow_info_overlay(
+                &mut stack,
+                selected_workflow_state,
+                self.size_info(app).pane_height_px().as_f32(),
+                menu_positioning,
+            );
         }
 
         if self.is_voltron_open && self.is_pane_focused(app) {
@@ -235,10 +233,10 @@ impl Input {
             ));
         }
         column.add_child(ChildView::new(&self.agent_status_view).finish());
-        if let Some(panel) = self.queued_prompts_panel.as_ref() {
-            if panel.as_ref(app).should_render(app) {
-                column.add_child(ChildView::new(panel).finish());
-            }
+        if let Some(panel) = self.queued_prompts_panel.as_ref()
+            && panel.as_ref(app).should_render(app)
+        {
+            column.add_child(ChildView::new(panel).finish());
         }
         column.add_child(input);
 

@@ -6,37 +6,32 @@
 //! - Does not write settings.toml, send telemetry, or contact the cloud
 //! - When the current model doesn't support reasoning (variants empty) → the whole component renders empty and the picker naturally disappears
 
+use std::sync::Arc;
+
 use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::color::blend::Blend;
 use warp_core::ui::theme::Fill;
+use warpui::elements::{
+    ChildAnchor, ChildView, ConstrainedBox, OffsetPositioning, ParentAnchor, ParentElement,
+    ParentOffsetBounds, Stack,
+};
 use warpui::{
-    elements::{
-        ChildAnchor, ChildView, ConstrainedBox, OffsetPositioning, ParentAnchor, ParentElement,
-        ParentOffsetBounds, Stack,
-    },
     AppContext, Element, Entity, EntityId, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
 
-use std::sync::Arc;
-
-use crate::{
-    ai::{
-        agent_providers::reasoning::model_reasoning_variants,
-        llms::{LLMPreferences, LLMPreferencesEvent},
-    },
-    appearance::Appearance,
-    context_chips::display_menu::{
-        ChipMenuType, DisplayChipMenu, GenericMenuItem, PromptDisplayMenuEvent,
-    },
-    settings::{AgentProviderApiType, ReasoningEffortSetting},
-    terminal::input::{MenuPositioning, MenuPositioningProvider},
-    ui_components::icons::Icon,
-    view_components::action_button::{ActionButton, ActionButtonTheme, ButtonSize},
-};
-
 use super::AgentInputButtonTheme;
+use crate::ai::agent_providers::reasoning::model_reasoning_variants;
+use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
+use crate::appearance::Appearance;
+use crate::context_chips::display_menu::{
+    ChipMenuType, DisplayChipMenu, GenericMenuItem, PromptDisplayMenuEvent,
+};
+use crate::settings::{AgentProviderApiType, ReasoningEffortSetting};
+use crate::terminal::input::{MenuPositioning, MenuPositioningProvider};
+use crate::ui_components::icons::Icon;
+use crate::view_components::action_button::{ActionButton, ActionButtonTheme, ButtonSize};
 
 /// The input box toolbar's "Reasoning Depth" selector.
 pub struct ReasoningDepthSelector {

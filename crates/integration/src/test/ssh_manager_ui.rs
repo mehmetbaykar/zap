@@ -10,7 +10,9 @@ use warp::integration_testing::ssh_manager::{
     open_ssh_manager_panel, save_server, select_group_by_id, ssh_server_view,
 };
 use warp::workspace::Workspace;
-use warpui::{async_assert, integration::TestStep, windowing::WindowManager, SingletonEntity};
+use warpui::integration::TestStep;
+use warpui::windowing::WindowManager;
+use warpui::{SingletonEntity, async_assert};
 
 use crate::Builder;
 

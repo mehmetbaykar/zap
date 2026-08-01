@@ -13,12 +13,11 @@
 //! This test suite is Zap's "anti-regression guardrail" — any later change to the prompt
 //! construction path that breaks byte-level stability will fail an assertion here.
 
-use crate::ai::agent::{MCPContext, MCPServer};
 use api::message;
 use warp_multi_agent_api as api;
 
-use super::chat_stream;
-use super::tools;
+use super::{chat_stream, tools};
+use crate::ai::agent::{MCPContext, MCPServer};
 
 // ---------------------------------------------------------------------------
 // P1-8: tool schema field order stability
@@ -128,8 +127,10 @@ fn serialize_grep_preserves_queries_order() {
 /// `prost_types::Struct.fields` uses a `BTreeMap` internally, which is stable on its own; we cover it here to confirm.
 #[test]
 fn serialize_mcp_tool_call_is_deterministic() {
-    use prost_types::{value::Kind, Struct, Value as ProstValue};
     use std::collections::BTreeMap;
+
+    use prost_types::value::Kind;
+    use prost_types::{Struct, Value as ProstValue};
 
     let mut fields = BTreeMap::new();
     fields.insert(
@@ -261,9 +262,10 @@ fn full_tools_array_serialization_is_stable() {
 /// End-to-end assembly stability with an MCP server (connecting to the P0-3 ordering guarantee).
 #[test]
 fn full_tools_array_with_mcp_is_stable() {
+    use std::sync::Arc;
+
     use rmcp::model::{AnnotateAble, RawResource, Tool as McpTool};
     use serde_json::json;
-    use std::sync::Arc;
 
     let schema_obj = json!({
         "type": "object",

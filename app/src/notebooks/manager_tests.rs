@@ -4,14 +4,14 @@ use warpui::{
     AddSingletonModel, App, EntityId, ModelHandle, SingletonEntity, ViewContext, ViewHandle,
 };
 
+use super::NotebookManager;
 use crate::ai::blocklist::BlocklistAIHistoryModel;
-use crate::auth::AuthManager;
-use crate::auth::AuthStateProvider;
+use crate::auth::{AuthManager, AuthStateProvider};
+use crate::cloud_object::Owner;
 use crate::cloud_object::model::actions::ObjectActions;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::model::view::ObjectStoreViewModel;
 use crate::cloud_object::update_manager::UpdateManager;
-use crate::cloud_object::Owner;
 use crate::network::NetworkStatus;
 use crate::notebooks::editor::keys::NotebookKeybindings;
 use crate::notebooks::notebook::NotebookView;
@@ -25,8 +25,6 @@ use crate::workspace::ActiveSession;
 use crate::workspaces::user_profiles::UserProfiles;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{GlobalResourceHandles, GlobalResourceHandlesProvider};
-
-use super::NotebookManager;
 
 struct TestState {
     manager: ModelHandle<NotebookManager>,

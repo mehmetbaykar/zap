@@ -1,14 +1,15 @@
-/// resolve_test_password unit tests
-/// author: logic
-/// date: 2026/06/01
-use super::*;
-use pathfinder_geometry::vector::vec2f;
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::appearance::Appearance;
 use warpui::platform::WindowStyle;
 use warpui::{App, WindowInvalidation};
 
+/// resolve_test_password unit tests
+/// author: logic
+/// date: 2026/06/01
+use super::*;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::view_components::dropdown::DropdownAction;
 

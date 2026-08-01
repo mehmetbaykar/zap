@@ -13,13 +13,13 @@ mod step;
 pub mod video_recorder;
 pub use action_log::ActionLog;
 pub use artifacts::ARTIFACTS_DIR_ENV_VAR;
-pub use driver::{Builder, SetupFn, TestDriver, RERUN_EXIT_CODE, RUNTIME_TAG_FAILURE_REASON};
+pub use driver::{Builder, RERUN_EXIT_CODE, RUNTIME_TAG_FAILURE_REASON, SetupFn, TestDriver};
 pub use overlay::OverlayLog;
 pub use step::{
     AssertionCallback, AssertionOutcome, AssertionWithDataCallback, IntegrationTestEvent,
     PersistedDataMap, StepData, StepDataMap, TestStep,
 };
-pub use video_recorder::{save_captured_frame_as_png, VideoRecorder};
+pub use video_recorder::{VideoRecorder, save_captured_frame_as_png};
 use warp_errors::report_error;
 
 #[macro_export]
@@ -190,10 +190,10 @@ impl TestSetupUtils {
         }
 
         let res = fs::create_dir_all(test_dir);
-        if let Err(err_code) = res {
-            if err_code.kind() != ErrorKind::AlreadyExists {
-                panic!("Failed to create directory {test_dir:?}");
-            }
+        if let Err(err_code) = res
+            && err_code.kind() != ErrorKind::AlreadyExists
+        {
+            panic!("Failed to create directory {test_dir:?}");
         }
     }
 

@@ -4,25 +4,18 @@ use std::collections::HashMap;
 use chrono::{Duration, Utc};
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
-use crate::{
-    auth::{AuthStateProvider, UserUid},
-    cloud_object::{
-        update_manager::{
-            ObjectOperation, OperationSuccessType, UpdateManager, UpdateManagerEvent,
-        },
-        Space, StoredObject, StoredObjectLocation,
-    },
-    drive::{
-        folders::FolderObject,
-        sharing::{ContentEditability, SharingAccessLevel},
-    },
-    safe_info,
-    server::ids::{ObjectUid, SyncId},
-    server_time::ServerTimestamp,
-    workspaces::user_profiles::UserProfiles,
-};
-
 use super::persistence::{ObjectStoreEvent, ObjectStoreModel};
+use crate::auth::{AuthStateProvider, UserUid};
+use crate::cloud_object::update_manager::{
+    ObjectOperation, OperationSuccessType, UpdateManager, UpdateManagerEvent,
+};
+use crate::cloud_object::{Space, StoredObject, StoredObjectLocation};
+use crate::drive::folders::FolderObject;
+use crate::drive::sharing::{ContentEditability, SharingAccessLevel};
+use crate::safe_info;
+use crate::server::ids::{ObjectUid, SyncId};
+use crate::server_time::ServerTimestamp;
+use crate::workspaces::user_profiles::UserProfiles;
 
 pub const EDITOR_TIMEOUT_DURATION_MINUTES: i64 = 15;
 
@@ -203,10 +196,9 @@ impl ObjectStoreViewModel {
                 // by forcing edit access if they created the object.
                 if let (Some(creator_uid), Some(user_uid)) =
                     (object.metadata().creator_uid.clone(), user_uid)
+                    && creator_uid == user_uid.as_string()
                 {
-                    if creator_uid == user_uid.as_string() {
-                        access_level = access_level.max(SharingAccessLevel::Edit);
-                    }
+                    access_level = access_level.max(SharingAccessLevel::Edit);
                 }
 
                 access_level
@@ -302,10 +294,10 @@ impl ObjectStoreViewModel {
                     let folder_timestamp = folder.metadata().revision.clone().map(Into::into);
                     let timestamp = max_child_timestamp.max(folder_timestamp);
 
-                    if let Some(timestamp) = timestamp {
-                        if let Ok(mut cache) = self.folder_timestamp_cache.try_borrow_mut() {
-                            cache.insert(folder.id, timestamp);
-                        }
+                    if let Some(timestamp) = timestamp
+                        && let Ok(mut cache) = self.folder_timestamp_cache.try_borrow_mut()
+                    {
+                        cache.insert(folder.id, timestamp);
                     }
 
                     timestamp
@@ -366,10 +358,10 @@ impl ObjectStoreViewModel {
                 }
             }
             ObjectStoreEvent::ObjectDeleted { folder_id, .. } => {
-                if let Some(folder_id) = folder_id {
-                    if self.invalidate_folder_timestamps(folder_id, ObjectStoreModel::as_ref(ctx)) {
-                        ctx.emit(ObjectStoreViewModelEvent::SortTimestampsChanged);
-                    }
+                if let Some(folder_id) = folder_id
+                    && self.invalidate_folder_timestamps(folder_id, ObjectStoreModel::as_ref(ctx))
+                {
+                    ctx.emit(ObjectStoreViewModelEvent::SortTimestampsChanged);
                 }
             }
             ObjectStoreEvent::NotebookEditorChangedExternally { .. }
@@ -399,11 +391,10 @@ impl ObjectStoreViewModel {
             if object_store_model
                 .get_folder_by_uid(&server_id.uid())
                 .is_some()
+                && let Some(client_id) = result.client_id
             {
-                if let Some(client_id) = result.client_id {
-                    let sync_id = SyncId::ClientId(client_id);
-                    self.folder_timestamp_cache.borrow_mut().remove(&sync_id);
-                }
+                let sync_id = SyncId::ClientId(client_id);
+                self.folder_timestamp_cache.borrow_mut().remove(&sync_id);
             }
 
             // For any new object, we need to recalculate its ancestors' timestamp with their
@@ -411,10 +402,9 @@ impl ObjectStoreViewModel {
             if let Some(parent_id) = object_store_model
                 .get_by_uid(&server_id.uid())
                 .and_then(|object| object.metadata().folder_id)
+                && self.invalidate_folder_timestamps(&parent_id, object_store_model)
             {
-                if self.invalidate_folder_timestamps(&parent_id, object_store_model) {
-                    ctx.emit(ObjectStoreViewModelEvent::SortTimestampsChanged);
-                }
+                ctx.emit(ObjectStoreViewModelEvent::SortTimestampsChanged);
             }
         }
     }

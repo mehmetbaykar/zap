@@ -6,20 +6,18 @@ use warp_core::features::FeatureFlag;
 use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::{Entity, EntityId, ModelContext, SingletonEntity};
 
+use super::AmbientAgentProgressUIState;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent_conversations_model::AgentConversationsModel;
-use crate::ai::ambient_agents::spawn::{spawn_task, AmbientAgentEvent};
+use crate::ai::ambient_agents::spawn::{AmbientAgentEvent, spawn_task};
 use crate::ai::ambient_agents::task::HarnessConfig;
 use crate::ai::ambient_agents::{
     AgentConfigSnapshot, AmbientAgentTaskId, AmbientAgentTaskState, AttachmentInput,
-    SpawnAgentRequest, OUT_OF_CREDITS_TASK_FAILURE_MESSAGE, SERVER_OVERLOADED_TASK_FAILURE_MESSAGE,
+    OUT_OF_CREDITS_TASK_FAILURE_MESSAGE, SERVER_OVERLOADED_TASK_FAILURE_MESSAGE, SpawnAgentRequest,
 };
 use crate::ai::api_error::AIApiError;
-use crate::ai::blocklist::BlocklistAIHistoryModel;
-use crate::ai::blocklist::BlocklistAIPermissions;
+use crate::ai::blocklist::{BlocklistAIHistoryModel, BlocklistAIPermissions};
 use crate::ai::llms::{LLMId, LLMPreferences};
-
-use super::AmbientAgentProgressUIState;
 
 /// Tracks progress timestamps for each step during ambient agent spawning.
 #[derive(Debug, Clone)]
@@ -378,16 +376,16 @@ impl AmbientAgentViewModel {
         ctx: &mut ModelContext<Self>,
     ) {
         // Apply pane settings from the request.
-        if let Some(config) = request.config.as_ref() {
-            if let Some(model_id) = config.model_id.as_deref() {
-                LLMPreferences::handle(ctx).update(ctx, |prefs, ctx| {
-                    prefs.update_preferred_agent_mode_llm(
-                        &LLMId::from(model_id),
-                        self.terminal_view_id,
-                        ctx,
-                    )
-                });
-            }
+        if let Some(config) = request.config.as_ref()
+            && let Some(model_id) = config.model_id.as_deref()
+        {
+            LLMPreferences::handle(ctx).update(ctx, |prefs, ctx| {
+                prefs.update_preferred_agent_mode_llm(
+                    &LLMId::from(model_id),
+                    self.terminal_view_id,
+                    ctx,
+                )
+            });
         }
 
         self.spawn_internal(request, ctx);
@@ -521,15 +519,15 @@ impl AmbientAgentViewModel {
 
                         // Check if this is a ClientError with an auth_url
                         use crate::ai::api_error::ClientError;
-                        if let Some(client_error) = err.downcast_ref::<ClientError>() {
-                            if let Some(auth_url) = &client_error.auth_url {
-                                me.handle_needs_github_auth(
-                                    auth_url.clone(),
-                                    client_error.error.clone(),
-                                    ctx,
-                                );
-                                return;
-                            }
+                        if let Some(client_error) = err.downcast_ref::<ClientError>()
+                            && let Some(auth_url) = &client_error.auth_url
+                        {
+                            me.handle_needs_github_auth(
+                                auth_url.clone(),
+                                client_error.error.clone(),
+                                ctx,
+                            );
+                            return;
                         }
                         if let Some(ai_api_error) = err.downcast_ref::<AIApiError>() {
                             match ai_api_error {

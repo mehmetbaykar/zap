@@ -137,8 +137,9 @@ impl SyncClock {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use warp_util::file_type::is_markdown_file;
+
+    use super::*;
 
     fn remote(path: &str) -> BufferLocation {
         BufferLocation::Remote(RemotePath::new(

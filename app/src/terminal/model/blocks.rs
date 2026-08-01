@@ -15,16 +15,16 @@ use sum_tree::{Dimension, Item, SeekBias, SumTree};
 use warp_core::command::ExitCode;
 use warp_core::features::FeatureFlag;
 use warp_terminal::model::{KeyboardModes, KeyboardModesApplyBehavior};
-use warpui::color::ColorU;
 use warpui::r#async::executor::Background;
+use warpui::color::ColorU;
 use warpui::units::{IntoLines, IntoPixels, Lines};
-use warpui::{record_trace_event, AppContext, EntityId, ViewHandle};
+use warpui::{AppContext, EntityId, ViewHandle, record_trace_event};
 
 use super::ansi::{Handler, InputBufferValue};
 use super::block::{BlockId, BlockSize, BlockState, SerializedAIMetadata};
 use super::early_output::EarlyOutput;
-use super::grid::grid_handler::{FragmentBoundary, GridHandler, Link, PossiblePath};
 use super::grid::RespectDisplayedOutput;
+use super::grid::grid_handler::{FragmentBoundary, GridHandler, Link, PossiblePath};
 use super::image_map::StoredImageMetadata;
 use super::kitty::{KittyAction, KittyResponse};
 use super::lifecycle::NextBlockIdDisposition;
@@ -32,8 +32,8 @@ use super::rich_content::RichContentType;
 use super::secrets::RespectObfuscatedSecrets;
 use super::selection::ScrollDelta;
 use super::terminal_model::RangeInModel;
-use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::AIAgentActionId;
+use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::{AIBlock, SerializedBlockListItem};
 use crate::terminal::block_filter::BlockFilterQuery;
 use crate::terminal::block_list_element::GridType;
@@ -769,7 +769,9 @@ impl BlockList {
                 self.finish_active_block_before_followup_append();
                 self.restore_block(block, BootstrapStage::PostBootstrapPrecmd, &mut processor);
             } else {
-                log::warn!("A non-active follow-up scrollback block was either not started or not completed");
+                log::warn!(
+                    "A non-active follow-up scrollback block was either not started or not completed"
+                );
             }
         }
 
@@ -1794,17 +1796,17 @@ impl BlockList {
             if let RemovableBlocklistItem::RichContent(view_id) = item {
                 let mut cursor = self.block_heights.cursor::<TotalIndex, ()>();
                 cursor.seek(index, SeekBias::Right);
-                if let Some(BlockHeightItem::RichContent(rich_content)) = cursor.item() {
-                    if rich_content.content_type.is_some_and(|content_type| {
+                if let Some(BlockHeightItem::RichContent(rich_content)) = cursor.item()
+                    && rich_content.content_type.is_some_and(|content_type| {
                         matches!(
                             content_type,
                             RichContentType::AIBlock
                                 | RichContentType::EnterAgentView
                                 | RichContentType::InlineAgentViewHeader
                         )
-                    }) {
-                        self.dirty_rich_content_items.insert(*view_id);
-                    }
+                    })
+                {
+                    self.dirty_rich_content_items.insert(*view_id);
                 }
             }
         }
@@ -1834,10 +1836,9 @@ impl BlockList {
                     origin_conversation_id,
                     ..
                 } = block.agent_view_visibility()
+                    && *origin_conversation_id == conversation_id
                 {
-                    if *origin_conversation_id == conversation_id {
-                        continue;
-                    }
+                    continue;
                 }
                 block.add_pending_conversation_id(conversation_id);
                 modified_blocks.push((block_id.clone(), block.agent_view_visibility().clone()));
@@ -1858,10 +1859,9 @@ impl BlockList {
                 origin_conversation_id,
                 ..
             } = block.agent_view_visibility()
+                && *origin_conversation_id == conversation_id
             {
-                if *origin_conversation_id == conversation_id {
-                    continue;
-                }
+                continue;
             }
             block.add_attached_conversation_id(conversation_id);
         }
@@ -1879,10 +1879,10 @@ impl BlockList {
     ) -> Vec<(BlockId, AgentViewVisibility)> {
         let mut modified_blocks = Vec::new();
         for block_id in block_ids {
-            if let Some(block) = self.mut_block_from_id(block_id) {
-                if block.remove_pending_conversation_id(conversation_id) {
-                    modified_blocks.push((block_id.clone(), block.agent_view_visibility().clone()));
-                }
+            if let Some(block) = self.mut_block_from_id(block_id)
+                && block.remove_pending_conversation_id(conversation_id)
+            {
+                modified_blocks.push((block_id.clone(), block.agent_view_visibility().clone()));
             }
         }
         modified_blocks
@@ -2822,18 +2822,18 @@ impl BlockList {
         if let Some(is_local) = restored_block_was_local {
             block.set_restored_block_was_local(is_local);
         }
-        if !self.blocks.is_empty() && self.active_block().is_for_in_band_command {
-            if let Some(CachedPromptData {
+        if !self.blocks.is_empty()
+            && self.active_block().is_for_in_band_command
+            && let Some(CachedPromptData {
                 prompt_grid,
                 rprompt_grid,
                 ..
             }) = &self.cached_prompt_data
-            {
-                let prompt_grid = prompt_grid.clone();
-                let rprompt_grid = rprompt_grid.clone();
-                log::debug!("Initializing new block using cached prompt grids");
-                block.set_prompt_grids_from_cached_data(prompt_grid, rprompt_grid);
-            }
+        {
+            let prompt_grid = prompt_grid.clone();
+            let rprompt_grid = rprompt_grid.clone();
+            log::debug!("Initializing new block using cached prompt grids");
+            block.set_prompt_grids_from_cached_data(prompt_grid, rprompt_grid);
         }
 
         if self.is_executing_oz_environment_startup_commands {
@@ -3278,11 +3278,11 @@ impl BlockList {
         // Set the completed_ts to the saved completed_ts _after_ `finish`ing the block (which would have set its own completed_ts).
         self.active_block_mut().override_completed_ts(completed_ts);
 
-        if let Some(prompt_snapshot) = &block.prompt_snapshot {
-            if let Ok(prompt_snapshot) = serde_json::from_str(prompt_snapshot) {
-                log::debug!("Restored prompt: {prompt_snapshot:?}");
-                self.active_block_mut().set_prompt_snapshot(prompt_snapshot);
-            }
+        if let Some(prompt_snapshot) = &block.prompt_snapshot
+            && let Ok(prompt_snapshot) = serde_json::from_str(prompt_snapshot)
+        {
+            log::debug!("Restored prompt: {prompt_snapshot:?}");
+            self.active_block_mut().set_prompt_snapshot(prompt_snapshot);
         }
     }
 
@@ -3777,7 +3777,9 @@ impl BlockList {
 
 impl ansi::Handler for BlockList {
     fn set_title(&mut self, _: Option<String>) {
-        report_error!("Handler method BlockList::set_title should never be called. This should be handled by TerminalModel.");
+        report_error!(
+            "Handler method BlockList::set_title should never be called. This should be handled by TerminalModel."
+        );
     }
 
     fn set_cursor_style(&mut self, style: Option<CursorStyle>) {
@@ -4059,11 +4061,15 @@ impl ansi::Handler for BlockList {
     }
 
     fn push_title(&mut self) {
-        report_error!("Handler method BlockList::push_title should never be called. This should be handled by TerminalModel.");
+        report_error!(
+            "Handler method BlockList::push_title should never be called. This should be handled by TerminalModel."
+        );
     }
 
     fn pop_title(&mut self) {
-        report_error!("Handler method BlockList::pop_title should never be called. This should be handled by TerminalModel.");
+        report_error!(
+            "Handler method BlockList::pop_title should never be called. This should be handled by TerminalModel."
+        );
     }
 
     fn text_area_size_pixels<W: io::Write>(&mut self, writer: &mut W) {

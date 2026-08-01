@@ -1,33 +1,27 @@
-use crate::terminal::shell::ShellType;
-use ::ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
-use repo_metadata::repositories::{DetectedRepositories, RepoDetectionSource};
-use repo_metadata::{RepoMetadataEvent, RepoMetadataModel, RepositoryIdentifier};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use ::ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
+use repo_metadata::repositories::{DetectedRepositories, RepoDetectionSource};
+use repo_metadata::{RepoMetadataEvent, RepoMetadataModel, RepositoryIdentifier};
 use warp_core::channel::ChannelState;
-use warp_core::{safe_error, SessionId};
+use warp_core::{SessionId, safe_error};
 use warp_files::{FileModel, FileModelEvent};
 use warp_util::content_version::ContentVersion;
 use warp_util::file::FileId;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warp_util::standardized_path::StandardizedPath;
-use warpui::platform::TerminationMode;
 use warpui::r#async::{Spawnable, SpawnableOutput, SpawnedFutureHandle};
+use warpui::platform::TerminationMode;
 use warpui::{Entity, ModelContext, ModelHandle, SingletonEntity};
 
-use super::diff_state_proto;
 use super::diff_state_tracker::{
     DiffModelKey, DiffStateUpdate, RemoteDiffStateManager, SubscribeOutcome,
 };
 use super::proto::{
-    client_message, delete_file_response, discard_files_response, get_diff_state_response,
-    git_commit_chain_response, git_create_pr_response, git_get_committed_branch_files_response,
-    git_get_pr_info_response, git_push_response, host_scoped_request, notification,
-    open_buffer_response, remote_skill_proto, resolve_conflict_response, run_command_response,
-    save_buffer_response, server_message, session_scoped_request, write_file_response, Abort,
-    BranchInfo, BufferEdit, BufferUpdatedPush, ClientMessage, CloseBuffer, DeleteFile,
+    Abort, BranchInfo, BufferEdit, BufferUpdatedPush, ClientMessage, CloseBuffer, DeleteFile,
     DeleteFileResponse, DeleteFileSuccess, DiscardFilesError, DiscardFilesResponse,
     DiscardFilesSuccess, ErrorCode, ErrorResponse, FailedFileRead, FileContextProto,
     FileOperationError, GetBranchesError, GetBranchesResponse, GetBranchesSuccess,
@@ -43,19 +37,24 @@ use super::proto::{
     RunCommandRequest, RunCommandResponse, RunCommandSuccess, SaveBuffer, SaveBufferResponse,
     SaveBufferSuccess, ServerMessage, SessionBootstrapped, TextEdit, UpdateGitHubPrInfo,
     UpdateGitHubRepoInfo, UpdateGitStatus, WriteFile, WriteFileResponse, WriteFileSuccess,
+    client_message, delete_file_response, discard_files_response, get_diff_state_response,
+    git_commit_chain_response, git_create_pr_response, git_get_committed_branch_files_response,
+    git_get_pr_info_response, git_push_response, host_scoped_request, notification,
+    open_buffer_response, remote_skill_proto, resolve_conflict_response, run_command_response,
+    save_buffer_response, server_message, session_scoped_request, write_file_response,
 };
 #[cfg(feature = "local_fs")]
 use super::proto::{
+    CreateDirectory, CreateDirectoryResponse, CreateDirectorySuccess, DirEntry,
+    FileSystemEntryKind, ListDirectory, ListDirectoryResponse, ListDirectorySuccess, ReadFileChunk,
+    ReadFileChunkResponse, ReadFileChunkSuccess, ResolvePath, ResolvePathResponse,
+    ResolvePathSuccess, WriteFileChunk, WriteFileChunkResponse, WriteFileChunkSuccess,
     create_directory_response, list_directory_response, read_file_chunk_response,
-    resolve_path_response, write_file_chunk_response, CreateDirectory, CreateDirectoryResponse,
-    CreateDirectorySuccess, DirEntry, FileSystemEntryKind, ListDirectory, ListDirectoryResponse,
-    ListDirectorySuccess, ReadFileChunk, ReadFileChunkResponse, ReadFileChunkSuccess, ResolvePath,
-    ResolvePathResponse, ResolvePathSuccess, WriteFileChunk, WriteFileChunkResponse,
-    WriteFileChunkSuccess,
+    resolve_path_response, write_file_chunk_response,
 };
-use super::ripgrep_search;
 #[cfg(feature = "local_fs")]
 use super::server_buffer_tracker::{PendingBufferRequestKind, ServerBufferTracker};
+use super::{diff_state_proto, ripgrep_search};
 #[cfg(feature = "local_fs")]
 use crate::code::global_buffer_model::{GlobalBufferModel, GlobalBufferModelEvent};
 use crate::code_review::diff_state::{CommitChainMode, DiffMode, FileStatusInfo};
@@ -63,6 +62,7 @@ use crate::code_review::git_repo_model::{GitRepoModels, GitRepoStatusModel};
 use crate::code_review::github_repo_model::{GitHubRepoEvent, GitHubRepoModel};
 #[cfg(feature = "local_tty")]
 use crate::terminal::local_shell::LocalShellState;
+use crate::terminal::shell::ShellType;
 
 /// How long the daemon waits with no connections before exiting.
 pub const GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(10 * 60);
@@ -76,9 +76,9 @@ const MAX_BRANCH_COUNT_CAP: usize = 500;
 pub type ConnectionId = uuid::Uuid;
 use super::protocol::RequestId;
 use crate::ai::agent::FileLocations;
-use crate::ai::blocklist::{read_local_file_context, ReadFileContextResult};
+use crate::ai::blocklist::{ReadFileContextResult, read_local_file_context};
 use crate::ai::skills::{
-    bundled_skill_snapshot_protos, BundledSkill, SkillManager, SkillManagerEvent,
+    BundledSkill, SkillManager, SkillManagerEvent, bundled_skill_snapshot_protos,
 };
 use crate::code_review::git_actions;
 use crate::terminal::model::session::command_executor::{
@@ -1515,13 +1515,12 @@ impl ServerModel {
                                 },
                             ),
                         );
-                        if is_git {
-                            if let Some(sent_roots) = me
+                        if is_git
+                            && let Some(sent_roots) = me
                                 .snapshot_sent_roots_by_connection
                                 .get_mut(&conn_id_for_response)
-                            {
-                                sent_roots.insert(root_path);
-                            }
+                        {
+                            sent_roots.insert(root_path);
                         }
                     }
                 }
@@ -3045,10 +3044,8 @@ impl ServerModel {
         };
         let already_tracked = self.github_repo_models.contains_key(&std_path);
         self.subscribe_to_github_info_updates(&std_path, ctx);
-        if already_tracked {
-            if let Some(handle) = self.github_repo_models.get(&std_path).cloned() {
-                handle.update(ctx, |model, ctx| model.refresh_pr_info(ctx));
-            }
+        if already_tracked && let Some(handle) = self.github_repo_models.get(&std_path).cloned() {
+            handle.update(ctx, |model, ctx| model.refresh_pr_info(ctx));
         }
     }
 
@@ -3069,10 +3066,8 @@ impl ServerModel {
         };
         let already_tracked = self.github_repo_models.contains_key(&std_path);
         self.subscribe_to_github_info_updates(&std_path, ctx);
-        if already_tracked {
-            if let Some(handle) = self.github_repo_models.get(&std_path).cloned() {
-                handle.update(ctx, |model, ctx| model.refresh_repository_info(ctx));
-            }
+        if already_tracked && let Some(handle) = self.github_repo_models.get(&std_path).cloned() {
+            handle.update(ctx, |model, ctx| model.refresh_repository_info(ctx));
         }
     }
 
@@ -3185,15 +3180,15 @@ fn requested_repo_path(repo_path: &str) -> Result<PathBuf, String> {
 
 #[cfg(feature = "local_fs")]
 fn expand_user_path(path: &str) -> PathBuf {
-    if path == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home;
-        }
+    if path == "~"
+        && let Some(home) = dirs::home_dir()
+    {
+        return home;
     }
-    if let Some(stripped) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(stripped);
-        }
+    if let Some(stripped) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(stripped);
     }
     PathBuf::from(path)
 }

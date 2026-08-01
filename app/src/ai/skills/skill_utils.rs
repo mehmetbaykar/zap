@@ -1,18 +1,18 @@
 //! Utility functions for working with skills.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use ai::skills::{
-    provider_parent_directory_for_skills_root, provider_rank, ParsedSkill, SkillProvider,
+    ParsedSkill, SkillProvider, provider_parent_directory_for_skills_root, provider_rank,
 };
 use lazy_static::lazy_static;
 use siphasher::sip::SipHasher;
+use warp_core::ui::Icon;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::theme::color::internal_colors;
-use warp_core::ui::Icon;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::prelude::MouseStateHandle;
 use warpui::{AppContext, Element, EventContext, SingletonEntity};

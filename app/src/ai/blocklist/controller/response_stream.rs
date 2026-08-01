@@ -1,26 +1,23 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
 
-use crate::ai::api_error::AIApiError;
 use anyhow::anyhow;
 use chrono::{DateTime, Local, TimeDelta};
 use futures::channel::oneshot;
 use futures_util::StreamExt;
 use uuid::Uuid;
 use warp_multi_agent_api::response_event;
-use warpui::{Entity, ModelContext};
+use warpui::{Entity, ModelContext, SingletonEntity};
 
-use crate::{
-    ai::agent::{
-        api::{self, ConvertToAPITypeError},
-        conversation::AIConversationId,
-        AIAgentInput, AIIdentifiers, CancellationReason,
-    },
-    ai::blocklist::BlocklistAIHistoryModel,
-    ai::byop_readiness::BlockedByopReadinessError,
-    network::NetworkStatus,
-    report_error, send_telemetry_from_ctx,
-};
-use warpui::SingletonEntity;
+use crate::ai::agent::api::{self, ConvertToAPITypeError};
+use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::{AIAgentInput, AIIdentifiers, CancellationReason};
+use crate::ai::api_error::AIApiError;
+use crate::ai::blocklist::BlocklistAIHistoryModel;
+use crate::ai::byop_readiness::BlockedByopReadinessError;
+use crate::network::NetworkStatus;
+use crate::{report_error, send_telemetry_from_ctx};
 
 /// Request routing parameters for the BYOP path. Extracted from LLMId, settings, and conversation,
 /// then handed to the spawn closure all at once (ctx can't cross await boundaries).
@@ -518,8 +515,8 @@ impl ResponseStream {
                                 Some(warp_multi_agent_api::response_event::stream_finished::Reason::Done(_)) | None
                             ) {
                                 // Emit retry success telemetry if this was a successful completion after retries
-                                if self.retry_count > 0 {
-                                    if let Some(original_error) = &self.original_error {
+                                if self.retry_count > 0
+                                    && let Some(original_error) = &self.original_error {
                                         send_telemetry_from_ctx!(
                                             crate::TelemetryEvent::AgentModeRequestRetrySucceeded {
                                                 identifiers: self.ai_identifiers.clone(),
@@ -529,7 +526,6 @@ impl ResponseStream {
                                             ctx
                                         );
                                     }
-                                }
                             }
                         }
                     }

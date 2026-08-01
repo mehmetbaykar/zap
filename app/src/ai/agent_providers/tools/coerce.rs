@@ -46,26 +46,24 @@ fn coerce_value(value: &mut Value, schema: &Value, changed: &mut bool) {
     match ty {
         "object" => {
             // the case where the model stringified the entire object: parse one layer and continue.
-            if let Some(s) = value.as_str() {
-                if let Ok(parsed) = serde_json::from_str::<Value>(s) {
-                    if parsed.is_object() {
-                        *value = parsed;
-                        *changed = true;
-                    }
-                }
+            if let Some(s) = value.as_str()
+                && let Ok(parsed) = serde_json::from_str::<Value>(s)
+                && parsed.is_object()
+            {
+                *value = parsed;
+                *changed = true;
             }
             if let Some(props) = schema.get("properties") {
                 coerce_object(value, props, schema, changed);
             }
         }
         "array" => {
-            if let Some(s) = value.as_str() {
-                if let Ok(parsed) = serde_json::from_str::<Value>(s) {
-                    if parsed.is_array() {
-                        *value = parsed;
-                        *changed = true;
-                    }
-                }
+            if let Some(s) = value.as_str()
+                && let Ok(parsed) = serde_json::from_str::<Value>(s)
+                && parsed.is_array()
+            {
+                *value = parsed;
+                *changed = true;
             }
             if let (Some(arr), Some(items_schema)) = (value.as_array_mut(), schema.get("items")) {
                 for item in arr {
@@ -93,30 +91,30 @@ fn coerce_value(value: &mut Value, schema: &Value, changed: &mut bool) {
                 if let Ok(n) = s.parse::<i64>() {
                     *value = Value::Number(n.into());
                     *changed = true;
-                } else if let Ok(f) = s.parse::<f64>() {
-                    if f.fract() == 0.0 && f.is_finite() {
-                        if let Some(num) = Number::from_f64(f).and_then(|n| n.as_i64()) {
-                            *value = Value::Number(num.into());
-                            *changed = true;
-                        }
-                    }
-                }
-            } else if let Some(f) = value.as_f64() {
-                if f.fract() == 0.0 && f.is_finite() {
-                    let n = f as i64;
-                    *value = Value::Number(n.into());
+                } else if let Ok(f) = s.parse::<f64>()
+                    && f.fract() == 0.0
+                    && f.is_finite()
+                    && let Some(num) = Number::from_f64(f).and_then(|n| n.as_i64())
+                {
+                    *value = Value::Number(num.into());
                     *changed = true;
                 }
+            } else if let Some(f) = value.as_f64()
+                && f.fract() == 0.0
+                && f.is_finite()
+            {
+                let n = f as i64;
+                *value = Value::Number(n.into());
+                *changed = true;
             }
         }
         "number" => {
-            if let Some(s) = value.as_str() {
-                if let Ok(f) = s.parse::<f64>() {
-                    if let Some(num) = Number::from_f64(f) {
-                        *value = Value::Number(num);
-                        *changed = true;
-                    }
-                }
+            if let Some(s) = value.as_str()
+                && let Ok(f) = s.parse::<f64>()
+                && let Some(num) = Number::from_f64(f)
+            {
+                *value = Value::Number(num);
+                *changed = true;
             }
         }
         "string" => match value {
@@ -166,8 +164,9 @@ fn coerce_object(value: &mut Value, props: &Value, parent_schema: &Value, change
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     fn shell_schema() -> Value {
         json!({

@@ -1,23 +1,22 @@
 //! [`TerminalView`]-specific implementation for ambient agent functionality.
 
 use warp_cli::agent::Harness;
-
-use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
-use crate::ai::agent::RenderableAIError;
-use warpui::prelude::Empty;
-
-use crate::ai::blocklist::{agent_view::AgentViewEntryOrigin, BlocklistAIHistoryModel};
-use crate::terminal::view::TerminalView;
-use crate::terminal::CLIAgent;
 use warp_core::ui::appearance::Appearance;
 use warpui::elements::Align;
+use warpui::prelude::Empty;
 use warpui::{AppContext, Element, EntityId, SingletonEntity, ViewContext};
 
+use super::AmbientAgentViewModelEvent;
 use super::loading_screen::{
     render_ambient_agent_cancelled_screen, render_ambient_agent_error_screen,
     render_ambient_agent_github_auth_required_screen, render_ambient_agent_loading_screen,
 };
-use super::AmbientAgentViewModelEvent;
+use crate::ai::agent::RenderableAIError;
+use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
+use crate::ai::blocklist::BlocklistAIHistoryModel;
+use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
+use crate::terminal::CLIAgent;
+use crate::terminal::view::TerminalView;
 const CHILD_AGENT_GITHUB_AUTH_REQUIRED_BLOCKED_ACTION: &str =
     "GitHub authentication required before starting the child agent.";
 

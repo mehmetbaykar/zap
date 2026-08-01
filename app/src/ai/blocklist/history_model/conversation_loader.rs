@@ -8,21 +8,19 @@ use futures::FutureExt;
 use itertools::Itertools as _;
 use persistence::model::AgentConversationRecord;
 
+use super::{
+    AIConversationMetadata, BlocklistAIHistoryModel, MAX_HISTORICAL_CONVERSATIONS,
+    agent_id_key_from_persisted_data,
+};
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{
     AIConversation, AIConversationId, ServerAIConversationMetadata,
 };
 use crate::ai::agent::task::Task;
-use crate::persistence::model::{AgentConversation, AgentConversationData};
-use crate::terminal::model::block::SerializedBlock;
-
 #[cfg(feature = "local_fs")]
 use crate::persistence::agent::read_agent_conversation_by_id;
-
-use super::{
-    agent_id_key_from_persisted_data, AIConversationMetadata, BlocklistAIHistoryModel,
-    MAX_HISTORICAL_CONVERSATIONS,
-};
+use crate::persistence::model::{AgentConversation, AgentConversationData};
+use crate::terminal::model::block::SerializedBlock;
 
 /// A conversation transcript from a CLI agent harness (e.g. Claude Code).
 #[derive(Debug, Clone)]
@@ -192,12 +190,11 @@ impl BlocklistAIHistoryModel {
             });
 
             // Convert the persisted conversation to an AIConversation
-            if let Some(persisted_conversation) = persisted_ai_conversation {
-                if let Some(conversation) =
+            if let Some(persisted_conversation) = persisted_ai_conversation
+                && let Some(conversation) =
                     convert_persisted_conversation_to_ai_conversation(persisted_conversation)
-                {
-                    return Some(conversation);
-                }
+            {
+                return Some(conversation);
             }
         }
 

@@ -3,11 +3,11 @@ use std::env;
 
 use anyhow::Result;
 use clap::Parser;
-use integration::test::*;
 use integration::Builder;
+use integration::test::*;
 use warp_cli::WorkerCommand;
-use warp_core::channel::{Channel, ChannelConfig, ChannelState};
 use warp_core::AppId;
+use warp_core::channel::{Channel, ChannelConfig, ChannelState};
 
 /// The Zap integration test runner.
 #[derive(Debug, Default, Parser, Clone)]

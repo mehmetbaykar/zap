@@ -13,17 +13,19 @@
 //!   * timeout defaults to 30s, capped at 120s
 //!   * image mime is automatically base64-encoded → output.attachments
 
-use anyhow::{bail, Context, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT};
-use reqwest::redirect::Policy;
-use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 use std::time::Duration;
+
+use anyhow::{Context, Result, bail};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use reqwest::StatusCode;
+use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_LENGTH, CONTENT_TYPE, USER_AGENT};
+use reqwest::redirect::Policy;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------
 // Constants (aligned with opencode webfetch.ts:8-10)
@@ -150,10 +152,10 @@ fn validate_url_not_internal(url_str: &str) -> Result<()> {
     let host = parsed.host_str().context("URL has no host")?;
 
     // If the host is already an IP literal, check it directly.
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if is_blocked_ip(ip) {
-            bail!("URL targets a blocked IP address range");
-        }
+    if let Ok(ip) = host.parse::<IpAddr>()
+        && is_blocked_ip(ip)
+    {
+        bail!("URL targets a blocked IP address range");
     }
 
     // Additionally resolve the hostname to catch DNS results pointing to internal IPs as early as possible. Port 0 is used here
@@ -315,10 +317,10 @@ fn validate_fetch_response_metadata(
             crate::ai::agent_providers::chat_stream::url_for_log(url)
         );
     }
-    if let Some(len) = content_length {
-        if len > MAX_RESPONSE_SIZE {
-            bail!("Response too large (Content-Length {len} > {MAX_RESPONSE_SIZE} bytes limit)");
-        }
+    if let Some(len) = content_length
+        && len > MAX_RESPONSE_SIZE
+    {
+        bail!("Response too large (Content-Length {len} > {MAX_RESPONSE_SIZE} bytes limit)");
     }
     Ok(())
 }

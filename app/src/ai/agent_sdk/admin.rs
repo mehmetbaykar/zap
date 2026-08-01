@@ -3,7 +3,8 @@
 use anyhow::Result;
 use serde::Serialize;
 use warp_cli::agent::OutputFormat;
-use warpui::{platform::TerminationMode, AppContext};
+use warpui::AppContext;
+use warpui::platform::TerminationMode;
 
 #[derive(Serialize)]
 struct WhoamiOutput {

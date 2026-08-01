@@ -1,16 +1,16 @@
 use std::ops::Deref;
 
 use serde::{Serialize, Serializer};
-use warpui::platform::Cursor;
 use warpui::ViewContext;
+use warpui::platform::Cursor;
 
 use crate::send_telemetry_from_ctx;
 use crate::server::telemetry::{LinkOpenMethod, TelemetryEvent};
+use crate::terminal::TerminalModel;
+use crate::terminal::model::RespectObfuscatedSecrets;
 use crate::terminal::model::grid::grid_handler::Link;
 use crate::terminal::model::index::Point;
 use crate::terminal::model::terminal_model::{WithinBlock, WithinModel};
-use crate::terminal::model::RespectObfuscatedSecrets;
-use crate::terminal::TerminalModel;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
@@ -385,11 +385,12 @@ impl super::TerminalView {
 
         // If the mouse is still on top of the previous highlighted link and that link is
         // still valid, we can keep highlighting it.
-        if let Some(link) = self.highlighted_link.as_ref() {
-            if link.contains(position) && !self.highlighted_link.is_invalidated() {
-                // If already hovering on a highlighted link, return.
-                return;
-            }
+        if let Some(link) = self.highlighted_link.as_ref()
+            && link.contains(position)
+            && !self.highlighted_link.is_invalidated()
+        {
+            // If already hovering on a highlighted link, return.
+            return;
         }
 
         // Updating the cursor shape repeatedly can cause flashing, so we only set it once, and only
@@ -582,13 +583,13 @@ impl super::TerminalView {
             use crate::features::FeatureFlag;
             use crate::remote_server::manager::RemoteServerManager;
 
-            if FeatureFlag::SshRemoteServer.is_enabled() {
-                if let Some(session_id) = session_id {
-                    return RemoteServerManager::handle(ctx)
-                        .as_ref(ctx)
-                        .host_id_for_session(session_id)
-                        .is_some();
-                }
+            if FeatureFlag::SshRemoteServer.is_enabled()
+                && let Some(session_id) = session_id
+            {
+                return RemoteServerManager::handle(ctx)
+                    .as_ref(ctx)
+                    .host_id_for_session(session_id)
+                    .is_some();
             }
         }
 

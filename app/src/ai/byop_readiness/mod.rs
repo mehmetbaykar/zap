@@ -3,12 +3,12 @@
 //! This module only handles already-projected safe metadata; it does not read the raw prompt, tool arguments, or tool output,
 //! nor does it modify the controller, serializer, or conversation state.
 
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
 pub const REPAIR_STATE_VERSION: u32 = 1;
-pub const BLOCKED_BYOP_REQUEST_MESSAGE: &str =
-    "Can't continue this conversation: an earlier tool result is missing or corrupted in this conversation's history, so Zap can't safely send the request to your provider. Start a new conversation or fork from an earlier point to continue.";
+pub const BLOCKED_BYOP_REQUEST_MESSAGE: &str = "Can't continue this conversation: an earlier tool result is missing or corrupted in this conversation's history, so Zap can't safely send the request to your provider. Start a new conversation or fork from an earlier point to continue.";
 pub const PENDING_BYOP_TOOL_RESULTS_MESSAGE: &str =
     "Waiting for a running tool to finish before sending your next request.";
 
@@ -888,13 +888,11 @@ pub fn normalize_projection(mut items: Vec<ProjectionItem>) -> Vec<ProjectionIte
                 active_group = Some(InferenceGroup::new(task_id, message_id, tool_calls));
             }
             ProjectionItemKind::ToolResult(result) => {
-                if result.assistant_tool_call_message_id.is_none() {
-                    if let Some(group) = &active_group {
-                        if let Some(assistant_message_id) = group.infer_assistant_message_id(result)
-                        {
-                            result.assistant_tool_call_message_id = Some(assistant_message_id);
-                        }
-                    }
+                if result.assistant_tool_call_message_id.is_none()
+                    && let Some(group) = &active_group
+                    && let Some(assistant_message_id) = group.infer_assistant_message_id(result)
+                {
+                    result.assistant_tool_call_message_id = Some(assistant_message_id);
                 }
             }
             ProjectionItemKind::UserBoundary

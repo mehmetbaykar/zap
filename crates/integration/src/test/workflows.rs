@@ -1,5 +1,5 @@
 use warp::integration_testing::command_palette::{
-    open_command_palette_and_run_action, TestStepsExt,
+    TestStepsExt, open_command_palette_and_run_action,
 };
 use warp::integration_testing::step::new_step_with_default_assertions;
 use warp::integration_testing::terminal::util::ExpectedExitStatus;
@@ -14,9 +14,9 @@ use warp::integration_testing::workflow::{
 use warp::integration_testing::{self, view_of_type};
 use warp::workflows::CategoriesView;
 use warpui_core::integration::TestStep;
-use warpui_core::{async_assert_eq, ViewHandle};
+use warpui_core::{ViewHandle, async_assert_eq};
 
-use super::{new_builder, TEST_ONLY_ASSETS};
+use super::{TEST_ONLY_ASSETS, new_builder};
 use crate::Builder;
 
 pub fn test_open_workflow_in_pane() -> Builder {

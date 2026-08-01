@@ -1,5 +1,5 @@
-use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::RepoMetadataModel;
+use repo_metadata::repositories::DetectedRepositories;
 use warpui::platform::WindowStyle;
 use warpui::presenter::ChildView;
 use warpui::{App, Element, Entity, TypedActionView, View, ViewHandle, WindowId};

@@ -3,14 +3,13 @@ mod mixer;
 mod search_item;
 pub(super) mod view;
 
-pub use data_source::*;
-pub use mixer::{build_slash_command_mixer, slash_command_query, SlashCommandMixer};
-pub use view::{CloseReason, InlineSlashCommandView, SlashCommandsEvent};
-
 #[cfg(feature = "local_fs")]
 use std::path::PathBuf;
 
 use ai::skills::SkillReference;
+pub use data_source::*;
+pub use mixer::{SlashCommandMixer, build_slash_command_mixer, slash_command_query};
+pub use view::{CloseReason, InlineSlashCommandView, SlashCommandsEvent};
 use warp_core::features::FeatureFlag;
 use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::appearance::Appearance;
@@ -21,17 +20,18 @@ use warpui::{AppContext, SingletonEntity, ViewContext};
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::agent_view::{
-    AgentViewEntryOrigin, DismissalStrategy, EphemeralMessage, ENTER_OR_EXIT_CONFIRMATION_WINDOW,
+    AgentViewEntryOrigin, DismissalStrategy, ENTER_OR_EXIT_CONFIRMATION_WINDOW, EphemeralMessage,
 };
-use crate::ai::blocklist::drive_object_attachment_for_reference;
 use crate::ai::blocklist::{
     BlocklistAIHistoryModel, InputTypeAutoDetectionSource, QueuedQuery, QueuedQueryId,
     QueuedQueryModel, QueuedQueryOrigin, SlashCommandRequest,
+    drive_object_attachment_for_reference,
 };
-use crate::cloud_object::{model::persistence::ObjectStoreModel, ObjectType};
+use crate::cloud_object::ObjectType;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
-use crate::search::slash_command_menu::static_commands::commands::{self, COMMAND_REGISTRY};
 use crate::search::slash_command_menu::static_commands::Availability;
+use crate::search::slash_command_menu::static_commands::commands::{self, COMMAND_REGISTRY};
 use crate::search::slash_command_menu::{SlashCommandId, StaticCommand};
 use crate::server::ids::SyncId;
 use crate::server::telemetry::SlashCommandAcceptedDetails;
@@ -52,7 +52,7 @@ use crate::terminal::view::TerminalAction;
 use crate::view_components::DismissibleToast;
 use crate::workflows::command_parser::compute_workflow_display_data;
 use crate::workspace::{ForkedConversationDestination, ToastStack, WorkspaceAction};
-use crate::{report_error, TelemetryEvent};
+use crate::{TelemetryEvent, report_error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcceptSlashCommandOrSavedPrompt {
@@ -1173,13 +1173,13 @@ mod slash_command_tests;
 
 #[cfg(all(test, feature = "local_fs", windows))]
 mod tests {
-    use super::*;
     use std::sync::Arc;
 
-    use crate::terminal::model::session::command_executor::testing::TestCommandExecutor;
-    use crate::terminal::model::session::SessionInfo;
-    use crate::terminal::shell::ShellType;
+    use super::*;
     use crate::terminal::ShellLaunchData;
+    use crate::terminal::model::session::SessionInfo;
+    use crate::terminal::model::session::command_executor::testing::TestCommandExecutor;
+    use crate::terminal::shell::ShellType;
 
     fn wsl_session() -> Session {
         Session::new(

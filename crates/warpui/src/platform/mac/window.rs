@@ -7,14 +7,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use cocoa::base::id;
 use instant::Instant;
 use num_traits::FromPrimitive;
 use objc::runtime::Object;
-use objc2::rc::{autoreleasepool, Retained};
+use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
-use objc2::{msg_send, MainThreadMarker};
+use objc2::{MainThreadMarker, msg_send};
 use objc2_app_kit::{NSApplication, NSScreen, NSView, NSWindow, NSWindowButton, NSWindowStyleMask};
 use objc2_foundation::{
     NSArray, NSInteger, NSPoint, NSRange, NSRect, NSSize, NSString, NSUInteger,
@@ -22,23 +22,22 @@ use objc2_foundation::{
 use objc2_metal::{MTLCopyAllDevices, MTLCreateSystemDefaultDevice, MTLDevice};
 use objc2_quartz_core::CAMetalLayer;
 use pathfinder_geometry::rect::RectF;
-use pathfinder_geometry::vector::{vec2f, Vector2F};
+use pathfinder_geometry::vector::{Vector2F, vec2f};
 use warpui_core::accessibility::AccessibilityContent;
 use warpui_core::actions::StandardAction;
+use warpui_core::r#async::{Timer, executor};
 use warpui_core::event::ModifiersState;
 use warpui_core::platform::{
-    self, file_picker, FilePickerCallback, FilePickerConfiguration, FullscreenState,
-    GraphicsBackend, TerminationMode, WindowBounds, WindowFocusBehavior, WindowOptions,
-    WindowStyle,
+    self, FilePickerCallback, FilePickerConfiguration, FullscreenState, GraphicsBackend,
+    TerminationMode, WindowBounds, WindowFocusBehavior, WindowOptions, WindowStyle, file_picker,
 };
-use warpui_core::r#async::{executor, Timer};
 use warpui_core::rendering::GPUPowerPreference;
 use warpui_core::windowing::WindowCallbacks;
 use warpui_core::{DisplayId, DisplayIdx, Event, OptionalPlatformWindow, Scene, WindowId};
 
 use super::delegate::DispatchDelegate;
-use super::rendering::{self, is_integrated_gpu, Device, RendererManager};
-use super::{app, RectFExt as _};
+use super::rendering::{self, Device, RendererManager, is_integrated_gpu};
+use super::{RectFExt as _, app};
 
 unsafe extern "C" {
     fn screenFrame() -> NSRect;
@@ -915,17 +914,19 @@ impl Window {
     ///
     /// # Safety
     /// This code is unsafe since it requires interfacing with platform code.
-    unsafe fn find_window_with_id(window_id: WindowId) -> Option<Retained<NSWindow>> { unsafe {
-        let mtm = MainThreadMarker::new_unchecked();
-        let windows = NSApplication::sharedApplication(mtm).windows();
-        (0..windows.count())
-            .find(|&i| {
-                let window = windows.objectAtIndex(i);
-                is_warp_window(&window).as_bool()
-                    && get_window_state(as_objc_object(&window)).window_id == window_id
-            })
-            .map(|idx| windows.objectAtIndex(idx))
-    }}
+    unsafe fn find_window_with_id(window_id: WindowId) -> Option<Retained<NSWindow>> {
+        unsafe {
+            let mtm = MainThreadMarker::new_unchecked();
+            let windows = NSApplication::sharedApplication(mtm).windows();
+            (0..windows.count())
+                .find(|&i| {
+                    let window = windows.objectAtIndex(i);
+                    is_warp_window(&window).as_bool()
+                        && get_window_state(as_objc_object(&window)).window_id == window_id
+                })
+                .map(|idx| windows.objectAtIndex(idx))
+        }
+    }
 
     pub fn close_window_async(window_id: WindowId, termination_mode: TerminationMode) {
         let force_terminate = match termination_mode {
@@ -1645,12 +1646,14 @@ pub extern "C-unwind" fn warp_app_window_moved(this: id, rect: NSRect) {
 /// Removes the WindowState ivar from an Objective-C object, nulls out the ivar
 /// pointer within the object, and returns the reference-counted pointer to the
 /// state.
-unsafe fn remove_state_ivar_from_object(object: &mut Object) -> Rc<WindowState> { unsafe {
-    let wrapper_ptr: *mut c_void = *object.get_ivar(WINDOW_STATE_IVAR);
-    let state = Ivar::take_state(wrapper_ptr);
-    object.set_ivar(WINDOW_STATE_IVAR, ptr::null::<c_void>());
-    state
-}}
+unsafe fn remove_state_ivar_from_object(object: &mut Object) -> Rc<WindowState> {
+    unsafe {
+        let wrapper_ptr: *mut c_void = *object.get_ivar(WINDOW_STATE_IVAR);
+        let state = Ivar::take_state(wrapper_ptr);
+        object.set_ivar(WINDOW_STATE_IVAR, ptr::null::<c_void>());
+        state
+    }
+}
 
 // dealloc is called by AppKit when our NSWindow subclass is deallocating,
 // because its retain count has dropped to zero. This is our chance to release
@@ -1689,10 +1692,12 @@ pub extern "C-unwind" fn warp_dealloc_window(native_window: &mut Object) {
     drop(state);
 }
 
-pub unsafe fn get_window_state(object: &Object) -> &Rc<WindowState> { unsafe {
-    let wrapper_ptr: *mut c_void = *object.get_ivar(WINDOW_STATE_IVAR);
-    Ivar::get_state(wrapper_ptr)
-}}
+pub unsafe fn get_window_state(object: &Object) -> &Rc<WindowState> {
+    unsafe {
+        let wrapper_ptr: *mut c_void = *object.get_ivar(WINDOW_STATE_IVAR);
+        Ivar::get_state(wrapper_ptr)
+    }
+}
 
 fn schedule_synthetic_drag(
     window_state: &Rc<WindowState>,
@@ -1706,16 +1711,16 @@ fn schedule_synthetic_drag(
         .executor
         .spawn(async move {
             Timer::at(instant).await;
-            if let Some(window_state) = weak_window_state.upgrade() {
-                if window_state.synthetic_drag_counter.get() == drag_id {
-                    schedule_synthetic_drag(&window_state, position, modifiers);
-                    app::callback_dispatcher()
-                        .for_window(&Window(window_state))
-                        .dispatch_event(Event::LeftMouseDragged {
-                            position,
-                            modifiers,
-                        });
-                }
+            if let Some(window_state) = weak_window_state.upgrade()
+                && window_state.synthetic_drag_counter.get() == drag_id
+            {
+                schedule_synthetic_drag(&window_state, position, modifiers);
+                app::callback_dispatcher()
+                    .for_window(&Window(window_state))
+                    .dispatch_event(Event::LeftMouseDragged {
+                        position,
+                        modifiers,
+                    });
             }
         })
         .detach();

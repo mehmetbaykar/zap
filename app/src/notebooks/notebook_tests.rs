@@ -4,16 +4,16 @@ use chrono::{Duration, Utc};
 use futures_util::future::BoxFuture;
 use warp_core::ui::appearance::Appearance;
 use warp_editor::editor::EditorView;
+use warpui::r#async::Timer;
 use warpui::platform::WindowStyle;
 use warpui::presenter::ChildView;
-use warpui::r#async::Timer;
 use warpui::{
     AddSingletonModel, App, AppContext, Element, Entity, SingletonEntity, TypedActionView, View,
     ViewHandle, WindowId,
 };
 
 use super::{NotebookEvent, NotebookView, SAVE_PERIOD};
-use crate::auth::{AuthManager, AuthStateProvider, UserUid, TEST_USER_EMAIL, TEST_USER_UID};
+use crate::auth::{AuthManager, AuthStateProvider, TEST_USER_EMAIL, TEST_USER_UID, UserUid};
 use crate::cloud_object::model::actions::ObjectActions;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::model::view::{Editor, EditorState, ObjectStoreViewModel};

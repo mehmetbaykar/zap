@@ -252,8 +252,8 @@ mod tests {
     use warp_util::standardized_path::StandardizedPath;
 
     use super::{
-        get_provider_for_path, get_scope_for_path, home_skills_path,
-        provider_parent_directory_for_skills_root, SkillProvider, SkillScope,
+        SkillProvider, SkillScope, get_provider_for_path, get_scope_for_path, home_skills_path,
+        provider_parent_directory_for_skills_root,
     };
 
     #[test]

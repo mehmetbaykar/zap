@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use warp_cli::agent::Harness;
 use warp_managed_secrets::{ManagedSecretType, ManagedSecretValue};
 

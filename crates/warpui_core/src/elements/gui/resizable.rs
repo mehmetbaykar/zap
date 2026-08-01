@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use pathfinder_color::ColorU;
 use pathfinder_geometry::rect::RectF;
-use pathfinder_geometry::vector::{vec2f, Vector2F};
+use pathfinder_geometry::vector::{Vector2F, vec2f};
 use warp_errors::report_error;
 
 use super::{Fill, Point, ZIndex};
@@ -148,11 +148,7 @@ impl ResizableState {
 
             self.mode = ResizableMode::Dragging { last_position };
 
-            if resized {
-                Some(origin_delta)
-            } else {
-                None
-            }
+            if resized { Some(origin_delta) } else { None }
         } else {
             None
         }
@@ -427,16 +423,15 @@ impl Element for Resizable {
         // Without this, child Draggable elements (e.g. SSH tree rows that stretch to the
         // full panel width) would also activate on the same click, causing ghost-drag
         // artifacts while the sidebar resize appears not to work (issue #203).
-        if let crate::Event::LeftMouseDown { position, .. } = event.raw_event() {
-            if self
+        if let crate::Event::LeftMouseDown { position, .. } = event.raw_event()
+            && self
                 .dragbar
                 .bounds
                 .is_some_and(|bounds| bounds.contains_point(*position))
-            {
-                self.state().begin_resizing(*position);
-                dispatch_callback(self.resize_handler.as_mut(), ctx, app);
-                return true;
-            }
+        {
+            self.state().begin_resizing(*position);
+            dispatch_callback(self.resize_handler.as_mut(), ctx, app);
+            return true;
         }
 
         let child_handled = self.child.dispatch_event(event, ctx, app);

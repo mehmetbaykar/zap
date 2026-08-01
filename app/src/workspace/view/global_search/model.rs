@@ -7,10 +7,10 @@ use futures::StreamExt as _;
 use instant::Instant;
 use num_traits::SaturatingSub;
 use regex::escape;
+use remote_server::HostId;
 use remote_server::manager::{HostRequestError, RemoteServerManager, RipgrepSearchParams};
 use remote_server::proto::RipgrepSearchSuccess;
 use remote_server::protocol::RequestId;
-use remote_server::HostId;
 use string_offset::ByteOffset;
 use warp_errors::report_error;
 use warp_ripgrep::search::{Match as RipgrepMatch, Submatch};
@@ -343,16 +343,14 @@ impl GlobalSearch {
             return;
         }
 
-        match outcome {
-            Some(SourceResult {
-                match_count,
-                capped,
-            }) => {
-                active.completed_sources += 1;
-                active.total_match_count += match_count;
-                active.capped |= capped;
-            }
-            None => {}
+        if let Some(SourceResult {
+            match_count,
+            capped,
+        }) = outcome
+        {
+            active.completed_sources += 1;
+            active.total_match_count += match_count;
+            active.capped |= capped;
         }
 
         active.remaining_sources = active.remaining_sources.saturating_sub(1);

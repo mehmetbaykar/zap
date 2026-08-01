@@ -12,8 +12,8 @@
 //!
 //! The parameter schema aligns with opencode `webfetch.ts:12-20`.
 
-use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow};
+use serde_json::{Value, json};
 use warp_multi_agent_api as api;
 
 use super::OpenAiTool;

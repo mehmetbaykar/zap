@@ -12,15 +12,13 @@ use warpui::{
     AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
 
-use crate::{
-    appearance::Appearance,
-    ui_components::icons,
-    view_components::action_button::{ActionButton, SecondaryTheme},
-    view_components::{DropdownItem, FilterableDropdown},
-    workspace::tab_settings::{
-        canonical_directory_key, DirectoryTabColor, DirectoryTabColors, TabSettings,
-        TabSettingsChangedEvent,
-    },
+use crate::appearance::Appearance;
+use crate::ui_components::icons;
+use crate::view_components::action_button::{ActionButton, SecondaryTheme};
+use crate::view_components::{DropdownItem, FilterableDropdown};
+use crate::workspace::tab_settings::{
+    DirectoryTabColor, DirectoryTabColors, TabSettings, TabSettingsChangedEvent,
+    canonical_directory_key,
 };
 
 const MENU_WIDTH: f32 = 340.;
@@ -282,10 +280,10 @@ fn compute_candidate_paths(
 
         let key = canonical_directory_key(&path);
 
-        if let Some(existing_color) = existing.0.get(&key) {
-            if !matches!(existing_color, DirectoryTabColor::Suppressed) {
-                continue;
-            }
+        if let Some(existing_color) = existing.0.get(&key)
+            && !matches!(existing_color, DirectoryTabColor::Suppressed)
+        {
+            continue;
         }
 
         if seen_keys.insert(key.clone()) {

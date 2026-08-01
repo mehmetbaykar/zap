@@ -15,8 +15,8 @@ use warp_multi_agent_api as api;
 use warp_multi_agent_api::ask_user_question_result::answer_item::Answer as AskUserQuestionAnswer;
 
 use crate::ai::agent::api::convert_from::{
-    convert_user_query_mode, ConversionParams, ConvertAPIMessageToClientOutputMessage,
-    MaybeAIAgentOutputMessage,
+    ConversionParams, ConvertAPIMessageToClientOutputMessage, MaybeAIAgentOutputMessage,
+    convert_user_query_mode,
 };
 use crate::ai::agent::conversation::update_todo_list_from_todo_op;
 use crate::ai::agent::task::TaskId;
@@ -149,8 +149,8 @@ pub(crate) fn convert_input_context(context: Option<&api::InputContext>) -> Arc<
             };
 
             // Convert binary data to base64
-            use base64::engine::general_purpose;
             use base64::Engine;
+            use base64::engine::general_purpose;
             let data = general_purpose::STANDARD.encode(&image.data);
 
             result.push(AIAgentContext::Image(ImageContext {
@@ -370,8 +370,8 @@ impl ConvertToExchanges for &api::Task {
                     false
                 }
                 api::message::Message::InvokeSkill(invoke_skill) => {
-                    if let Some(api_skill) = invoke_skill.skill.clone() {
-                        if let Ok(parsed_skill) = ParsedSkill::try_from_api_with_origin(
+                    if let Some(api_skill) = invoke_skill.skill.clone()
+                        && let Ok(parsed_skill) = ParsedSkill::try_from_api_with_origin(
                             api_skill,
                             &SkillPathOrigin::RestoredDisplayOnly,
                         ) {
@@ -391,8 +391,7 @@ impl ConvertToExchanges for &api::Task {
                                 user_query,
                             };
                             current_inputs.push(input);
-                        };
-                    };
+                        };;
 
                     true
                 }
@@ -429,8 +428,8 @@ impl ConvertToExchanges for &api::Task {
                 | api::message::Message::OrchestrationConfigSnapshot(_) => false,
             };
 
-            if !added_message_as_exchange_input {
-                if let Ok(MaybeAIAgentOutputMessage::Message(output_msg)) = (*api_message)
+            if !added_message_as_exchange_input
+                && let Ok(MaybeAIAgentOutputMessage::Message(output_msg)) = (*api_message)
                     .clone()
                     .to_client_output_message(ConversionParams {
                         current_todo_list: todo_lists.last(),
@@ -439,9 +438,8 @@ impl ConvertToExchanges for &api::Task {
                         task_id: &TaskId::new(api_message.task_id.clone()),
                         skill_path_origin: &SkillPathOrigin::Unavailable,
                     })
-                {
-                    current_outputs.push(output_msg);
-                }
+            {
+                current_outputs.push(output_msg);
             }
         }
 

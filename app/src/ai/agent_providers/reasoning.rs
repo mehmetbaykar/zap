@@ -13,9 +13,10 @@
 //! - opencode v5's anthropicAdaptiveEfforts / OPENAI_EFFORTS lists
 //! - each provider's official docs for the thinking-mode model list
 
-use crate::settings::{AgentProviderApiType, ReasoningEffortSetting};
 use std::collections::HashSet;
 use std::sync::{OnceLock, RwLock};
+
+use crate::settings::{AgentProviderApiType, ReasoningEffortSetting};
 
 /// Returns the list of reasoning effort levels actually available for the given (api_type, model_id).
 ///
@@ -135,13 +136,13 @@ pub fn model_supports_reasoning(api_type: AgentProviderApiType, model_id: &str) 
 }
 
 fn strip_effort_suffix(id: &str) -> &str {
-    if let Some((prefix, last)) = id.rsplit_once('-') {
-        if matches!(
+    if let Some((prefix, last)) = id.rsplit_once('-')
+        && matches!(
             last,
             "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "zero"
-        ) {
-            return prefix;
-        }
+        )
+    {
+        return prefix;
     }
     id
 }
@@ -328,10 +329,10 @@ pub fn note_reasoning_seen(api_type: AgentProviderApiType, model_id: &str) {
         return;
     }
     let key = (api_type, model_id.to_ascii_lowercase());
-    if let Ok(s) = latch_set().read() {
-        if s.contains(&key) {
-            return;
-        }
+    if let Ok(s) = latch_set().read()
+        && s.contains(&key)
+    {
+        return;
     }
     if let Ok(mut s) = latch_set().write() {
         s.insert(key);

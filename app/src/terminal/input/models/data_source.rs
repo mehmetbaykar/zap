@@ -1,11 +1,11 @@
-use fuzzy_match::{match_indices_case_insensitive, FuzzyMatchResult};
+use fuzzy_match::{FuzzyMatchResult, match_indices_case_insensitive};
 use itertools::Itertools;
 use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine};
 use ordered_float::OrderedFloat;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::icons::Icon;
-use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors;
 use warpui::elements::{
     ConstrainedBox, Container, CornerRadius, FormattedTextElement, Highlight, HighlightedHyperlink,
     MouseStateHandle, Radius, Text,
@@ -20,13 +20,16 @@ use warpui::{
     AppContext, Element, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity as _,
 };
 
+use super::model_spec_scores::{
+    CostRow, CostRowTooltip, ModelSpecScoresLayout, render_byop_spec_scores,
+    render_model_spec_header, render_model_spec_scores,
+};
 use crate::ai::agent_providers::{llm_id as byop_llm_id, lookup_byop};
 use crate::ai::custom_model_routers::is_custom_router_id;
 use crate::ai::execution_profiles::model_menu_items::is_auto;
 use crate::ai::llms::{
-    byo_key_source_for_model, should_show_bedrock_icon_for_model,
-    should_show_key_icon_for_model,
     ByoKeySource, DisableReason, LLMId, LLMInfo, LLMPreferences, LLMProvider, LLMSpec,
+    byo_key_source_for_model, should_show_bedrock_icon_for_model, should_show_key_icon_for_model,
 };
 use crate::features::FeatureFlag;
 use crate::search::data_source::{Query, QueryFilter, QueryResult};
@@ -35,17 +38,12 @@ use crate::search::result_renderer::ItemHighlightState;
 use crate::search::{SearchItem, SyncDataSource};
 use crate::settings_view::SettingsSection;
 use crate::terminal::input::inline_menu::{
-    default_navigation_message_items, styles as inline_styles, DetailsRenderConfig,
-    InlineMenuAction, InlineMenuMessageArgs, InlineMenuType,
+    DetailsRenderConfig, InlineMenuAction, InlineMenuMessageArgs, InlineMenuType,
+    default_navigation_message_items, styles as inline_styles,
 };
 use crate::terminal::input::message_bar::{Message, MessageItem};
 use crate::terminal::view::ambient_agent::AmbientAgentViewModel;
 use crate::workspace::WorkspaceAction;
-
-use super::model_spec_scores::{
-    render_byop_spec_scores, render_model_spec_header, render_model_spec_scores, CostRow,
-    CostRowTooltip, ModelSpecScoresLayout,
-};
 
 const AUTO_BEDROCK_TOOLTIP: &str = "Auto uses Bedrock when the selected model supports it.";
 
@@ -150,11 +148,7 @@ impl ModelPickerChoice {
     }
 
     fn priority_tier(&self) -> u8 {
-        if self.is_selectable() {
-            0
-        } else {
-            1
-        }
+        if self.is_selectable() { 0 } else { 1 }
     }
 }
 
@@ -433,13 +427,13 @@ impl SearchItem for ModelSearchItem {
         .with_color(name_text_color.into())
         .with_clip(ClipConfig::ellipsis());
 
-        if let Some(name_match) = &self.name_match_result {
-            if !name_match.matched_indices.is_empty() {
-                text = text.with_single_highlight(
-                    Highlight::new().with_properties(Properties::default().weight(Weight::Bold)),
-                    name_match.matched_indices.clone(),
-                );
-            }
+        if let Some(name_match) = &self.name_match_result
+            && !name_match.matched_indices.is_empty()
+        {
+            text = text.with_single_highlight(
+                Highlight::new().with_properties(Properties::default().weight(Weight::Bold)),
+                name_match.matched_indices.clone(),
+            );
         }
 
         let mut row = Flex::row()
@@ -551,59 +545,59 @@ impl SearchItem for ModelSearchItem {
 
         // BYOP uses a dedicated score rendering: Context / Output (bar normalized with log2) + Cost = BilledToApi.
         // Visually identical to the default Zap panel, only the row semantics differ.
-        if byop_llm_id::is_byop(&self.id) {
-            if let Some((provider, _api_key, model_id)) = lookup_byop(app, &self.id) {
-                let model_entry = provider.models.iter().find(|m| m.id == model_id);
-                let context_window = model_entry.map(|m| m.context_window).filter(|n| *n > 0);
-                let max_output_tokens = model_entry.map(|m| m.max_output_tokens).filter(|n| *n > 0);
+        if byop_llm_id::is_byop(&self.id)
+            && let Some((provider, _api_key, model_id)) = lookup_byop(app, &self.id)
+        {
+            let model_entry = provider.models.iter().find(|m| m.id == model_id);
+            let context_window = model_entry.map(|m| m.context_window).filter(|n| *n > 0);
+            let max_output_tokens = model_entry.map(|m| m.max_output_tokens).filter(|n| *n > 0);
 
-                let manage_button = appearance
-                    .ui_builder()
-                    .button(
-                        ButtonVariant::Outlined,
-                        self.manage_api_key_mouse_state.clone(),
-                    )
-                    .with_text_label(crate::t!("common-manage"))
-                    .with_style(UiComponentStyles {
-                        height: Some(24.),
-                        padding: Some(Coords {
-                            top: 2.,
-                            bottom: 2.,
-                            left: 4.,
-                            right: 4.,
-                        }),
-                        ..Default::default()
-                    })
-                    .with_cursor(Some(Cursor::PointingHand))
-                    .build()
-                    .on_click(|ctx, _, _| {
-                        ctx.dispatch_typed_action(WorkspaceAction::ShowSettingsPageWithSearch {
-                            search_query: "agent provider".to_string(),
-                            section: Some(SettingsSection::WarpAgent),
-                        });
-                    })
-                    .finish();
+            let manage_button = appearance
+                .ui_builder()
+                .button(
+                    ButtonVariant::Outlined,
+                    self.manage_api_key_mouse_state.clone(),
+                )
+                .with_text_label(crate::t!("common-manage"))
+                .with_style(UiComponentStyles {
+                    height: Some(24.),
+                    padding: Some(Coords {
+                        top: 2.,
+                        bottom: 2.,
+                        left: 4.,
+                        right: 4.,
+                    }),
+                    ..Default::default()
+                })
+                .with_cursor(Some(Cursor::PointingHand))
+                .build()
+                .on_click(|ctx, _, _| {
+                    ctx.dispatch_typed_action(WorkspaceAction::ShowSettingsPageWithSearch {
+                        search_query: "agent provider".to_string(),
+                        section: Some(SettingsSection::WarpAgent),
+                    });
+                })
+                .finish();
 
-                let scores = render_byop_spec_scores(
-                    context_window,
-                    max_output_tokens,
-                    Container::new(manage_button).finish(),
-                    ModelSpecScoresLayout {
-                        bg_bar_color: internal_colors::neutral_3(theme),
-                    },
-                    app,
-                );
+            let scores = render_byop_spec_scores(
+                context_window,
+                max_output_tokens,
+                Container::new(manage_button).finish(),
+                ModelSpecScoresLayout {
+                    bg_bar_color: internal_colors::neutral_3(theme),
+                },
+                app,
+            );
 
-                let column = Flex::column()
-                    .with_child(Container::new(header).with_margin_bottom(12.).finish())
-                    .with_child(scores);
+            let column = Flex::column()
+                .with_child(Container::new(header).with_margin_bottom(12.).finish())
+                .with_child(scores);
 
-                return Some(
-                    ConstrainedBox::new(column.finish())
-                        .with_width(model_specs_width(app))
-                        .finish(),
-                );
-            }
+            return Some(
+                ConstrainedBox::new(column.finish())
+                    .with_width(model_specs_width(app))
+                    .finish(),
+            );
         }
 
         let uses_external_inference = self.is_using_bedrock || self.byo_key_source.is_some();
@@ -749,11 +743,7 @@ impl SearchItem for ModelSearchItem {
     }
 
     fn priority_tier(&self) -> u8 {
-        if self.is_disabled() {
-            1
-        } else {
-            0
-        }
+        if self.is_disabled() { 1 } else { 0 }
     }
 
     fn score(&self) -> OrderedFloat<f64> {

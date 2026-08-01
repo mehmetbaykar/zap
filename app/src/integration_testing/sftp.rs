@@ -10,11 +10,10 @@ use std::sync::Arc;
 
 use warpui::{App, ViewHandle, WindowId};
 
-use crate::sftp_manager::browser::SftpBrowserView;
-use crate::sftp_manager::sftp_backend::{InMemorySftpBackend, SftpBackend};
-
 // Re-exported for integration tests to use via warp::integration_testing::sftp
 pub use crate::sftp_manager::browser::SftpBrowserAction;
+use crate::sftp_manager::browser::SftpBrowserView;
+use crate::sftp_manager::sftp_backend::{InMemorySftpBackend, SftpBackend};
 pub use crate::sftp_manager::types::{ConnectionState, Dialog};
 
 /// Get the SFTP browser view handle.

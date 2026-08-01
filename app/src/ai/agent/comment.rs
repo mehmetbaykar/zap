@@ -1,5 +1,6 @@
-use crate::code_review::comments::CommentId;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
+
+use crate::code_review::comments::CommentId;
 
 /// The current state of a code review.
 #[derive(Debug, Clone, Default)]

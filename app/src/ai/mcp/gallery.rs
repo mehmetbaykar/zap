@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use crate::ai::mcp::templatable::{GalleryData, JsonTemplate, TemplatableMCPServer};
 use uuid::Uuid;
 use warpui::{Entity, ModelContext, SingletonEntity};
+
+use crate::ai::mcp::templatable::{GalleryData, JsonTemplate, TemplatableMCPServer};
 #[derive(Clone, Debug)]
 pub struct GalleryMCPServer {
     uuid: Uuid,

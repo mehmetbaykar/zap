@@ -37,10 +37,10 @@ use pathfinder_color::ColorU;
 use settings::Setting as _;
 use warp_core::features::FeatureFlag;
 use warp_core::semantic_selection::SemanticSelection;
-use warp_core::ui::color::contrast::{
-    foreground_color_with_minimum_contrast, MinimumAllowedContrast,
-};
 use warp_core::ui::color::Rgb;
+use warp_core::ui::color::contrast::{
+    MinimumAllowedContrast, foreground_color_with_minimum_contrast,
+};
 use warp_core::ui::theme::{Fill, WarpTheme};
 use warpui::elements::{
     Align, Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty,
@@ -54,34 +54,32 @@ use warpui::text_layout::TextStyle;
 use warpui::ui_components::components::UiComponent;
 use warpui::{AppContext, Element, SingletonEntity, View, ViewContext};
 
+use super::secret_redaction::SecretRedactionState;
+use super::{
+    AIBlock, AIBlockAction, DISPATCHED_REQUESTED_EDIT_KEYMAP_CONTEXT, HAS_PENDING_ACTION,
+    RICH_CONTENT_SECRET_FIRST_CHAR_POSITION_ID, TextLocation, attachment_names,
+};
+use crate::ai::agent::{AIAgentCitation, AIAgentInput};
+use crate::ai::blocklist::block::DetectedLinksState;
+use crate::ai::blocklist::block::view_impl::comments::address_comment_chips;
+use crate::ai::blocklist::block::view_impl::header::{
+    OVERFLOW_BUTTON_SIZE, render_overflow_menu_button,
+};
+use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
 use crate::ai::blocklist::inline_action::inline_action_icons::icon_size;
 use crate::ai::blocklist::model::AIBlockModelHelper;
 use crate::appearance::Appearance;
-use crate::settings::{AISettings, InputModeSettings, InputSettings};
-
-use super::secret_redaction::SecretRedactionState;
-use super::{
-    attachment_names, AIBlock, AIBlockAction, TextLocation,
-    DISPATCHED_REQUESTED_EDIT_KEYMAP_CONTEXT, HAS_PENDING_ACTION,
-    RICH_CONTENT_SECRET_FIRST_CHAR_POSITION_ID,
-};
-use crate::ai::agent::{AIAgentCitation, AIAgentInput};
-use crate::ai::blocklist::block::view_impl::comments::address_comment_chips;
-use crate::ai::blocklist::block::view_impl::header::{
-    render_overflow_menu_button, OVERFLOW_BUTTON_SIZE,
-};
-use crate::ai::blocklist::block::DetectedLinksState;
-use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::settings::{AISettings, InputModeSettings, InputSettings};
 use crate::settings_view::SettingsSection;
+use crate::terminal::TerminalView;
 use crate::terminal::block_list_element::BlockListMenuSource;
 use crate::terminal::grid_renderer::URL_COLOR;
+use crate::terminal::model::ObfuscateSecrets;
 use crate::terminal::model::blocks::{BlockHeightItem, RemovableBlocklistItem, RichContentItem};
 use crate::terminal::model::rich_content::RichContentType;
-use crate::terminal::model::ObfuscateSecrets;
 use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
 use crate::terminal::view::TerminalAction;
-use crate::terminal::TerminalView;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
 use crate::util::link_detection::DetectedLinkType;
@@ -171,72 +169,71 @@ fn add_highlights_to_text(
         Highlight::new().with_text_style(TextStyle::new().with_foreground_color(*URL_COLOR));
     let mut highlighted_ranges = vec![];
 
-    if let Some(open_secret_tooltip) = &secret_redaction_state.open_tooltip_location() {
-        if open_secret_tooltip.location == location {
-            text_element = text_element.with_saved_char_position(
-                open_secret_tooltip.secret_range.char_range.start,
-                RICH_CONTENT_SECRET_FIRST_CHAR_POSITION_ID.to_owned(),
-            );
-        }
+    if let Some(open_secret_tooltip) = &secret_redaction_state.open_tooltip_location()
+        && open_secret_tooltip.location == location
+    {
+        text_element = text_element.with_saved_char_position(
+            open_secret_tooltip.secret_range.char_range.start,
+            RICH_CONTENT_SECRET_FIRST_CHAR_POSITION_ID.to_owned(),
+        );
     }
 
     // Add gray + strikethrough styling for all detected secrets when in strikethrough mode
-    if let Some(detected_secrets) = secret_redaction_state.secrets_for_location(&location) {
-        if matches!(
+    if let Some(detected_secrets) = secret_redaction_state.secrets_for_location(&location)
+        && matches!(
             get_secret_obfuscation_mode(app),
             ObfuscateSecrets::Strikethrough
-        ) {
-            for secret_range in detected_secrets.detected_secrets.keys() {
-                // Skip gray styling if this secret is currently hovered or has tooltip open
-                if !secret_redaction_state.is_hovered(&location, secret_range)
-                    && !secret_redaction_state.has_open_tooltip(&location, secret_range)
-                {
-                    let highlight_indices = secret_range.char_range.clone().collect_vec();
-                    if highlight_indices.is_empty() {
-                        continue;
-                    }
-                    highlighted_ranges.push(HighlightedRange {
-                        highlight: create_secret_gray_highlight(),
-                        highlight_indices,
-                    });
+        )
+    {
+        for secret_range in detected_secrets.detected_secrets.keys() {
+            // Skip gray styling if this secret is currently hovered or has tooltip open
+            if !secret_redaction_state.is_hovered(&location, secret_range)
+                && !secret_redaction_state.has_open_tooltip(&location, secret_range)
+            {
+                let highlight_indices = secret_range.char_range.clone().collect_vec();
+                if highlight_indices.is_empty() {
+                    continue;
                 }
+                highlighted_ranges.push(HighlightedRange {
+                    highlight: create_secret_gray_highlight(),
+                    highlight_indices,
+                });
             }
         }
     }
 
     // If we have an open tooltip, that secret should be highlighted.
-    if let Some(open_secret_tooltip) = &secret_redaction_state.open_tooltip_location() {
-        if open_secret_tooltip.location == location {
-            let highlight_indices = open_secret_tooltip
-                .secret_range
-                .char_range
-                .clone()
-                .collect_vec();
-            if !highlight_indices.is_empty() {
-                highlighted_ranges.push(HighlightedRange {
-                    highlight: secret_hover_click_highlight,
-                    highlight_indices,
-                });
-            }
+    if let Some(open_secret_tooltip) = &secret_redaction_state.open_tooltip_location()
+        && open_secret_tooltip.location == location
+    {
+        let highlight_indices = open_secret_tooltip
+            .secret_range
+            .char_range
+            .clone()
+            .collect_vec();
+        if !highlight_indices.is_empty() {
+            highlighted_ranges.push(HighlightedRange {
+                highlight: secret_hover_click_highlight,
+                highlight_indices,
+            });
         }
     }
     // Also highlight any currently hovered secret if it's different.
-    if let Some(currently_hovered_secret) = &secret_redaction_state.hovered_location() {
-        if currently_hovered_secret.location == location
-            && secret_redaction_state.hovered_location()
-                != secret_redaction_state.open_tooltip_location()
-        {
-            let highlight_indices = currently_hovered_secret
-                .secret_range
-                .char_range
-                .clone()
-                .collect_vec();
-            if !highlight_indices.is_empty() {
-                highlighted_ranges.push(HighlightedRange {
-                    highlight: secret_hover_click_highlight,
-                    highlight_indices,
-                });
-            }
+    if let Some(currently_hovered_secret) = &secret_redaction_state.hovered_location()
+        && currently_hovered_secret.location == location
+        && secret_redaction_state.hovered_location()
+            != secret_redaction_state.open_tooltip_location()
+    {
+        let highlight_indices = currently_hovered_secret
+            .secret_range
+            .char_range
+            .clone()
+            .collect_vec();
+        if !highlight_indices.is_empty() {
+            highlighted_ranges.push(HighlightedRange {
+                highlight: secret_hover_click_highlight,
+                highlight_indices,
+            });
         }
     }
 
@@ -247,35 +244,33 @@ fn add_highlights_to_text(
 
         // Link highlighting.
         // If we have an open tooltip, that link should be highlighted.
-        if let Some(open_link_tooltip) = &detected_links_state.link_location_open_tooltip {
-            if open_link_tooltip.location == location {
-                let highlight_indices = open_link_tooltip.link_range.clone().collect_vec();
-                if !highlight_indices.is_empty() {
-                    highlighted_ranges.push(HighlightedRange {
-                        highlight: link_highlight,
-                        highlight_indices,
-                    });
-                }
-                text_element = text_element.with_saved_char_position(
-                    open_link_tooltip.link_range.start,
-                    detected_links_state.resolved_tooltip_position_id(),
-                );
+        if let Some(open_link_tooltip) = &detected_links_state.link_location_open_tooltip
+            && open_link_tooltip.location == location
+        {
+            let highlight_indices = open_link_tooltip.link_range.clone().collect_vec();
+            if !highlight_indices.is_empty() {
+                highlighted_ranges.push(HighlightedRange {
+                    highlight: link_highlight,
+                    highlight_indices,
+                });
             }
+            text_element = text_element.with_saved_char_position(
+                open_link_tooltip.link_range.start,
+                detected_links_state.resolved_tooltip_position_id(),
+            );
         }
         // Also highlight any currently hovered link if it's different.
         if let Some(currently_hovered_link) = &detected_links_state.currently_hovered_link_location
+            && currently_hovered_link.location == location
+            && detected_links_state.currently_hovered_link_location
+                != detected_links_state.link_location_open_tooltip
         {
-            if currently_hovered_link.location == location
-                && detected_links_state.currently_hovered_link_location
-                    != detected_links_state.link_location_open_tooltip
-            {
-                let highlight_indices = currently_hovered_link.link_range.clone().collect_vec();
-                if !highlight_indices.is_empty() {
-                    highlighted_ranges.push(HighlightedRange {
-                        highlight: link_highlight,
-                        highlight_indices,
-                    });
-                }
+            let highlight_indices = currently_hovered_link.link_range.clone().collect_vec();
+            if !highlight_indices.is_empty() {
+                highlighted_ranges.push(HighlightedRange {
+                    highlight: link_highlight,
+                    highlight_indices,
+                });
             }
         }
 
@@ -477,21 +472,19 @@ pub(crate) fn add_highlights_to_rich_text(
                             link_highlight_location = None;
                         }
 
-                        if let Some(link_location) = link_highlight_location {
-                            if link_location.location == location
-                                && link_location.link_range == *range
-                            {
-                                let hover_highlight =
-                                    if matches!(link.link, DetectedLinkType::Url(_)) {
-                                        url_hover_click_highlight
-                                    } else {
-                                        file_hover_click_highlight
-                                    };
-                                return Some(HighlightedRange {
-                                    highlight_indices,
-                                    highlight: hover_highlight,
-                                });
-                            }
+                        if let Some(link_location) = link_highlight_location
+                            && link_location.location == location
+                            && link_location.link_range == *range
+                        {
+                            let hover_highlight = if matches!(link.link, DetectedLinkType::Url(_)) {
+                                url_hover_click_highlight
+                            } else {
+                                file_hover_click_highlight
+                            };
+                            return Some(HighlightedRange {
+                                highlight_indices,
+                                highlight: hover_highlight,
+                            });
                         }
 
                         if matches!(link.link, DetectedLinkType::Url(_)) {
@@ -506,47 +499,27 @@ pub(crate) fn add_highlights_to_rich_text(
                     .collect_vec();
             }
 
-            if let Some(open_link_tooltip) = &detected_links_state.link_location_open_tooltip {
-                if open_link_tooltip.location == location {
-                    formatted_text_element = formatted_text_element.with_saved_glyph_position(
-                        open_link_tooltip.link_range.start,
-                        i,
-                        detected_links_state.resolved_tooltip_position_id(),
-                    );
-                }
-            }
-        }
-
-        if let Some(open_secret_tooltip) = &secret_redaction_state.open_tooltip_location() {
-            if open_secret_tooltip.location == location {
-                formatted_text_element = formatted_text_element.with_saved_glyph_position(
-                    open_secret_tooltip.secret_range.char_range.start,
-                    i,
-                    RICH_CONTENT_SECRET_FIRST_CHAR_POSITION_ID.to_owned(),
-                );
-                if !is_selecting {
-                    let highlight_indices = open_secret_tooltip
-                        .secret_range
-                        .char_range
-                        .clone()
-                        .collect_vec();
-                    if !highlight_indices.is_empty() {
-                        style_ranges.push(HighlightedRange {
-                            highlight_indices,
-                            highlight: secret_hover_click_highlight,
-                        });
-                    }
-                }
-            }
-        }
-
-        // Also highlight any currently hovered secret if it's different.
-        if let Some(currently_hovered_secret) = &secret_redaction_state.hovered_location() {
-            if currently_hovered_secret.location == location
-                && secret_redaction_state.hovered_location()
-                    != secret_redaction_state.open_tooltip_location()
+            if let Some(open_link_tooltip) = &detected_links_state.link_location_open_tooltip
+                && open_link_tooltip.location == location
             {
-                let highlight_indices = currently_hovered_secret
+                formatted_text_element = formatted_text_element.with_saved_glyph_position(
+                    open_link_tooltip.link_range.start,
+                    i,
+                    detected_links_state.resolved_tooltip_position_id(),
+                );
+            }
+        }
+
+        if let Some(open_secret_tooltip) = &secret_redaction_state.open_tooltip_location()
+            && open_secret_tooltip.location == location
+        {
+            formatted_text_element = formatted_text_element.with_saved_glyph_position(
+                open_secret_tooltip.secret_range.char_range.start,
+                i,
+                RICH_CONTENT_SECRET_FIRST_CHAR_POSITION_ID.to_owned(),
+            );
+            if !is_selecting {
+                let highlight_indices = open_secret_tooltip
                     .secret_range
                     .char_range
                     .clone()
@@ -560,26 +533,44 @@ pub(crate) fn add_highlights_to_rich_text(
             }
         }
 
+        // Also highlight any currently hovered secret if it's different.
+        if let Some(currently_hovered_secret) = &secret_redaction_state.hovered_location()
+            && currently_hovered_secret.location == location
+            && secret_redaction_state.hovered_location()
+                != secret_redaction_state.open_tooltip_location()
+        {
+            let highlight_indices = currently_hovered_secret
+                .secret_range
+                .char_range
+                .clone()
+                .collect_vec();
+            if !highlight_indices.is_empty() {
+                style_ranges.push(HighlightedRange {
+                    highlight_indices,
+                    highlight: secret_hover_click_highlight,
+                });
+            }
+        }
+
         // Add gray + strikethrough styling for all detected secrets in rich text
         if matches!(
             get_secret_obfuscation_mode(app),
             ObfuscateSecrets::Strikethrough
-        ) {
-            if let Some(detected_secrets) = secret_redaction_state.secrets_for_location(&location) {
-                for secret_range in detected_secrets.detected_secrets.keys() {
-                    // Skip gray styling if this secret is currently hovered or has tooltip open
-                    if !secret_redaction_state.is_hovered(&location, secret_range)
-                        && !secret_redaction_state.has_open_tooltip(&location, secret_range)
-                    {
-                        let highlight_indices = secret_range.char_range.clone().collect_vec();
-                        if highlight_indices.is_empty() {
-                            continue;
-                        }
-                        style_ranges.push(HighlightedRange {
-                            highlight: create_secret_gray_highlight(),
-                            highlight_indices,
-                        });
+        ) && let Some(detected_secrets) = secret_redaction_state.secrets_for_location(&location)
+        {
+            for secret_range in detected_secrets.detected_secrets.keys() {
+                // Skip gray styling if this secret is currently hovered or has tooltip open
+                if !secret_redaction_state.is_hovered(&location, secret_range)
+                    && !secret_redaction_state.has_open_tooltip(&location, secret_range)
+                {
+                    let highlight_indices = secret_range.char_range.clone().collect_vec();
+                    if highlight_indices.is_empty() {
+                        continue;
                     }
+                    style_ranges.push(HighlightedRange {
+                        highlight: create_secret_gray_highlight(),
+                        highlight_indices,
+                    });
                 }
             }
         }
@@ -943,137 +934,132 @@ impl View for AIBlock {
         } else {
             vec![]
         };
-        if should_render_query_and_header {
-            if let Some((
+        if should_render_query_and_header
+            && let Some((
                 query_for_display,
                 input_index,
                 query_prefix_highlight_len,
                 elements_below_query,
                 context_references,
             )) = query_and_index
-            {
-                let mut did_render_header = false;
-                if let Some(header) = header::render(
-                    header::Props {
-                        attached_blocks_chip_mouse_state: &self
-                            .state_handles
-                            .attached_blocks_chip_state_handle,
-                        overflow_menu_mouse_state: &self.state_handles.overflow_menu_handle,
-                        rewind_button: &self.rewind_button,
-                        num_attached_context_blocks: self.num_attached_context_blocks,
-                        has_attached_context_selected_text: self.has_attached_context_selected_text,
-                        directory_context: &self.directory_context,
-                        view_id: &self.view_id,
-                        exchange_id: &self.client_ids.client_exchange_id,
-                        conversation_id: &self.client_ids.conversation_id,
-                        is_selected_text_attached_as_context: self
-                            .context_model
-                            .as_ref(app)
-                            .pending_context_selected_text()
-                            .is_some(),
-                        is_restored: self.is_restored(),
-                    },
-                    app,
-                ) {
-                    // Only render the prompt "header" for blocks containing a user query (as opposed to a
-                    // requested command result).
-                    contents.add_child(header.with_content_item_spacing().finish());
-                    did_render_header = true;
-                }
-                // Derive the display info for the participant who initiated this exchange.
-                // For non-shared sessions, this is just the current user.
-                // For shared sessions, this is the user who initiated the request.
-                let (avatar_display_name, profile_image_path, avatar_color) = self
-                    .model
-                    .response_initiator(app)
-                    .and_then(|participant_id| {
-                        app.view_with_id::<TerminalView>(self.window_id, self.terminal_view_id)
-                            .and_then(|terminal_view| {
-                                terminal_view.read(app, |view, app| {
-                                    view.shared_session_presence_manager().and_then(move |pm| {
-                                        pm.as_ref(app).get_participant(&participant_id).map(
-                                            |participant| {
-                                                // Get the display info from the participant
-                                                // who sent this query.
-                                                (
-                                                    participant
-                                                        .info
-                                                        .profile_data
-                                                        .display_name
-                                                        .clone(),
-                                                    participant.info.profile_data.photo_url.clone(),
-                                                    Some(participant.color),
-                                                )
-                                            },
-                                        )
-                                    })
+        {
+            let mut did_render_header = false;
+            if let Some(header) = header::render(
+                header::Props {
+                    attached_blocks_chip_mouse_state: &self
+                        .state_handles
+                        .attached_blocks_chip_state_handle,
+                    overflow_menu_mouse_state: &self.state_handles.overflow_menu_handle,
+                    rewind_button: &self.rewind_button,
+                    num_attached_context_blocks: self.num_attached_context_blocks,
+                    has_attached_context_selected_text: self.has_attached_context_selected_text,
+                    directory_context: &self.directory_context,
+                    view_id: &self.view_id,
+                    exchange_id: &self.client_ids.client_exchange_id,
+                    conversation_id: &self.client_ids.conversation_id,
+                    is_selected_text_attached_as_context: self
+                        .context_model
+                        .as_ref(app)
+                        .pending_context_selected_text()
+                        .is_some(),
+                    is_restored: self.is_restored(),
+                },
+                app,
+            ) {
+                // Only render the prompt "header" for blocks containing a user query (as opposed to a
+                // requested command result).
+                contents.add_child(header.with_content_item_spacing().finish());
+                did_render_header = true;
+            }
+            // Derive the display info for the participant who initiated this exchange.
+            // For non-shared sessions, this is just the current user.
+            // For shared sessions, this is the user who initiated the request.
+            let (avatar_display_name, profile_image_path, avatar_color) = self
+                .model
+                .response_initiator(app)
+                .and_then(|participant_id| {
+                    app.view_with_id::<TerminalView>(self.window_id, self.terminal_view_id)
+                        .and_then(|terminal_view| {
+                            terminal_view.read(app, |view, app| {
+                                view.shared_session_presence_manager().and_then(move |pm| {
+                                    pm.as_ref(app).get_participant(&participant_id).map(
+                                        |participant| {
+                                            // Get the display info from the participant
+                                            // who sent this query.
+                                            (
+                                                participant.info.profile_data.display_name.clone(),
+                                                participant.info.profile_data.photo_url.clone(),
+                                                Some(participant.color),
+                                            )
+                                        },
+                                    )
                                 })
                             })
-                    })
-                    // Fallback to the current user's info if this is not a shared session
-                    // or the participant is not found.
-                    .unwrap_or((
-                        self.user_display_name.clone(),
-                        self.profile_image_path.clone(),
-                        None,
-                    ));
-                if let Some(rendered_query) = query::maybe_render(
-                    query::Props {
-                        user_display_name: &avatar_display_name,
-                        profile_image_path: profile_image_path.as_ref(),
-                        avatar_color,
-                        query_and_index: Some((&query_for_display, input_index)),
-                        query_prefix_highlight_len,
-                        detected_links_state: &self.detected_links_state,
-                        secret_redaction_state: &self.secret_redaction_state,
-                        is_selecting_text: self.state_handles.selection_handle.is_selecting(),
-                        is_ai_input_enabled: self
-                            .context_model
-                            .as_ref(app)
-                            .pending_context_selected_text()
-                            .is_some(),
-                        attachments: &attachment_name_list,
-                        context_references: &context_references,
-                        find_context: self.find_model.as_ref(app).is_find_bar_open().then_some(
-                            FindContext {
-                                model: self.find_model.as_ref(app),
-                                state: &self.find_state,
-                            },
-                        ),
-                    },
-                    app,
-                ) {
-                    if did_render_header {
-                        contents.add_child(rendered_query.with_content_item_spacing().finish());
-                    } else {
-                        // The query element is designed to be exactly icon_size() height.
-                        let rendered_query_height = icon_size(app);
-                        let margin_bottom = (CONTENT_ITEM_VERTICAL_MARGIN
-                            - (OVERFLOW_BUTTON_SIZE - rendered_query_height).max(0.))
-                        .max(0.);
-                        contents.add_child(
-                            Flex::row()
-                                .with_cross_axis_alignment(CrossAxisAlignment::Start)
-                                .with_child(Expanded::new(1., rendered_query).finish())
-                                .with_child(render_overflow_menu_button(
-                                    self.state_handles.overflow_menu_handle.clone(),
-                                    self.view_id,
-                                    self.client_ids.client_exchange_id,
-                                    self.client_ids.conversation_id,
-                                    self.is_restored(),
-                                    app,
-                                ))
-                                .finish()
-                                .with_content_item_spacing()
-                                .with_margin_bottom(margin_bottom)
-                                .finish(),
-                        );
-                    }
+                        })
+                })
+                // Fallback to the current user's info if this is not a shared session
+                // or the participant is not found.
+                .unwrap_or((
+                    self.user_display_name.clone(),
+                    self.profile_image_path.clone(),
+                    None,
+                ));
+            if let Some(rendered_query) = query::maybe_render(
+                query::Props {
+                    user_display_name: &avatar_display_name,
+                    profile_image_path: profile_image_path.as_ref(),
+                    avatar_color,
+                    query_and_index: Some((&query_for_display, input_index)),
+                    query_prefix_highlight_len,
+                    detected_links_state: &self.detected_links_state,
+                    secret_redaction_state: &self.secret_redaction_state,
+                    is_selecting_text: self.state_handles.selection_handle.is_selecting(),
+                    is_ai_input_enabled: self
+                        .context_model
+                        .as_ref(app)
+                        .pending_context_selected_text()
+                        .is_some(),
+                    attachments: &attachment_name_list,
+                    context_references: &context_references,
+                    find_context: self.find_model.as_ref(app).is_find_bar_open().then_some(
+                        FindContext {
+                            model: self.find_model.as_ref(app),
+                            state: &self.find_state,
+                        },
+                    ),
+                },
+                app,
+            ) {
+                if did_render_header {
+                    contents.add_child(rendered_query.with_content_item_spacing().finish());
+                } else {
+                    // The query element is designed to be exactly icon_size() height.
+                    let rendered_query_height = icon_size(app);
+                    let margin_bottom = (CONTENT_ITEM_VERTICAL_MARGIN
+                        - (OVERFLOW_BUTTON_SIZE - rendered_query_height).max(0.))
+                    .max(0.);
+                    contents.add_child(
+                        Flex::row()
+                            .with_cross_axis_alignment(CrossAxisAlignment::Start)
+                            .with_child(Expanded::new(1., rendered_query).finish())
+                            .with_child(render_overflow_menu_button(
+                                self.state_handles.overflow_menu_handle.clone(),
+                                self.view_id,
+                                self.client_ids.client_exchange_id,
+                                self.client_ids.conversation_id,
+                                self.is_restored(),
+                                app,
+                            ))
+                            .finish()
+                            .with_content_item_spacing()
+                            .with_margin_bottom(margin_bottom)
+                            .finish(),
+                    );
                 }
+            }
 
-                if let Some(element) = elements_below_query {
-                    contents.add_child(element.with_agent_output_item_spacing(app).finish());
-                }
+            if let Some(element) = elements_below_query {
+                contents.add_child(element.with_agent_output_item_spacing(app).finish());
             }
         }
 

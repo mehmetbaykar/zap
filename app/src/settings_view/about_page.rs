@@ -11,12 +11,12 @@ use warpui::ui_components::switch::SwitchStateHandle;
 use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
 use super::settings_page::{
-    render_body_item, MatchData, PageType, SettingsPageEvent, SettingsPageMeta,
-    SettingsPageViewHandle, SettingsWidget,
+    MatchData, PageType, SettingsPageEvent, SettingsPageMeta, SettingsPageViewHandle,
+    SettingsWidget, render_body_item,
 };
 use super::{LocalOnlyIconState, SettingsSection, ToggleState};
 use crate::appearance::Appearance;
-use crate::autoupdate::{self, github, AutoupdateStage, AutoupdateState};
+use crate::autoupdate::{self, AutoupdateStage, AutoupdateState, github};
 use crate::channel::ChannelState;
 use crate::report_if_error;
 use crate::settings::AutoupdateSettings;
@@ -70,9 +70,11 @@ impl TypedActionView for AboutPageView {
         match action {
             AboutPageAction::ToggleAutomaticUpdates => {
                 AutoupdateSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .automatic_updates_enabled
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .automatic_updates_enabled
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 ctx.notify();
             }

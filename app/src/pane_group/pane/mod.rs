@@ -35,30 +35,10 @@ pub mod workflow_pane;
 use std::any::Any;
 use std::fmt::Display;
 
-use crate::pane_group::focus_state::PaneFocusHandle;
-use crate::pane_group::pane::get_started_view::GetStartedView;
-use crate::server::network_log_view::NetworkLogView;
-use crate::sftp_manager::browser::SftpBrowserView;
-use crate::ssh_manager::server_view::SshServerView;
-use crate::view_components::action_button::ActionButton;
-use crate::{
-    ai::execution_profiles::editor::ExecutionProfileEditorView,
-    ai::{
-        ai_document_view::AIDocumentView, blocklist::inline_action::code_diff_view::CodeDiffView,
-        facts::AIFactView,
-    },
-    code::view::CodeView,
-    env_vars::view::env_var_collection::EnvVarCollectionView,
-    menu::MenuItem,
-    notebooks::{file::FileNotebookView, image::ImageViewerView, notebook::NotebookView},
-    settings::PaneSettings,
-    settings_view::SettingsView,
-    terminal::{available_shells::AvailableShell, TerminalView},
-    workflows::workflow_view::WorkflowView,
-};
 use serde::{Deserialize, Serialize};
 use url::Url;
-use warp_util::{local_or_remote_path::LocalOrRemotePath, remote_path::RemotePath};
+use warp_util::local_or_remote_path::LocalOrRemotePath;
+use warp_util::remote_path::RemotePath;
 use warpui::elements::{DispatchEventResult, EventHandler, MouseInBehavior};
 use warpui::presenter::ChildView;
 use warpui::{
@@ -68,6 +48,27 @@ use warpui::{
 
 pub use self::view::{PaneHeaderAction, PaneHeaderCustomAction, PaneView, PaneViewEvent};
 use super::{ActivationReason, LeafContents, PaneGroup, PaneGroupAction};
+use crate::ai::ai_document_view::AIDocumentView;
+use crate::ai::blocklist::inline_action::code_diff_view::CodeDiffView;
+use crate::ai::execution_profiles::editor::ExecutionProfileEditorView;
+use crate::ai::facts::AIFactView;
+use crate::code::view::CodeView;
+use crate::env_vars::view::env_var_collection::EnvVarCollectionView;
+use crate::menu::MenuItem;
+use crate::notebooks::file::FileNotebookView;
+use crate::notebooks::image::ImageViewerView;
+use crate::notebooks::notebook::NotebookView;
+use crate::pane_group::focus_state::PaneFocusHandle;
+use crate::pane_group::pane::get_started_view::GetStartedView;
+use crate::server::network_log_view::NetworkLogView;
+use crate::settings::PaneSettings;
+use crate::settings_view::SettingsView;
+use crate::sftp_manager::browser::SftpBrowserView;
+use crate::ssh_manager::server_view::SshServerView;
+use crate::terminal::TerminalView;
+use crate::terminal::available_shells::AvailableShell;
+use crate::view_components::action_button::ActionButton;
+use crate::workflows::workflow_view::WorkflowView;
 
 pub(super) fn init(app: &mut AppContext) {
     self::view::init(app);

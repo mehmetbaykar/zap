@@ -1,8 +1,8 @@
-use ui_components::{button, tooltip, Component as _, Options as _};
+use ui_components::{Component as _, Options as _, button, tooltip};
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::icons::Icon;
-use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors;
 use warpui_core::elements::{
     Border, ClippedScrollStateHandle, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
     Flex, FormattedTextElement, Hoverable, MainAxisSize, MouseStateHandle, ParentElement, Radius,

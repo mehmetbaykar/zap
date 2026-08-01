@@ -7,13 +7,13 @@
 //! Note: `rmcp::model::Tool` and `rmcp::model::Resource` (= `Annotated<RawResource>`)
 //! come from an upstream vendor crate; only their public construction paths (`Tool::new` / `RawResource::new`) are used here.
 
-use rmcp::model::{AnnotateAble, RawResource, Tool};
-use serde_json::json;
 use std::sync::Arc;
 
-use crate::ai::agent::{MCPContext, MCPServer};
+use rmcp::model::{AnnotateAble, RawResource, Tool};
+use serde_json::json;
 
 use super::{build_mcp_tool_defs, function_name};
+use crate::ai::agent::{MCPContext, MCPServer};
 
 /// Constructs an `rmcp::model::Tool` with a minimal input schema.
 fn mk_tool(name: &'static str, desc: &'static str) -> Tool {

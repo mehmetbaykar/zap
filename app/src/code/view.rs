@@ -1,92 +1,84 @@
-use crate::code::editor::scroll::ScrollPosition;
-use crate::code::editor::view::CodeEditorRenderOptions;
-use crate::code::editor_management::CodeEditorStatus;
-use crate::code::global_buffer_model::GlobalBufferModel;
-use crate::code::{ImmediateSaveError, SaveOutcome, SaveStatus};
-use crate::editor::InteractionState;
-use crate::input::Vector2F;
-use crate::pane_group::focus_state::PaneFocusHandle;
-use crate::pane_group::pane::view::header::components::{
-    render_pane_header_buttons, render_pane_header_title_text, render_three_column_header,
-    CenteredHeaderEdgeWidth,
-};
-use crate::pane_group::pane::view::header::render_pane_header_draggable;
-use crate::pane_group::{CodePane, PaneConfigurationEvent, PaneDragDropLocation, TabBarAxis};
-use crate::quit_warning::UnsavedStateSummary;
-use crate::server::telemetry::CodeContextDestination;
-use crate::terminal::cli_agent::{
-    build_selection_line_range_prompt, build_selection_substring_prompt,
-};
-use crate::terminal::view::CliAgentRouting;
-use crate::workspace::util::get_context_target_terminal_view;
-use crate::workspace::TabBarDropTargetData;
-use crate::{code::EditorTabBarDropTargetData, pane_group::pane::ActionOrigin};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
 use lsp::LspManagerModel;
 use pathfinder_color::ColorU;
 use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::vec2f;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use warp_core::channel::{Channel, ChannelState};
 use warp_core::features::FeatureFlag;
 use warp_core::ui::appearance::Appearance;
 use warp_core::ui::icons::ICON_DIMENSIONS;
 use warp_editor::render::element::VerticalExpansionBehavior;
 use warp_util::path::LineAndColumnArg;
-use warpui::elements::Rect;
-use warpui::fonts::Style;
-use warpui::text::point::Point;
-use warpui::text_layout::ClipConfig;
-
 #[cfg(feature = "local_fs")]
 use warpui::clipboard::ClipboardContent;
+use warpui::elements::{
+    AcceptedByDropTarget, Align, Border, ChildAnchor, ChildView, Clipped, ConstrainedBox,
+    Container, CornerRadius, CrossAxisAlignment, Draggable, DraggableState, DropTarget, Empty,
+    Expanded, Flex, Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle,
+    OffsetPositioning, Padding, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Rect,
+    SavePosition, Shrinkable, Stack, Text,
+};
+use warpui::fonts::{Properties, Style, Weight};
+use warpui::keymap::EditableBinding;
+use warpui::text::point::Point;
+use warpui::text_layout::ClipConfig;
+use warpui::ui_components::button::ButtonVariant;
+use warpui::ui_components::components::UiComponent;
 use warpui::{
-    elements::{
-        AcceptedByDropTarget, Align, Border, ChildAnchor, ChildView, Clipped, ConstrainedBox,
-        Container, CornerRadius, CrossAxisAlignment, Draggable, DraggableState, DropTarget, Empty,
-        Expanded, Flex, Hoverable, MainAxisAlignment, MainAxisSize, MouseStateHandle,
-        OffsetPositioning, Padding, ParentAnchor, ParentElement, ParentOffsetBounds, Radius,
-        SavePosition, Shrinkable, Stack, Text,
-    },
-    fonts::{Properties, Weight},
-    id,
-    keymap::EditableBinding,
-    ui_components::{button::ButtonVariant, components::UiComponent},
     AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
-    ViewContext, ViewHandle, WindowId,
+    ViewContext, ViewHandle, WindowId, id,
 };
 
-use crate::{
-    menu::{MenuItem, MenuItemFields},
-    notebooks::file::{is_markdown_file, renders_in_warp_notebook_viewer, MarkdownDisplayMode},
-    search::{files::icon::icon_from_file_path, ItemHighlightState},
-    tab::TAB_BAR_BORDER_HEIGHT,
-    ui_components::{blended_colors, buttons::icon_button},
-    view_components::{DismissibleToast, MarkdownToggleEvent, MarkdownToggleView},
-    workspace::{ActiveSession, ToastStack, WorkspaceAction},
-};
-
-use crate::pane_group::{
-    pane::{view, PaneHeaderAction},
-    BackingView, PaneConfiguration, PaneEvent,
-};
-
-use super::{
-    buffer_location::BufferLocation,
-    diff_viewer::DiffViewer,
-    editor::view::{CodeEditorEvent, CodeEditorView},
-    editor_management::{CodeManager, CodeSource},
-    local_code_editor::{LocalCodeEditorEvent, LocalCodeEditorView, ShowFindReferencesCard},
-};
-
-use crate::settings::CodeSettings;
-use crate::{send_telemetry_from_ctx, TelemetryEvent};
-
+use super::buffer_location::BufferLocation;
+use super::diff_viewer::DiffViewer;
+use super::editor::view::{CodeEditorEvent, CodeEditorView};
+use super::editor_management::{CodeManager, CodeSource};
+use super::local_code_editor::{LocalCodeEditorEvent, LocalCodeEditorView, ShowFindReferencesCard};
+use crate::code::editor::scroll::ScrollPosition;
+use crate::code::editor::view::CodeEditorRenderOptions;
+use crate::code::editor_management::CodeEditorStatus;
+use crate::code::global_buffer_model::GlobalBufferModel;
+use crate::code::{EditorTabBarDropTargetData, ImmediateSaveError, SaveOutcome, SaveStatus};
+use crate::editor::InteractionState;
+use crate::input::Vector2F;
+use crate::menu::{MenuItem, MenuItemFields};
 // Read-only rendered Markdown preview for remote files reuses the notebook rich-text
 // machinery. `RichTextEditorView` is referenced by the always-present `TabData` field, so
 // it must be in scope unconditionally; the construction helpers are only used on the
 // `local_fs` toggle path.
 use crate::notebooks::editor::view::RichTextEditorView;
+use crate::notebooks::file::{
+    MarkdownDisplayMode, is_markdown_file, renders_in_warp_notebook_viewer,
+};
+use crate::pane_group::focus_state::PaneFocusHandle;
+use crate::pane_group::pane::view::header::components::{
+    CenteredHeaderEdgeWidth, render_pane_header_buttons, render_pane_header_title_text,
+    render_three_column_header,
+};
+use crate::pane_group::pane::view::header::render_pane_header_draggable;
+use crate::pane_group::pane::{ActionOrigin, PaneHeaderAction, view};
+use crate::pane_group::{
+    BackingView, CodePane, PaneConfiguration, PaneConfigurationEvent, PaneDragDropLocation,
+    PaneEvent, TabBarAxis,
+};
+use crate::quit_warning::UnsavedStateSummary;
+use crate::search::ItemHighlightState;
+use crate::search::files::icon::icon_from_file_path;
+use crate::server::telemetry::CodeContextDestination;
+use crate::settings::CodeSettings;
+use crate::tab::TAB_BAR_BORDER_HEIGHT;
+use crate::terminal::cli_agent::{
+    build_selection_line_range_prompt, build_selection_substring_prompt,
+};
+use crate::terminal::view::CliAgentRouting;
+use crate::ui_components::blended_colors;
+use crate::ui_components::buttons::icon_button;
+use crate::view_components::{DismissibleToast, MarkdownToggleEvent, MarkdownToggleView};
+use crate::workspace::util::get_context_target_terminal_view;
+use crate::workspace::{ActiveSession, TabBarDropTargetData, ToastStack, WorkspaceAction};
+use crate::{TelemetryEvent, send_telemetry_from_ctx};
 #[cfg(feature = "local_fs")]
 use crate::{
     notebooks::{
@@ -520,15 +512,15 @@ impl CodeView {
 
     /// If a tab is a preview, promote it and emit "FileOpened"
     fn promote_if_preview(&mut self, ctx: &mut ViewContext<Self>) {
-        if let Some(tab) = self.tab_group.get_mut(self.active_tab_index) {
-            if tab.preview {
-                tab.preview = false;
-                self.set_title_after_content_update(ctx);
-                self.update_tab_bar_state(ctx);
-                self.focus_contents(ctx);
-                send_telemetry_from_ctx!(TelemetryEvent::PreviewPanePromoted, ctx);
-                ctx.notify();
-            }
+        if let Some(tab) = self.tab_group.get_mut(self.active_tab_index)
+            && tab.preview
+        {
+            tab.preview = false;
+            self.set_title_after_content_update(ctx);
+            self.update_tab_bar_state(ctx);
+            self.focus_contents(ctx);
+            send_telemetry_from_ctx!(TelemetryEvent::PreviewPanePromoted, ctx);
+            ctx.notify();
         }
     }
 
@@ -731,14 +723,14 @@ impl CodeView {
                 // Once the remote buffer's initial content arrives, release the
                 // edit lock imposed during loading. Local files are editable from
                 // creation and are never locked, so this is a no-op for them.
-                if let Some(tab) = me.tab_group.iter().find(|tab| tab.editor_view == emitter) {
-                    if matches!(tab.location, Some(BufferLocation::Remote(_))) {
-                        emitter.update(ctx, |local_editor, ctx| {
-                            local_editor.editor().update(ctx, |code_editor, ctx| {
-                                code_editor.set_interaction_state(InteractionState::Editable, ctx);
-                            });
+                if let Some(tab) = me.tab_group.iter().find(|tab| tab.editor_view == emitter)
+                    && matches!(tab.location, Some(BufferLocation::Remote(_)))
+                {
+                    emitter.update(ctx, |local_editor, ctx| {
+                        local_editor.editor().update(ctx, |code_editor, ctx| {
+                            code_editor.set_interaction_state(InteractionState::Editable, ctx);
                         });
-                    }
+                    });
                 }
                 me.pane_configuration.update(ctx, |pane_config, ctx| {
                     pane_config.refresh_pane_header_overflow_menu_items(ctx);
@@ -1529,12 +1521,11 @@ impl CodeView {
                     if is_clearing_group {
                         let unsaved_indices = self.unsaved_indices(ctx);
                         for &unsaved_index in &unsaved_indices {
-                            if let Some(tab) = self.tab_group.get(unsaved_index) {
-                                if tab.editor_view.as_ref(ctx).file_id().is_some() {
-                                    tab.editor_view.update(ctx, |editor, _| {
-                                        editor.mark_next_save_as_auto_save()
-                                    });
-                                }
+                            if let Some(tab) = self.tab_group.get(unsaved_index)
+                                && tab.editor_view.as_ref(ctx).file_id().is_some()
+                            {
+                                tab.editor_view
+                                    .update(ctx, |editor, _| editor.mark_next_save_as_auto_save());
                             }
                         }
                         self.clear_tab_group_with_intent(
@@ -1610,16 +1601,15 @@ impl CodeView {
         // indirect reference to the buffer). Otherwise the remote buffer would
         // reuse stale state with unsaved edits on next open, creating the false
         // impression that it was "already saved". See `GlobalBufferModel::close_buffer`.
-        if close_buffer {
-            if let Some(file_id) = self
+        if close_buffer
+            && let Some(file_id) = self
                 .tab_group
                 .get(index)
                 .and_then(|tab| tab.editor_view.as_ref(ctx).file_id())
-            {
-                GlobalBufferModel::handle(ctx).update(ctx, |model, ctx| {
-                    model.close_buffer(file_id, ctx);
-                });
-            }
+        {
+            GlobalBufferModel::handle(ctx).update(ctx, |model, ctx| {
+                model.close_buffer(file_id, ctx);
+            });
         }
 
         self.tab_group.remove(index);
@@ -2221,23 +2211,22 @@ impl CodeView {
                             .mouse_state_handles
                             .tab_draggable_state
                             .is_dragging()
+                        && let Some(path) = tab_data.path.clone()
                     {
-                        if let Some(path) = tab_data.path.clone() {
-                            let tooltip = appearance
-                                .ui_builder()
-                                .tool_tip(Self::relative_path(path, self.window_id, app))
-                                .build()
-                                .finish();
-                            stack.add_positioned_overlay_child(
-                                tooltip,
-                                OffsetPositioning::offset_from_parent(
-                                    vec2f(10., -1.),
-                                    ParentOffsetBounds::Unbounded,
-                                    ParentAnchor::BottomLeft,
-                                    ChildAnchor::TopLeft,
-                                ),
-                            );
-                        }
+                        let tooltip = appearance
+                            .ui_builder()
+                            .tool_tip(Self::relative_path(path, self.window_id, app))
+                            .build()
+                            .finish();
+                        stack.add_positioned_overlay_child(
+                            tooltip,
+                            OffsetPositioning::offset_from_parent(
+                                vec2f(10., -1.),
+                                ParentOffsetBounds::Unbounded,
+                                ParentAnchor::BottomLeft,
+                                ChildAnchor::TopLeft,
+                            ),
+                        );
                     }
 
                     stack.finish()
@@ -2530,7 +2519,7 @@ impl CodeView {
             let renders_markdown_preview = match &local_path {
                 Some(path) => renders_in_warp_notebook_viewer(path),
                 None => active_location
-                    .map(|loc| is_markdown_file(&loc.language_path()))
+                    .map(|loc| is_markdown_file(loc.language_path()))
                     .unwrap_or(false),
             };
             if renders_markdown_preview {

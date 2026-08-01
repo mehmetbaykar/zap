@@ -1586,23 +1586,22 @@ impl View for AIContextMenu {
         stack.add_child(main_container);
 
         // Add details panel overlay if there's a selected result
-        if !matches!(self.state.navigation_state, NavigationState::MainMenu) {
-            if let (Some(selected_result_renderer), Some(details_panel_positioning)) = (
+        if !matches!(self.state.navigation_state, NavigationState::MainMenu)
+            && let (Some(selected_result_renderer), Some(details_panel_positioning)) = (
                 self.selected_result_renderer(app),
                 self.offset_positioning_for_details_panel(app),
-            ) {
-                if let Some(details) = selected_result_renderer.render_details(app) {
-                    // QueryResultRenderer already applies styling, padding, border, etc.
-                    // Just add some margin for spacing from the main menu
-                    stack.add_positioned_overlay_child(
-                        Container::new(details)
-                            .with_margin_bottom(DETAILS_PANEL_MARGIN)
-                            .with_margin_right(DETAILS_PANEL_MARGIN)
-                            .finish(),
-                        details_panel_positioning,
-                    );
-                }
-            }
+            )
+            && let Some(details) = selected_result_renderer.render_details(app)
+        {
+            // QueryResultRenderer already applies styling, padding, border, etc.
+            // Just add some margin for spacing from the main menu
+            stack.add_positioned_overlay_child(
+                Container::new(details)
+                    .with_margin_bottom(DETAILS_PANEL_MARGIN)
+                    .with_margin_right(DETAILS_PANEL_MARGIN)
+                    .finish(),
+                details_panel_positioning,
+            );
         }
 
         // Use proper keybinding handling instead of event handlers

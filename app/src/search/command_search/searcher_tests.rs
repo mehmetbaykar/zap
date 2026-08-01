@@ -3,14 +3,13 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use ordered_float::OrderedFloat;
-use warpui::elements::Empty;
 use warpui::r#async::Timer;
+use warpui::elements::Empty;
 use warpui::{App, AppContext, Element};
 
 use super::*;
 use crate::appearance::Appearance;
-use crate::auth::AuthManager;
-use crate::auth::AuthStateProvider;
+use crate::auth::{AuthManager, AuthStateProvider};
 use crate::search::command_search::history::history_data_source;
 use crate::search::command_search::searcher::CommandSearchMixer;
 use crate::search::data_source::{Query, QueryResult};
@@ -131,10 +130,12 @@ fn test_add_source_to_mixer() {
             );
         });
         app.read(|app| {
-            assert!(mixer
-                .as_ref(app)
-                .registered_filters()
-                .any(|filter| filter == QueryFilter::History));
+            assert!(
+                mixer
+                    .as_ref(app)
+                    .registered_filters()
+                    .any(|filter| filter == QueryFilter::History)
+            );
         });
     });
 }

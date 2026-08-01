@@ -28,8 +28,8 @@ use crate::persistence::{BlockCompleted, ModelEvent, PersistedDataScope, Persist
 use crate::server::ids::{ClientId, SyncId};
 use crate::server_time::ServerTimestamp;
 use crate::tab::SelectedTabColor;
-use crate::terminal::model::block::SerializedBlock;
 use crate::terminal::ShellLaunchData;
+use crate::terminal::model::block::SerializedBlock;
 use crate::themes::theme::AnsiColorIdentifier;
 use crate::workspace::tab_group::TabGroupId;
 

@@ -1,7 +1,7 @@
 //! Serde helpers for RRGGBBAA (8-digit hex) colors.
 //! Also accepts RRGGBB (6-digit hex), using alpha 255 (opaque).
 
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use warpui_core::color::ColorU;
 
 use super::OPAQUE;

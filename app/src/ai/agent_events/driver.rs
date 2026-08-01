@@ -1,16 +1,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use futures::future::Either;
 use futures::StreamExt;
+use futures::future::Either;
 use instant::Instant;
-use warp_errors::{register_error, report_error, AnyhowErrorExt as _, ErrorExt};
+use warp_errors::{AnyhowErrorExt as _, ErrorExt, register_error, report_error};
 use warpui::r#async::Timer;
 
 use crate::ai::agent_events::{AgentEventStreamClient, AgentRunEvent};
-use crate::server::retry_strategies::{is_transient_http_error, HttpStatusError};
+use crate::server::retry_strategies::{HttpStatusError, is_transient_http_error};
 
 // `HttpStatusError` used to live in the stripped cloud upload module, where this
 // registration classified request timeouts and rate limits as non-actionable.

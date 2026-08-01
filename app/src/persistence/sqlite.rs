@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::{fs, thread};
 
 use ai::project_context::model::ProjectRulePath;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use diesel::connection::{DefaultLoadingMode, SimpleConnection};
 use diesel::result::Error;
@@ -27,9 +27,9 @@ use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::Vector2F;
 use persistence::model::AMBIENT_AGENT_PANE_KIND;
 use uuid::Uuid;
+use warpui::AppContext;
 use warpui::platform::FullscreenState;
 use warpui::windowing::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
-use warpui::AppContext;
 
 use super::agent::{
     backfill_conversation_summaries, delete_agent_conversations, read_agent_conversation_metadata,
@@ -40,17 +40,17 @@ use super::block_list::{
     upsert_ai_query,
 };
 use super::model::{
-    self, ActiveMCPServer, CurrentUserInformation, MCPEnvironmentVariables, NewActiveMCPServer,
-    NewApp, NewCommand, NewFolder, NewNotebook, NewServerExperiment, NewTab, NewTabGroup, NewTeam,
+    self, AI_DOCUMENT_PANE_KIND, AI_FACT_PANE_KIND, ActiveMCPServer, CODE_PANE_KIND,
+    CurrentUserInformation, ENV_VAR_COLLECTION_PANE_KIND, EXECUTION_PROFILE_EDITOR_PANE_KIND,
+    MCP_SERVER_PANE_KIND, MCPEnvironmentVariables, NOTEBOOK_PANE_KIND, NewActiveMCPServer, NewApp,
+    NewCommand, NewFolder, NewNotebook, NewServerExperiment, NewTab, NewTabGroup, NewTeam,
     NewWindow, NewWorkspace, NewWorkspaceMetadata, NewWorkspaceTeam, ObjectMetadata,
-    ObjectPermissions, Project, Tab, TabGroup, Window, WorkspaceMetadata as WorkspaceMetadataModel,
-    AI_DOCUMENT_PANE_KIND, AI_FACT_PANE_KIND, CODE_PANE_KIND, ENV_VAR_COLLECTION_PANE_KIND,
-    EXECUTION_PROFILE_EDITOR_PANE_KIND, MCP_SERVER_PANE_KIND, NOTEBOOK_PANE_KIND,
-    SETTINGS_PANE_KIND, TERMINAL_PANE_KIND, WORKFLOW_PANE_KIND,
+    ObjectPermissions, Project, SETTINGS_PANE_KIND, TERMINAL_PANE_KIND, Tab, TabGroup,
+    WORKFLOW_PANE_KIND, Window, WorkspaceMetadata as WorkspaceMetadataModel,
 };
 use super::{
-    schema, BlockCompleted, CodeWorkspaceMetadata, FinishedCommandMetadata, ModelEvent,
-    PersistedData, PersistedDataScope, PersistenceScope, StartedCommandMetadata, WriterHandles,
+    BlockCompleted, CodeWorkspaceMetadata, FinishedCommandMetadata, ModelEvent, PersistedData,
+    PersistedDataScope, PersistenceScope, StartedCommandMetadata, WriterHandles, schema,
 };
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
@@ -70,18 +70,17 @@ use crate::app_state::{
     RightPanelSnapshot, SettingsPaneSnapshot, SplitDirection, TabGroupSnapshot, TabSnapshot,
     TerminalPaneSnapshot, WindowSnapshot, WorkflowPaneSnapshot,
 };
-use crate::auth::PersistedCurrentUserInformation;
-use crate::auth::UserUid;
+use crate::auth::{PersistedCurrentUserInformation, UserUid};
 use crate::cloud_object::model::actions::{ObjectAction, ObjectActionSubtype};
 use crate::cloud_object::model::generic_string_model::{GenericStringObjectId, StoredStringObject};
 use crate::cloud_object::{
-    JsonObjectType, NumInFlightRequests, ObjectIdType, ObjectType, Owner, Revision, StoredObject,
-    StoredObjectMetadata, StoredObjectPermissions, StoredObjectStatuses, StoredObjectSyncStatus,
-    GENERIC_STRING_OBJECT_PREFIX, JSON_OBJECT_PREFIX,
+    GENERIC_STRING_OBJECT_PREFIX, JSON_OBJECT_PREFIX, JsonObjectType, NumInFlightRequests,
+    ObjectIdType, ObjectType, Owner, Revision, StoredObject, StoredObjectMetadata,
+    StoredObjectPermissions, StoredObjectStatuses, StoredObjectSyncStatus,
 };
 use crate::code::editor_management::CodeSource;
-use crate::drive::folders::{FolderId, FolderObject, FolderObjectModel};
 use crate::drive::ZapDriveObjectSettings;
+use crate::drive::folders::{FolderId, FolderObject, FolderObjectModel};
 use crate::env_vars::{EnvVarCollectionObject, EnvVarCollectionObjectModel};
 use crate::features::FeatureFlag;
 use crate::notebooks::{NotebookId, NotebookObject, NotebookObjectModel};
@@ -89,10 +88,10 @@ use crate::persistence::block_list::{
     get_all_restored_blocks, process_ai_queries_for_nld_history_match,
     process_ai_queries_for_uparrow_prompt, read_recent_ai_queries,
 };
-use crate::persistence::cloud_objects::{upsert_stored_object, StoredObjectId};
+use crate::persistence::cloud_objects::{StoredObjectId, upsert_stored_object};
 use crate::persistence::model::{
-    NewGenericStringObject, NewPersistedObjectAction, NewTeamSettings, ProjectRules, UserProfile,
-    CODE_REVIEW_PANE_KIND, GET_STARTED_PANE_KIND,
+    CODE_REVIEW_PANE_KIND, GET_STARTED_PANE_KIND, NewGenericStringObject, NewPersistedObjectAction,
+    NewTeamSettings, ProjectRules, UserProfile,
 };
 use crate::server::experiments::ServerExperiment;
 use crate::server::ids::{ClientId, HashableId, ServerId, SyncId, ToServerId};
@@ -102,14 +101,14 @@ use crate::settings::cloud_preferences::{PreferenceObject, PreferenceObjectModel
 use crate::settings_view::SettingsSection;
 use crate::suggestions::ignored_suggestions_model::SuggestionType;
 use crate::tab::SelectedTabColor;
-use crate::terminal::history::PersistedCommand;
 use crate::terminal::ShellLaunchData;
+use crate::terminal::history::PersistedCommand;
 use crate::themes::theme::AnsiColorIdentifier;
 use crate::workflows::workflow_enum::{WorkflowEnumObject, WorkflowEnumObjectModel};
 use crate::workflows::{WorkflowId, WorkflowObject, WorkflowObjectModel};
 use crate::workspace::tab_group::TabGroupId;
 use crate::workspaces::team::Team as TeamMetadata;
-use crate::workspaces::user_profiles::{user_profile_from_persistence, UserProfileWithUID};
+use crate::workspaces::user_profiles::{UserProfileWithUID, user_profile_from_persistence};
 use crate::workspaces::workspace::{Workspace as WorkspaceMetadata, WorkspaceUid};
 use crate::{report_error, report_if_error, safe_info, send_telemetry_from_app_ctx};
 
@@ -181,17 +180,17 @@ pub fn prewarm_db_in_background() {
                     "SQLite prewarm completed in {elapsed_ms} ms (success={})",
                     result.is_ok()
                 );
-                if let Some(cell) = PREWARMED_DB.get() {
-                    if let Ok(mut guard) = cell.lock() {
-                        // Transition to Done. Both the Pending and Joining states need to have the
-                        // result written. If the main thread has already Taken (should not happen),
-                        // discard the connection.
-                        match *guard {
-                            PrewarmState::Pending(_) | PrewarmState::Joining => {
-                                *guard = PrewarmState::Done(result);
-                            }
-                            _ => {}
+                if let Some(cell) = PREWARMED_DB.get()
+                    && let Ok(mut guard) = cell.lock()
+                {
+                    // Transition to Done. Both the Pending and Joining states need to have the
+                    // result written. If the main thread has already Taken (should not happen),
+                    // discard the connection.
+                    match *guard {
+                        PrewarmState::Pending(_) | PrewarmState::Joining => {
+                            *guard = PrewarmState::Done(result);
                         }
+                        _ => {}
                     }
                 }
             });
@@ -320,10 +319,12 @@ pub fn initialize(
                 let backfills = std::mem::take(&mut persisted_data.conversation_summary_backfills);
                 if !backfills.is_empty() {
                     log::info!("Backfilling {} conversation summaries", backfills.len());
-                    report_if_error!(writer_handles
-                        .sender
-                        .send(ModelEvent::BackfillConversationSummaries { backfills })
-                        .context("Error requesting conversation summary backfill"));
+                    report_if_error!(
+                        writer_handles
+                            .sender
+                            .send(ModelEvent::BackfillConversationSummaries { backfills })
+                            .context("Error requesting conversation summary backfill")
+                    );
                 }
             }
 
@@ -397,66 +398,68 @@ fn establish_connection(database_url: &str, read_only: bool) -> Result<SqliteCon
 /// ## Safety
 /// Setting up SQLite logging is not thread-safe. No other SQLite calls may be made while this
 /// function is running.
-unsafe fn init_logging() { unsafe {
-    use std::ffi::{c_char, c_int, c_void, CStr};
-    use std::{panic, ptr};
+unsafe fn init_logging() {
+    unsafe {
+        use std::ffi::{CStr, c_char, c_int, c_void};
+        use std::{panic, ptr};
 
-    extern "C-unwind" fn log_callback(_data: *mut c_void, err_code: c_int, msg: *const c_char) {
-        // `err_code` is an extended error code (https://www.sqlite.org/rescode.html#primary_result_codes_versus_extended_result_codes).
-        // In general, the least-significant byte of an extended error code is the primary error
-        // code it belongs to. Each primary error code can also be used where an extended error
-        // code is expected (for example, `SQLITE_SCHEMA` has no extended error codes).
-        let primary_error_code = err_code & 0xFF;
-        let level = match (primary_error_code, err_code) {
-            // This usually means that a schema change invalidated a prepared statement.
-            (sqlite3::SQLITE_SCHEMA, _) => log::Level::Debug,
-            // These are used with sqlite3_log, in extensions.
-            (sqlite3::SQLITE_NOTICE | sqlite3::SQLITE_WARNING, _) => log::Level::Warn,
-            // According to the docs, this error means that the database file was moved (or deleted),
-            // so SQLite can't safely modify it and the rollback journal:
-            //     https://www.sqlite.org/rescode.html#readonly_dbmoved
-            // This is mostly outside of Zap's control (e.g. the user or some system program is
-            // moving around files in the user data directory), so downgrade to a warning.
-            (_, sqlite3::SQLITE_READONLY_DBMOVED) => log::Level::Warn,
-            _ => log::Level::Error,
-        };
+        extern "C-unwind" fn log_callback(_data: *mut c_void, err_code: c_int, msg: *const c_char) {
+            // `err_code` is an extended error code (https://www.sqlite.org/rescode.html#primary_result_codes_versus_extended_result_codes).
+            // In general, the least-significant byte of an extended error code is the primary error
+            // code it belongs to. Each primary error code can also be used where an extended error
+            // code is expected (for example, `SQLITE_SCHEMA` has no extended error codes).
+            let primary_error_code = err_code & 0xFF;
+            let level = match (primary_error_code, err_code) {
+                // This usually means that a schema change invalidated a prepared statement.
+                (sqlite3::SQLITE_SCHEMA, _) => log::Level::Debug,
+                // These are used with sqlite3_log, in extensions.
+                (sqlite3::SQLITE_NOTICE | sqlite3::SQLITE_WARNING, _) => log::Level::Warn,
+                // According to the docs, this error means that the database file was moved (or deleted),
+                // so SQLite can't safely modify it and the rollback journal:
+                //     https://www.sqlite.org/rescode.html#readonly_dbmoved
+                // This is mostly outside of Zap's control (e.g. the user or some system program is
+                // moving around files in the user data directory), so downgrade to a warning.
+                (_, sqlite3::SQLITE_READONLY_DBMOVED) => log::Level::Warn,
+                _ => log::Level::Error,
+            };
 
-        // Safety: the message pointer came from the SQLite library, which promises that it's a
-        // valid C string pointer.
-        let msg = unsafe { CStr::from_ptr(msg) };
-        let err_message = String::from_utf8_lossy(msg.to_bytes());
-        // The local log path should not panic, but still avoid unwinding across the FFI boundary.
-        let _ = panic::catch_unwind(|| {
-            // openWarp only writes to the local log; the error code/description still retain their
-            // diagnostic value.
-            log::log!(
-                level,
-                "SQLite error {} ({}): {}",
-                err_code,
-                sqlite3::code_to_str(err_code),
-                err_message
+            // Safety: the message pointer came from the SQLite library, which promises that it's a
+            // valid C string pointer.
+            let msg = unsafe { CStr::from_ptr(msg) };
+            let err_message = String::from_utf8_lossy(msg.to_bytes());
+            // The local log path should not panic, but still avoid unwinding across the FFI boundary.
+            let _ = panic::catch_unwind(|| {
+                // openWarp only writes to the local log; the error code/description still retain their
+                // diagnostic value.
+                log::log!(
+                    level,
+                    "SQLite error {} ({}): {}",
+                    err_code,
+                    sqlite3::code_to_str(err_code),
+                    err_message
+                );
+            });
+        }
+
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            let null: *const c_void = ptr::null();
+            // Diesel doesn't expose SQLite's logging/tracing APIs, but the FFI bindings do.
+            let status = sqlite3::sqlite3_config(
+                sqlite3::SQLITE_CONFIG_LOG,
+                log_callback as extern "C-unwind" fn(_, _, _),
+                null,
             );
+
+            if status != sqlite3::SQLITE_OK {
+                log::error!(
+                    "Error setting up SQLite logging: {}",
+                    sqlite3::code_to_str(status)
+                );
+            }
         });
     }
-
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let null: *const c_void = ptr::null();
-        // Diesel doesn't expose SQLite's logging/tracing APIs, but the FFI bindings do.
-        let status = sqlite3::sqlite3_config(
-            sqlite3::SQLITE_CONFIG_LOG,
-            log_callback as extern "C-unwind" fn(_, _, _),
-            null,
-        );
-
-        if status != sqlite3::SQLITE_OK {
-            log::error!(
-                "Error setting up SQLite logging: {}",
-                sqlite3::code_to_str(status)
-            );
-        }
-    });
-}}
+}
 
 /// Determines the db path, establishes a connection and runs any migrations.
 pub(super) fn init_db(scope: &PersistenceScope) -> Result<SqliteConnection> {
@@ -485,15 +488,12 @@ pub(super) fn init_db(scope: &PersistenceScope) -> Result<SqliteConnection> {
     #[cfg(target_os = "macos")]
     if matches!(scope, PersistenceScope::App)
         && warp_core::channel::ChannelState::channel() == warp_core::channel::Channel::Oss
+        && let Some(legacy_dir) = zap_legacy_app_group_sqlite_dir()
+        && let Err(err) = migrate_zap_app_group_sqlite_if_needed(&db_path, &legacy_dir)
+            .context("Failed to migrate Zap SQLite database out of legacy App Group")
     {
-        if let Some(legacy_dir) = zap_legacy_app_group_sqlite_dir() {
-            if let Err(err) = migrate_zap_app_group_sqlite_if_needed(&db_path, &legacy_dir)
-                .context("Failed to migrate Zap SQLite database out of legacy App Group")
-            {
-                report_error!(err);
-                log::warn!("Skipping legacy App Group SQLite migration and continuing startup");
-            }
-        }
+        report_error!(err);
+        log::warn!("Skipping legacy App Group SQLite migration and continuing startup");
     }
 
     let conn = setup_database(&db_path)?;
@@ -525,8 +525,10 @@ fn migrate_old_sqlite_into_secure_container_if_needed(db_path: &Path) {
 
             if let Err(err) = std::fs::rename(&old_wal, &new_wal) {
                 if err.kind() != std::io::ErrorKind::NotFound {
-                    report_error!(anyhow::Error::new(err)
-                        .context("Failed to migrate SQLite WAL into application container"));
+                    report_error!(
+                        anyhow::Error::new(err)
+                            .context("Failed to migrate SQLite WAL into application container")
+                    );
                 }
             } else {
                 log::info!("Migrated SQLite WAL into application container");
@@ -534,16 +536,20 @@ fn migrate_old_sqlite_into_secure_container_if_needed(db_path: &Path) {
 
             if let Err(err) = std::fs::rename(&old_shm, &new_shm) {
                 if err.kind() != std::io::ErrorKind::NotFound {
-                    report_error!(anyhow::Error::new(err)
-                        .context("Failed to migrate SQLite SHM into application container"));
+                    report_error!(
+                        anyhow::Error::new(err)
+                            .context("Failed to migrate SQLite SHM into application container")
+                    );
                 }
             } else {
                 log::info!("Migrated SQLite shared memory file into application container");
             }
         }
         Err(err) => {
-            report_error!(anyhow::Error::new(err)
-                .context("Failed to migrate SQLite database into application container"));
+            report_error!(
+                anyhow::Error::new(err)
+                    .context("Failed to migrate SQLite database into application container")
+            );
         }
     }
 }
@@ -755,15 +761,19 @@ pub(super) fn remove(sender: SyncSender<ModelEvent>) {
     // Ideally, we'd drop any other events in the channel, but it's not worth the complexity right
     // now. Having the writer thread remove the database file prevents race conditions if the
     // thread is in the middle of another update.
-    report_if_error!(sender
-        .send(ModelEvent::PauseAndRemoveDatabase)
-        .context("Error requesting database deletion"));
+    report_if_error!(
+        sender
+            .send(ModelEvent::PauseAndRemoveDatabase)
+            .context("Error requesting database deletion")
+    );
 }
 
 pub(super) fn reconstruct(sender: SyncSender<ModelEvent>) {
-    report_if_error!(sender
-        .send(ModelEvent::ReconstructAndResume)
-        .context("Error resuming SQLite thread"));
+    report_if_error!(
+        sender
+            .send(ModelEvent::ReconstructAndResume)
+            .context("Error resuming SQLite thread")
+    );
 }
 
 fn reconstruct_database(path: &Path) -> Result<SqliteConnection> {
@@ -821,8 +831,10 @@ fn start_writer(conn: SqliteConnection, database_path: PathBuf) -> Result<Writer
                             log::info!("SQLite Writer is paused");
 
                             if let Err(err) = std::fs::remove_file(&database_path) {
-                                report_error!(anyhow::Error::new(err)
-                                    .context("Error removing SQLite database"));
+                                report_error!(
+                                    anyhow::Error::new(err)
+                                        .context("Error removing SQLite database")
+                                );
                             } else {
                                 log::info!("Removed SQLite database");
                             }
@@ -1328,10 +1340,10 @@ fn save_app_state(conn: &mut SqliteConnection, app_state: &AppState) -> Result<(
                     // and `read_node` would fail to resolve the leaf on
                     // restore, causing the entire surrounding tab to be
                     // dropped. See `LeafContents::is_persisted`.
-                    if let PaneNodeSnapshot::Leaf(leaf) = pane_node {
-                        if !leaf.contents.is_persisted() {
-                            continue;
-                        }
+                    if let PaneNodeSnapshot::Leaf(leaf) = pane_node
+                        && !leaf.contents.is_persisted()
+                    {
+                        continue;
                     }
 
                     let is_leaf = matches!(pane_node, PaneNodeSnapshot::Leaf(_));
@@ -2359,20 +2371,19 @@ fn save_workspaces(
             .execute(conn)?;
     }
 
-    if let Some(current_workspace_uid) = current_workspace_uid {
-        if !workspaces_to_insert
+    if let Some(current_workspace_uid) = current_workspace_uid
+        && !workspaces_to_insert
             .iter()
             .any(|workspace| workspace.uid == current_workspace_uid)
-        {
-            // If the currently selected workspace is not in the list of workspaces, set
-            // the first workspace as the current workspace.
-            if let Some(first_workspace) = workspaces_to_insert.first() {
-                diesel::update(workspaces.filter(
-                    schema::workspaces::dsl::server_uid.eq::<String>(first_workspace.uid.into()),
-                ))
-                .set(is_selected.eq(true))
-                .execute(conn)?;
-            }
+    {
+        // If the currently selected workspace is not in the list of workspaces, set
+        // the first workspace as the current workspace.
+        if let Some(first_workspace) = workspaces_to_insert.first() {
+            diesel::update(workspaces.filter(
+                schema::workspaces::dsl::server_uid.eq::<String>(first_workspace.uid.into()),
+            ))
+            .set(is_selected.eq(true))
+            .execute(conn)?;
         }
     }
 

@@ -1,54 +1,47 @@
 //! [`TerminalView`]-specific implementation for shared sessions.
 
+use chrono::{DateTime, Local};
+use itertools::Itertools;
+use settings::Setting as _;
+use warp_core::semantic_selection::SemanticSelection;
+use warpui::r#async::Timer;
+use warpui::units::IntoLines;
+use warpui::{AppContext, ModelHandle, SingletonEntity, ViewContext};
+
+use super::ConversationEndedTombstoneView;
+use super::adapter::{Adapter, Kind, Participant};
+use super::sharer::Sharer;
+use super::sharer::inactivity_modal::InactivityModalEvent;
+use super::viewer::Viewer;
 use crate::context_chips::ContextChipKind;
 use crate::editor::{InteractionState, ReplicaId};
+use crate::menu::{MenuItem, MenuItemFields};
 use crate::settings::InputModeSettings;
+use crate::terminal::TerminalModel;
 use crate::terminal::block_list_viewport::ScrollPositionUpdate;
 use crate::terminal::model::blocks::BlockListPoint;
 use crate::terminal::model::index::Point;
 use crate::terminal::model::terminal_model::WithinBlock;
-use crate::terminal::shared_session::protocol::RoleUpdatedReason;
-use crate::terminal::shared_session::protocol::SessionSourceType;
-use crate::terminal::shared_session::protocol::{ParticipantId, Role, SessionId, WindowSize};
-use crate::terminal::shared_session::protocol::{RoleUpdateReason, SessionEndedReason};
+use crate::terminal::shared_session::participant_avatar_view::{
+    ParticipantAvatarEvent, ParticipantAvatarView,
+};
+use crate::terminal::shared_session::presence_manager::{
+    Event as PresenceManagerEvent, PresenceManager,
+};
+use crate::terminal::shared_session::protocol::{
+    ParticipantId, ParticipantList, ParticipantPresenceUpdate, Role, RoleUpdateReason,
+    RoleUpdatedReason, SessionEndedReason, SessionId, SessionSourceType, WindowSize,
+};
+use crate::terminal::shared_session::selections::point_to_session_sharing;
 use crate::terminal::shared_session::settings::SharedSessionSettings;
 use crate::terminal::shared_session::{
-    selections::point_to_session_sharing, SharedSessionActionSource, SharedSessionScrollbackType,
-    SharedSessionStatus,
+    SharedSessionActionSource, SharedSessionScrollbackType, SharedSessionStatus,
 };
 use crate::terminal::view::{
     ContextMenuAction, Event, InlineBannerItem, InlineBannerType, RichContentInsertionPosition,
     SharedSessionBanners, SizeUpdateBuilder, TerminalAction, TerminalView,
 };
-use crate::terminal::TerminalModel;
 use crate::view_components::ToastFlavor;
-use crate::{
-    menu::{MenuItem, MenuItemFields},
-    terminal::shared_session::presence_manager::{Event as PresenceManagerEvent, PresenceManager},
-};
-use chrono::{DateTime, Local};
-use itertools::Itertools;
-use warpui::r#async::Timer;
-
-use settings::Setting as _;
-use warp_core::semantic_selection::SemanticSelection;
-use warpui::units::IntoLines;
-use warpui::SingletonEntity;
-use warpui::{ModelHandle, ViewContext};
-
-use crate::terminal::shared_session::participant_avatar_view::ParticipantAvatarEvent;
-use crate::terminal::shared_session::participant_avatar_view::ParticipantAvatarView;
-
-use crate::terminal::shared_session::protocol::ParticipantList;
-use crate::terminal::shared_session::protocol::ParticipantPresenceUpdate;
-
-use warpui::AppContext;
-
-use super::adapter::{Adapter, Kind, Participant};
-use super::sharer::inactivity_modal::InactivityModalEvent;
-use super::sharer::Sharer;
-use super::viewer::Viewer;
-use super::ConversationEndedTombstoneView;
 
 impl TerminalView {
     pub fn sharer_session_kind(&self) -> Option<&Kind> {
@@ -385,10 +378,10 @@ impl TerminalView {
     /// Applies to both sharer and viewer when the session sharing ends.
     pub fn on_session_share_ended(&mut self, ctx: &mut ViewContext<Self>) {
         // Ensure inactivity timer is aborted for sharer
-        if let Some(sharer) = self.shared_session_sharer_mut() {
-            if let Some(old_abort_handle) = sharer.inactivity_timer_abort_handle.take() {
-                old_abort_handle.abort();
-            }
+        if let Some(sharer) = self.shared_session_sharer_mut()
+            && let Some(old_abort_handle) = sharer.inactivity_timer_abort_handle.take()
+        {
+            old_abort_handle.abort();
         }
         #[cfg(not(target_arch = "wasm32"))]
         if self.active_viewer_driven_size.is_some() && !self.is_shared_session_for_ambient_agent() {
@@ -512,10 +505,10 @@ impl TerminalView {
         // session due to inactivity. Clear any existing timer and return early so
         // the session stays open until explicitly closed.
         if self.model.lock().is_shared_ambient_agent_session() {
-            if let Some(sharer) = self.shared_session_sharer_mut() {
-                if let Some(old_abort_handle) = sharer.inactivity_timer_abort_handle.take() {
-                    old_abort_handle.abort();
-                }
+            if let Some(sharer) = self.shared_session_sharer_mut()
+                && let Some(old_abort_handle) = sharer.inactivity_timer_abort_handle.take()
+            {
+                old_abort_handle.abort();
             }
             return;
         }
@@ -731,11 +724,9 @@ impl TerminalView {
 
         // If we the participant has block(s) selected, scroll to the block where the avatar is.
         // Otherwise, if the participant has block text selected, scroll so the cursor is in view.
-        if let Some(block_index) = {
-            let index =
-                participant.get_selected_block_index_for_avatar(self.model.lock().block_list());
-            index
-        } {
+        if let Some(block_index) =
+            { participant.get_selected_block_index_for_avatar(self.model.lock().block_list()) }
+        {
             self.update_scroll_position_locking(
                 ScrollPositionUpdate::ScrollToTopOfBlockWithBuffer {
                     block_index,

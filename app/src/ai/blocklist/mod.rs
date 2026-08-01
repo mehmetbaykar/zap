@@ -35,34 +35,37 @@ pub use action_model::AIActionStatus;
 // Consumed by `tui_export` for the `warp_tui` frontend.
 #[cfg(feature = "tui")]
 pub use action_model::RequestFileEditsExecutor;
-#[cfg_attr(target_family = "wasm", allow(unused_imports))]
-pub(crate) use action_model::{
-    apply_edits, read_local_file_context, FileReadResult, PromptSuggestionExecutor,
-    PromptSuggestionExecutorEvent, ReadFileContextResult, RequestFileEditsFormatKind,
-    StartAgentExecutor, StartAgentExecutorEvent, StartAgentRequest,
-};
 pub use action_model::{
     BlocklistAIActionEvent, BlocklistAIActionModel, ShellCommandExecutor, ShellCommandExecutorEvent,
 };
+#[cfg_attr(target_family = "wasm", allow(unused_imports))]
+pub(crate) use action_model::{
+    FileReadResult, PromptSuggestionExecutor, PromptSuggestionExecutorEvent, ReadFileContextResult,
+    RequestFileEditsFormatKind, StartAgentExecutor, StartAgentExecutorEvent, StartAgentRequest,
+    apply_edits, read_local_file_context,
+};
 #[cfg(any(test, feature = "integration_tests"))]
 pub(crate) use block::model::testing::FakeAIBlockModel;
-pub(crate) use block::{init, model, AIBlock, AIBlockEvent, RequestedEditResolution};
+pub(crate) use block::{AIBlock, AIBlockEvent, RequestedEditResolution, init, model};
 pub use block::{keyboard_navigable_buttons, toggleable_items};
+pub use context_model::BlocklistAIContextModel;
 #[cfg(not(feature = "tui"))]
 pub(crate) use context_model::block_context_from_terminal_model;
 #[cfg(feature = "tui")]
 pub use context_model::block_context_from_terminal_model;
-pub use context_model::BlocklistAIContextModel;
 pub(crate) use context_model::{
     AttachmentType, BlocklistAIContextEvent, PendingAttachment, PendingFile,
 };
+pub use controller::BlocklistAIController;
 pub use controller::input_context::{
     BLOCK_CONTEXT_ATTACHMENT_REGEX, DIFF_HUNK_ATTACHMENT_REGEX, DRIVE_OBJECT_ATTACHMENT_REGEX,
+};
+pub(crate) use controller::input_context::{
+    drive_object_attachment_for_reference, plan_attachment_for_reference,
 };
 #[cfg(test)]
 pub(crate) use controller::response_stream::ResponseStream;
 pub(crate) use controller::response_stream::ResponseStreamId;
-pub use controller::BlocklistAIController;
 pub(crate) use controller::{
     BlocklistAIControllerEvent, ClientIdentifiers, SessionContext, SlashCommandRequest,
 };
@@ -91,19 +94,16 @@ pub use permissions::{BlocklistAIPermissions, CommandExecutionPermissionAllowedR
 pub(crate) use persistence::PersistedAIInputType;
 pub(crate) use persistence::{PersistedAIInput, SerializedBlockListItem};
 pub(crate) use queued_query::{
-    is_lrc_auto_queue_active, AutofireAction, QueuedQuery, QueuedQueryEvent, QueuedQueryId,
-    QueuedQueryModel, QueuedQueryOrigin,
+    AutofireAction, QueuedQuery, QueuedQueryEvent, QueuedQueryId, QueuedQueryModel,
+    QueuedQueryOrigin, is_lrc_auto_queue_active,
 };
 pub use suggestion_chip_view::*;
 pub use view_util::error_color;
 pub(crate) use view_util::{
-    ai_brand_color, ai_indicator_height, format_credits,
-    get_ai_block_overflow_menu_element_position_id, get_attached_blocks_chip_element_position_id,
-    render_ai_agent_mode_icon, render_ai_follow_up_icon, ATTACH_AS_AGENT_MODE_CONTEXT_TEXT,
-    CLAUDE_ORANGE,
+    ATTACH_AS_AGENT_MODE_CONTEXT_TEXT, CLAUDE_ORANGE, ai_brand_color, ai_indicator_height,
+    format_credits, get_ai_block_overflow_menu_element_position_id,
+    get_attached_blocks_chip_element_position_id, render_ai_agent_mode_icon,
+    render_ai_follow_up_icon,
 };
 
-pub use crate::ai::blocklist::block::{secret_redaction, TextLocation};
-pub(crate) use controller::input_context::{
-    drive_object_attachment_for_reference, plan_attachment_for_reference,
-};
+pub use crate::ai::blocklist::block::{TextLocation, secret_redaction};

@@ -3,9 +3,8 @@
 //! When the second phase adds multi-agent calls, this will be expanded into a complete
 //! Chat Completions + tool-calling stream.
 
-use serde::Deserialize;
-
 use http_client::Client;
+use serde::Deserialize;
 
 /// A single model entry returned by the `/models` endpoint.
 ///

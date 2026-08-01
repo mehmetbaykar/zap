@@ -6,18 +6,17 @@ use warp_core::ui::appearance::Appearance;
 use warpui::fonts::FamilyId;
 use warpui::{AppContext, SingletonEntity};
 
-use crate::cloud_object::model::persistence::ObjectStoreModel;
+use super::InlineItem;
 use crate::cloud_object::StoredObject;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::search::FuzzyMatchWorkflowResult;
 use crate::search::async_snapshot_data_source::AsyncSnapshotDataSource;
 use crate::search::data_source::{Query, QueryResult};
 use crate::search::mixer::{BoxFuture, DataSourceRunErrorWrapper};
-use crate::search::FuzzyMatchWorkflowResult;
 use crate::server::ids::SyncId;
 use crate::settings::AISettings;
 use crate::terminal::input::slash_commands::AcceptSlashCommandOrSavedPrompt;
 use crate::workflows::WorkflowObjectModel;
-
-use super::InlineItem;
 
 pub(super) struct SavedPromptCandidate {
     pub(super) id: SyncId,
@@ -41,8 +40,8 @@ pub(crate) struct SavedPromptsSnapshot {
 /// We use fuzzy search rather than Tantivy full-text search. Switching to Tantivy would avoid
 /// cloning all workflow data on each query, but would require exposing the Tantivy reader for
 /// off-thread use.
-pub(crate) fn saved_prompts_data_source(
-) -> AsyncSnapshotDataSource<SavedPromptsSnapshot, AcceptSlashCommandOrSavedPrompt> {
+pub(crate) fn saved_prompts_data_source()
+-> AsyncSnapshotDataSource<SavedPromptsSnapshot, AcceptSlashCommandOrSavedPrompt> {
     AsyncSnapshotDataSource::new(
         |query: &Query, app: &AppContext| {
             let ai_enabled = AISettings::as_ref(app).is_any_ai_enabled(app);

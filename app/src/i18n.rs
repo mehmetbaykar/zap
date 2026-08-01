@@ -12,14 +12,13 @@
 //!   - even English doesn't have it -> returns the key string itself (and log::warn, so CI can
 //!     catch untranslated entries)
 
+use std::sync::OnceLock;
+
 #[cfg(not(target_os = "macos"))]
 use i18n_embed::DesktopLanguageRequester;
-use i18n_embed::{
-    fluent::{fluent_language_loader, FluentLanguageLoader},
-    LanguageLoader,
-};
+use i18n_embed::LanguageLoader;
+use i18n_embed::fluent::{FluentLanguageLoader, fluent_language_loader};
 use rust_embed::RustEmbed;
-use std::sync::OnceLock;
 use unic_langid::LanguageIdentifier;
 
 /// Embed the `app/i18n` directory into the binary. Re-embedded on every build (the debug-embed
@@ -112,7 +111,8 @@ fn system_requested_languages() -> Vec<LanguageIdentifier> {
 
 #[cfg(target_os = "macos")]
 fn macos_requested_languages() -> Vec<LanguageIdentifier> {
-    use objc::{class, msg_send, runtime::Object, sel, sel_impl};
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
     use warpui::platform::mac::utils::nsstring_as_str;
 
     unsafe {

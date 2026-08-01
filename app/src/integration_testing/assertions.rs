@@ -1,16 +1,16 @@
-use warpui::{async_assert, async_assert_eq, integration::TestStep, SingletonEntity};
+use warpui::integration::TestStep;
+use warpui::{SingletonEntity, async_assert, async_assert_eq};
 
-use crate::{
-    cloud_object::{
-        model::persistence::ObjectStoreModel, update_manager::UpdateManager, Space,
-        StoredObjectEventEntrypoint, StoredObjectLocation,
-    },
-    network::{NetworkStatus, NetworkStatusKind},
-    server::ids::ClientId,
-    util::bindings::keybinding_name_to_display_string,
-    workflows::workflow::Workflow,
-    workspaces::{team::Team, user_workspaces::UserWorkspaces, workspace::Workspace},
-};
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::cloud_object::{Space, StoredObjectEventEntrypoint, StoredObjectLocation};
+use crate::network::{NetworkStatus, NetworkStatusKind};
+use crate::server::ids::ClientId;
+use crate::util::bindings::keybinding_name_to_display_string;
+use crate::workflows::workflow::Workflow;
+use crate::workspaces::team::Team;
+use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::workspaces::workspace::Workspace;
 
 fn set_and_assert_network_status(status: NetworkStatusKind) -> TestStep {
     TestStep::new("Set and assert network status")

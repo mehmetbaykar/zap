@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
-use lsp::supported_servers::LSPServerType;
 use lsp::LanguageId;
+use lsp::supported_servers::LSPServerType;
 #[cfg(feature = "local_fs")]
 use lsp::{LspEvent, LspManagerModel, LspServerConfig};
 #[cfg(feature = "local_fs")]

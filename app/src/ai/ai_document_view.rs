@@ -16,8 +16,8 @@ use warpui::keymap::{EditableBinding, FixedBinding};
 use warpui::text_layout::ClipConfig;
 use warpui::ui_components::components::UiComponent;
 use warpui::{
-    id, AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
-    ViewContext, ViewHandle,
+    AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
+    ViewContext, ViewHandle, id,
 };
 
 use crate::ai::agent::conversation::AIConversationId;
@@ -37,10 +37,10 @@ use crate::notebooks::link::{NotebookLinks, SessionSource};
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::pane::view;
 use crate::pane_group::pane::view::header::components::{
-    render_pane_header_buttons, render_pane_header_title_text, render_three_column_header,
-    CenteredHeaderEdgeWidth,
+    CenteredHeaderEdgeWidth, render_pane_header_buttons, render_pane_header_title_text,
+    render_three_column_header,
 };
-use crate::pane_group::pane::view::header::{toolbelt_button_position_id, PaneHeaderAction};
+use crate::pane_group::pane::view::header::{PaneHeaderAction, toolbelt_button_position_id};
 use crate::pane_group::{BackingView, PaneConfiguration, PaneEvent};
 use crate::server::telemetry::TelemetryEvent;
 use crate::settings::FontSettings;
@@ -48,12 +48,12 @@ use crate::terminal::input::MenuPositioning;
 use crate::terminal::view::TerminalView;
 use crate::ui_components::icons::Icon;
 use crate::util::bindings::keybinding_name_to_keystroke;
+use crate::view_components::DismissibleToast;
 use crate::view_components::action_button::{
     ActionButton, ButtonSize, NakedTheme, PrimaryTheme, SecondaryTheme, TooltipAlignment,
 };
-use crate::view_components::DismissibleToast;
 use crate::workspace::ToastStack;
-use crate::{send_telemetry_from_ctx, BlocklistAIHistoryModel};
+use crate::{BlocklistAIHistoryModel, send_telemetry_from_ctx};
 
 pub fn init(app: &mut AppContext) {
     app.register_editable_bindings([EditableBinding::new(
@@ -231,17 +231,16 @@ impl AIDocumentView {
                     }
 
                     // Auto-set pending document ID when document becomes dirty
-                    if status.is_dirty() {
-                        if let Some(terminal_view) = &me.original_terminal_view {
-                            terminal_view.update(ctx, |terminal_view, ctx| {
-                                terminal_view.ai_context_model().update(
-                                    ctx,
-                                    |context_model, ctx| {
-                                        context_model.set_pending_document(Some(document_id), ctx);
-                                    },
-                                );
-                            });
-                        }
+                    if status.is_dirty()
+                        && let Some(terminal_view) = &me.original_terminal_view
+                    {
+                        terminal_view.update(ctx, |terminal_view, ctx| {
+                            terminal_view
+                                .ai_context_model()
+                                .update(ctx, |context_model, ctx| {
+                                    context_model.set_pending_document(Some(document_id), ctx);
+                                });
+                        });
                     }
 
                     me.update_header_buttons(ctx);
@@ -264,10 +263,10 @@ impl AIDocumentView {
                         ..
                     } => {
                         // Check if this is our terminal view
-                        if let Some(tv) = &me.original_terminal_view {
-                            if tv.id() == *terminal_surface_id {
-                                me.update_header_buttons(ctx);
-                            }
+                        if let Some(tv) = &me.original_terminal_view
+                            && tv.id() == *terminal_surface_id
+                        {
+                            me.update_header_buttons(ctx);
                         }
                     }
                     BlocklistAIHistoryEvent::RestoredConversations {
@@ -370,7 +369,9 @@ impl AIDocumentView {
         let save_action = keybinding_name_to_keystroke(SAVE_FILE_BINDING_NAME, ctx)
             .map(|k| k.displayed())
             .unwrap_or("Click".to_string());
-        let tooltip_text = format!("This plan has changes the agent isn't aware of. {save_action} to stop the agent's current task and send the updated plan");
+        let tooltip_text = format!(
+            "This plan has changes the agent isn't aware of. {save_action} to stop the agent's current task and send the updated plan"
+        );
         let update_plan_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new(crate::t!("ai-document-update-agent"), PrimaryTheme)
                 .with_size(ButtonSize::Small)
@@ -485,14 +486,13 @@ impl AIDocumentView {
 
         // Search for the terminal view by ID
         let window_id = ctx.window_id();
-        if let Some(terminal_views) = ctx.views_of_type::<TerminalView>(window_id) {
-            if let Some(terminal_view) = terminal_views
+        if let Some(terminal_views) = ctx.views_of_type::<TerminalView>(window_id)
+            && let Some(terminal_view) = terminal_views
                 .into_iter()
                 .find(|tv| tv.id() == terminal_view_id)
-            {
-                self.original_terminal_view = Some(terminal_view);
-                ctx.notify();
-            }
+        {
+            self.original_terminal_view = Some(terminal_view);
+            ctx.notify();
         }
     }
 
@@ -930,12 +930,11 @@ impl AIDocumentView {
 
         ctx.open_save_file_picker(
             move |path_opt: Option<String>, _me: &mut Self, _ctx: &mut ViewContext<Self>| {
-                if let Some(path) = path_opt {
-                    if let Err(e) =
+                if let Some(path) = path_opt
+                    && let Err(e) =
                         std::fs::write(&path, &markdown).context("Failed to export AI document")
-                    {
-                        report_error!(e);
-                    }
+                {
+                    report_error!(e);
                 }
             },
             config,

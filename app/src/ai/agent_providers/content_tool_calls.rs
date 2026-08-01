@@ -91,12 +91,12 @@ fn extract_balanced_json_objects(text: &str) -> Vec<String> {
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'{' {
-            if let Some(end) = find_json_object_end(text, i) {
-                objects.push(text[i..=end].to_owned());
-                i = end + 1;
-                continue;
-            }
+        if bytes[i] == b'{'
+            && let Some(end) = find_json_object_end(text, i)
+        {
+            objects.push(text[i..=end].to_owned());
+            i = end + 1;
+            continue;
         }
         i += 1;
     }
@@ -178,10 +178,10 @@ fn extract_name_and_args(value: &Value) -> Option<(String, Value)> {
 }
 
 fn coerce_args_value(args: Value) -> Value {
-    if let Some(raw) = args.as_str() {
-        if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
-            return parsed;
-        }
+    if let Some(raw) = args.as_str()
+        && let Ok(parsed) = serde_json::from_str::<Value>(raw)
+    {
+        return parsed;
     }
     args
 }
@@ -208,19 +208,19 @@ fn normalize_tool_call(raw_name: String, args: Value) -> Option<(String, Value)>
         | "bash"
         | "terminal_command" => remap_shell_from_command_arg(args),
         name if super::tools::lookup(name).is_some() => {
-            if name == "run_shell_command" {
-                if let Some(command) = args.get("command").and_then(Value::as_str) {
-                    return Some((raw_name, shell_command_args(command.to_owned())));
-                }
+            if name == "run_shell_command"
+                && let Some(command) = args.get("command").and_then(Value::as_str)
+            {
+                return Some((raw_name, shell_command_args(command.to_owned())));
             }
             Some((raw_name, args))
         }
         _ => {
             // Local models invent tool names but often include a shell `command` field.
-            if args.get("command_id").is_none() {
-                if let Some((name, args)) = remap_shell_from_command_arg(args) {
-                    return Some((name, args));
-                }
+            if args.get("command_id").is_none()
+                && let Some((name, args)) = remap_shell_from_command_arg(args)
+            {
+                return Some((name, args));
             }
             None
         }
@@ -228,13 +228,13 @@ fn normalize_tool_call(raw_name: String, args: Value) -> Option<(String, Value)>
 }
 
 fn remap_shell_from_command_arg(args: Value) -> Option<(String, Value)> {
-    if let Some(command) = args.get("command").and_then(Value::as_str) {
-        if !command.is_empty() {
-            return Some((
-                "run_shell_command".to_owned(),
-                shell_command_args(command.to_owned()),
-            ));
-        }
+    if let Some(command) = args.get("command").and_then(Value::as_str)
+        && !command.is_empty()
+    {
+        return Some((
+            "run_shell_command".to_owned(),
+            shell_command_args(command.to_owned()),
+        ));
     }
     None
 }

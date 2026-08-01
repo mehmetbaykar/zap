@@ -1,7 +1,6 @@
 use anyhow::Result;
 use warp_core::channel::{Channel, ChannelConfig, ChannelState};
-use warp_core::features;
-use warp_core::AppId;
+use warp_core::{AppId, features};
 
 fn main() -> Result<()> {
     let config = ChannelConfig {

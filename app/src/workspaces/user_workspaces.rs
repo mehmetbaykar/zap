@@ -1,33 +1,26 @@
-use super::{
-    team::{MembershipRole, Team},
-    workspace::{
-        AdminEnablementSetting, CustomerType, EnterpriseSecretRegex,
-        UgcCollectionEnablementSetting, Workspace, WorkspaceUid,
-    },
-};
-use crate::{
-    auth::{UserUid, TEST_USER_UID},
-    channel::ChannelState,
-    cloud_object::{
-        model::persistence::ObjectStoreModel, ObjectType, Owner, Space, StoredObjectEventEntrypoint,
-    },
-    server::ids::ServerId,
-    settings::{AISettings, PrivacySettings},
-    workspaces::workspace::{AiAutonomySettings, SandboxedAgentSettings},
-};
 use regex::Regex;
-use warp_core::{
-    features::FeatureFlag,
-    settings::{ChangeEventReason, Setting},
-};
+use warp_core::features::FeatureFlag;
+use warp_core::settings::{ChangeEventReason, Setting};
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, Tracked};
 
+use super::team::{MembershipRole, Team};
 #[cfg(test)]
 use super::workspace::WorkspaceMemberUsageInfo;
+use super::workspace::{
+    AdminEnablementSetting, CustomerType, EnterpriseSecretRegex, UgcCollectionEnablementSetting,
+    Workspace, WorkspaceUid,
+};
+use crate::auth::{TEST_USER_UID, UserUid};
+use crate::channel::ChannelState;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::{ObjectType, Owner, Space, StoredObjectEventEntrypoint};
+use crate::server::ids::ServerId;
+use crate::settings::{AISettings, PrivacySettings};
 #[cfg(test)]
 use crate::workspaces::workspace::{
     AIAutonomyPolicy, BillingMetadata, WorkspaceMember, WorkspaceSettings,
 };
+use crate::workspaces::workspace::{AiAutonomySettings, SandboxedAgentSettings};
 
 #[derive(Debug)]
 pub enum UserWorkspacesEvent {

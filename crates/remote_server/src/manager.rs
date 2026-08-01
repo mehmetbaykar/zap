@@ -6,23 +6,24 @@ use std::time::Duration;
 
 use futures::channel::oneshot;
 use repo_metadata::RepoMetadataUpdate;
+use warp_core::SessionId;
 #[cfg(not(target_family = "wasm"))]
 use warp_core::channel::{Channel, ChannelState};
-use warp_core::SessionId;
 use warp_util::remote_path::{RemoteNavigationResult, RemotePath};
 use warp_util::standardized_path::StandardizedPath;
 #[cfg(not(target_family = "wasm"))]
 use warpui_core::r#async::FutureExt as _;
 use warpui_core::{Entity, ModelContext, ModelSpawner, SingletonEntity};
 
+use crate::HostId;
 #[cfg(not(target_family = "wasm"))]
 use crate::client::ClientEvent;
 use crate::client::RemoteServerClient;
 use crate::codebase_index_proto::RemoteCodebaseIndexStatus;
 use crate::proto::{
-    diff_state, get_diff_state_response, DiffMode, DiffState, DiffStateErrorValue,
-    DiffStateFileDelta, DiffStateMetadataUpdate, DiffStateSnapshot, FileStatusInfo,
-    GetDiffStateResponse, GitOpDelta, GitStatusMetadata, PrInfo, RepositoryInfo, TextEdit,
+    DiffMode, DiffState, DiffStateErrorValue, DiffStateFileDelta, DiffStateMetadataUpdate,
+    DiffStateSnapshot, FileStatusInfo, GetDiffStateResponse, GitOpDelta, GitStatusMetadata, PrInfo,
+    RepositoryInfo, TextEdit, diff_state, get_diff_state_response,
 };
 use crate::repo_metadata_proto::proto_load_repo_metadata_directory_response_to_update;
 #[cfg(not(target_family = "wasm"))]
@@ -35,7 +36,6 @@ use crate::setup::{PreinstallCheckResult, RemotePlatform, RemoteServerSetupState
 #[cfg(not(target_family = "wasm"))]
 use crate::transport::{Connection, ControlPath};
 use crate::transport::{Error, InstallSource, RemoteTransport};
-use crate::HostId;
 
 /// Maximum number of reconnection attempts after a spontaneous disconnect.
 pub const MAX_RECONNECT_ATTEMPTS: u32 = 2;
@@ -1175,10 +1175,10 @@ impl RemoteServerManager {
         host_id: &HostId,
         preferred_session: Option<SessionId>,
     ) -> Option<Arc<RemoteServerClient>> {
-        if let Some(session_id) = preferred_session {
-            if let Some(client) = self.client_for_session(session_id) {
-                return Some(client.clone());
-            }
+        if let Some(session_id) = preferred_session
+            && let Some(client) = self.client_for_session(session_id)
+        {
+            return Some(client.clone());
         }
         self.client_for_host(host_id).cloned()
     }
@@ -2566,7 +2566,7 @@ impl RemoteServerManager {
         ctx: &mut ModelContext<Self>,
     ) {
         use crate::proto::{
-            get_branches_response, host_scoped_request, ClientMessage, GetBranches,
+            ClientMessage, GetBranches, get_branches_response, host_scoped_request,
         };
 
         let session_id = match self.find_connected_session(&host_id) {
@@ -2648,7 +2648,7 @@ impl RemoteServerManager {
         mode: DiffMode,
         ctx: &mut ModelContext<Self>,
     ) {
-        use crate::proto::{host_scoped_request, ClientMessage, DiscardFilesRequest};
+        use crate::proto::{ClientMessage, DiscardFilesRequest, host_scoped_request};
 
         let request_id = crate::protocol::RequestId::new();
         let msg = ClientMessage::host_scoped(
@@ -3189,23 +3189,28 @@ impl RemoteServerManager {
             host_response_rx,
             move |me, msg, _ctx| {
                 let request_id = crate::protocol::RequestId::from(msg.request_id.clone());
-                match me.pending_host_requests.remove(&request_id) { Some(pending) => {
-                    pending.cancel_timeout();
-                    // Check for server-reported ErrorResponse.
-                    if let Some(crate::proto::server_message::Message::Error(ref e)) = msg.message {
-                        let _ = pending.result_tx.send(Err(HostRequestError::ServerError {
-                            code: e.code(),
-                            message: e.message.clone(),
-                        }));
-                    } else {
-                        let _ = pending.result_tx.send(Ok(msg));
+                match me.pending_host_requests.remove(&request_id) {
+                    Some(pending) => {
+                        pending.cancel_timeout();
+                        // Check for server-reported ErrorResponse.
+                        if let Some(crate::proto::server_message::Message::Error(ref e)) =
+                            msg.message
+                        {
+                            let _ = pending.result_tx.send(Err(HostRequestError::ServerError {
+                                code: e.code(),
+                                message: e.message.clone(),
+                            }));
+                        } else {
+                            let _ = pending.result_tx.send(Ok(msg));
+                        }
                     }
-                } _ => {
-                    log::warn!(
-                        "Host-scoped response on session {session_id:?} with \
+                    _ => {
+                        log::warn!(
+                            "Host-scoped response on session {session_id:?} with \
                          unknown request_id={request_id} (no pending host request)"
-                    );
-                }}
+                        );
+                    }
+                }
             },
             |_, _| {},
         );
@@ -3226,17 +3231,17 @@ impl RemoteServerManager {
         // (Re-)send the SessionBootstrapped notification so the daemon
         // registers an executor for this session. This fires on both the
         // initial connect and every reconnect.
-        if let Some(info) = self.session_bootstrap_info.get(&session_id) {
-            if let Some(client) = self.client_for_session(session_id) {
-                log::info!(
-                    "Remote server sending SessionBootstrapped notification: session={session_id:?}"
-                );
-                client.notify_session_bootstrapped(
-                    session_id,
-                    &info.shell_type,
-                    info.shell_path.as_deref(),
-                );
-            }
+        if let Some(info) = self.session_bootstrap_info.get(&session_id)
+            && let Some(client) = self.client_for_session(session_id)
+        {
+            log::info!(
+                "Remote server sending SessionBootstrapped notification: session={session_id:?}"
+            );
+            client.notify_session_bootstrapped(
+                session_id,
+                &info.shell_type,
+                info.shell_path.as_deref(),
+            );
         }
     }
 

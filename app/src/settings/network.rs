@@ -16,7 +16,8 @@
 //! To simplify the first version, a username field is also provided here; the password is still managed by managed_secrets.
 
 use serde::{Deserialize, Serialize};
-use settings::{macros::define_settings_group, SupportedPlatforms, SyncToCloud};
+use settings::macros::define_settings_group;
+use settings::{SupportedPlatforms, SyncToCloud};
 
 /// The user-visible proxy mode.
 ///
