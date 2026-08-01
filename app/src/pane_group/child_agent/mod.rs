@@ -79,9 +79,10 @@ fn propagate_parent_agent_settings(
     };
 
     let parent_view_id = parent_terminal_view.id();
-    let parent_profile_id = *AIExecutionProfilesModel::as_ref(ctx)
+    let parent_profile_id = AIExecutionProfilesModel::as_ref(ctx)
         .active_profile(Some(parent_view_id), ctx)
-        .id();
+        .id()
+        .clone();
     AIExecutionProfilesModel::handle(ctx).update(ctx, |profiles, ctx| {
         profiles.set_active_profile(child_terminal_view_id, parent_profile_id, ctx);
     });

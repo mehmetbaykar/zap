@@ -93,6 +93,11 @@ pub enum FeatureFlag {
     /// Enables the settings file feature.
     SettingsFile,
 
+    /// Stores GUI execution profiles in the shared settings collection.
+    ///
+    /// TUI builds use the collection on every channel independently of this flag.
+    FileBackedExecutionProfiles,
+
     /// Enables rect selection.
     RectSelection,
 
@@ -861,6 +866,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::RestorePromptOnInlineModelSelectorSearch,
     FeatureFlag::WarpControlCli,
     FeatureFlag::PromptCacheExpiryWarning,
+    FeatureFlag::FileBackedExecutionProfiles,
     FeatureFlag::BackgroundComputerUse,
     FeatureFlag::ContextWindowUsageBreakdown,
     FeatureFlag::WaitForEventsParentRegistration,

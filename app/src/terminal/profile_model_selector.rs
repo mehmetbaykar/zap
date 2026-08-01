@@ -34,11 +34,12 @@ use crate::ai::blocklist::prompt::PromptIconButtonTheme;
 use crate::ai::blocklist::{
     BlocklistAIController, BlocklistAIControllerEvent, BlocklistAIInputEvent, BlocklistAIInputModel,
 };
+use crate::ai::execution_profiles::ExecutionProfileId;
 use crate::ai::execution_profiles::model_menu_items::{
     available_model_menu_items, has_reasoning_variants, is_auto,
 };
 use crate::ai::execution_profiles::profiles::{
-    AIExecutionProfilesModel, AIExecutionProfilesModelEvent, ClientProfileId,
+    AIExecutionProfilesModel, AIExecutionProfilesModelEvent,
 };
 use crate::ai::llms::{
     ByoKeySource, LLMId, LLMInfo, LLMPreferences, LLMPreferencesEvent, LLMSpec,
@@ -188,7 +189,7 @@ pub enum ProfileModelSelectorEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileModelSelectorAction {
-    SelectProfile(ClientProfileId),
+    SelectProfile(ExecutionProfileId),
     SelectModel(LLMId),
     SelectAutoModel,
     SelectReasoningModel(String),
@@ -801,9 +802,9 @@ impl ProfileModelSelector {
         ];
 
         for profile_id in all_profile_ids {
-            if let Some(profile_info) = profiles_model.get_profile_by_id(profile_id, ctx) {
+            if let Some(profile_info) = profiles_model.get_profile_by_id(&profile_id, ctx) {
                 let profile = profile_info.data();
-                let is_active = *active_profile.id() == profile_id;
+                let is_active = active_profile.id() == &profile_id;
 
                 let mut fields = MenuItemFields::new(profile.display_name());
                 if is_active {
@@ -826,7 +827,8 @@ impl ProfileModelSelector {
 
         self.profile_dropdown.update(ctx, |menu, ctx| {
             menu.set_items(menu_items, ctx);
-            let active_action = ProfileModelSelectorAction::SelectProfile(*active_profile.id());
+            let active_action =
+                ProfileModelSelectorAction::SelectProfile(active_profile.id().clone());
             menu.set_selected_by_action(&active_action, ctx);
         });
     }
@@ -1949,7 +1951,11 @@ impl TypedActionView for ProfileModelSelector {
         match action {
             ProfileModelSelectorAction::SelectProfile(profile_id) => {
                 AIExecutionProfilesModel::handle(ctx).update(ctx, |profiles_model, ctx| {
-                    profiles_model.set_active_profile(self.terminal_view_id, *profile_id, ctx);
+                    profiles_model.set_active_profile(
+                        self.terminal_view_id,
+                        profile_id.clone(),
+                        ctx,
+                    );
                 });
 
                 // Remove any LLM override when switching profiles

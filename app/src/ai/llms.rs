@@ -766,27 +766,6 @@ impl LLMPreferences {
         app: &AppContext,
         terminal_view_id: Option<EntityId>,
     ) -> &LLMInfo {
-        self.get_preferred_base_model_for_settings_mode(
-            settings::settings_mode(),
-            app,
-            terminal_view_id,
-        )
-    }
-
-    fn get_preferred_base_model_for_settings_mode(
-        &self,
-        settings_mode: settings::SettingsMode,
-        app: &AppContext,
-        terminal_view_id: Option<EntityId>,
-    ) -> &LLMInfo {
-        // In the TUI, the file-backed `agents.model` setting is the source of
-        // truth for the base model: it overrides both per-surface overrides
-        // and the cloud-synced execution profile, keeping the TUI's TOML file
-        // the single place the model is configured.
-        if settings_mode == settings::SettingsMode::Tui {
-            return self.tui_agent_model_info(AISettings::as_ref(app).agent_model.value());
-        }
-
         if let Some(terminal_view_id) = terminal_view_id {
             let raw_override = self.base_llm_for_terminal_view.get(&terminal_view_id);
             if let Some(llm_id) = raw_override
@@ -841,8 +820,8 @@ impl LLMPreferences {
     /// Resolves `id` against the local provider catalog, custom endpoints, and
     /// local custom routers.
     ///
-    /// Shared by the per-surface override, execution-profile, and TUI
-    /// `agents.model` resolution paths so their lookup semantics can't drift.
+    /// Shared by the per-surface override and execution-profile resolution
+    /// paths so their lookup semantics can't drift.
     fn model_info_for_id<'a>(
         &'a self,
         available: &'a AvailableLLMs,
@@ -852,27 +831,6 @@ impl LLMPreferences {
             .info_for_id(id)
             .or_else(|| self.custom_llm_info_for_id(id))
             .or_else(|| self.custom_router_llm_info_for_id_if_enabled(id))
-    }
-
-    /// Resolves the TUI's file-backed `agents.model` setting (the
-    /// `TuiAgentModel` setting) to an `LLMInfo`.
-    ///
-    /// `"auto"` — the default — resolves to the server-provided default model
-    /// (i.e. defers to Warp's automatic model selection). Unknown ids also
-    /// fall back to the default, so an invalid TOML value never sends an
-    /// unresolvable model id to the server.
-    ///
-    /// TODO: once the TUI grows general invalid-settings UI support, surface
-    /// unknown `agents.model` values to the user instead of silently falling
-    /// back to the default model.
-    fn tui_agent_model_info(&self, setting: &str) -> &LLMInfo {
-        if setting != TUI_AUTO_MODEL_SETTING {
-            let id = LLMId::from(setting);
-            if let Some(info) = self.model_info_for_id(&self.models_by_feature.agent_mode, &id) {
-                return info;
-            }
-        }
-        self.models_by_feature.agent_mode.default_llm_info()
     }
 
     pub fn get_active_coding_model<'a>(
@@ -1239,7 +1197,7 @@ impl LLMPreferences {
 
         AIExecutionProfilesModel::handle(ctx).update(ctx, |profiles, ctx| {
             for profile_id in profiles.get_all_profile_ids() {
-                let Some(profile) = profiles.get_profile_by_id(profile_id, ctx) else {
+                let Some(profile) = profiles.get_profile_by_id(&profile_id, ctx) else {
                     continue;
                 };
                 let profile_data = profile.data();
@@ -1248,8 +1206,8 @@ impl LLMPreferences {
                         && !valid_local.contains(id)
                 });
                 if base_stale {
-                    profiles.set_base_model(profile_id, None, ctx);
-                    profiles.set_context_window_limit(profile_id, None, ctx);
+                    profiles.set_base_model(&profile_id, None, ctx);
+                    profiles.set_context_window_limit(&profile_id, None, ctx);
                     updated_agent_mode = true;
                 }
                 let coding_stale = profile_data.coding_model.as_ref().is_some_and(|id| {
@@ -1257,7 +1215,7 @@ impl LLMPreferences {
                         && !valid_local.contains(id)
                 });
                 if coding_stale {
-                    profiles.set_coding_model(profile_id, None, ctx);
+                    profiles.set_coding_model(&profile_id, None, ctx);
                     updated_coding = true;
                 }
             }
@@ -1408,7 +1366,7 @@ impl LLMPreferences {
             let profile = profiles.active_profile(terminal_view_id, ctx);
 
             if profile.data().coding_model != new_value {
-                profiles.set_coding_model(*profile.id(), new_value, ctx);
+                profiles.set_coding_model(profile.id(), new_value, ctx);
                 changed = true;
             }
         });
@@ -1560,7 +1518,7 @@ impl LLMPreferences {
         let profiles_model = AIExecutionProfilesModel::handle(ctx);
         profiles_model.update(ctx, |profiles, ctx| {
             for profile_id in profiles.get_all_profile_ids() {
-                if let Some(profile) = profiles.get_profile_by_id(profile_id, ctx) {
+                if let Some(profile) = profiles.get_profile_by_id(&profile_id, ctx) {
                     let profile_data = profile.data();
                     let preferred_base_model = profile_data.base_model.clone();
                     let effective_base_model_id = preferred_base_model
@@ -1596,13 +1554,13 @@ impl LLMPreferences {
                         && preferred_base_model_is_recognized
                         && effective_base_model_unusable
                     {
-                        profiles.set_base_model(profile_id, None, ctx);
+                        profiles.set_base_model(&profile_id, None, ctx);
                     }
                     if has_context_window_limit
                         && preferred_base_model_is_recognized
                         && (effective_base_model_unusable || !effective_base_model_is_configurable)
                     {
-                        profiles.set_context_window_limit(profile_id, None, ctx);
+                        profiles.set_context_window_limit(&profile_id, None, ctx);
                     }
                     if let Some(preferred_llm_id) = &profile.data().coding_model {
                         // Same guard: only clear recognized IDs.
@@ -1622,7 +1580,7 @@ impl LLMPreferences {
                                 })
                                 .is_none()
                         {
-                            profiles.set_coding_model(profile_id, None, ctx);
+                            profiles.set_coding_model(&profile_id, None, ctx);
                         }
                     }
                     if let Some(preferred_llm_id) = &profile.data().cli_agent_model {
@@ -1641,7 +1599,7 @@ impl LLMPreferences {
                                 })
                                 .is_none()
                         {
-                            profiles.set_cli_agent_model(profile_id, None, ctx);
+                            profiles.set_cli_agent_model(&profile_id, None, ctx);
                         }
                     }
                     if let Some(preferred_llm_id) = &profile.data().computer_use_model
@@ -1650,7 +1608,7 @@ impl LLMPreferences {
                             .usable_info_for_id(preferred_llm_id, ctx)
                             .is_none()
                     {
-                        profiles.set_computer_use_model(profile_id, None, ctx);
+                        profiles.set_computer_use_model(&profile_id, None, ctx);
                     }
                 }
             }
@@ -1744,10 +1702,6 @@ impl LLMPreferences {
         ctx.emit(LLMPreferencesEvent::UpdatedReasoningEffort);
     }
 }
-
-/// The TUI `agents.model` value that defers model choice to Warp's automatic
-/// model selection (the server-provided default).
-const TUI_AUTO_MODEL_SETTING: &str = "auto";
 
 #[derive(Clone, Debug)]
 pub enum LLMPreferencesEvent {

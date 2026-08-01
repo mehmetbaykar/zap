@@ -131,7 +131,6 @@ const ANTIGRAVITY_PURPLE: ColorU = ColorU {
     a: 255,
 };
 
-
 /// Hermes brand color (Nous Research purple #7C3AED)
 const HERMES_PURPLE: ColorU = ColorU {
     r: 124,

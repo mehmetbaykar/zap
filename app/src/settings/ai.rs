@@ -24,6 +24,7 @@ use warpui::platform::OperatingSystem;
 use warpui::platform::keyboard::KeyCode;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, UpdateModel};
 
+use crate::ai::execution_profiles::ExecutionProfilesConfig;
 use crate::ai::request_usage_model::RequestLimitInfo;
 use crate::report_if_error;
 use crate::terminal::CLIAgent;
@@ -1681,20 +1682,19 @@ define_settings_group!(AISettings, settings: [
         toml_path: "agents.profiles.agent_mode_coding_file_read_allowlist",
         description: "File paths the agent can read without asking for permission.",
     }
-    // The default model the TUI agent uses, as a file-backed setting.
-    //
-    // TUI-only (`surface: Tui`): the GUI selects its model via execution
-    // profiles, so this key only appears in (and is read from) the TUI's
-    // settings file. `"auto"` defers to Warp's automatic model selection.
-    agent_model: TuiAgentModel {
-        type: String,
-        default: "auto".to_string(),
+    // The complete execution-profile collection shared by GUI and TUI.
+    // GUI cloud synchronization respects the user's settings-sync preference;
+    // TUI settings mode keeps this value local.
+    execution_profiles: ExecutionProfiles {
+        type: ExecutionProfilesConfig,
+        default: ExecutionProfilesConfig::default(),
         supported_platforms: SupportedPlatforms::ALL,
-        sync_to_cloud: SyncToCloud::Never,
-        surface: settings::SettingSurfaces::TUI,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::ALL,
         private: false,
-        toml_path: "agents.model",
-        description: "The default model the TUI agent uses.",
+        toml_path: "agents.execution_profiles",
+        max_table_depth: 2,
+        description: "AI execution profiles and their permissions.",
     }
     // Whether or not the profile-level command autoexecution speedbump has been shown.
     //

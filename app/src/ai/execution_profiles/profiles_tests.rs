@@ -1,9 +1,12 @@
+use settings::Setting as _;
+use warp_core::features::FeatureFlag;
 use warpui::{App, SingletonEntity};
 
 use crate::LaunchMode;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::execution_profiles::{
     AIExecutionProfile, AIExecutionProfileObject, AIExecutionProfileObjectModel, ActionPermission,
+    ExecutionProfileId,
 };
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::auth::AuthStateProvider;
@@ -12,7 +15,7 @@ use crate::cloud_object::update_manager::UpdateManager;
 use crate::cloud_object::{StoredObjectMetadata, StoredObjectPermissions};
 use crate::network::NetworkStatus;
 use crate::server::ids::{ServerId, SyncId};
-use crate::settings::PrivacySettings;
+use crate::settings::{AISettings, PrivacySettings};
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 
@@ -27,6 +30,23 @@ fn install_singletons(app: &mut App, auth_state: AuthStateProvider) {
     app.add_singleton_model(|_| TemplatableMCPServerManager::default());
     app.add_singleton_model(PrivacySettings::mock);
     app.add_singleton_model(UserWorkspaces::default_mock);
+}
+
+fn collection_with_profile(
+    id: &str,
+    name: &str,
+    permission: ActionPermission,
+) -> crate::ai::execution_profiles::ExecutionProfilesConfig {
+    let mut profiles = crate::ai::execution_profiles::ExecutionProfilesConfig::default();
+    profiles.insert(
+        ExecutionProfileId::parse(id).expect("test profile key should be valid"),
+        AIExecutionProfile {
+            name: name.to_string(),
+            read_files: permission,
+            ..Default::default()
+        },
+    );
+    profiles
 }
 
 /// Regression test for the onboarding autonomy bug where
@@ -64,7 +84,7 @@ fn edits_persist_on_unsynced_default_profile_when_logged_out() {
         // `set_apply_code_diffs` value was cloned, mutated, then dropped
         // without being written back to `default_profile_state`.
         profile_model.update(&mut app, |model, ctx| {
-            model.set_apply_code_diffs(default_profile_id, &ActionPermission::AlwaysAllow, ctx);
+            model.set_apply_code_diffs(&default_profile_id, &ActionPermission::AlwaysAllow, ctx);
         });
 
         profile_model.read(&app, |model, ctx| {
@@ -76,6 +96,50 @@ fn edits_persist_on_unsynced_default_profile_when_logged_out() {
             );
         });
     })
+}
+
+#[test]
+fn explicit_local_collection_is_preserved_from_onboarding() {
+    let _guard = FeatureFlag::FileBackedExecutionProfiles.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        install_singletons(&mut app, AuthStateProvider::new_for_test());
+        app.update(|ctx| {
+            AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                settings
+                    .execution_profiles
+                    .set_value(
+                        collection_with_profile(
+                            "pre-login",
+                            "Pre-login",
+                            ActionPermission::AlwaysAllow,
+                        ),
+                        ctx,
+                    )
+                    .unwrap();
+            });
+        });
+
+        let profile_model = app.add_singleton_model(|ctx| {
+            AIExecutionProfilesModel::new(&LaunchMode::new_for_unit_test(), ctx)
+        });
+        profile_model.update(&mut app, |model, ctx| {
+            model.migrate_settings_profiles(ctx);
+        });
+
+        profile_model.read(&app, |model, ctx| {
+            assert!(model.should_preserve_onboarding_profile(ctx));
+        });
+        app.read(|ctx| {
+            assert!(
+                AISettings::as_ref(ctx)
+                    .execution_profiles
+                    .value()
+                    .profile(&ExecutionProfileId::parse("pre-login").unwrap())
+                    .is_some()
+            );
+        });
+    });
 }
 
 /// Regression test for the "log in to an existing user after onboarding"
@@ -153,7 +217,7 @@ fn reconciles_unsynced_default_profile_with_cloud_after_initial_load() {
         // creating a duplicate.
         let default_profile_id = profile_model.read(&app, |model, _ctx| model.default_profile_id());
         profile_model.update(&mut app, |model, ctx| {
-            model.set_apply_code_diffs(default_profile_id, &ActionPermission::AlwaysAsk, ctx);
+            model.set_apply_code_diffs(&default_profile_id, &ActionPermission::AlwaysAsk, ctx);
         });
         profile_model.read(&app, |model, ctx| {
             let info = model.default_profile(ctx);

@@ -8,7 +8,7 @@ use warpui::prelude::CrossAxisAlignment;
 use warpui::text_layout::ClipConfig;
 use warpui::{AppContext, Element, SingletonEntity as _};
 
-use crate::ai::execution_profiles::profiles::ClientProfileId;
+use crate::ai::execution_profiles::ExecutionProfileId;
 use crate::appearance::Appearance;
 use crate::search::{ItemHighlightState, SearchItem};
 use crate::terminal::input::inline_menu::styles as inline_styles;
@@ -17,7 +17,7 @@ use crate::terminal::input::profiles::data_source::SelectProfileMenuItem;
 #[derive(Debug, Clone)]
 enum ProfileSearchItemKind {
     Profile {
-        profile_id: ClientProfileId,
+        profile_id: ExecutionProfileId,
         profile_name: String,
         is_selected: bool,
     },
@@ -33,7 +33,7 @@ pub(super) struct ProfileSearchItem {
 
 impl ProfileSearchItem {
     pub fn new_profile_item(
-        profile_id: ClientProfileId,
+        profile_id: ExecutionProfileId,
         profile_name: String,
         is_selected: bool,
     ) -> Self {
@@ -164,10 +164,10 @@ impl SearchItem for ProfileSearchItem {
     }
 
     fn accept_result(&self) -> Self::Action {
-        match self.kind {
-            ProfileSearchItemKind::Profile { profile_id, .. } => {
-                SelectProfileMenuItem::Profile { profile_id }
-            }
+        match &self.kind {
+            ProfileSearchItemKind::Profile { profile_id, .. } => SelectProfileMenuItem::Profile {
+                profile_id: profile_id.clone(),
+            },
             ProfileSearchItemKind::ManageProfiles => SelectProfileMenuItem::ManageProfiles,
         }
     }

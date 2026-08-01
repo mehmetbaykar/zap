@@ -244,7 +244,8 @@ use crate::ai::blocklist::{
     is_lrc_auto_queue_active,
 };
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel, AIDocumentVersion};
-use crate::ai::execution_profiles::profiles::{AIExecutionProfilesModel, ClientProfileId};
+use crate::ai::execution_profiles::ExecutionProfileId;
+use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::llms::{LLMId, LLMModelHost, LLMPreferences};
 use crate::ai::loading::shimmering_warp_loading_text;
 use crate::ai::persisted_workspace::PersistedWorkspace;
@@ -1824,7 +1825,7 @@ pub enum Event {
     },
     SlowBootstrap,
     OpenAgentProfileEditor {
-        profile_id: ClientProfileId,
+        profile_id: ExecutionProfileId,
     },
     #[cfg(not(target_family = "wasm"))]
     OpenPluginInstructionsPane(CLIAgent, PluginModalKind),
@@ -19684,7 +19685,7 @@ impl TerminalView {
                 let profiles_model = AIExecutionProfilesModel::as_ref(ctx);
                 let active_profile = profiles_model.active_profile(Some(self.view_id), ctx);
                 ctx.emit(Event::OpenAgentProfileEditor {
-                    profile_id: *active_profile.id(),
+                    profile_id: active_profile.id().clone(),
                 });
             }
             AIBlockEvent::OpenThemeChooser => {

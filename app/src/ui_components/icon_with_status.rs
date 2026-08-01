@@ -276,10 +276,7 @@ pub(crate) fn render_icon_with_status_with_badge_style(
             let icon_color = agent.brand_icon_color();
             let icon_element =
                 render_cli_agent_logo(agent, WarpThemeFill::Solid(icon_color), sub_text);
-            let background = if matches!(
-                agent,
-                CLIAgent::DeepSeek | CLIAgent::Antigravity
-            ) {
+            let background = if matches!(agent, CLIAgent::DeepSeek | CLIAgent::Antigravity) {
                 theme.background()
             } else {
                 ThemeFill::Solid(brand_color)

@@ -41,7 +41,7 @@ use warpui::{
 
 use crate::GlobalResourceHandlesProvider;
 use crate::ai::custom_model_routers::CustomModelRouter;
-use crate::ai::execution_profiles::profiles::ClientProfileId;
+use crate::ai::execution_profiles::ExecutionProfileId;
 use crate::appearance::Appearance;
 use crate::editor::{
     EditorView, Event as EditorEvent, PropagateAndNoOpNavigationKeys, SingleLineEditorOptions,
@@ -206,7 +206,7 @@ pub enum SettingsViewEvent {
     OpenMCPServerCollection,
     OpenCustomRouterEditor(Option<CustomModelRouter>),
     OpenCustomRouterFile(PathBuf),
-    OpenExecutionProfileEditor(ClientProfileId),
+    OpenExecutionProfileEditor(ExecutionProfileId),
     OpenProjectRulesPane {
         rule_paths: Vec<PathBuf>,
     },
@@ -1845,7 +1845,9 @@ impl SettingsView {
                 ctx.emit(SettingsViewEvent::OpenCustomRouterFile(path.clone()));
             }
             AISettingsPageEvent::OpenExecutionProfileEditor(profile_id) => {
-                ctx.emit(SettingsViewEvent::OpenExecutionProfileEditor(*profile_id));
+                ctx.emit(SettingsViewEvent::OpenExecutionProfileEditor(
+                    profile_id.clone(),
+                ));
             }
             AISettingsPageEvent::ShowModal | AISettingsPageEvent::HideModal => {
                 ctx.notify();

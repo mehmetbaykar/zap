@@ -585,9 +585,9 @@ fn reconcile_preserves_custom_models_saved_on_execution_profile() {
         let default_profile_id =
             profiles_model.read(&app, |profiles, _| profiles.default_profile_id());
         profiles_model.update(&mut app, |profiles, ctx| {
-            profiles.set_base_model(default_profile_id, Some(custom_model_id.clone()), ctx);
-            profiles.set_coding_model(default_profile_id, Some(custom_model_id.clone()), ctx);
-            profiles.set_cli_agent_model(default_profile_id, Some(custom_model_id.clone()), ctx);
+            profiles.set_base_model(&default_profile_id, Some(custom_model_id.clone()), ctx);
+            profiles.set_coding_model(&default_profile_id, Some(custom_model_id.clone()), ctx);
+            profiles.set_cli_agent_model(&default_profile_id, Some(custom_model_id.clone()), ctx);
         });
 
         llm_preferences.update(&mut app, |preferences, ctx| {
@@ -646,22 +646,22 @@ fn reconcile_preserves_custom_endpoint_models_not_configured_locally() {
         let preserved_context_window_limit: u32 = 200_000;
         profiles_model.update(&mut app, |profiles, ctx| {
             profiles.set_base_model(
-                default_profile_id,
+                &default_profile_id,
                 Some(remote_custom_model_id.clone()),
                 ctx,
             );
             profiles.set_coding_model(
-                default_profile_id,
+                &default_profile_id,
                 Some(remote_custom_model_id.clone()),
                 ctx,
             );
             profiles.set_cli_agent_model(
-                default_profile_id,
+                &default_profile_id,
                 Some(remote_custom_model_id.clone()),
                 ctx,
             );
             profiles.set_context_window_limit(
-                default_profile_id,
+                &default_profile_id,
                 Some(preserved_context_window_limit),
                 ctx,
             );
@@ -700,7 +700,7 @@ fn reconcile_preserves_custom_endpoint_models_not_configured_locally() {
     });
 }
 
-// -- tui_agent_model_info tests --
+// -- execution-profile model selection tests --
 
 fn agent_llm(id: &str, display_name: &str) -> LLMInfo {
     LLMInfo {
@@ -725,7 +725,7 @@ fn agent_llm(id: &str, display_name: &str) -> LLMInfo {
 
 /// Preferences whose agent-mode models are a server-style list with an
 /// `"auto"` default plus one concrete model.
-fn preferences_for_tui_tests() -> LLMPreferences {
+fn preferences_for_profile_model_tests() -> LLMPreferences {
     let agent_mode = AvailableLLMs::new(
         "auto".into(),
         vec![
@@ -747,17 +747,6 @@ fn preferences_for_tui_tests() -> LLMPreferences {
         custom_llms: Vec::new(),
         custom_model_routers: Vec::new(),
     }
-}
-
-fn tui_agent_model_test(f: impl FnOnce(&LLMPreferences)) {
-    f(&preferences_for_tui_tests());
-}
-
-#[test]
-fn tui_agent_model_auto_resolves_to_the_default_model() {
-    tui_agent_model_test(|preferences| {
-        assert_eq!(preferences.tui_agent_model_info("auto").id.as_str(), "auto");
-    });
 }
 
 #[test]
@@ -789,24 +778,5 @@ fn shared_model_picker_query_orders_filters_and_marks_disabled_choices() {
         assert_eq!(filtered[0].llm.id.as_str(), "gpt-5");
         assert!(filtered[0].name_match_result.is_some());
         assert!(filtered[0].is_selectable());
-    });
-}
-
-#[test]
-fn tui_agent_model_known_id_resolves_to_that_model() {
-    tui_agent_model_test(|preferences| {
-        let info = preferences.tui_agent_model_info("claude-opus");
-        assert_eq!(info.id.as_str(), "claude-opus");
-        assert_eq!(info.display_name, "Opus");
-    });
-}
-
-#[test]
-fn tui_agent_model_unknown_id_falls_back_to_the_default_model() {
-    tui_agent_model_test(|preferences| {
-        assert_eq!(
-            preferences.tui_agent_model_info("not-a-model").id.as_str(),
-            "auto"
-        );
     });
 }

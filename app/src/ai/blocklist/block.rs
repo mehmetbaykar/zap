@@ -3556,11 +3556,12 @@ impl AIBlock {
             }
             AskUserQuestionViewEvent::SpeedbumpPermissionChanged(permission) => {
                 let permission = *permission;
-                let profile_id = *AIExecutionProfilesModel::as_ref(ctx)
+                let profile_id = AIExecutionProfilesModel::as_ref(ctx)
                     .active_profile(Some(self.terminal_view_id), ctx)
-                    .id();
+                    .id()
+                    .clone();
                 AIExecutionProfilesModel::handle(ctx).update(ctx, |model, ctx| {
-                    model.set_ask_user_question(profile_id, permission, ctx);
+                    model.set_ask_user_question(&profile_id, permission, ctx);
                 });
                 send_telemetry_from_ctx!(
                     TelemetryEvent::ChangedAgentModeAskUserQuestionPermission {
