@@ -866,7 +866,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::WarpControlCli,
     FeatureFlag::PromptCacheExpiryWarning,
     FeatureFlag::FileBackedExecutionProfiles,
-    FeatureFlag::BackgroundComputerUse,
     FeatureFlag::ContextWindowUsageBreakdown,
     FeatureFlag::WaitForEventsParentRegistration,
     FeatureFlag::BoxDrawingGlyphs,

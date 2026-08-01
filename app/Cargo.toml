@@ -552,6 +552,7 @@ default = [
     "ask_user_question",
     "bundled_skills",
     "agent_mode_computer_use",
+    "background_computer_use",
     "oz_platform_skills",
     "conversation_artifacts",
     "agent_view",

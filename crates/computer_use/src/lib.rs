@@ -9,6 +9,8 @@ mod imp;
 mod mock;
 mod noop;
 mod overlay;
+#[cfg(any(macos, linux))]
+mod recording_metadata;
 #[cfg(any(macos, linux, windows))]
 mod screenshot_utils;
 
@@ -277,12 +279,10 @@ pub fn create_recorder() -> Box<dyn Recorder> {
     }
 }
 
-/// Burns action labels into a recorded video, returning the path to the
-/// annotated file. The original file is left untouched; the caller owns cleanup
-/// of both. Real compositing (ffmpeg + libass) only runs on the Linux capture
-/// path; every other target returns `input` unchanged so callers can treat
-/// annotation as best-effort and upload the original on any failure.
-pub async fn burn_in_action_log(
+/// Applies platform-specific post-processing and returns the path to upload.
+/// Linux trims inactive gaps and burns action overlays; other platforms return
+/// `input` unchanged.
+pub async fn post_process_recording(
     input: &Path,
     entries: &[ActionLogEntry],
     dimensions: (u32, u32),
@@ -291,12 +291,26 @@ pub async fn burn_in_action_log(
 ) -> Result<PathBuf, RecordingError> {
     #[cfg(all(linux, not(noop)))]
     {
-        imp::burn_in_action_log(input, entries, dimensions, source_duration, frame_rate).await
+        imp::post_process_recording(input, entries, dimensions, source_duration, frame_rate).await
     }
     #[cfg(not(all(linux, not(noop))))]
     {
         let _ = (entries, dimensions, source_duration, frame_rate);
         Ok(input.to_path_buf())
+    }
+}
+/// Reads the duration encoded in a finalized recording's media timeline.
+pub async fn finalized_video_duration(input: &Path) -> Result<Duration, RecordingError> {
+    #[cfg(any(macos, linux))]
+    {
+        recording_metadata::video_duration(input).await
+    }
+    #[cfg(not(any(macos, linux)))]
+    {
+        let _ = input;
+        Err(RecordingError::Finalize {
+            reason: "video duration probing is unsupported on this platform".to_string(),
+        })
     }
 }
 
