@@ -335,7 +335,6 @@ pub(super) fn run_window_command(
             ActionKind::WindowCreate,
             TabCreateParams {
                 tab_type: args.tab_type.map(Into::into),
-                shell: args.shell,
             },
             output_format,
         ),
@@ -364,7 +363,6 @@ pub(super) fn run_tab_command(
             ActionKind::TabCreate,
             TabCreateParams {
                 tab_type: args.tab_type.map(Into::into),
-                shell: args.shell,
             },
             output_format,
         ),
