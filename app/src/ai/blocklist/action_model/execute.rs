@@ -1034,7 +1034,7 @@ pub async fn read_local_file_context(
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     result.failed_files.push(ReadFilesFailedFile {
                         path: absolute_file_path.to_string_lossy().to_string(),
-                        message: "File not found or could not be read".to_string(),
+                        message: "File does not exist".to_string(),
                     });
                     continue;
                 }
@@ -1198,7 +1198,7 @@ pub fn describe_failed_files(failed_files: &[ReadFilesFailedFile]) -> String {
 /// matching the units used in the "too large" failure message.
 #[cfg(feature = "local_fs")]
 fn format_mb(bytes: usize) -> String {
-    format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    format!("{:.1} MB", bytes as f64 / 1_000_000.0)
 }
 
 enum BinaryFileReadResult {
