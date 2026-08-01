@@ -2711,13 +2711,11 @@ const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
 ///
 /// `start_agent` (one child per call) and `run_agents` (a whole batch per call) are
 /// the same capability at different granularity and are both governed by the
-/// profile's `run_agents` permission, so they must appear/disappear together.
-/// Keeping the pair in one const is what lets `available_tool_names` and
-/// `build_tools_array` — two copy-paste-duplicated filters with no shared helper —
-/// stay in lockstep, and lets the registry swap one tool for the other without any
-/// gating change here.
-const CHILD_ORCHESTRATION_TOOLS: &[&str] =
-    &[tools::start_agent::TOOL_NAME, tools::run_agents::TOOL_NAME];
+/// profile's `run_agents` permission. `start_agent` used to sit alongside
+/// `run_agents` here; it is gone, but the const stays so that
+/// `available_tool_names` and `build_tools_array` -- two copy-paste-duplicated
+/// filters with no shared helper -- keep gating from one place.
+const CHILD_ORCHESTRATION_TOOLS: &[&str] = &[tools::run_agents::TOOL_NAME];
 
 /// Lists the tool names actually fed to the upstream model this turn (built-in REGISTRY + current MCP tools),
 /// sharing the same gating as `build_tools_array` (LRC / `web_search_enabled` /
@@ -4286,10 +4284,6 @@ pub async fn generate_byop_output(
 
         // Stream ended: emit the accumulated tool_calls all at once.
         let mut final_messages: Vec<api::Message> = Vec::new();
-        // start_agent ceiling: spawns beyond MAX_START_AGENT_CALLS_PER_TURN in a single
-        // assistant turn get a synthetic error result instead of a child agent, so a
-        // misbehaving model can't fork-bomb the machine with hidden panes.
-        let mut start_agent_calls_this_turn = 0usize;
         // Same ceiling for the batch tool, on its own counter: `run_agents` is a
         // different function name, so the check below is by name and cannot piggyback
         // on `start_agent`'s. Its per-call limit lives in `run_agents::from_args`
@@ -4443,44 +4437,6 @@ pub async fn generate_byop_output(
                     }
                 }
                 continue;
-            }
-
-            // start_agent per-turn ceiling (see the counter's declaration above). Runs before
-            // parse_incoming_tool_call so an over-limit call never becomes a real ToolCall:
-            // the model just reads back a structured error and continues.
-            if call.fn_name == tools::start_agent::TOOL_NAME {
-                start_agent_calls_this_turn += 1;
-                if start_agent_calls_this_turn > tools::start_agent::MAX_START_AGENT_CALLS_PER_TURN
-                {
-                    log::warn!(
-                        "[byop] start_agent call #{start_agent_calls_this_turn} exceeds the \
-                         per-turn ceiling ({}); refusing spawn",
-                        tools::start_agent::MAX_START_AGENT_CALLS_PER_TURN,
-                    );
-                    let args_str = if call.fn_arguments.is_string() {
-                        call.fn_arguments.as_str().unwrap_or("").to_owned()
-                    } else {
-                        call.fn_arguments.to_string()
-                    };
-                    let error_content = format!(
-                        r#"{{"status":"error","error":"Too many start_agent calls in one turn (max {}). Wait for the running child agents to finish before spawning more."}}"#,
-                        tools::start_agent::MAX_START_AGENT_CALLS_PER_TURN,
-                    );
-                    final_messages.push(make_tool_call_carrier_message(
-                        &current_task_id,
-                        &request_id,
-                        &call.call_id,
-                        &call.fn_name,
-                        &args_str,
-                    ));
-                    final_messages.push(make_tool_call_result_message(
-                        &current_task_id,
-                        &request_id,
-                        call.call_id.clone(),
-                        error_content,
-                    ));
-                    continue;
-                }
             }
 
             // run_agents per-turn ceiling. Same shape as start_agent's above: runs
@@ -7912,57 +7868,10 @@ mod issue_94_task_linearization_tests {
     }
 }
 
-#[cfg(test)]
-mod start_agent_gating_tests {
-    use super::*;
-
-    fn params() -> RequestParams {
-        RequestParams::new_for_test(vec![], vec![])
-    }
-
-    fn has_start_agent(params: &RequestParams) -> bool {
-        available_tool_names(params)
-            .iter()
-            .any(|n| n == tools::start_agent::TOOL_NAME)
-    }
-
-    fn tools_array_has_start_agent(params: &RequestParams) -> bool {
-        build_tools_array(params)
-            .iter()
-            .any(|t| t.name.as_str() == tools::start_agent::TOOL_NAME)
-    }
-
-    #[test]
-    fn hidden_when_run_agents_disabled() {
-        let params = params();
-        assert!(!params.run_agents_enabled);
-        assert!(!has_start_agent(&params));
-        assert!(!tools_array_has_start_agent(&params));
-    }
-
-    #[test]
-    fn exposed_when_run_agents_enabled() {
-        let mut params = params();
-        params.run_agents_enabled = true;
-        assert!(has_start_agent(&params));
-        assert!(tools_array_has_start_agent(&params));
-    }
-
-    #[test]
-    fn hidden_for_child_agents() {
-        let mut params = params();
-        params.run_agents_enabled = true;
-        params.parent_agent_id = Some("parent-1".to_string());
-        assert!(!has_start_agent(&params));
-        assert!(!tools_array_has_start_agent(&params));
-    }
-}
-
-/// The batch tool's half of the shared child-orchestration gate. Mirrors
-/// `start_agent_gating_tests` case for case and asserts BOTH filter functions,
-/// because `available_tool_names` (system prompt) and `build_tools_array` (genai
-/// tools array) are duplicated code: updating one alone would advertise a tool the
-/// model cannot call, or the reverse.
+/// The child-orchestration gate. Asserts BOTH filter functions, because
+/// `available_tool_names` (system prompt) and `build_tools_array` (genai tools
+/// array) are duplicated code: updating one alone would advertise a tool the model
+/// cannot call, or the reverse.
 #[cfg(test)]
 mod run_agents_gating_tests {
     use super::*;
@@ -8013,7 +7922,7 @@ mod run_agents_gating_tests {
     /// the assertion that makes swapping which tool is registered a registry-only
     /// change.
     #[test]
-    fn both_orchestration_tools_share_one_gate() {
+    fn orchestration_tools_share_one_gate() {
         for (run_agents_enabled, parent) in [
             (false, None),
             (true, None),
@@ -8028,6 +7937,8 @@ mod run_agents_gating_tests {
                 .copied()
                 .filter(|name| names.iter().any(|n| n.as_str() == *name))
                 .collect();
+            // Trivially true while only `run_agents` is listed; it exists to catch a
+            // future second orchestration tool being gated inconsistently.
             assert!(
                 exposed.is_empty() || exposed.len() == CHILD_ORCHESTRATION_TOOLS.len(),
                 "orchestration tools diverged: exposed={exposed:?} \

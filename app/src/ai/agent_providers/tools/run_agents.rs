@@ -2,8 +2,9 @@
 //!
 //! Lets the BYOP lead agent spawn a *batch* of local child agents in one call — one
 //! `summary` + one shared `base_prompt` + one harness, fanned out over N per-child
-//! prompts. This is the bulk counterpart of `start_agent` (one child per call) and
-//! maps onto the protobuf `RunAgents` tool, so the existing orchestration chain is
+//! prompts. This is the fork's only child-orchestration tool; it replaced the
+//! single-child `start_agent`, whose protobuf messages upstream deleted. It maps onto
+//! the protobuf `RunAgents` tool, so the existing orchestration chain is
 //! reused: `convert_from.rs` → `AIAgentActionType::RunAgents(RunAgentsRequest)` →
 //! `RunAgentsExecutor` (profile `run_agents` permission + the orchestrate
 //! confirmation card) → per-child `StartAgentExecutor::dispatch` → `RunAgentsResult`
@@ -24,8 +25,8 @@
 //!
 //! ## Gating (see `chat_stream::build_tools_array` / `available_tool_names`)
 //!
-//! Identical to `start_agent`'s — both tools are child orchestration and share one
-//! permission, so `chat_stream::CHILD_ORCHESTRATION_TOOLS` gates them together:
+//! Listed in `chat_stream::CHILD_ORCHESTRATION_TOOLS`, which is where child
+//! orchestration is gated:
 //! - `RequestParams.run_agents_enabled` — the active profile's `run_agents`
 //!   permission is `NeverAllow` → tool not exposed.
 //! - `RequestParams.parent_agent_id.is_some()` — child agents cannot spawn
@@ -47,9 +48,11 @@ pub const TOOL_NAME: &str = "run_agents";
 /// Upper bound on `run_agents` calls honored in a single assistant turn.
 /// Calls beyond this get a synthetic error result instead of a batch.
 ///
-/// Lower than `start_agent`'s ceiling on purpose: each call here already spawns up
-/// to `MAX_AGENTS_PER_CALL` children, so the real fork-bomb budget is the product.
-pub const MAX_RUN_AGENTS_CALLS_PER_TURN: usize = 2;
+/// One call per turn, because the real fork-bomb budget is this times
+/// `MAX_AGENTS_PER_CALL`. That keeps the per-turn ceiling at four children --
+/// the same budget the retired `start_agent` tool allowed (four calls, one child
+/// each) -- so replacing it did not quietly widen what one turn can spawn.
+pub const MAX_RUN_AGENTS_CALLS_PER_TURN: usize = 1;
 
 /// Upper bound on child agents in ONE `run_agents` call. Enforced in `from_args`
 /// (not in `chat_stream`) because the count only exists inside the parsed args;

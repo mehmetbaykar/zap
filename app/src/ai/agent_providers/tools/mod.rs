@@ -31,7 +31,6 @@ pub mod run_agents;
 pub mod search;
 pub mod shell;
 pub mod skill;
-pub mod start_agent;
 pub mod suggest;
 pub mod todowrite;
 pub mod web_runtime;
@@ -99,15 +98,11 @@ pub const REGISTRY: &[&OpenAiTool] = &[
     // intercepts it by name before parse_incoming_tool_call and calls web_runtime directly to run the HTTP.
     // gating: when profile.web_search_enabled=false, build_tools_array filters it out.
     &webfetch::WEBFETCH,
-    // Child-agent orchestration. Gated by the profile's `run_agents` permission
-    // (`RequestParams.run_agents_enabled`) and hidden from child agents themselves
-    // (`parent_agent_id` recursion guard) — see build_tools_array.
-    &start_agent::START_AGENT,
-    // Batch counterpart of `start_agent`: one call launches a whole batch of local
-    // children sharing a harness and a base prompt. Same gate as `start_agent`
-    // (`chat_stream::CHILD_ORCHESTRATION_TOOLS`) — both are exposed while the
-    // single-child tool is still the supported path; exposing only one is a matter
-    // of dropping the other entry here, with no gating change.
+    // Child-agent orchestration: one call launches a batch of local children sharing
+    // a harness and a base prompt. Gated by the profile's `run_agents` permission and
+    // hidden from child agents themselves — see `chat_stream::CHILD_ORCHESTRATION_TOOLS`.
+    // Replaced the single-child `start_agent` tool, which upstream retired along with
+    // its protobuf messages.
     &run_agents::RUN_AGENTS,
 ];
 
