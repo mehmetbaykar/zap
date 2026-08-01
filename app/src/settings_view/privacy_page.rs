@@ -29,8 +29,9 @@ use warpui::{
 
 use super::privacy::{AddRegexModal, AddRegexModalEvent, AddRegexModalViewState};
 use super::settings_page::{
-    HEADER_PADDING, LocalOnlyIconState, MatchData, PAGE_PADDING, PageType, SettingsPageMeta,
-    SettingsPageViewHandle, SettingsWidget, TOGGLE_BUTTON_RIGHT_PADDING, render_sub_header,
+    HEADER_PADDING, LocalOnlyIconState, MatchData, PageType, SettingsPageMeta,
+    SettingsPageViewHandle, SettingsWidget, TOGGLE_BUTTON_RIGHT_PADDING, ToggleState,
+    render_body_item, render_sub_header,
 };
 use super::{SettingsAction, SettingsSection, ToggleSettingActionPair, flags};
 use crate::appearance::Appearance;
@@ -1249,9 +1250,7 @@ impl SettingsWidget for SecretRedactionWidget {
             column.add_child(self.horizontal_divider(appearance));
         }
 
-        Container::new(column.finish())
-            .with_padding_top(PAGE_PADDING)
-            .finish()
+        Container::new(column.finish()).finish()
     }
 }
 

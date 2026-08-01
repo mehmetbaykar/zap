@@ -50,7 +50,7 @@ use crate::view_components::{
 pub const TOGGLE_BUTTON_RIGHT_PADDING: f32 = 5.;
 pub const HEADER_PADDING: f32 = 15.;
 pub const SUBHEADER_MARGIN_BOTTOM: f32 = 4.;
-pub const PAGE_TITLE_MARGIN_BOTTOM: f32 = 4.;
+pub const PAGE_TITLE_MARGIN_BOTTOM: f32 = HEADER_PADDING;
 pub(super) const PAGE_PADDING: f32 = 28.;
 pub(super) const HEADER_FONT_SIZE: f32 = 23.;
 const ALTERNATING_LIST_CLOSE_BUTTON_DIAMETER: f32 = 20.0;

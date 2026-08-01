@@ -502,7 +502,7 @@ fn terminal_screen_lifecycle_toggles_bracketed_paste() {
     );
 
     let mut leave_output = Vec::new();
-    leave_terminal_screen(&mut leave_output, true).unwrap();
+    leave_terminal_screen(&mut leave_output).unwrap();
     assert!(
         leave_output
             .windows(b"\x1b[?2004l".len())
@@ -511,10 +511,56 @@ fn terminal_screen_lifecycle_toggles_bracketed_paste() {
     );
 }
 
-/// Regression test for Shift+Enter not inserting a newline in terminals that
-/// require the Kitty keyboard protocol (e.g. Ghostty): entering the TUI must
-/// push the `DISAMBIGUATE_ESCAPE_CODES` enhancement flag (CSI `>1u`) so modified
-/// keys are reported distinctly, and leaving must pop it (CSI `<1u`).
+#[test]
+fn terminal_screen_lifecycle_toggles_focus_reporting() {
+    let mut enter_output = Vec::new();
+    enter_terminal_screen(&mut enter_output, true, true).unwrap();
+    assert!(
+        enter_output
+            .windows(b"\x1b[?1004h".len())
+            .any(|window| window == b"\x1b[?1004h"),
+        "entering the TUI should enable focus reporting"
+    );
+
+    let mut leave_output = Vec::new();
+    leave_terminal_screen(&mut leave_output).unwrap();
+    assert!(
+        leave_output
+            .windows(b"\x1b[?1004l".len())
+            .any(|window| window == b"\x1b[?1004l"),
+        "leaving the TUI should disable focus reporting"
+    );
+}
+
+#[test]
+fn terminal_background_probe_only_runs_on_quiet_active_focus_gain() {
+    let key = CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty()));
+
+    assert!(should_probe_after_event(
+        &CrosstermEvent::FocusGained,
+        true,
+        false,
+    ));
+    assert!(!should_probe_after_event(
+        &CrosstermEvent::FocusGained,
+        false,
+        false,
+    ));
+    assert!(!should_probe_after_event(
+        &CrosstermEvent::FocusGained,
+        true,
+        true,
+    ));
+    assert!(!should_probe_after_event(
+        &CrosstermEvent::FocusLost,
+        true,
+        false,
+    ));
+    assert!(!should_probe_after_event(&key, true, false));
+}
+/// Enhancement-capable terminals report standalone modifier event types while
+/// preserving shifted text through Crossterm's alternate-key decoding (CSI
+/// `>15u`), then restore the previous protocol on exit.
 ///
 /// Crossterm hard-routes these commands to the unsupported legacy Windows
 /// console API, so the ANSI sequences are only emitted off Windows. The
@@ -527,7 +573,7 @@ fn terminal_screen_lifecycle_toggles_keyboard_enhancement() {
     enter_terminal_screen(&mut enter_output, true).unwrap();
 
     let mut leave_output = Vec::new();
-    leave_terminal_screen(&mut leave_output, true).unwrap();
+    leave_terminal_screen(&mut leave_output).unwrap();
 
     #[cfg(not(windows))]
     {
@@ -547,22 +593,96 @@ fn terminal_screen_lifecycle_toggles_keyboard_enhancement() {
 }
 
 #[test]
-fn terminal_screen_lifecycle_skips_unsupported_keyboard_enhancement() {
+fn terminal_screen_lifecycle_can_skip_all_key_reporting() {
     let mut enter_output = Vec::new();
-    enter_terminal_screen(&mut enter_output, false).unwrap();
-    assert!(
-        !enter_output
-            .windows(b"\x1b[>1u".len())
-            .any(|window| window == b"\x1b[>1u")
-    );
+    enter_terminal_screen(&mut enter_output, true, false).unwrap();
+
+    #[cfg(not(windows))]
+    {
+        assert!(
+            enter_output
+                .windows(b"\x1b[>3u".len())
+                .any(|window| window == b"\x1b[>3u"),
+            "compatibility mode should retain safe keyboard enhancements"
+        );
+        assert!(
+            !enter_output
+                .windows(b"\x1b[>15u".len())
+                .any(|window| window == b"\x1b[>15u"),
+            "compatibility mode should not request all-key reporting"
+        );
+    }
+}
+
+#[test]
+fn terminal_screen_lifecycle_reconfigures_modifier_reporting() {
+    let mut output = Vec::new();
+    set_terminal_keyboard_enhancement_flags(&mut output, false).unwrap();
+    assert_eq!(output, b"\x1b[=3;1u");
+
+    output.clear();
+    set_terminal_keyboard_enhancement_flags(&mut output, true).unwrap();
+    assert_eq!(output, b"\x1b[=15;1u");
+}
+
+#[test]
+fn terminal_screen_lifecycle_uses_baseline_keyboard_enhancement_when_unconfirmed() {
+    let mut enter_output = Vec::new();
+    enter_terminal_screen(&mut enter_output, false, true).unwrap();
+
+    #[cfg(not(windows))]
+    {
+        assert!(
+            enter_output
+                .windows(b"\x1b[>3u".len())
+                .any(|window| window == b"\x1b[>3u"),
+            "unconfirmed terminals should still receive safe baseline keyboard enhancements"
+        );
+        assert!(
+            !enter_output
+                .windows(b"\x1b[>15u".len())
+                .any(|window| window == b"\x1b[>15u"),
+            "unconfirmed terminals should not receive all-key reporting"
+        );
+    }
 
     let mut leave_output = Vec::new();
-    leave_terminal_screen(&mut leave_output, false).unwrap();
+    leave_terminal_screen(&mut leave_output).unwrap();
+    #[cfg(not(windows))]
     assert!(
-        !leave_output
+        leave_output
             .windows(b"\x1b[<1u".len())
-            .any(|window| window == b"\x1b[<1u")
+            .any(|window| window == b"\x1b[<1u"),
+        "leaving should pop the baseline keyboard enhancement request"
     );
+}
+
+#[test]
+fn keyboard_enhancement_probe_retries_a_negative_result_once() {
+    let mut results = VecDeque::from([Ok(false), Ok(true)]);
+    assert!(probe_keyboard_enhancement_support(|| {
+        results.pop_front().expect("probe should run at most twice")
+    }));
+    assert!(results.is_empty());
+}
+
+#[test]
+fn keyboard_enhancement_probe_does_not_retry_success_or_error() {
+    let mut successful_results = VecDeque::from([Ok(true), Ok(false)]);
+    assert!(probe_keyboard_enhancement_support(|| {
+        successful_results
+            .pop_front()
+            .expect("successful probe should run once")
+    }));
+    assert_eq!(successful_results.len(), 1);
+
+    let mut failed_results = VecDeque::from([Err(io::Error::other("probe failed")), Ok(true)]);
+    assert!(!probe_keyboard_enhancement_support(|| {
+        failed_results
+            .pop_front()
+            .expect("failed probe should run once")
+    }));
+    assert_eq!(failed_results.len(), 1);
 }
 #[test]
 fn raw_mode_guard_restores_on_drop() {

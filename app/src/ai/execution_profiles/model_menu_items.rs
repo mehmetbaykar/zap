@@ -77,7 +77,8 @@ fn make_item_fields<A: Action + Clone>(
     collapse_reasoning_variants: bool,
     app: &AppContext,
 ) -> MenuItem<A> {
-    let label = if collapse_auto && is_auto(llm) {
+    let is_auto_model = is_auto(llm);
+    let label = if collapse_auto && is_auto_model {
         "auto".to_string()
     } else if collapse_reasoning_variants && llm.has_reasoning_level() {
         llm.base_model_name().to_string()
