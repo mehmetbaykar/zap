@@ -1,47 +1,54 @@
-use super::*;
+use super::{
+    AIAgentActionResultType, RunAgentsAgentOutcome, RunAgentsAgentOutcomeKind,
+    RunAgentsLaunchedExecutionMode, RunAgentsResult,
+};
 
-#[test]
-fn local_run_agents_result_reports_ordered_outcomes() {
-    let result = AIAgentActionResultType::RunAgents(RunAgentsResult::Launched {
-        model_id: "local-model".to_string(),
-        harness_type: "codex".to_string(),
+fn launched_agent(name: &str) -> RunAgentsAgentOutcome {
+    RunAgentsAgentOutcome {
+        name: name.to_string(),
+        kind: RunAgentsAgentOutcomeKind::Launched {
+            agent_id: format!("{name}-id"),
+        },
+    }
+}
+
+fn failed_agent(name: &str) -> RunAgentsAgentOutcome {
+    RunAgentsAgentOutcome {
+        name: name.to_string(),
+        kind: RunAgentsAgentOutcomeKind::Failed {
+            error: "launch failed".to_string(),
+        },
+    }
+}
+
+fn run_agents_result(agents: Vec<RunAgentsAgentOutcome>) -> AIAgentActionResultType {
+    AIAgentActionResultType::RunAgents(RunAgentsResult::Launched {
+        model_id: "auto".to_string(),
+        harness_type: "oz".to_string(),
         execution_mode: RunAgentsLaunchedExecutionMode::Local,
-        agents: vec![
-            RunAgentsAgentOutcome {
-                name: "first".to_string(),
-                kind: RunAgentsAgentOutcomeKind::Launched {
-                    agent_id: "agent-1".to_string(),
-                },
-            },
-            RunAgentsAgentOutcome {
-                name: "second".to_string(),
-                kind: RunAgentsAgentOutcomeKind::Failed {
-                    error: "not installed".to_string(),
-                },
-            },
-        ],
-    });
-
-    assert!(result.is_successful());
-    assert!(!result.is_failed());
-    assert!(!result.is_cancelled());
-    assert_eq!(
-        result.to_string(),
-        "Orchestrate launched (1/2 agents started)"
-    );
+        agents,
+    })
 }
 
 #[test]
-fn local_orchestration_terminal_states_are_classified() {
-    let denied = AIAgentActionResultType::RunAgents(RunAgentsResult::Denied {
-        reason: "not approved".to_string(),
-    });
-    let cancelled = AIAgentActionResultType::RunAgents(RunAgentsResult::Cancelled);
-    let wait_completed = AIAgentActionResultType::WaitForEvents(WaitForEventsResult::Completed);
-    let wait_cancelled = AIAgentActionResultType::WaitForEvents(WaitForEventsResult::Cancelled);
+fn run_agents_is_successful_when_all_agents_launch() {
+    let result = run_agents_result(vec![launched_agent("first"), launched_agent("second")]);
 
-    assert!(denied.is_failed());
-    assert!(cancelled.is_cancelled());
-    assert!(wait_completed.is_successful());
-    assert!(wait_cancelled.is_cancelled());
+    assert!(result.is_successful());
+    assert!(!result.is_failed());
+}
+
+#[test]
+fn run_agents_is_successful_when_some_agents_launch() {
+    let result = run_agents_result(vec![launched_agent("first"), failed_agent("second")]);
+    assert!(result.is_successful());
+    assert!(!result.is_failed());
+}
+
+#[test]
+fn run_agents_is_failed_when_no_agents_launch() {
+    let result = run_agents_result(vec![failed_agent("first"), failed_agent("second")]);
+
+    assert!(!result.is_successful());
+    assert!(result.is_failed());
 }

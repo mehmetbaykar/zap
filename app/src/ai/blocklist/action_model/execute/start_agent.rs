@@ -1,18 +1,16 @@
-//! Local-only executor for `AIAgentActionType::StartAgent`.
+//! Local child-agent launcher.
+//!
+//! No longer an action executor: upstream retired the `StartAgent` tool and its
+//! action variant, so nothing dispatches to it through the action model. What
+//! survives is `dispatch`, which `RunAgentsExecutor` calls once per child to
+//! actually start it. Upstream kept this file for the same reason.
 
-use futures::FutureExt;
-use futures::future::BoxFuture;
 use shell_words::split as split_shell_words;
 use warp_cli::agent::Harness;
-use warp_core::execution_mode::AppExecutionMode;
-use warpui::{Entity, EntityId, ModelContext, SingletonEntity};
+use warpui::{Entity, EntityId, ModelContext};
 
-use super::{ActionExecution, AnyActionExecution, ExecuteActionInput};
+use crate::ai::agent::StartAgentExecutionMode;
 use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::agent::{
-    AIAgentActionResultType, AIAgentActionType, StartAgentExecutionMode, StartAgentResult,
-};
-use crate::ai::blocklist::permissions::BlocklistAIPermissions;
 use crate::ai::local_harness_setup::local_harness_product_disabled_message;
 
 /// Per-request outcome of a local child launch.
@@ -63,62 +61,6 @@ impl StartAgentExecutor {
     /// run) spawns without user approval; `AlwaysAsk` waits for the action card's
     /// Accept. The plan-driven orchestrator path is unaffected — `RunAgentsExecutor`
     /// does its own approval and dispatches into this executor directly.
-    pub(super) fn should_autoexecute(&self, ctx: &ModelContext<Self>) -> bool {
-        AppExecutionMode::as_ref(ctx).is_autonomous()
-            || BlocklistAIPermissions::as_ref(ctx)
-                .get_run_agents_setting(ctx, Some(self.terminal_view_id))
-                .is_always_allow()
-    }
-
-    pub(super) fn preprocess_action(&mut self) -> BoxFuture<'static, ()> {
-        futures::future::ready(()).boxed()
-    }
-
-    pub(super) fn execute(
-        &mut self,
-        input: ExecuteActionInput,
-        ctx: &mut ModelContext<Self>,
-    ) -> impl Into<AnyActionExecution> + use<> {
-        let AIAgentActionType::StartAgent {
-            version,
-            name,
-            prompt,
-            execution_mode,
-            lifecycle_subscription,
-        } = &input.action.action
-        else {
-            return ActionExecution::InvalidAction;
-        };
-
-        let version = *version;
-        let receiver = self.dispatch(
-            name.clone(),
-            prompt.clone(),
-            execution_mode.clone(),
-            lifecycle_subscription.clone(),
-            input.conversation_id,
-            ctx,
-        );
-
-        ActionExecution::new_async(async move { receiver.recv().await }, move |result, _| {
-            match result {
-                Ok(StartAgentOutcome::Started { agent_id }) => {
-                    AIAgentActionResultType::StartAgent(StartAgentResult::Success {
-                        agent_id,
-                        version,
-                    })
-                }
-                Ok(StartAgentOutcome::Error(error)) => {
-                    AIAgentActionResultType::StartAgent(StartAgentResult::Error { error, version })
-                }
-                Err(_) => {
-                    AIAgentActionResultType::StartAgent(StartAgentResult::Cancelled { version })
-                }
-            }
-        })
-    }
-
-    /// Dispatch a local child launch and return a receiver for its terminal-pane completion.
     pub fn dispatch(
         &mut self,
         name: String,
@@ -235,7 +177,3 @@ impl Entity for StartAgentExecutor {
 pub enum StartAgentExecutorEvent {
     CreateAgent(StartAgentRequest),
 }
-
-#[cfg(test)]
-#[path = "start_agent_tests.rs"]
-mod tests;

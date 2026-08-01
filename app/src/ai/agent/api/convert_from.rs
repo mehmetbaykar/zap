@@ -3,10 +3,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use ai::agent::UnknownCitationTypeError;
-use ai::agent::action::{
-    RunAgentsAgentRunConfig, RunAgentsExecutionMode, RunAgentsRequest, StartAgentExecutionMode,
-};
-use ai::agent::action_result::StartAgentVersion;
+use ai::agent::action::{RunAgentsAgentRunConfig, RunAgentsExecutionMode, RunAgentsRequest};
 use ai::agent::convert::ToolToAIAgentActionError;
 use ai::skills::{SkillPathOrigin, skill_reference_from_read_skill_ref};
 use api::ask_user_question::question::QuestionType;
@@ -138,65 +135,6 @@ fn convert_run_agents(run_agents: api::RunAgents) -> AIAgentActionType {
         // carry it.
         harness_auth_secret_name: None,
     })
-}
-
-/// Converts a proto lifecycle event type into the fork's string form
-/// (snake_case proto short names, e.g. "errored", "in_progress").
-/// Returns `None` for unknown or unspecified values.
-fn convert_start_agent_lifecycle_event_type(event_type: i32) -> Option<String> {
-    match api::LifecycleEventType::try_from(event_type).ok()? {
-        api::LifecycleEventType::Unspecified => None,
-        api::LifecycleEventType::Started => Some("started".to_string()),
-        api::LifecycleEventType::Idle => Some("idle".to_string()),
-        api::LifecycleEventType::Restarted => Some("restarted".to_string()),
-        api::LifecycleEventType::Errored => Some("errored".to_string()),
-        api::LifecycleEventType::Cancelled => Some("cancelled".to_string()),
-        api::LifecycleEventType::Blocked => Some("blocked".to_string()),
-        api::LifecycleEventType::InProgress => Some("in_progress".to_string()),
-        api::LifecycleEventType::Succeeded => Some("succeeded".to_string()),
-        api::LifecycleEventType::Failed => Some("failed".to_string()),
-    }
-}
-
-fn convert_start_agent_v2_harness_type(
-    harness: Option<api::start_agent_v2::execution_mode::Harness>,
-) -> Option<String> {
-    harness
-        .map(|harness| harness.r#type)
-        .filter(|harness_type| !harness_type.trim().is_empty())
-}
-
-/// Zap has no cloud child-agent execution: a `Remote` proto mode degrades to
-/// the local default instead of erroring, so the exchange is never aborted.
-fn convert_start_agent_execution_mode(
-    execution_mode: Option<api::start_agent::ExecutionMode>,
-) -> StartAgentExecutionMode {
-    match execution_mode.and_then(|execution_mode| execution_mode.mode) {
-        Some(api::start_agent::execution_mode::Mode::Remote(_)) => {
-            log::warn!("StartAgent requested remote execution; degrading to local (no cloud)");
-            StartAgentExecutionMode::local_with_defaults()
-        }
-        Some(api::start_agent::execution_mode::Mode::Local(_)) | None => {
-            StartAgentExecutionMode::local_with_defaults()
-        }
-    }
-}
-
-fn convert_start_agent_v2_execution_mode(
-    execution_mode: Option<api::start_agent_v2::ExecutionMode>,
-) -> StartAgentExecutionMode {
-    match execution_mode.and_then(|execution_mode| execution_mode.mode) {
-        Some(api::start_agent_v2::execution_mode::Mode::Remote(_)) => {
-            log::warn!("StartAgentV2 requested remote execution; degrading to local (no cloud)");
-            StartAgentExecutionMode::local_with_defaults()
-        }
-        Some(api::start_agent_v2::execution_mode::Mode::Local(local)) => {
-            convert_start_agent_v2_harness_type(local.harness)
-                .map(StartAgentExecutionMode::local_harness)
-                .unwrap_or_else(StartAgentExecutionMode::local_with_defaults)
-        }
-        None => StartAgentExecutionMode::local_with_defaults(),
-    }
 }
 
 /// Unexpected errors when trying to convert an [`api::Message`] to an [`AIAgentOutputMessage`].
@@ -783,40 +721,11 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
                     subagent_type,
                 }))
             }
-            api::message::tool_call::Tool::StartAgent(start_agent) => {
-                create_standard_action(AIAgentActionType::StartAgent {
-                    version: StartAgentVersion::V1,
-                    name: start_agent.name,
-                    prompt: start_agent.prompt,
-                    execution_mode: convert_start_agent_execution_mode(start_agent.execution_mode),
-                    lifecycle_subscription: start_agent.lifecycle_subscription.map(
-                        |subscription| {
-                            subscription
-                                .event_types
-                                .into_iter()
-                                .filter_map(convert_start_agent_lifecycle_event_type)
-                                .collect()
-                        },
-                    ),
-                })
-            }
-            api::message::tool_call::Tool::StartAgentV2(start_agent) => {
-                create_standard_action(AIAgentActionType::StartAgent {
-                    version: StartAgentVersion::V2,
-                    name: start_agent.name,
-                    prompt: start_agent.prompt,
-                    execution_mode: convert_start_agent_v2_execution_mode(
-                        start_agent.execution_mode,
-                    ),
-                    lifecycle_subscription: start_agent.lifecycle_subscription.map(
-                        |subscription| {
-                            subscription
-                                .event_types
-                                .into_iter()
-                                .filter_map(convert_start_agent_lifecycle_event_type)
-                                .collect()
-                        },
-                    ),
+            api::message::tool_call::Tool::SendMessageToAgent(send_message) => {
+                create_standard_action(AIAgentActionType::SendMessageToAgent {
+                    addresses: send_message.addresses,
+                    subject: send_message.subject,
+                    message: send_message.message,
                 })
             }
             api::message::tool_call::Tool::RunAgents(run_agents) => {

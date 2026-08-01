@@ -250,15 +250,10 @@ fn result_to_json_cancelled_when_outcome_unset() {
 fn result_to_json_ignores_other_variants() {
     // `serialize_result` is first-match-wins across the whole REGISTRY, so claiming
     // a foreign variant here would hijack another tool's result.
-    let start_agent =
-        api::message::tool_call_result::Result::StartAgentV2(api::StartAgentV2Result {
-            result: Some(api::start_agent_v2_result::Result::Success(
-                api::start_agent_v2_result::Success {
-                    agent_id: "agent-42".to_string(),
-                },
-            )),
-        });
-    assert!((RUN_AGENTS.result_to_json)(&start_agent).is_none());
+    let other_tool = api::message::tool_call_result::Result::RunShellCommand(
+        api::RunShellCommandResult::default(),
+    );
+    assert!((RUN_AGENTS.result_to_json)(&other_tool).is_none());
 
     let server = api::message::tool_call_result::Result::Server(
         api::message::tool_call_result::ServerResult {

@@ -792,39 +792,20 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                                 .add_child(render_request_computer_use(props, id, request, app));
                         }
                         AIAgentOutputMessageType::Action(AIAgentAction {
-                            action: AIAgentActionType::RunAgents(_),
+                            action: AIAgentActionType::RunAgents(_req),
                             id,
                             ..
                         }) => {
+                            // Embed the per-action `RunAgentsCardView`
+                            // via `ChildView`. The view renders a
+                            // "Configuring agents..." placeholder while
+                            // streaming, then transitions to the full
+                            // confirmation card once complete.
                             should_render_footer = false;
                             should_render_suggestions = false;
                             if let Some(card_view) = props.run_agents_card_views.get(id) {
                                 output_items.add_child(ChildView::new(card_view).finish());
                             }
-                        }
-                        AIAgentOutputMessageType::Action(AIAgentAction {
-                            action:
-                                AIAgentActionType::StartAgent {
-                                    version: _,
-                                    name,
-                                    prompt,
-                                    execution_mode,
-                                    lifecycle_subscription: _,
-                                },
-                            id,
-                            ..
-                        }) => {
-                            should_render_footer = false;
-                            should_render_suggestions = false;
-                            output_items.add_child(orchestration::render_start_agent(
-                                props,
-                                id,
-                                name,
-                                prompt,
-                                execution_mode,
-                                &output_message.id,
-                                app,
-                            ));
                         }
                         AIAgentOutputMessageType::Action(AIAgentAction {
                             action:

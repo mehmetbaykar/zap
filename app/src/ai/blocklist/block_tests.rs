@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+
+use ai::agent::action::{RunAgentsAgentRunConfig, RunAgentsExecutionMode};
+use ai::skills::SkillReference;
 use settings::Setting;
 use warpui::{App, SingletonEntity};
 

@@ -490,9 +490,6 @@ impl BlocklistAIActionExecutor {
             AIAgentActionType::ReadSkill(_) => self
                 .read_skill_executor
                 .update(ctx, |executor, ctx| executor.preprocess_action(input, ctx)),
-            AIAgentActionType::StartAgent { .. } => self
-                .start_agent_executor
-                .update(ctx, |executor, _| executor.preprocess_action()),
             AIAgentActionType::RunAgents(_) => self
                 .run_agents_executor
                 .update(ctx, |executor, _| executor.preprocess_action()),
@@ -691,10 +688,6 @@ impl BlocklistAIActionExecutor {
                 .into(),
             AIAgentActionType::ReadSkill(_) => self
                 .read_skill_executor
-                .update(ctx, |executor, ctx| executor.execute(input, ctx))
-                .into(),
-            AIAgentActionType::StartAgent { .. } => self
-                .start_agent_executor
                 .update(ctx, |executor, ctx| executor.execute(input, ctx))
                 .into(),
             AIAgentActionType::RunAgents(_) => self
@@ -926,9 +919,6 @@ impl BlocklistAIActionExecutor {
             AIAgentActionType::ReadSkill(_) => self
                 .read_skill_executor
                 .update(ctx, |executor, ctx| executor.should_autoexecute(input, ctx)),
-            AIAgentActionType::StartAgent { .. } => self
-                .start_agent_executor
-                .update(ctx, |executor, ctx| executor.should_autoexecute(ctx)),
             AIAgentActionType::RunAgents(_) => self
                 .run_agents_executor
                 .update(ctx, |executor, ctx| executor.should_autoexecute(input, ctx)),

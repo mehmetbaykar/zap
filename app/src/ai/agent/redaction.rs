@@ -231,7 +231,6 @@ pub(crate) fn redact_inputs(inputs: &mut [AIAgentInput]) {
 
                     // Local-only results never cross the Warp protocol.
                     AIAgentActionResultType::FetchConversation(_)
-                    | AIAgentActionResultType::StartAgent(_)
                     | AIAgentActionResultType::SendMessageToAgent(_)
                     | AIAgentActionResultType::RunAgents(_)
                     | AIAgentActionResultType::WaitForEvents(_) => {}

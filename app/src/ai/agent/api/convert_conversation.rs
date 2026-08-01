@@ -1231,10 +1231,6 @@ pub(crate) fn convert_tool_call_result_to_input(
             create_cancelled_result_for_tool_call(task_id, &tool_call_id, tool_call_map, context)
         }
         Some(ToolCallResultType::Subagent(_)) => None,
-        Some(ToolCallResultType::StartAgent(_)) | Some(ToolCallResultType::StartAgentV2(_)) => {
-            // The cloud tool has been physically excised
-            None
-        }
         Some(ToolCallResultType::AskUserQuestion(result)) => {
             let ask_result = match &result.result {
                 Some(warp_multi_agent_api::ask_user_question_result::Result::Success(success)) => {
@@ -1372,7 +1368,6 @@ fn create_cancelled_result_for_tool_call(
         ToolType::FetchConversation(_) => return None,
         ToolType::Server(_) => return None,
         ToolType::Subagent(_) => return None,
-        ToolType::StartAgent(_) | ToolType::StartAgentV2(_) => return None,
         ToolType::AskUserQuestion(_) => {
             AIAgentActionResultType::AskUserQuestion(AskUserQuestionResult::Cancelled)
         }

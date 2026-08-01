@@ -87,10 +87,7 @@ pub enum AIAgentActionResultType {
     /// The result of fetching a conversation's tasks.
     FetchConversation(FetchConversationResult),
 
-    /// The result of starting a local child agent.
-    StartAgent(StartAgentResult),
-
-    /// The result of sending a message to another local agent.
+    /// The result of sending a message to another agent.
     SendMessageToAgent(SendMessageToAgentResult),
 
     /// The output of transferring shell command control to the user.
@@ -114,13 +111,6 @@ impl Display for ReadFilesFailedFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.path, self.message)
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum StartAgentVersion {
-    #[default]
-    V1,
-    V2,
 }
 
 impl AIAgentActionResultType {
@@ -171,7 +161,6 @@ impl Display for AIAgentActionResultType {
             AIAgentActionResultType::InsertReviewComments(result) => result.fmt(f),
             AIAgentActionResultType::RequestComputerUse(result) => result.fmt(f),
             AIAgentActionResultType::FetchConversation(result) => result.fmt(f),
-            AIAgentActionResultType::StartAgent(result) => result.fmt(f),
             AIAgentActionResultType::SendMessageToAgent(result) => result.fmt(f),
             AIAgentActionResultType::TransferShellCommandControlToUser(result) => result.fmt(f),
             AIAgentActionResultType::AskUserQuestion(result) => result.fmt(f),
@@ -745,7 +734,6 @@ impl AIAgentActionResultType {
             AIAgentActionResultType::UseComputer(_) => "The computer use result",
             AIAgentActionResultType::RequestComputerUse(_) => "The computer use request result",
             AIAgentActionResultType::FetchConversation(_) => "The fetched conversation tasks",
-            AIAgentActionResultType::StartAgent(_) => "The result of starting a child agent",
             AIAgentActionResultType::SendMessageToAgent(_) => "The result of sending a message",
             AIAgentActionResultType::TransferShellCommandControlToUser(_) => {
                 "The result of transferring shell command control to user"
@@ -788,7 +776,7 @@ impl AIAgentActionResultType {
             | Self::FetchConversation(FetchConversationResult::Success { .. })
             | Self::OpenCodeReview
             | Self::ReadSkill(ReadSkillResult::Success { .. })
-            | Self::StartAgent(StartAgentResult::Success { .. })
+            | Self::FetchConversation(FetchConversationResult::Success { .. })
             | Self::SendMessageToAgent(SendMessageToAgentResult::Success { .. })
             | Self::TransferShellCommandControlToUser(
                 TransferShellCommandControlToUserResult::Snapshot { .. }
@@ -819,7 +807,6 @@ impl AIAgentActionResultType {
             | Self::InsertReviewComments(InsertReviewCommentsResult::Error { .. })
             | Self::RequestComputerUse(RequestComputerUseResult::Error(_))
             | Self::FetchConversation(FetchConversationResult::Error(_))
-            | Self::StartAgent(StartAgentResult::Error { .. })
             | Self::SendMessageToAgent(SendMessageToAgentResult::Error(_))
             | Self::AskUserQuestion(AskUserQuestionResult::Error(_))
             | Self::TransferShellCommandControlToUser(
@@ -865,7 +852,7 @@ impl AIAgentActionResultType {
                 WriteToLongRunningShellCommandResult::Cancelled,
             )
             | Self::ReadSkill(ReadSkillResult::Cancelled)
-            | Self::StartAgent(StartAgentResult::Cancelled { .. })
+            | Self::FetchConversation(FetchConversationResult::Cancelled)
             | Self::SendMessageToAgent(SendMessageToAgentResult::Cancelled)
             // SkippedByAutoApprove is intentionally excluded: the agent should continue.
             | Self::AskUserQuestion(AskUserQuestionResult::Cancelled)
@@ -1188,50 +1175,14 @@ impl Display for FetchConversationResult {
     }
 }
 
-// TODO(QUALITY-788): Delete legacy start_agent/start_agent_v2 result support once
-// old preview orchestration history no longer needs parse/display/result compatibility.
-// Linear issue: QUALITY-788.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum StartAgentResult {
-    Success {
-        agent_id: String,
-        #[serde(default)]
-        version: StartAgentVersion,
-    },
-    Error {
-        error: String,
-        #[serde(default)]
-        version: StartAgentVersion,
-    },
-    Cancelled {
-        #[serde(default)]
-        version: StartAgentVersion,
-    },
-}
-
-impl StartAgentResult {
-    pub fn version(&self) -> StartAgentVersion {
-        match self {
-            StartAgentResult::Success { version, .. }
-            | StartAgentResult::Error { version, .. }
-            | StartAgentResult::Cancelled { version } => *version,
-        }
-    }
-}
-
-impl Display for StartAgentResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StartAgentResult::Success { agent_id, .. } => {
-                write!(f, "Started agent with id {agent_id}")
-            }
-            StartAgentResult::Error { error, .. } => write!(f, "Start agent error: {error}"),
-            StartAgentResult::Cancelled { .. } => write!(f, "Start agent cancelled"),
-        }
-    }
-}
-
-/// Terminal outcome of a local orchestration batch.
+/// The terminal outcome of an orchestrate tool call.
+///
+/// Mirrors the proto `RunAgentsResult` oneof, with an additional
+/// `Cancelled` variant used internally by the action machinery when the
+/// user clicks Reject. The proto wire form for cancellation is the
+/// generic `ToolCallResult.Cancel` marker; the conversion code emits
+/// `ConvertToAPITypeError::Ignore` for `Cancelled` so the input
+/// interceptor can synthesize the marker on the next outbound input.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RunAgentsResult {
     Launched {

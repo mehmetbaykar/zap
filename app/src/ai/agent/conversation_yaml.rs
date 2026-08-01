@@ -367,16 +367,6 @@ fn write_tool_call_args(out: &mut String, tool: &Tool) {
                 }
             }
         }
-        Tool::StartAgent(sa) => {
-            out.push_str(&format!("name: \"{}\"\n", escape_yaml_string(&sa.name)));
-            out.push_str("prompt: |\n");
-            write_block_scalar(out, &sa.prompt);
-        }
-        Tool::StartAgentV2(sa) => {
-            out.push_str(&format!("name: \"{}\"\n", escape_yaml_string(&sa.name)));
-            out.push_str("prompt: |\n");
-            write_block_scalar(out, &sa.prompt);
-        }
         #[allow(deprecated)]
         Tool::FileGlob(fg) => {
             out.push_str("patterns:\n");
@@ -510,15 +500,59 @@ fn write_tool_call_args(out: &mut String, tool: &Tool) {
 /// Writes content from structured tool call results.
 fn write_tool_call_result_content(out: &mut String, result: &ToolCallResultType) {
     match result {
-        ToolCallResultType::StartAgentV2(r) => match &r.result {
-            Some(api::start_agent_v2_result::Result::Success(s)) => {
-                out.push_str(&format!("agent_id: {}\n", s.agent_id));
+        ToolCallResultType::RunAgentsResult(r) => match &r.outcome {
+            Some(api::run_agents_result::Outcome::Launched(launched)) => {
+                out.push_str("status: launched\n");
+                out.push_str(&format!("agent_count: {}\n", launched.agents.len()));
+                if !launched.agents.is_empty() {
+                    out.push_str("agents:\n");
+                    for agent in &launched.agents {
+                        out.push_str(&format!(
+                            "  - name: \"{}\"\n",
+                            escape_yaml_string(&agent.name)
+                        ));
+                        match &agent.result {
+                            Some(api::run_agents_result::agent_outcome::Result::Launched(
+                                launched,
+                            )) => {
+                                out.push_str("    status: launched\n");
+                                out.push_str(&format!("    agent_id: {}\n", launched.agent_id));
+                            }
+                            Some(api::run_agents_result::agent_outcome::Result::Failed(failed)) => {
+                                out.push_str("    status: failed\n");
+                                out.push_str(&format!(
+                                    "    error: \"{}\"\n",
+                                    escape_yaml_string(&failed.error)
+                                ));
+                            }
+                            None => {
+                                out.push_str("    status: unknown\n");
+                            }
+                        }
+                    }
+                    out.push_str(
+                        "next_step: \"Use send_message_to_agent with the existing agent_id instead of running agents again.\"\n",
+                    );
+                }
             }
-            Some(api::start_agent_v2_result::Result::Error(e)) => {
-                out.push_str(&format!("error: {}\n", e.error));
+            Some(api::run_agents_result::Outcome::Denied(denied)) => {
+                out.push_str("status: launch_denied\n");
+                out.push_str(&format!(
+                    "reason: \"{}\"\n",
+                    escape_yaml_string(&denied.reason)
+                ));
+            }
+            Some(api::run_agents_result::Outcome::Failure(failure)) => {
+                out.push_str("status: failure\n");
+                out.push_str(&format!(
+                    "error: \"{}\"\n",
+                    escape_yaml_string(&failure.error)
+                ));
             }
             None => {}
         },
+        ToolCallResultType::WaitForEvents(_) => {}
+        ToolCallResultType::StartRecording(_) | ToolCallResultType::StopRecording(_) => {}
         ToolCallResultType::RunShellCommand(r) => {
             if let Some(res) = &r.result {
                 use api::run_shell_command_result::Result;
@@ -865,19 +899,6 @@ fn write_tool_call_result_content(out: &mut String, result: &ToolCallResultType)
                     }
                     Result::Error(e) => {
                         out.push_str(&format!("error: {}\n", e.message));
-                    }
-                }
-            }
-        }
-        ToolCallResultType::StartAgent(r) => {
-            if let Some(res) = &r.result {
-                use api::start_agent_result::Result;
-                match res {
-                    Result::Success(s) => {
-                        out.push_str(&format!("agent_id: {}\n", s.agent_id));
-                    }
-                    Result::Error(e) => {
-                        out.push_str(&format!("error: {}\n", e.error));
                     }
                 }
             }

@@ -269,8 +269,7 @@ pub mod text {
                     }
                     FetchConversationResult::Cancelled => writeln!(w, "{CANCELLED_MESSAGE}"),
                 },
-                AIAgentActionResultType::StartAgent(_)
-                | AIAgentActionResultType::SendMessageToAgent(_)
+                AIAgentActionResultType::SendMessageToAgent(_)
                 | AIAgentActionResultType::RunAgents(_)
                 | AIAgentActionResultType::WaitForEvents(_) => Ok(()),
                 AIAgentActionResultType::AskUserQuestion(_) => Ok(()),
@@ -369,7 +368,6 @@ pub mod text {
                     | AIAgentActionType::EditDocuments(_)
                     | AIAgentActionType::CreateDocuments(_)
                     | AIAgentActionType::ReadShellCommandOutput { .. }
-                    | AIAgentActionType::StartAgent { .. }
                     | AIAgentActionType::SendMessageToAgent { .. }
                     | AIAgentActionType::RunAgents(_)
                     | AIAgentActionType::WaitForEvents(_)
@@ -1009,7 +1007,6 @@ pub mod json {
                     | AIAgentActionType::UseComputer(_)
                     | AIAgentActionType::ReadSkill(_)
                     | AIAgentActionType::FetchConversation { .. }
-                    | AIAgentActionType::StartAgent { .. }
                     | AIAgentActionType::SendMessageToAgent { .. }
                     | AIAgentActionType::RunAgents(_)
                     | AIAgentActionType::WaitForEvents(_)

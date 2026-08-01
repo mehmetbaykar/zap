@@ -21,9 +21,9 @@ use crate::agent::action_result::{
     InsertReviewCommentsResult, ReadDocumentsResult, ReadFilesResult, ReadMCPResourceResult,
     ReadShellCommandOutputResult, ReadSkillResult, RequestCommandOutputResult,
     RequestComputerUseResult, RequestFileEditsResult, RunAgentsResult, SearchCodebaseResult,
-    SendMessageToAgentResult, StartAgentResult, StartAgentVersion, SuggestNewConversationResult,
-    SuggestPromptResult, TransferShellCommandControlToUserResult, UseComputerResult,
-    WaitForEventsResult, WriteToLongRunningShellCommandResult,
+    SendMessageToAgentResult, SuggestNewConversationResult, SuggestPromptResult,
+    TransferShellCommandControlToUserResult, UseComputerResult, WaitForEventsResult,
+    WriteToLongRunningShellCommandResult,
 };
 use crate::agent::{AIAgentCitation, FileLocations};
 use crate::diff_validation::ParsedDiff;
@@ -141,14 +141,6 @@ pub enum AIAgentActionType {
 
     FetchConversation {
         conversation_id: String,
-    },
-
-    StartAgent {
-        version: StartAgentVersion,
-        name: String,
-        prompt: String,
-        execution_mode: StartAgentExecutionMode,
-        lifecycle_subscription: Option<Vec<String>>,
     },
 
     SendMessageToAgent {
@@ -328,11 +320,6 @@ impl AIAgentActionType {
             Self::FetchConversation { .. } => {
                 AIAgentActionResultType::FetchConversation(FetchConversationResult::Cancelled)
             }
-            Self::StartAgent { version, .. } => {
-                AIAgentActionResultType::StartAgent(StartAgentResult::Cancelled {
-                    version: *version,
-                })
-            }
             Self::SendMessageToAgent { .. } => {
                 AIAgentActionResultType::SendMessageToAgent(SendMessageToAgentResult::Cancelled)
             }
@@ -379,7 +366,6 @@ impl AIAgentActionType {
             Self::RequestComputerUse(_) => "Requesting computer use",
             Self::ReadSkill(_) => "Reading skill",
             Self::FetchConversation { .. } => "Fetching conversation",
-            Self::StartAgent { .. } => "Starting agent",
             Self::SendMessageToAgent { .. } => "Sending message",
             Self::TransferShellCommandControlToUser { .. } => "Transferring control",
             Self::AskUserQuestion { .. } => "Asking question",
@@ -421,7 +407,6 @@ impl AIAgentActionType {
             Self::RequestComputerUse(_) => "Request computer use".to_string(),
             Self::ReadSkill(_) => "Read skill".to_string(),
             Self::FetchConversation { .. } => "Fetch conversation".to_string(),
-            Self::StartAgent { name, .. } => format!("Start agent: {name}"),
             Self::SendMessageToAgent { subject, .. } => format!("Send message: {subject}"),
             Self::TransferShellCommandControlToUser { .. } => {
                 "Transfer shell command control to user".to_string()
@@ -579,9 +564,6 @@ impl Display for AIAgentActionType {
             }
             AIAgentActionType::FetchConversation { conversation_id } => {
                 write!(f, "FetchConversation: {conversation_id}")
-            }
-            AIAgentActionType::StartAgent { name, .. } => {
-                write!(f, "StartAgent: {name}")
             }
             AIAgentActionType::SendMessageToAgent {
                 addresses, subject, ..

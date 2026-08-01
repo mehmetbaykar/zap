@@ -420,7 +420,6 @@ impl From<&AIAgentActionType> for PersistedAIAgentActionType {
             | AIAgentActionType::CreateDocuments(_)
             | AIAgentActionType::ReadShellCommandOutput { .. }
             | AIAgentActionType::ReadSkill(_)
-            | AIAgentActionType::StartAgent { .. }
             | AIAgentActionType::SendMessageToAgent { .. }
             | AIAgentActionType::RunAgents(_)
             | AIAgentActionType::WaitForEvents(_)

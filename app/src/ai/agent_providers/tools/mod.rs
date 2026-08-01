@@ -205,8 +205,6 @@ pub fn action_result_to_msg_result(
         ReqR::SuggestPrompt(r) => MsgR::SuggestPrompt(r),
         ReqR::OpenCodeReview(r) => MsgR::OpenCodeReview(r),
         ReqR::TransferShellCommandControlToUser(r) => MsgR::TransferShellCommandControlToUser(r),
-        ReqR::StartAgent(r) => MsgR::StartAgent(r),
-        ReqR::StartAgentV2(r) => MsgR::StartAgentV2(r),
         // Carries the `run_agents` result to `result_to_json` so the model reads
         // structured per-agent ids instead of the `Display` summary string.
         // Depends on `convert_to.rs` converting `AIAgentActionResultType::RunAgents`
