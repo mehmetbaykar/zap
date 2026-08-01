@@ -55,13 +55,15 @@ impl AppBuilderExt for super::AppBuilder {
 }
 
 unsafe fn set_app_user_model_id(app_id: String) -> Result<(), windows::core::Error> {
-    let wide_string = std::ffi::OsStr::new(&app_id)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect_vec();
-    windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(windows::core::PCWSTR(
-        wide_string.as_ptr(),
-    ))
+    unsafe {
+        let wide_string = std::ffi::OsStr::new(&app_id)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect_vec();
+        windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(windows::core::PCWSTR(
+            wide_string.as_ptr(),
+        ))
+    }
 }
 
 /// Registers the AUMID under `HKCU\Software\Classes\AppUserModelId\<aumid>`,

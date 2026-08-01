@@ -216,16 +216,16 @@ pub fn open_file_path_with_line_and_col(
 ) {
     if full_path.is_file() {
         with_editor = with_editor.filter(|editor| editor.is_installed(ctx));
-        if let Some(editor) = with_editor {
-            if let Some(mut command) = editor.command(line_column_number, full_path) {
-                if let Err(err) = command.spawn() {
-                    report_error!(
-                        anyhow::Error::new(err).context("Error launching editor"),
-                        extra: { "editor" => ?editor }
-                    );
-                }
-                return;
+        if let Some(editor) = with_editor
+            && let Some(mut command) = editor.command(line_column_number, full_path)
+        {
+            if let Err(err) = command.spawn() {
+                report_error!(
+                    anyhow::Error::new(err).context("Error launching editor"),
+                    extra: { "editor" => ?editor }
+                );
             }
+            return;
         }
     }
 

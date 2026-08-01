@@ -14,6 +14,7 @@ use futures::future::{self, BoxFuture, FutureExt as _};
 use warp_core::{safe_warn, send_telemetry_from_ctx};
 use warp_util::sync::Condition;
 use warpui_core::ModelHandle;
+use warpui_core::r#async::{FutureId, SpawnedFutureHandle};
 
 /// Represents either a file or directory in a repository.
 #[derive(Debug, Clone)]

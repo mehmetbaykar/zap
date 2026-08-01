@@ -7,6 +7,9 @@
 use warpui::AppContext;
 
 use crate::TuiMountFn;
+use crate::ai::mcp::FileBasedMCPManager;
+use crate::auth::AuthStateProvider;
+use crate::auth::auth_manager::{AuthManager, AuthManagerEvent};
 
 /// Mounts the local TUI after the shared headless app state is initialized.
 pub(crate) fn init(mount: TuiMountFn, ctx: &mut AppContext) {
