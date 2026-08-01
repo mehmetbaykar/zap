@@ -48,8 +48,8 @@ use super::settings_page::{
     SettingsPageViewHandle, SettingsWidget, TOGGLE_BUTTON_RIGHT_PADDING, ToggleState,
     build_sub_header, build_toggle_element, render_body_item_label,
     render_body_item_label_with_icon, render_custom_size_header, render_dropdown_item,
-    render_dropdown_item_label, render_full_pane_width_ai_button, render_input_list,
-    render_separator, render_settings_info_banner,
+    render_dropdown_item_label, render_filterable_dropdown_item, render_full_pane_width_ai_button,
+    render_input_list, render_separator, render_settings_info_banner,
 };
 use super::{
     SettingActionPairContexts, SettingActionPairDescriptions, SettingsAction, SettingsSection,
@@ -97,8 +97,8 @@ use crate::settings::{
     NaturalLanguageAutosuggestionsEnabled, OrchestrationMessageDisplayMode, PromptSubmissionMode,
     RuleSuggestionsEnabled, ShouldRenderCLIAgentToolbar,
     ShouldRenderUseAgentToolbarForUserCommands, ShowAgentTips, ShowAgentZeroStateHints,
-    ShowConversationHistory, ShowHintText, ThinkingDisplayMode, VoiceInputEnabled,
-    VoiceInputToggleKey,
+    ShowConversationHistory, ShowHintText, ThinkingDisplayMode, VOICE_INPUT_LANGUAGES,
+    VoiceInputEnabled, VoiceInputLanguage, VoiceInputToggleKey,
 };
 use crate::terminal::CLIAgent;
 use crate::terminal::cli_agent::{CLIAgentInstallEvent, CLIAgentInstallModel};
@@ -540,6 +540,7 @@ pub struct AISettingsPageView {
     page: PageType<Self>,
     active_subpage: Option<AISubpage>,
     voice_input_toggle_key_dropdown: ViewHandle<Dropdown<AISettingsPageAction>>,
+    voice_input_language_dropdown: ViewHandle<FilterableDropdown<AISettingsPageAction>>,
     local_only_icon_tooltip_states: RefCell<HashMap<String, MouseStateHandle>>,
     autodetection_denylist_editor: ViewHandle<EditorView>,
     autonomy_dropdown_menu: ViewHandle<Dropdown<AISettingsPageAction>>,
@@ -700,6 +701,38 @@ impl AISettingsPageView {
                 ctx,
             );
             dropdown.set_selected_by_index(selected_index, ctx);
+
+            dropdown
+        });
+
+        let voice_input_language_dropdown = ctx.add_typed_action_view(|ctx| {
+            let mut dropdown = FilterableDropdown::new(ctx);
+            dropdown.set_top_bar_max_width(AI_SETTINGS_DROPDOWN_WIDTH);
+            dropdown.set_menu_width(AI_SETTINGS_DROPDOWN_WIDTH, ctx);
+            if !AISettings::as_ref(ctx).is_voice_input_enabled(ctx) {
+                dropdown.set_disabled(ctx);
+            }
+
+            dropdown.add_items(
+                VOICE_INPUT_LANGUAGES
+                    .iter()
+                    .map(|&(code, name)| {
+                        DropdownItem::new(
+                            name,
+                            AISettingsPageAction::SetVoiceInputLanguage(code.to_string()),
+                        )
+                    })
+                    .collect(),
+                ctx,
+            );
+            let current_code = AISettings::as_ref(ctx)
+                .voice_input_language_code()
+                .unwrap_or("")
+                .to_string();
+            dropdown.set_selected_by_action(
+                AISettingsPageAction::SetVoiceInputLanguage(current_code),
+                ctx,
+            );
 
             dropdown
         });
@@ -1143,6 +1176,19 @@ impl AISettingsPageView {
                     me.voice_input_toggle_key_dropdown
                         .update(ctx, |dropdown, ctx| {
                             dropdown.set_selected_by_name(current_value, ctx)
+                        });
+                }
+                AISettingsChangedEvent::VoiceInputLanguage { .. } => {
+                    let current_code = AISettings::as_ref(ctx)
+                        .voice_input_language_code()
+                        .unwrap_or("")
+                        .to_string();
+                    me.voice_input_language_dropdown
+                        .update(ctx, |dropdown, ctx| {
+                            dropdown.set_selected_by_action(
+                                AISettingsPageAction::SetVoiceInputLanguage(current_code),
+                                ctx,
+                            )
                         });
                 }
                 AISettingsChangedEvent::AgentModeCommandExecutionAllowlist { .. } => {
@@ -1780,6 +1826,7 @@ impl AISettingsPageView {
             page: Self::build_page(None, ctx),
             active_subpage: None,
             voice_input_toggle_key_dropdown,
+            voice_input_language_dropdown,
             autodetection_denylist_editor,
             local_only_icon_tooltip_states: Default::default(),
             command_execution_allowlist_editor,
@@ -1844,6 +1891,14 @@ impl AISettingsPageView {
     fn update_voice_input_dropdown_enablement(&mut self, ctx: &mut ViewContext<Self>) {
         let is_voice_enabled = AISettings::as_ref(ctx).is_voice_input_enabled(ctx);
         self.voice_input_toggle_key_dropdown
+            .update(ctx, |dropdown, ctx| {
+                if is_voice_enabled {
+                    dropdown.set_enabled(ctx);
+                } else {
+                    dropdown.set_disabled(ctx);
+                }
+            });
+        self.voice_input_language_dropdown
             .update(ctx, |dropdown, ctx| {
                 if is_voice_enabled {
                     dropdown.set_enabled(ctx);
@@ -3291,6 +3346,8 @@ pub enum PerAgentDimension {
 pub enum AISettingsPageAction {
     OpenUrl(String),
     SetVoiceInputToggleKey(VoiceInputToggleKey),
+    SetVoiceInputLanguage(String),
+    ToggleGlobalAI,
     ToggleActiveAI,
     ToggleIntelligentAutosuggestions,
     TogglePromptSuggestions,
@@ -3531,6 +3588,24 @@ impl TypedActionView for AISettingsPageView {
                             .set_value(true, ctx)
                     );
                 });
+                ctx.notify();
+            }
+            AISettingsPageAction::SetVoiceInputLanguage(language) => {
+                let language = language.clone();
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.voice_input_language.set_value(language, ctx));
+                });
+                ctx.notify();
+            }
+            AISettingsPageAction::ToggleGlobalAI => {
+                match AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    settings.is_any_ai_enabled.toggle_and_save_value(ctx)
+                }) {
+                    Ok(new_value) => {}
+                    Err(e) => {
+                        log::warn!("Failed to set value for Global AI setting: {e:?}");
+                    }
+                }
                 ctx.notify();
             }
             AISettingsPageAction::ToggleActiveAI => {
@@ -6839,6 +6914,20 @@ impl VoiceWidget {
                 None,
                 &view.voice_input_toggle_key_dropdown,
             ));
+            column.add_child(render_filterable_dropdown_item(
+                appearance,
+                "Speech Language",
+                Some("Language used when transcribing voice input."),
+                None,
+                LocalOnlyIconState::for_setting(
+                    VoiceInputLanguage::storage_key(),
+                    VoiceInputLanguage::sync_to_cloud(),
+                    &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                    app,
+                ),
+                None,
+                &view.voice_input_language_dropdown,
+            ));
         }
 
         column.finish()
@@ -6849,7 +6938,7 @@ impl SettingsWidget for VoiceWidget {
     type View = AISettingsPageView;
 
     fn search_terms(&self) -> &str {
-        "voice agent oz ai a.i. speech input natural language talk english"
+        "voice agent oz ai a.i. speech input natural language talk english spanish french german estonian finnish"
     }
 
     fn should_render(&self, app: &AppContext) -> bool {

@@ -391,7 +391,7 @@ impl ConvertToExchanges for &api::Task {
                                 user_query,
                             };
                             current_inputs.push(input);
-                        };;
+                        };
 
                     true
                 }

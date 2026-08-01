@@ -1109,10 +1109,27 @@ pub async fn read_local_file_context(
                     }
                     result.file_contexts.push(file_context);
                 }
-                BinaryFileReadResult::Missing => result.failed_files.push(ReadFilesFailedFile {
+                BinaryFileReadResult::NotFound => result.failed_files.push(ReadFilesFailedFile {
                     path: path_str,
-                    message: "File not found or could not be read".to_string(),
+                    message: "File does not exist".to_string(),
                 }),
+                BinaryFileReadResult::TooLarge {
+                    size_bytes,
+                    limit_bytes,
+                } => result.failed_files.push(ReadFilesFailedFile {
+                    path: path_str,
+                    message: format!(
+                        "File is too large to read ({} > {} limit). Downscale/compress it or read a smaller copy.",
+                        format_mb(size_bytes),
+                        format_mb(limit_bytes)
+                    ),
+                }),
+                BinaryFileReadResult::ProcessingFailed { detail } => {
+                    result.failed_files.push(ReadFilesFailedFile {
+                        path: path_str,
+                        message: format!("File could not be processed as an image: {detail}"),
+                    })
+                }
             }
         }
 
@@ -1165,14 +1182,41 @@ async fn is_file_content_binary_async(path: &std::path::Path) -> bool {
 }
 
 #[cfg(feature = "local_fs")]
+/// Builds a single, reason-accurate summary from a batch of file-read failures,
+/// one `path: reason` entry per file. Shared by the agent-tool consumers
+/// (`read_files`, `get_files`, `search_codebase`) so they all surface the same
+/// per-file reason instead of a flat "do not exist" list.
+pub fn describe_failed_files(failed_files: &[ReadFilesFailedFile]) -> String {
+    failed_files
+        .iter()
+        .map(|failed_file| format!("{}: {}", failed_file.path, failed_file.message))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Renders a byte count in megabytes with one decimal place (e.g. `3.5 MB`),
+/// matching the units used in the "too large" failure message.
+#[cfg(feature = "local_fs")]
+fn format_mb(bytes: usize) -> String {
+    format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+}
+
 enum BinaryFileReadResult {
     /// Successfully read as binary.
     Context {
         file_context: FileContext,
         bytes_read: usize,
     },
-    /// File doesn't exist, exceeds the size limit, or couldn't be processed.
-    Missing,
+    /// The file does not exist on disk.
+    NotFound,
+    /// The file exists but exceeds the effective byte limit.
+    TooLarge {
+        size_bytes: usize,
+        limit_bytes: usize,
+    },
+    /// The file could not be processed (e.g. an image decode/resize failed, or
+    /// the processed image is still too large to send).
+    ProcessingFailed { detail: String },
 }
 
 /// Reads a binary file, applying image processing when applicable.
@@ -1184,12 +1228,15 @@ async fn read_binary_file_context(
     last_modified: Option<std::time::SystemTime>,
 ) -> anyhow::Result<BinaryFileReadResult> {
     if file_size > max_bytes {
-        return Ok(BinaryFileReadResult::Missing);
+        return Ok(BinaryFileReadResult::TooLarge {
+            size_bytes: file_size,
+            limit_bytes: max_bytes,
+        });
     }
 
     let content = match read_file_as_binary(path).await {
         Ok(content) => content,
-        Err(FileLoadError::DoesNotExist) => return Ok(BinaryFileReadResult::Missing),
+        Err(FileLoadError::DoesNotExist) => return Ok(BinaryFileReadResult::NotFound),
         Err(FileLoadError::IOError(e)) => return Err(anyhow::anyhow!(e)),
     };
 
@@ -1199,11 +1246,15 @@ async fn read_binary_file_context(
             ProcessImageResult::Success { data } => Some(data),
             ProcessImageResult::TooLarge => {
                 log::warn!("Image file too large after processing: {}", path.display());
-                return Ok(BinaryFileReadResult::Missing);
+                return Ok(BinaryFileReadResult::ProcessingFailed {
+                    detail: "the image is too large to send even after resizing".to_string(),
+                });
             }
             ProcessImageResult::Error(err) => {
                 log::warn!("Error processing image file {}: {err:?}", path.display());
-                return Ok(BinaryFileReadResult::Missing);
+                return Ok(BinaryFileReadResult::ProcessingFailed {
+                    detail: err.to_string(),
+                });
             }
         }
     } else {
@@ -1212,7 +1263,10 @@ async fn read_binary_file_context(
 
     let final_content = processed_content.unwrap_or(content);
     if final_content.len() > max_bytes {
-        return Ok(BinaryFileReadResult::Missing);
+        return Ok(BinaryFileReadResult::TooLarge {
+            size_bytes: final_content.len(),
+            limit_bytes: max_bytes,
+        });
     }
 
     let bytes_read = final_content.len();
