@@ -1034,9 +1034,12 @@ void open_save_file_picker(void *callback, NSString *defaultFilename, NSString *
 }
 
 // Open a given url.
-void open_url(NSString *urlString) {
+BOOL open_url(NSString *urlString) {
     NSURL *url = [NSURL URLWithString:urlString];
-    [[NSWorkspace sharedWorkspace] openURL:url];
+    if (url == nil) {
+        return NO;
+    }
+    return [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
 void hide_app() {

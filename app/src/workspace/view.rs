@@ -170,6 +170,8 @@ use crate::ai::execution_profiles::editor::ExecutionProfileEditorManager;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::facts::view::AIFactPage;
 use crate::ai::facts::{AIFactManager, AIFactView, AIFactViewEvent};
+#[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
+use crate::ai::llms::LLMId as HandoffLLMId;
 use crate::ai::llms::LLMPreferences;
 use crate::ai_assistant::execution_context::WarpAiExecutionContext;
 use crate::ai_assistant::panel::{AIAssistantPanelEvent, AIAssistantPanelView};
