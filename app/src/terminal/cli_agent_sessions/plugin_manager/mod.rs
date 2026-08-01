@@ -294,7 +294,6 @@ pub(crate) fn plugin_manager_for_with_shell(
         | CLIAgent::Antigravity
         | CLIAgent::Hermes
         | CLIAgent::Vibe
-        | CLIAgent::Antigravity
         | CLIAgent::Unknown => None,
     }
 }
