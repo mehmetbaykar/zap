@@ -747,11 +747,11 @@ impl TryFrom<AIAgentActionResult> for api::request::input::user_inputs::user_inp
             AIAgentActionResultType::StartAgent(start_agent_result) => {
                 Some(start_agent_result.into())
             }
+            AIAgentActionResultType::RunAgents(run_agents_result) => Some(run_agents_result.into()),
             // Local-only tools are not represented by the fork's pinned proto.
             AIAgentActionResultType::SearchCodebase(_)
             | AIAgentActionResultType::FetchConversation(_)
             | AIAgentActionResultType::SendMessageToAgent(_)
-            | AIAgentActionResultType::RunAgents(_)
             | AIAgentActionResultType::WaitForEvents(_) => None,
             AIAgentActionResultType::TransferShellCommandControlToUser(transfer_control_result) => {
                 Some(transfer_control_result.try_into()?)

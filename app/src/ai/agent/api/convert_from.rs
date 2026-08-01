@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use ai::agent::UnknownCitationTypeError;
-use ai::agent::action::StartAgentExecutionMode;
+use ai::agent::action::{
+    RunAgentsAgentRunConfig, RunAgentsExecutionMode, RunAgentsRequest, StartAgentExecutionMode,
+};
 use ai::agent::action_result::StartAgentVersion;
 use ai::agent::convert::ToolToAIAgentActionError;
 use ai::skills::{SkillPathOrigin, skill_reference_from_read_skill_ref};
@@ -75,10 +77,68 @@ pub(crate) fn convert_user_query_mode(mode: Option<&api::UserQueryMode>) -> User
     }
 }
 
-// The `RunAgents` bulk-orchestration proto message does not exist in this
-// fork's pinned `warp_multi_agent_api`; only the `StartAgent`/`StartAgentV2`
-// single-child tools below are convertible. `RunAgentsRequest` et al. remain
-// local-only types that are never populated from an incoming proto tool call.
+/// Maps a proto harness selection onto the harness-name string the executor
+/// re-parses with `Harness::parse_local_child_harness`.
+///
+/// `Oz` and `Gemini` are mapped through faithfully even though that parse
+/// rejects them, so an unsupported harness surfaces as an explicit executor
+/// error rather than silently falling back to a different agent.
+fn convert_run_agents_harness(harness: Option<&api::Harness>) -> String {
+    let Some(variant) = harness.and_then(|harness| harness.variant.as_ref()) else {
+        return String::new();
+    };
+    match variant {
+        api::harness::Variant::ClaudeCode(_) => "claude",
+        api::harness::Variant::OpenCode(_) => "opencode",
+        api::harness::Variant::Codex(_) => "codex",
+        api::harness::Variant::Oz(_) => "oz",
+        api::harness::Variant::Gemini(_) => "gemini",
+    }
+    .to_string()
+}
+
+/// Converts an incoming `RunAgents` bulk-orchestration tool call into the
+/// fork's local orchestration request.
+///
+/// Two proto fields are deliberately dropped rather than decoded. `execution_mode`
+/// collapses to `Local` because `RunAgentsExecutionMode` has no remote variant --
+/// Zap has no cloud child-agent execution -- so a `Remote` mode degrades to local
+/// instead of aborting the exchange, matching how `convert_start_agent_execution_mode`
+/// already behaves. `skills` is dropped because resolving a proto skill reference
+/// needs a `SkillPathOrigin` that this conversion does not receive, and the BYOP
+/// `run_agents` tool never populates the field.
+fn convert_run_agents(run_agents: api::RunAgents) -> AIAgentActionType {
+    let api::RunAgents {
+        summary,
+        base_prompt,
+        skills: _,
+        model_id,
+        harness,
+        agent_run_configs,
+        plan_id,
+        execution_mode: _,
+    } = run_agents;
+    AIAgentActionType::RunAgents(RunAgentsRequest {
+        summary,
+        base_prompt,
+        skills: Vec::new(),
+        model_id,
+        harness_type: convert_run_agents_harness(harness.as_ref()),
+        execution_mode: RunAgentsExecutionMode::Local,
+        agent_run_configs: agent_run_configs
+            .into_iter()
+            .map(|config| RunAgentsAgentRunConfig {
+                name: config.name,
+                prompt: config.prompt,
+                title: config.title,
+            })
+            .collect(),
+        plan_id,
+        // Populated by the confirmation card before Accept; the proto does not
+        // carry it.
+        harness_auth_secret_name: None,
+    })
+}
 
 /// Converts a proto lifecycle event type into the fork's string form
 /// (snake_case proto short names, e.g. "errored", "in_progress").
@@ -758,6 +818,9 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
                         },
                     ),
                 })
+            }
+            api::message::tool_call::Tool::RunAgents(run_agents) => {
+                create_standard_action(convert_run_agents(run_agents))
             }
             api::message::tool_call::Tool::InsertReviewComments(insert_review_comments) => {
                 create_standard_action(insert_review_comments.into())

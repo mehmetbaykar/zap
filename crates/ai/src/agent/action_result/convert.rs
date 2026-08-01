@@ -1121,6 +1121,81 @@ impl From<StartAgentResult> for api::request::input::tool_call_result::Result {
     }
 }
 
+/// Maps the fork's harness-name string back onto the proto harness selection.
+///
+/// Inverse of `convert_run_agents_harness` in the app's `convert_from`. An empty
+/// or unrecognized name leaves the field unset rather than guessing a harness,
+/// which matches the proto's own "unset means the server picks" contract.
+fn run_agents_harness_from_type(harness_type: &str) -> Option<api::Harness> {
+    let variant = match harness_type.trim().to_ascii_lowercase().as_str() {
+        "claude" | "claude-code" => api::harness::Variant::ClaudeCode(api::harness::ClaudeCode {}),
+        "opencode" | "open-code" => api::harness::Variant::OpenCode(api::harness::OpenCode {}),
+        "codex" => api::harness::Variant::Codex(api::harness::Codex {}),
+        "oz" => api::harness::Variant::Oz(api::harness::Oz {}),
+        "gemini" => api::harness::Variant::Gemini(api::harness::Gemini {}),
+        _ => return None,
+    };
+    Some(api::Harness {
+        variant: Some(variant),
+    })
+}
+
+impl From<RunAgentsResult> for api::request::input::tool_call_result::Result {
+    fn from(result: RunAgentsResult) -> Self {
+        let outcome = match result {
+            RunAgentsResult::Launched {
+                model_id,
+                harness_type,
+                execution_mode: RunAgentsLaunchedExecutionMode::Local,
+                agents,
+            } => api::run_agents_result::Outcome::Launched(api::run_agents_result::Launched {
+                resolved_model_id: model_id,
+                resolved_harness: run_agents_harness_from_type(&harness_type),
+                agents: agents
+                    .into_iter()
+                    .map(|agent| api::run_agents_result::AgentOutcome {
+                        name: agent.name,
+                        result: Some(match agent.kind {
+                            RunAgentsAgentOutcomeKind::Launched { agent_id } => {
+                                api::run_agents_result::agent_outcome::Result::Launched(
+                                    api::run_agents_result::LaunchedAgent { agent_id },
+                                )
+                            }
+                            RunAgentsAgentOutcomeKind::Failed { error } => {
+                                api::run_agents_result::agent_outcome::Result::Failed(
+                                    api::run_agents_result::FailedAgent { error },
+                                )
+                            }
+                        }),
+                    })
+                    .collect(),
+                resolved_execution_mode: Some(
+                    api::run_agents_result::launched::ResolvedExecutionMode::Local(
+                        api::run_agents::Local {},
+                    ),
+                ),
+            }),
+            RunAgentsResult::Denied { reason } => {
+                api::run_agents_result::Outcome::Denied(api::run_agents_result::Denied { reason })
+            }
+            RunAgentsResult::Failure { error } => {
+                api::run_agents_result::Outcome::Failure(api::run_agents_result::Failure { error })
+            }
+            // Reported as a denial rather than a failure, mirroring how the
+            // StartAgent contract treats user cancellation: a terminal outcome
+            // the model should not retry, not an error to report.
+            RunAgentsResult::Cancelled => {
+                api::run_agents_result::Outcome::Denied(api::run_agents_result::Denied {
+                    reason: "Cancelled by user".to_string(),
+                })
+            }
+        };
+        api::request::input::tool_call_result::Result::RunAgentsResult(api::RunAgentsResult {
+            outcome: Some(outcome),
+        })
+    }
+}
+
 #[cfg(test)]
 #[path = "convert_tests.rs"]
 mod tests;

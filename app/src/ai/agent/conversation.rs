@@ -1287,6 +1287,15 @@ impl AIConversation {
         &self,
         plan_id: &str,
     ) -> Option<(&OrchestrationConfig, OrchestrationConfigStatus)> {
+        // An empty plan id means "this request is not tied to a plan", which is
+        // the normal case for BYOP `run_agents` calls. Without this guard the
+        // empty string is just an ordinary map key, so a config stored under it
+        // would be treated as an approved plan for every unplanned batch -- and
+        // an approved config makes `should_autoexecute` skip the confirmation
+        // card. Fail closed instead.
+        if plan_id.is_empty() {
+            return None;
+        }
         self.orchestration_configs
             .get(plan_id)
             .map(|(config, status)| (config, *status))

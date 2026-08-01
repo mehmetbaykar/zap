@@ -27,6 +27,7 @@ pub mod files;
 pub mod long_shell;
 pub mod markers;
 pub mod mcp;
+pub mod run_agents;
 pub mod search;
 pub mod shell;
 pub mod skill;
@@ -102,6 +103,12 @@ pub const REGISTRY: &[&OpenAiTool] = &[
     // (`RequestParams.run_agents_enabled`) and hidden from child agents themselves
     // (`parent_agent_id` recursion guard) — see build_tools_array.
     &start_agent::START_AGENT,
+    // Batch counterpart of `start_agent`: one call launches a whole batch of local
+    // children sharing a harness and a base prompt. Same gate as `start_agent`
+    // (`chat_stream::CHILD_ORCHESTRATION_TOOLS`) — both are exposed while the
+    // single-child tool is still the supported path; exposing only one is a matter
+    // of dropping the other entry here, with no gating change.
+    &run_agents::RUN_AGENTS,
 ];
 
 /// Reverse-looks up the registry by OpenAI function name.
@@ -205,6 +212,13 @@ pub fn action_result_to_msg_result(
         ReqR::TransferShellCommandControlToUser(r) => MsgR::TransferShellCommandControlToUser(r),
         ReqR::StartAgent(r) => MsgR::StartAgent(r),
         ReqR::StartAgentV2(r) => MsgR::StartAgentV2(r),
+        // Carries the `run_agents` result to `result_to_json` so the model reads
+        // structured per-agent ids instead of the `Display` summary string.
+        // Depends on `convert_to.rs` converting `AIAgentActionResultType::RunAgents`
+        // rather than mapping it to `None`; if that arm is ever removed, the
+        // `try_into` above stops yielding a `RunAgentsResult` and this goes silently
+        // dead, since the `_ => return None` below swallows the miss.
+        ReqR::RunAgentsResult(r) => MsgR::RunAgentsResult(r),
         _ => return None,
     };
     Some(msg_side)
