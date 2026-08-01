@@ -59,6 +59,7 @@ pub fn is_agent_supported(agent: &CLIAgent) -> bool {
             | CLIAgent::Pi
             | CLIAgent::DeepSeek
             | CLIAgent::Antigravity
+            | CLIAgent::OhMyPi
     )
 }
 
@@ -67,18 +68,18 @@ fn create_handler(agent: &CLIAgent) -> Option<Box<dyn CLIAgentSessionHandler>> {
     match agent {
         // Auggie and Pi are supported via community-maintained plugins
         // (https://github.com/augmentmoogi/auggie-warp,
-        // https://github.com/badlogic/pi-mono), which emit the same
-        // structured OSC 777 events as the first-party Claude/OpenCode/Gemini
-        // plugins. Droid can be supported by user-configured hooks or future
-        // integrations that emit the same structured OSC 777 events. We don't
-        // ship install flows for these agents here — we just listen.
+        // https://github.com/badlogic/pi-mono). OhMyPi emits these structured
+        // OSC 777 events natively. Droid can be supported by user-configured
+        // hooks or future integrations that emit the same events. We don't ship
+        // install flows for these agents here — we just listen.
         CLIAgent::Claude
         | CLIAgent::OpenCode
         | CLIAgent::Gemini
         | CLIAgent::Auggie
         | CLIAgent::Droid
         | CLIAgent::Pi
-        | CLIAgent::Antigravity => Some(Box::new(DefaultSessionListener)),
+        | CLIAgent::Antigravity
+        | CLIAgent::OhMyPi => Some(Box::new(DefaultSessionListener)),
         CLIAgent::Codex => Some(Box::new(CodexSessionHandler)),
         CLIAgent::DeepSeek => Some(Box::new(DeepSeekSessionHandler)),
         CLIAgent::Hermes

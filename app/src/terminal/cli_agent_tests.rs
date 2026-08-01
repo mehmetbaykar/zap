@@ -269,6 +269,7 @@ fn test_detect_known_agents() {
                 ("omp", CLIAgent::Omp),
                 ("vibe", CLIAgent::Vibe),
                 ("agy", CLIAgent::Antigravity),
+                ("omp", CLIAgent::OhMyPi),
             ] {
                 assert_eq!(
                     CLIAgent::detect(command, None, None, ctx),
@@ -356,6 +357,12 @@ fn test_detect_with_alias() {
                 CLIAgent::detect("c --help", None, Some(&map), ctx),
                 Some(CLIAgent::Claude),
             );
+
+            let map = aliases(&[("o", "omp")]);
+            assert_eq!(
+                CLIAgent::detect("o", None, Some(&map), ctx),
+                Some(CLIAgent::OhMyPi),
+            );
         });
     });
 }
@@ -396,6 +403,10 @@ fn test_detect_with_env_var_prefix() {
                     ctx,
                 ),
                 Some(CLIAgent::OpenCode),
+            );
+            assert_eq!(
+                CLIAgent::detect("FOO=1 omp", Some(EscapeChar::Backslash), None, ctx,),
+                Some(CLIAgent::OhMyPi),
             );
         });
     });
@@ -562,6 +573,11 @@ fn test_cli_agent_search_dirs_include_home_managed_bins() {
     assert!(dirs.contains(&home.join(".cargo/bin")));
     assert!(dirs.contains(&home.join(".bun/bin")));
     assert!(dirs.contains(&home.join(".local/bin")));
+}
+
+#[test]
+fn test_oh_my_pi_supports_bash_mode() {
+    assert!(CLIAgent::OhMyPi.supports_bash_mode());
 }
 
 #[test]

@@ -287,6 +287,7 @@ pub(crate) fn plugin_manager_for_with_shell(
         | CLIAgent::Droid
         | CLIAgent::Copilot
         | CLIAgent::Pi
+        | CLIAgent::OhMyPi
         | CLIAgent::Auggie
         | CLIAgent::CursorCli
         | CLIAgent::Goose

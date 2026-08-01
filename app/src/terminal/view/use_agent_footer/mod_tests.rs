@@ -393,3 +393,11 @@ fn cli_agent_footer_renders_for_viewer_of_shared_ambient_agent_session() {
         });
     })
 }
+
+#[test]
+fn test_rich_input_submit_strategy_for_oh_my_pi() {
+    assert_eq!(
+        rich_input_submit_strategy(CLIAgent::OhMyPi),
+        RichInputSubmitStrategy::BracketedPaste
+    );
+}

@@ -427,6 +427,7 @@ pub enum CLIAgentType {
     OpenCode,
     Copilot,
     Pi,
+    OhMyPi,
     Auggie,
     Cursor,
     Goose,
