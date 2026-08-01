@@ -1193,15 +1193,13 @@ impl<A: Action + Clone> MenuItemFields<A> {
                 if self.has_submenu {
                     label_row
                         .add_child(self.render_right_aligned_chevron(appearance, primary_color));
-                } else if let Some(right_label) =
-                    self.render_right_side_label(appearance, secondary_color.into())
-                {
+                } else { match self.render_right_side_label(appearance, secondary_color.into())
+                { Some(right_label) => {
                     label_row.add_child(right_label);
-                } else if let Some(key_shortcut) =
-                    self.render_key_shortcut(appearance, secondary_color.into())
-                {
+                } _ => { match self.render_key_shortcut(appearance, secondary_color.into())
+                { Some(key_shortcut) => {
                     label_row.add_child(key_shortcut);
-                } else if let Some(timestamp) = &self.timestamp {
+                } _ => if let Some(timestamp) = &self.timestamp {
                     label_row.add_child(self.render_right_aligned_time_estimation(
                         timestamp,
                         font_family,
@@ -1209,7 +1207,7 @@ impl<A: Action + Clone> MenuItemFields<A> {
                         text_background_color,
                         appearance,
                     ));
-                }
+                }}}}}
 
                 if let Some(right_icon) = self.render_right_side_icon(appearance, primary_color) {
                     label_row.add_child(right_icon);

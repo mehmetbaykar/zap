@@ -30,7 +30,8 @@ fn clear_proxy_env() {
         "NO_PROXY",
         "no_proxy",
     ] {
-        env::remove_var(var);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { env::remove_var(var) };
     }
 }
 
@@ -66,7 +67,8 @@ fn resolve_proxy_reads_https_proxy_for_tls() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "http://proxy.corp:3128");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "http://proxy.corp:3128") };
 
     let info = resolved_proxy_tls("example.com").expect("should resolve");
     assert_eq!(info.host, "proxy.corp");
@@ -83,7 +85,8 @@ fn resolve_proxy_reads_http_proxy_for_non_tls() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTP_PROXY", "http://proxy.corp:8080");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTP_PROXY", "http://proxy.corp:8080") };
 
     let info = resolved_proxy_plain("example.com").expect("should resolve");
     assert_eq!(info.host, "proxy.corp");
@@ -99,7 +102,8 @@ fn resolve_proxy_falls_back_to_all_proxy() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("ALL_PROXY", "http://all-proxy.corp:9999");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("ALL_PROXY", "http://all-proxy.corp:9999") };
 
     let tls_info = resolved_proxy_tls("example.com").expect("TLS should fall back to ALL_PROXY");
     assert_eq!(tls_info.host, "all-proxy.corp");
@@ -117,8 +121,10 @@ fn resolve_proxy_prefers_specific_over_all_proxy() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "http://specific:1111");
-    env::set_var("ALL_PROXY", "http://fallback:2222");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "http://specific:1111") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("ALL_PROXY", "http://fallback:2222") };
 
     let info = resolved_proxy_tls("example.com").expect("should resolve");
     assert_eq!(info.host, "specific");
@@ -131,7 +137,8 @@ fn resolve_proxy_reads_lowercase_env_vars() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("https_proxy", "http://lower.corp:4444");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("https_proxy", "http://lower.corp:4444") };
 
     let info = resolved_proxy_tls("example.com").expect("should resolve from lowercase");
     assert_eq!(info.host, "lower.corp");
@@ -144,7 +151,8 @@ fn resolve_proxy_returns_error_for_malformed_proxy_env() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "://broken");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "://broken") };
 
     let err = resolve_proxy(&wss_uri("example.com")).expect_err("malformed proxy env should fail");
     let err_msg = format!("{err:#}");
@@ -158,7 +166,8 @@ fn resolve_proxy_rejects_https_proxy_urls() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "https://proxy.corp:443");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "https://proxy.corp:443") };
 
     let err = resolve_proxy(&wss_uri("example.com")).expect_err("https proxy URLs should fail");
     let err_msg = format!("{err:#}");
@@ -174,8 +183,10 @@ fn no_proxy_exact_match() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "http://proxy:3128");
-    env::set_var("NO_PROXY", "example.com");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "http://proxy:3128") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("NO_PROXY", "example.com") };
 
     assert!(resolved_proxy_tls("example.com").is_none());
     assert!(resolved_proxy_tls("other.com").is_some());
@@ -187,8 +198,10 @@ fn no_proxy_wildcard() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "http://proxy:3128");
-    env::set_var("NO_PROXY", "*");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "http://proxy:3128") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("NO_PROXY", "*") };
 
     assert!(resolved_proxy_tls("anything.com").is_none());
     clear_proxy_env();
@@ -199,8 +212,10 @@ fn no_proxy_suffix_with_dot() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "http://proxy:3128");
-    env::set_var("NO_PROXY", ".warp.dev");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "http://proxy:3128") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("NO_PROXY", ".warp.dev") };
 
     assert!(resolved_proxy_tls("sessions.app.warp.dev").is_none());
 
@@ -214,8 +229,10 @@ fn no_proxy_suffix_without_dot() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "http://proxy:3128");
-    env::set_var("NO_PROXY", "warp.dev");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "http://proxy:3128") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("NO_PROXY", "warp.dev") };
 
     // "sessions.app.warp.dev" ends with ".warp.dev" → matches
     assert!(resolved_proxy_tls("sessions.app.warp.dev").is_none());
@@ -230,8 +247,10 @@ fn no_proxy_comma_separated() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "http://proxy:3128");
-    env::set_var("NO_PROXY", "localhost, 127.0.0.1, .internal.corp");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "http://proxy:3128") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("NO_PROXY", "localhost, 127.0.0.1, .internal.corp") };
 
     assert!(resolved_proxy_tls("localhost").is_none());
     assert!(resolved_proxy_tls("127.0.0.1").is_none());
@@ -245,8 +264,10 @@ fn no_proxy_case_insensitive() {
     let _lock = ENV_LOCK.lock();
     clear_proxy_env();
     use_system_proxy_mode();
-    env::set_var("HTTPS_PROXY", "http://proxy:3128");
-    env::set_var("NO_PROXY", "Example.COM");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HTTPS_PROXY", "http://proxy:3128") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("NO_PROXY", "Example.COM") };
 
     assert!(resolved_proxy_tls("example.com").is_none());
     assert!(resolved_proxy_tls("EXAMPLE.COM").is_none());

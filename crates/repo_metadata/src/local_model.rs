@@ -1635,16 +1635,16 @@ impl LocalRepoMetadataModel {
                         let state =
                             FileTreeState::new(root_entry, gitignores_for_build, Some(repository_handle));
 
-                        if let Err(e) = model.add_repository_internal(
+                        match model.add_repository_internal(
                             std_repo_path.clone(),
                             state,
                             RootWatchMode::Recursive,
                             ctx,
-                        ) {
+                        ) { Err(e) => {
                             log::warn!("Failed to add repository {repo_path_str}: {e:?}");
                             // On failure, mark the repository as failed so waiters are notified.
                             model.mark_repository_failed(std_repo_path, e, ctx);
-                        } else if indexed_with_limit {
+                        } _ => if indexed_with_limit {
                             safe_warn!(
                                 safe: ("Repository exceeded max file budget; indexed with partial coverage"),
                                 full: ("Repository {repo_path_str} exceeded the max file budget ({MAX_FILES_PER_REPO}); indexed breadth-first up to the budget — remaining directories load on expand")
@@ -1656,7 +1656,7 @@ impl LocalRepoMetadataModel {
                                 repo_path_str,
                                 files.len()
                             );
-                        }
+                        }}
                     }
                     Err(e) => {
                         safe_warn!(

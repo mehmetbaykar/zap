@@ -2310,7 +2310,7 @@ impl RemoteServerManager {
         session_id: SessionId,
         path: String,
         ctx: &mut ModelContext<Self>,
-    ) -> impl Future<Output = Option<RemoteNavigationResult>> {
+    ) -> impl Future<Output = Option<RemoteNavigationResult>> + use<> {
         use futures::future::ready;
 
         match self.navigate_to_directory_impl(session_id, path, ctx) {
@@ -3189,7 +3189,7 @@ impl RemoteServerManager {
             host_response_rx,
             move |me, msg, _ctx| {
                 let request_id = crate::protocol::RequestId::from(msg.request_id.clone());
-                if let Some(pending) = me.pending_host_requests.remove(&request_id) {
+                match me.pending_host_requests.remove(&request_id) { Some(pending) => {
                     pending.cancel_timeout();
                     // Check for server-reported ErrorResponse.
                     if let Some(crate::proto::server_message::Message::Error(ref e)) = msg.message {
@@ -3200,12 +3200,12 @@ impl RemoteServerManager {
                     } else {
                         let _ = pending.result_tx.send(Ok(msg));
                     }
-                } else {
+                } _ => {
                     log::warn!(
                         "Host-scoped response on session {session_id:?} with \
                          unknown request_id={request_id} (no pending host request)"
                     );
-                }
+                }}
             },
             |_, _| {},
         );

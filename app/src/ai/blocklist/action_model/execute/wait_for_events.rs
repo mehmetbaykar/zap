@@ -59,7 +59,7 @@ impl WaitForEventsExecutor {
         &mut self,
         input: ExecuteActionInput,
         ctx: &mut ModelContext<Self>,
-    ) -> impl Into<AnyActionExecution> {
+    ) -> impl Into<AnyActionExecution> + use<> {
         let AIAgentActionType::WaitForEvents(request) = &input.action.action else {
             return ActionExecution::InvalidAction;
         };

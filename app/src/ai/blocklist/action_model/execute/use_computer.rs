@@ -33,7 +33,7 @@ impl UseComputerExecutor {
         &mut self,
         input: ExecuteActionInput,
         _ctx: &mut ModelContext<Self>,
-    ) -> impl Into<AnyActionExecution> {
+    ) -> impl Into<AnyActionExecution> + use<> {
         let ExecuteActionInput { action, .. } = input;
         let AIAgentActionType::UseComputer(request) = &action.action else {
             return ActionExecution::InvalidAction;

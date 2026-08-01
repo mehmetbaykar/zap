@@ -1124,7 +1124,7 @@ impl AIConversation {
     pub fn new_exchange_ids_for_response(
         &self,
         stream_id: &ResponseStreamId,
-    ) -> impl Iterator<Item = AIAgentExchangeId> + '_ {
+    ) -> impl Iterator<Item = AIAgentExchangeId> + '_ + use<'_> {
         self.added_exchanges_by_response
             .get(stream_id)
             .into_iter()
@@ -1709,7 +1709,7 @@ impl AIConversation {
         for artifact in &mut self.artifacts {
             if let Artifact::Plan {
                 document_uid: doc_uid,
-                notebook_uid: ref mut nb_uid,
+                notebook_uid: nb_uid,
                 ..
             } = artifact
             {
@@ -1923,20 +1923,20 @@ impl AIConversation {
             .modify_task(&task_id, |task| task.append_source_messages(messages))
             .ok_or(UpdateConversationError::TaskNotFound)??;
         if let Err(e) = self.send_updated_conversation_state_for_byop_preflight(ctx) {
-            if let Some(rollback_result) = self.task_store.modify_task(&task_id, |task| {
+            match self.task_store.modify_task(&task_id, |task| {
                 task.remove_source_messages_by_ids(&message_ids)
-            }) {
+            }) { Some(rollback_result) => {
                 if let Err(rollback_error) = rollback_result {
                     log::error!(
                         "[byop-readiness] failed to roll back preflight messages after \
                          persistence error: {rollback_error:?}"
                     );
                 }
-            } else {
+            } _ => {
                 log::error!(
                     "[byop-readiness] failed to find task while rolling back preflight messages"
                 );
-            }
+            }}
             return Err(e);
         }
         Ok(message_count)
@@ -2728,7 +2728,7 @@ impl AIConversation {
                         });
 
                         for AddedExchange {
-                            ref mut task_id, ..
+                            task_id, ..
                         } in self
                             .added_exchanges_by_response
                             .get_mut(response_stream_id)
@@ -4707,7 +4707,7 @@ impl AIAgentExchange {
         server_output_id: ServerOutputId,
     ) -> Result<(), UpdateTaskError> {
         match &mut self.output_status {
-            AIAgentOutputStatus::Streaming { ref mut output } => {
+            AIAgentOutputStatus::Streaming { output } => {
                 if let Some(shared_output) = output {
                     // We expect to initialize output that has already been initialized if we retry
                     // after receiving a StreamInit event but before receiving any ClientActions.

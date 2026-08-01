@@ -4056,9 +4056,8 @@ pub async fn generate_byop_output(
                                 }
                                 // reparse failure (intermediate state): silent, wait for the next chunk.
                             }
-                        } else if let Ok(parsed) =
-                            parse_incoming_tool_call(&call, mcp_context.as_ref())
-                        {
+                        } else { match parse_incoming_tool_call(&call, mcp_context.as_ref())
+                        { Ok(parsed) => {
                             // First successful parse → immediately emit the placeholder card.
                             // Every chunk reparses before a placeholder is emitted (i.e. "retry on every
                             // chunk"), so even if the first frame's args are incomplete, any later chunk that is complete
@@ -4081,7 +4080,7 @@ pub async fn generate_byop_output(
                                 &current_task_id,
                                 vec![placeholder],
                             ));
-                        }
+                        } _ => {}}}
                         // First-frame parse failure (args still incomplete / unknown tool): don't emit yet,
                         // retry on the next chunk or take the old path at End, to avoid visual jitter.
                     }

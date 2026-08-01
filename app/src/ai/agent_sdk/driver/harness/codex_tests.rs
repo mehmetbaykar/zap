@@ -95,7 +95,8 @@ fn prepare_codex_auth_writes_with_0600_perms() {
 #[serial_test::serial]
 fn resolve_openai_api_key_uses_typed_secret() {
     let prev = std::env::var(OPENAI_API_KEY_ENV).ok();
-    std::env::remove_var(OPENAI_API_KEY_ENV);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) };
     let secrets = HashMap::from([(
         "My OpenAI Key".to_string(),
         openai_secret("sk-from-secret", None),
@@ -104,8 +105,10 @@ fn resolve_openai_api_key_uses_typed_secret() {
     let result = resolve_openai_api_key(&secrets);
 
     match prev {
-        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
-        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(OPENAI_API_KEY_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) },
     }
     assert_eq!(result.as_deref(), Some("sk-from-secret"));
 }
@@ -114,7 +117,8 @@ fn resolve_openai_api_key_uses_typed_secret() {
 #[serial_test::serial]
 fn resolve_openai_api_key_uses_raw_value_under_env_name() {
     let prev = std::env::var(OPENAI_API_KEY_ENV).ok();
-    std::env::remove_var(OPENAI_API_KEY_ENV);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) };
     let secrets = HashMap::from([(
         OPENAI_API_KEY_ENV.to_string(),
         ManagedSecretValue::RawValue {
@@ -125,8 +129,10 @@ fn resolve_openai_api_key_uses_raw_value_under_env_name() {
     let result = resolve_openai_api_key(&secrets);
 
     match prev {
-        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
-        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(OPENAI_API_KEY_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) },
     }
     assert_eq!(result.as_deref(), Some("sk-raw"));
 }
@@ -135,7 +141,8 @@ fn resolve_openai_api_key_uses_raw_value_under_env_name() {
 #[serial_test::serial]
 fn resolve_openai_api_key_prefers_env_over_secrets() {
     let prev = std::env::var(OPENAI_API_KEY_ENV).ok();
-    std::env::set_var(OPENAI_API_KEY_ENV, "sk-from-env");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var(OPENAI_API_KEY_ENV, "sk-from-env") };
     let secrets = HashMap::from([(
         "My OpenAI Key".to_string(),
         openai_secret("sk-from-secret", None),
@@ -144,8 +151,10 @@ fn resolve_openai_api_key_prefers_env_over_secrets() {
     let result = resolve_openai_api_key(&secrets);
 
     match prev {
-        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
-        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(OPENAI_API_KEY_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) },
     }
     assert_eq!(result.as_deref(), Some("sk-from-env"));
 }
@@ -154,13 +163,16 @@ fn resolve_openai_api_key_prefers_env_over_secrets() {
 #[serial_test::serial]
 fn resolve_openai_api_key_returns_none_when_nothing_available() {
     let prev = std::env::var(OPENAI_API_KEY_ENV).ok();
-    std::env::remove_var(OPENAI_API_KEY_ENV);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) };
 
     let result = resolve_openai_api_key(&HashMap::new());
 
     match prev {
-        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
-        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(OPENAI_API_KEY_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) },
     }
     assert_eq!(result, None);
 }
@@ -169,7 +181,8 @@ fn resolve_openai_api_key_returns_none_when_nothing_available() {
 #[serial_test::serial]
 fn resolve_openai_api_key_treats_whitespace_env_as_absent() {
     let prev = std::env::var(OPENAI_API_KEY_ENV).ok();
-    std::env::set_var(OPENAI_API_KEY_ENV, "   ");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var(OPENAI_API_KEY_ENV, "   ") };
     let secrets = HashMap::from([(
         "My OpenAI Key".to_string(),
         openai_secret("sk-from-secret", None),
@@ -178,8 +191,10 @@ fn resolve_openai_api_key_treats_whitespace_env_as_absent() {
     let result = resolve_openai_api_key(&secrets);
 
     match prev {
-        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
-        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(OPENAI_API_KEY_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) },
     }
     assert_eq!(result.as_deref(), Some("sk-from-secret"));
 }
@@ -188,7 +203,8 @@ fn resolve_openai_api_key_treats_whitespace_env_as_absent() {
 #[serial_test::serial]
 fn resolve_openai_base_url_from_secret_returns_base_url_when_typed_secret_active() {
     let prev = std::env::var(OPENAI_API_KEY_ENV).ok();
-    std::env::remove_var(OPENAI_API_KEY_ENV);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) };
     let secrets = HashMap::from([(
         "My OpenAI Key".to_string(),
         openai_secret("sk-1", Some("https://custom.api.openai.com/v1")),
@@ -197,8 +213,10 @@ fn resolve_openai_base_url_from_secret_returns_base_url_when_typed_secret_active
     let result = resolve_openai_base_url_from_secret(&secrets);
 
     match prev {
-        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
-        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(OPENAI_API_KEY_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) },
     }
     assert_eq!(result.as_deref(), Some("https://custom.api.openai.com/v1"));
 }
@@ -207,7 +225,8 @@ fn resolve_openai_base_url_from_secret_returns_base_url_when_typed_secret_active
 #[serial_test::serial]
 fn resolve_openai_base_url_from_secret_returns_none_when_env_wins() {
     let prev = std::env::var(OPENAI_API_KEY_ENV).ok();
-    std::env::set_var(OPENAI_API_KEY_ENV, "sk-from-env");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var(OPENAI_API_KEY_ENV, "sk-from-env") };
     let secrets = HashMap::from([(
         "My OpenAI Key".to_string(),
         openai_secret("sk-1", Some("https://custom.api.openai.com/v1")),
@@ -216,8 +235,10 @@ fn resolve_openai_base_url_from_secret_returns_none_when_env_wins() {
     let result = resolve_openai_base_url_from_secret(&secrets);
 
     match prev {
-        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
-        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(OPENAI_API_KEY_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) },
     }
     assert_eq!(result, None);
 }
@@ -226,14 +247,17 @@ fn resolve_openai_base_url_from_secret_returns_none_when_env_wins() {
 #[serial_test::serial]
 fn resolve_openai_base_url_from_secret_returns_none_when_no_base_url() {
     let prev = std::env::var(OPENAI_API_KEY_ENV).ok();
-    std::env::remove_var(OPENAI_API_KEY_ENV);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) };
     let secrets = HashMap::from([("My OpenAI Key".to_string(), openai_secret("sk-1", None))]);
 
     let result = resolve_openai_base_url_from_secret(&secrets);
 
     match prev {
-        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
-        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(OPENAI_API_KEY_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) },
     }
     assert_eq!(result, None);
 }
@@ -247,8 +271,10 @@ fn prepare_codex_environment_config_honors_codex_home() {
     fs::create_dir_all(&working_dir).unwrap();
     let prev_codex_home = std::env::var(CODEX_HOME_ENV).ok();
     let prev_openai_api_key = std::env::var(OPENAI_API_KEY_ENV).ok();
-    std::env::set_var(CODEX_HOME_ENV, &codex_home);
-    std::env::remove_var(OPENAI_API_KEY_ENV);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var(CODEX_HOME_ENV, &codex_home) };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) };
     let secrets = HashMap::from([(
         "My OpenAI Key".to_string(),
         openai_secret("sk-from-secret", None),
@@ -257,12 +283,16 @@ fn prepare_codex_environment_config_honors_codex_home() {
     let result = prepare_codex_environment_config(&working_dir, Some("system prompt"), &secrets);
 
     match prev_codex_home {
-        Some(v) => std::env::set_var(CODEX_HOME_ENV, v),
-        None => std::env::remove_var(CODEX_HOME_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(CODEX_HOME_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(CODEX_HOME_ENV) },
     }
     match prev_openai_api_key {
-        Some(v) => std::env::set_var(OPENAI_API_KEY_ENV, v),
-        None => std::env::remove_var(OPENAI_API_KEY_ENV),
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        Some(v) => unsafe { std::env::set_var(OPENAI_API_KEY_ENV, v) },
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        None => unsafe { std::env::remove_var(OPENAI_API_KEY_ENV) },
     }
 
     result.unwrap();

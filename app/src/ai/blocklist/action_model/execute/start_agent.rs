@@ -78,7 +78,7 @@ impl StartAgentExecutor {
         &mut self,
         input: ExecuteActionInput,
         ctx: &mut ModelContext<Self>,
-    ) -> impl Into<AnyActionExecution> {
+    ) -> impl Into<AnyActionExecution> + use<> {
         let AIAgentActionType::StartAgent {
             version,
             name,

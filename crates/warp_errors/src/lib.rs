@@ -49,7 +49,7 @@ pub enum ReportErrorLogMode {
 /// Warn level.
 #[macro_export]
 macro_rules! report_error {
-    (@log $err:expr) => {{
+    (@log $err:expr_2021) => {{
         #[allow(unused_imports)]
         use $crate::{AnyhowErrorExt as _, ErrorExt as _, LOG_TARGET};
         let err = $err;
@@ -61,14 +61,14 @@ macro_rules! report_error {
         };
         log::log!(target: LOG_TARGET, log_level, "{:#}", err);
     }};
-    (@once_per_run $err:expr) => {{
+    (@once_per_run $err:expr_2021) => {{
         static HAS_LOGGED_REPORT_ERROR: ::std::sync::atomic::AtomicBool =
             ::std::sync::atomic::AtomicBool::new(false);
         if !HAS_LOGGED_REPORT_ERROR.swap(true, ::std::sync::atomic::Ordering::Relaxed) {
             $crate::report_error!(@log $err);
         }
     }};
-    (@once_per_run_extra $err:expr, { $($fields:tt)* }) => {{
+    (@once_per_run_extra $err:expr_2021, { $($fields:tt)* }) => {{
         static HAS_LOGGED_REPORT_ERROR: ::std::sync::atomic::AtomicBool =
             ::std::sync::atomic::AtomicBool::new(false);
         if !HAS_LOGGED_REPORT_ERROR.swap(true, ::std::sync::atomic::Ordering::Relaxed) {
@@ -76,7 +76,7 @@ macro_rules! report_error {
         }
     }};
     // Reports `err` and attaches the given fields to the local log line.
-    (@log_extra $err:expr, { $($fields:tt)* }) => {{
+    (@log_extra $err:expr_2021, { $($fields:tt)* }) => {{
         #[allow(unused_imports)]
         use $crate::{AnyhowErrorExt as _, ErrorExt as _, LOG_TARGET};
         let err = $err;
@@ -93,15 +93,15 @@ macro_rules! report_error {
     }};
     // Field muncher for `extra: { .. }`. `%expr` forces Display, `?expr` forces Debug, a bare expr
     // defaults to Display.
-    (@fields $vec:ident $key:literal => ? $value:expr $(, $($rest:tt)*)?) => {{
+    (@fields $vec:ident $key:literal => ? $value:expr_2021 $(, $($rest:tt)*)?) => {{
         $vec.push(($key, format!("{:?}", $value)));
         $crate::report_error!(@fields $vec $($($rest)*)?);
     }};
-    (@fields $vec:ident $key:literal => % $value:expr $(, $($rest:tt)*)?) => {{
+    (@fields $vec:ident $key:literal => % $value:expr_2021 $(, $($rest:tt)*)?) => {{
         $vec.push(($key, format!("{}", $value)));
         $crate::report_error!(@fields $vec $($($rest)*)?);
     }};
-    (@fields $vec:ident $key:literal => $value:expr $(, $($rest:tt)*)?) => {{
+    (@fields $vec:ident $key:literal => $value:expr_2021 $(, $($rest:tt)*)?) => {{
         $vec.push(($key, format!("{}", $value)));
         $crate::report_error!(@fields $vec $($($rest)*)?);
     }};
@@ -116,7 +116,7 @@ macro_rules! report_error {
     // Static-message form with a structured `extra:` block AND an explicit log mode (e.g.
     // `ReportErrorLogMode::OncePerRun`), so throttled reports can still carry per-instance data
     // out of the grouped message.
-    ($fmt:literal, extra: { $($fields:tt)* }, $log_mode:expr) => {{
+    ($fmt:literal, extra: { $($fields:tt)* }, $log_mode:expr_2021) => {{
         match $log_mode {
             $crate::ReportErrorLogMode::EveryTime => {
                 $crate::report_error!(@log_extra $crate::__anyhow::anyhow!($fmt), { $($fields)* });
@@ -132,11 +132,11 @@ macro_rules! report_error {
         $crate::report_error!(@log $crate::__anyhow::anyhow!($fmt));
     }};
     // Error-value forms.
-    ($err:expr, extra: { $($fields:tt)* }) => {{
+    ($err:expr_2021, extra: { $($fields:tt)* }) => {{
         $crate::report_error!(@log_extra $err, { $($fields)* });
     }};
     // Error-value form with a structured `extra:` block AND an explicit log mode.
-    ($err:expr, extra: { $($fields:tt)* }, $log_mode:expr) => {{
+    ($err:expr_2021, extra: { $($fields:tt)* }, $log_mode:expr_2021) => {{
         match $log_mode {
             $crate::ReportErrorLogMode::EveryTime => {
                 $crate::report_error!(@log_extra $err, { $($fields)* });
@@ -146,22 +146,22 @@ macro_rules! report_error {
             }
         }
     }};
-    ($err:expr) => {{
+    ($err:expr_2021) => {{
         $crate::report_error!(@log $err);
     }};
-    ($err:expr, $crate::ReportErrorLogMode::EveryTime) => {{
+    ($err:expr_2021, $crate::ReportErrorLogMode::EveryTime) => {{
         $crate::report_error!(@log $err);
     }};
-    ($err:expr, ReportErrorLogMode::EveryTime) => {{
+    ($err:expr_2021, ReportErrorLogMode::EveryTime) => {{
         $crate::report_error!(@log $err);
     }};
-    ($err:expr, $crate::ReportErrorLogMode::OncePerRun) => {{
+    ($err:expr_2021, $crate::ReportErrorLogMode::OncePerRun) => {{
         $crate::report_error!(@once_per_run $err);
     }};
-    ($err:expr, ReportErrorLogMode::OncePerRun) => {{
+    ($err:expr_2021, ReportErrorLogMode::OncePerRun) => {{
         $crate::report_error!(@once_per_run $err);
     }};
-    ($err:expr, $log_mode:expr) => {{
+    ($err:expr_2021, $log_mode:expr_2021) => {{
         match $log_mode {
             $crate::ReportErrorLogMode::EveryTime => {
                 $crate::report_error!(@log $err);
@@ -178,17 +178,17 @@ macro_rules! report_error {
 /// This checks whether or not the error is actionable, and logs an error or warning accordingly.
 #[macro_export]
 macro_rules! report_if_error {
-    ($result:expr) => {{
+    ($result:expr_2021) => {{
         if let Err(error) = &$result {
             $crate::report_error!(error);
         }
     }};
-    ($result:expr, extra: { $($fields:tt)* }) => {{
+    ($result:expr_2021, extra: { $($fields:tt)* }) => {{
         if let Err(error) = &$result {
             $crate::report_error!(error, extra: { $($fields)* });
         }
     }};
-    ($result:expr, $log_mode:expr) => {{
+    ($result:expr_2021, $log_mode:expr_2021) => {{
         if let Err(error) = &$result {
             $crate::report_error!(error, $log_mode);
         }

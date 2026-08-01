@@ -927,7 +927,7 @@ impl AgentManagementView {
             self.list_state.add_item();
             let card_key = card.item_id.as_key();
 
-            if let Some(mut existing) = old_items.remove(&card_key) {
+            match old_items.remove(&card_key) { Some(mut existing) => {
                 if should_show_artifacts(&card.artifacts) {
                     if let Some(view) = &existing.artifact_buttons_view {
                         view.update(ctx, |v, ctx| v.update_artifacts(&card.artifacts, ctx));
@@ -944,7 +944,7 @@ impl AgentManagementView {
                 });
 
                 new_items.push(existing);
-            } else {
+            } _ => {
                 let artifact_buttons_view = if should_show_artifacts(&card.artifacts) {
                     Some(self.create_artifact_buttons_view(&card.artifacts, ctx))
                 } else {
@@ -962,7 +962,7 @@ impl AgentManagementView {
                     action_buttons_view,
                     item_id: card.item_id,
                 });
-            }
+            }}
         }
 
         let num_items = new_items.len();

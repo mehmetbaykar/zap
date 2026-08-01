@@ -28,7 +28,7 @@ use crate::proto::{server_message, ServerMessage};
 /// `Success | Error | (unset)` result shape. A missing `result` is an error
 /// (see module docs).
 macro_rules! file_op_result {
-    ($msg:expr, $variant:path, $result:path, $op:literal) => {{
+    ($msg:expr_2021, $variant:path, $result:path, $op:literal) => {{
         use $result as R;
         match &$msg.message {
             Some($variant(resp)) => match &resp.result {

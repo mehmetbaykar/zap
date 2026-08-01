@@ -35,7 +35,7 @@ pub fn validate_agent_mode_base_model_id(
 /// Retained for legacy call sites; local model data needs no remote metadata refresh.
 pub fn refresh_workspace_metadata<C>(
     _ctx: &mut C,
-) -> impl Future<Output = anyhow::Result<()>> + Send + 'static {
+) -> impl Future<Output = anyhow::Result<()>> + Send + 'static + use<C> {
     async { Ok(()) }
 }
 

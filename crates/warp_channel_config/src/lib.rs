@@ -24,7 +24,7 @@ macro_rules! path_concat {
 #[macro_export]
 #[cfg(not(windows))]
 macro_rules! path_concat {
-    ($path:expr, $file:expr) => {
+    ($path:expr_2021, $file:expr_2021) => {
         concat!($path, "/", $file)
     };
 }
@@ -37,7 +37,7 @@ macro_rules! path_concat {
 /// runtime.
 #[macro_export]
 macro_rules! load_config {
-    ($channel:expr) => {{
+    ($channel:expr_2021) => {{
         #[cfg(feature = "release_bundle")]
         {
             $crate::load_config_from_embedded(include_str!($crate::path_concat!(

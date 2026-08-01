@@ -1067,10 +1067,10 @@ impl RemoteServerClient {
                                 log::warn!("Event channel closed, dropping push message");
                             }
                         }
-                    } else if let Some((_, tx)) = pending_requests.remove(&request_id) {
+                    } else { match pending_requests.remove(&request_id) { Some((_, tx)) => {
                         // Session-scoped response — resolve the caller's oneshot.
                         let _ = tx.send(Ok(msg));
-                    } else {
+                    } _ => {
                         // Host-scoped response (either normal path or daemon
                         // failover). Forward to the manager for matching.
                         if host_response_tx.try_send(msg).is_err() {
@@ -1079,10 +1079,10 @@ impl RemoteServerClient {
                                  with request_id={request_id}"
                             );
                         }
-                    }
+                    }}}
                 }
                 Err(ProtocolError::Decode(ref err, Some(ref request_id))) => {
-                    if let Some((_, tx)) = pending_requests.remove(request_id) {
+                    match pending_requests.remove(request_id) { Some((_, tx)) => {
                         log::warn!(
                             "Reader task: malformed response \
                              (request_id={request_id}): {err}"
@@ -1091,7 +1091,7 @@ impl RemoteServerClient {
                             err.clone(),
                             Some(request_id.clone()),
                         ))));
-                    } else {
+                    } _ => {
                         // Not a session-scoped pending request — this is a
                         // host-scoped response the manager is tracking. Tell
                         // it so the caller fails fast rather than waiting for
@@ -1105,7 +1105,7 @@ impl RemoteServerClient {
                                 request_id: request_id.clone(),
                             })
                             .await;
-                    }
+                    }}
                 }
                 Err(ProtocolError::Decode(ref err, None)) => {
                     log::warn!(

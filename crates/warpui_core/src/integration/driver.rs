@@ -440,13 +440,13 @@ impl TestDriver {
             let path = artifacts::get_artifacts(step_data_map)
                 .map(|artifacts| artifacts.path(&filename))
                 .unwrap_or_else(|| PathBuf::from(&filename));
-            if let Err(e) = video_recorder::save_captured_frame_as_png(&frame, &path)
+            match video_recorder::save_captured_frame_as_png(&frame, &path)
                 .context("VideoRecorder: failed to save screenshot")
-            {
+            { Err(e) => {
                 report_error!(e, extra: { "path" => %path.display() });
-            } else {
+            } _ => {
                 log::info!("VideoRecorder: screenshot saved to {}", path.display());
-            }
+            }}
             step_data_map.insert(video_recorder::SCREENSHOT_PATH_KEY, String::new());
         }
     }

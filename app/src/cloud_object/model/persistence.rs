@@ -123,7 +123,7 @@ impl ObjectStoreModel {
     }
 
     /// Wait until the local object store is readable. In Zap this condition is satisfied immediately.
-    pub fn initial_load_complete(&self) -> impl Future<Output = ()> {
+    pub fn initial_load_complete(&self) -> impl Future<Output = ()> + use<> {
         self.initial_load_complete.wait()
     }
 

@@ -2019,7 +2019,7 @@ impl View for DisplayChip {
     }
 
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
-        if let Some(chip) = self.render_chip(app) {
+        match self.render_chip(app) { Some(chip) => {
             if self.is_in_agent_view {
                 chip
             } else {
@@ -2027,9 +2027,9 @@ impl View for DisplayChip {
                     .with_margin_right(CHIP_MARGIN_RIGHT)
                     .finish()
             }
-        } else {
+        } _ => {
             Empty::new().finish()
-        }
+        }}
     }
 }
 

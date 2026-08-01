@@ -228,7 +228,7 @@ impl KeybindingsView {
     fn get_bindings_by_section(
         &self,
         section: KeybindingSection,
-    ) -> impl Iterator<Item = CommandBinding> {
+    ) -> impl Iterator<Item = CommandBinding> + use<> {
         let bindings = self
             .binding_results
             .as_ref()

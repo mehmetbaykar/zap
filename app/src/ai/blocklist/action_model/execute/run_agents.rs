@@ -92,7 +92,7 @@ impl RunAgentsExecutor {
         &mut self,
         input: ExecuteActionInput,
         ctx: &mut ModelContext<Self>,
-    ) -> impl Into<AnyActionExecution> {
+    ) -> impl Into<AnyActionExecution> + use<> {
         let AIAgentActionType::RunAgents(request) = &input.action.action else {
             return ActionExecution::InvalidAction;
         };

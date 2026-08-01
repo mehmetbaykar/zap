@@ -418,13 +418,13 @@ impl Repository {
         subscriber_id: SubscriberId,
         ctx: &mut ModelContext<Self>,
     ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
-        if let Some(mut subscriber) = self.subscribers.remove(&subscriber_id) {
+        match self.subscribers.remove(&subscriber_id) { Some(mut subscriber) => {
             let future = subscriber.on_scan(self, ctx);
             self.subscribers.insert(subscriber_id, subscriber);
             Some(future)
-        } else {
+        } _ => {
             None
-        }
+        }}
     }
 
     /// Notifies a specific subscriber about file changes.
@@ -435,13 +435,13 @@ impl Repository {
         update: &RepositoryUpdate,
         ctx: &mut ModelContext<Self>,
     ) -> Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>> {
-        if let Some(mut subscriber) = self.subscribers.remove(&subscriber_id) {
+        match self.subscribers.remove(&subscriber_id) { Some(mut subscriber) => {
             let future = subscriber.on_files_updated(self, update, ctx);
             self.subscribers.insert(subscriber_id, subscriber);
             Some(future)
-        } else {
+        } _ => {
             None
-        }
+        }}
     }
 
     /// Returns the subscriber IDs for this repository.

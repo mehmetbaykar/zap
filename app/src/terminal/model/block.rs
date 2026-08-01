@@ -3031,7 +3031,7 @@ impl Block {
 /// the provided method call on the active grid, the command grid if in input mode
 /// or the output grid if in output mode.
 macro_rules! delegate {
-    ($self:ident.$method:ident( $( $arg:expr ),* )) => {
+    ($self:ident.$method:ident( $( $arg:expr_2021 ),* )) => {
         match $self.header_grid.receiving_chars_for_prompt {
             Some(ansi::PromptKind::Initial) => {
                 $self.header_grid.$method($( $arg ),*)
@@ -3056,7 +3056,7 @@ macro_rules! delegate {
 
 /// Like `delegate!`, but image completions are output, even before preexec.
 macro_rules! delegate_image_completion {
-    ($self:ident.$method:ident( $( $arg:expr ),* )) => {
+    ($self:ident.$method:ident( $( $arg:expr_2021 ),* )) => {
         match $self.header_grid.receiving_chars_for_prompt {
             Some(ansi::PromptKind::Initial) => {
                 $self.header_grid.$method($( $arg ),*)
