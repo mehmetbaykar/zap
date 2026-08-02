@@ -406,6 +406,20 @@ pub fn render_permissions_section(
             .clone(),
     ));
 
+    // Matches upstream's row (label and Icon::Atom). Plain string rather than a
+    // `t!` key: this fork is English-only and has no locale entry for it.
+    column.add_child(render_permission_row(
+        appearance,
+        Icon::Atom,
+        "Run orchestrated agents",
+        &view.run_agents_dropdown,
+        profile_data.run_agents.description(),
+        !ai_settings.is_run_agents_permissions_editable(app),
+        view.tooltip_mouse_state_handles
+            .run_agents_tooltip_mouse_state
+            .clone(),
+    ));
+
     let mcp_label = crate::t!("settings-exec-profile-editor-call-mcp-servers");
     column.add_child(render_permission_row(
         appearance,

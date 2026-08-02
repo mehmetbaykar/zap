@@ -605,6 +605,7 @@ default = [
     "trim_trailing_blank_lines",
     "open_warp_new_settings_modes",
     "settings_file",
+    "file_backed_execution_profiles",
     "onekey_prompt",
     "directory_tab_colors",
     "git_credential_refresh",
