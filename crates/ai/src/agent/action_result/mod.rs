@@ -783,7 +783,9 @@ impl AIAgentActionResultType {
                 | TransferShellCommandControlToUserResult::CommandFinished { .. },
             ) => true,
             Self::AskUserQuestion(AskUserQuestionResult::Success { .. }) => true,
-            Self::RunAgents(RunAgentsResult::Launched { .. }) => true,
+            Self::RunAgents(RunAgentsResult::Launched { agents, .. }) => agents
+                .iter()
+                .any(|agent| matches!(agent.kind, RunAgentsAgentOutcomeKind::Launched { .. })),
             Self::WaitForEvents(WaitForEventsResult::Completed) => true,
             _ => false,
         }
@@ -815,6 +817,9 @@ impl AIAgentActionResultType {
             | Self::RunAgents(RunAgentsResult::Failure { .. } | RunAgentsResult::Denied { .. }) => {
                 true
             }
+            Self::RunAgents(RunAgentsResult::Launched { agents, .. }) => agents
+                .iter()
+                .all(|agent| matches!(agent.kind, RunAgentsAgentOutcomeKind::Failed { .. })),
             _ => false,
         }
     }

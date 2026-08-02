@@ -646,7 +646,11 @@ pub fn run() -> Result<()> {
         && std::env::var_os("LC_ALL").is_none()
         && std::env::var_os("LC_CTYPE").is_none()
     {
-        std::env::set_var("LANG", "en_US.UTF-8");
+        // SAFETY: this runs at the very top of `run()`, before any thread is spawned, so there is
+        // no concurrent reader of the environment to race with.
+        unsafe {
+            std::env::set_var("LANG", "en_US.UTF-8");
+        }
     }
 
     // Perform any necessary platform-specific initialization.

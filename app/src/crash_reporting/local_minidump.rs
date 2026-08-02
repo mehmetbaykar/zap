@@ -17,6 +17,7 @@ use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use warp_errors::report_error;
 
 use super::ToCrashReportTags;
 
@@ -127,7 +128,7 @@ pub fn run_server(socket_path: &Path) -> anyhow::Result<()> {
             &self,
             result: Result<minidumper::MinidumpBinary, minidumper::Error>,
         ) -> minidumper::LoopAction {
-            if let Err(ref err) = &result {
+            if let Err(err) = &result {
                 log::warn!("Unable to create minidump file: {err:#}");
             }
 
