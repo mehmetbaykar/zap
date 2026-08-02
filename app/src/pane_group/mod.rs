@@ -4188,6 +4188,50 @@ impl PaneGroup {
         }
     }
 
+    /// Revert a temporary-replacement swap and clear the orchestration
+    /// split-off marker on the replacement's view, so a later reveal
+    /// renders pills rather than breadcrumbs.
+    fn revert_swap_clearing_split_off(
+        &mut self,
+        replacement_id: PaneId,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if let Some(terminal_view) = self.terminal_view_from_pane_id(replacement_id, ctx) {
+            terminal_view.update(ctx, |view, ctx| {
+                view.clear_orchestration_split_off(ctx);
+            });
+        }
+        self.panes.revert_temporary_replacement(replacement_id);
+    }
+
+    /// Reveal `pane_id` if it's currently the original of an active swap,
+    /// then focus it. Used by cross-tab navigation paths that may resolve
+    /// to a swapped-out pane; without the reveal, focus would land on an
+    /// off-tree pane the user can't see. Logs a warning if the pane is
+    /// neither in the tree nor swap-hidden.
+    pub fn reveal_and_focus_pane(&mut self, pane_id: PaneId, ctx: &mut ViewContext<Self>) {
+        if let Some(replacement_id) = self.panes.replacement_pane_for_original(pane_id) {
+            self.revert_swap_clearing_split_off(replacement_id, ctx);
+            self.handle_pane_count_change(ctx);
+            // The visible content of this slot changed; refresh agent-view
+            // back-button labels on both sides.
+            for refresh_pane_id in [pane_id, replacement_id] {
+                if let Some(terminal_view) = self.terminal_view_from_pane_id(refresh_pane_id, ctx) {
+                    terminal_view.update(ctx, |view, ctx| {
+                        view.update_agent_view_back_button_state(ctx);
+                    });
+                }
+            }
+            ctx.emit(Event::TerminalViewStateChanged);
+            ctx.emit(Event::AppStateChanged);
+        } else if !self.panes.is_pane_in_tree(pane_id) {
+            log::warn!(
+                "reveal_and_focus_pane: pane {pane_id:?} is off-tree; focus will land on a non-visible pane"
+            );
+        }
+        self.focus_pane_by_id(pane_id, ctx);
+    }
+
     /// Temporarily replace a pane with another pane.
     /// The original pane is hidden and can be restored later.
     /// Returns true if the replacement was successful, false otherwise.

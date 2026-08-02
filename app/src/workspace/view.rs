@@ -5175,7 +5175,7 @@ impl Workspace {
             // remain focused (as opposed to the pane with pane_id) since its
             // input would remain focused.
             tab.pane_group.update(ctx, |view, ctx| {
-                view.focus_pane_by_id(pane_view_locator.pane_id, ctx);
+                view.reveal_and_focus_pane(pane_view_locator.pane_id, ctx);
             });
             self.activate_tab_internal(index, ctx);
             ctx.notify();
