@@ -1,0 +1,71 @@
+# Local Linux build gate for Zap.
+#
+# Mirrors the CI Linux environment (ubuntu-22.04, same toolchain, same build
+# deps) so `target_os = "linux"` code paths get compiled on this machine
+# instead of only inside GitHub Actions. macOS gates are structurally blind to
+# them: anything behind `#[cfg(target_os = "linux")]` is never parsed by a
+# macOS `cargo check`, so a Linux-only compile error ships green locally and
+# fails ~17 minutes into the release workflow.
+#
+# Build deps come from the repo's own `script/linux/install_build_deps` rather
+# than a hand-copied apt list, so this image tracks that script automatically.
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    WARP_SKIP_SUDO_PROMPT=1 \
+    CARGO_TERM_COLOR=always
+
+# `install_build_deps` shells out through `warp_sudo`, which calls `sudo` even
+# when already root, so sudo has to exist in the image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        sudo ca-certificates curl git unzip xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy only what the dep scripts need. Keeping the repo itself out of the image
+# means editing source does not invalidate this (slow) layer — the working tree
+# is bind-mounted at run time instead.
+COPY script ./script
+COPY rust-toolchain.toml ./rust-toolchain.toml
+
+# GITHUB_ACTIONS=true is what makes `script/install_rust` pass `-y` to rustup;
+# it is scoped to this layer so the app build itself never sees it.
+RUN apt-get update \
+    && GITHUB_ACTIONS=true ./script/linux/install_build_deps \
+    && rm -rf /var/lib/apt/lists/*
+
+# rustup drops cargo here; every later layer needs it on PATH.
+ENV PATH=/root/.cargo/bin:$PATH
+
+# Test deps. This deliberately does NOT call `script/linux/install_test_deps`
+# wholesale: that script also provisions the gcloud CLI, which exists purely for
+# the SSH integration tests, and this gate runs CI's `-E 'not package(integration)'`
+# selection. The runtime libs, the shells the suite spawns (zsh/fish), vim for
+# the altscreen tests, and nextest are all still installed from the repo's own
+# scripts.
+RUN apt-get update \
+    && ./script/linux/install_runtime_deps \
+    && apt-get install -y --no-install-recommends zsh fish vim \
+    && rm -rf /var/lib/apt/lists/* \
+    && ./script/install_cargo_test_deps
+
+# Windows cross-check support. cargo-xwin fetches the MSVC CRT + Windows SDK
+# headers and drives clang-cl, which lets `cargo check --target
+# x86_64-pc-windows-msvc` compile the ~92 `cfg(target_os = "windows")` sites
+# without a Windows machine. It lives here rather than on the host so the Mac
+# never needs a 3GB Homebrew LLVM install.
+#
+# cc-rs looks for a bare `llvm-lib`; Ubuntu only ships it inside the versioned
+# LLVM directory, so it gets linked onto PATH.
+# perl is required by openssl-src: there is no system OpenSSL for the MSVC
+# target, so openssl-sys builds a vendored copy, and its ./Configure is a Perl
+# script. Without it the cross-check dies at `perl ... exit status: 127`.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        clang lld llvm perl make \
+    && ln -sf "$(echo /usr/lib/llvm-*/bin/llvm-lib | tr ' ' '\n' | tail -1)" /usr/local/bin/llvm-lib \
+    && rm -rf /var/lib/apt/lists/* \
+    && rustup target add x86_64-pc-windows-msvc \
+    && cargo install cargo-xwin --locked
+
+WORKDIR /workspace

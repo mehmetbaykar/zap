@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+#
+# script/linux/local_gate - run the Linux compile gates on this machine.
+#
+# Why this exists: the macOS gates cannot see `#[cfg(target_os = "linux")]`
+# code. Twice in a row a Linux-only compile error passed a fully green macOS
+# run and only surfaced ~17 minutes into the release workflow, after the tag
+# was already pushed. This runs the same compile inside a container that
+# mirrors CI (ubuntu-22.04, pinned toolchain, repo's own build deps).
+#
+# Usage:
+#   script/linux/local_gate            # cargo check --workspace --all-targets
+#   script/linux/local_gate test       # CI's exact whole-workspace nextest run
+#   script/linux/local_gate release    # check the release feature set the bundler uses
+#   script/linux/local_gate windows    # cross-check the Windows target (compile only)
+#   script/linux/local_gate shell      # interactive shell in the gate container
+#   script/linux/local_gate --rebuild  # force-rebuild the container image
+#
+# The container writes to Docker-managed volumes, never to the host `target/`,
+# so this is safe to run without disturbing a macOS build tree. (Do not run it
+# concurrently with a host build anyway — cargo's registry lock is shared only
+# if CARGO_HOME is, but the disk and CPU contention alone make it a bad idea.)
+#
+# Note on architecture: the image runs on the host's native architecture. On
+# Apple Silicon that means aarch64 Linux, not CI's x86_64. That covers every
+# `target_os = "linux"` gate (the class of break this is here to catch) but not
+# `target_arch = "x86_64"` code. Set ZAP_GATE_PLATFORM=linux/amd64 to match CI
+# exactly at the cost of qemu emulation (much slower).
+
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+REPO_ROOT="$PWD"
+
+IMAGE=zap-linux-gate
+PLATFORM="${ZAP_GATE_PLATFORM:-}"
+BUILD_ARGS=()
+RUN_ARGS=()
+if [[ -n "$PLATFORM" ]]; then
+  BUILD_ARGS+=(--platform "$PLATFORM")
+  RUN_ARGS+=(--platform "$PLATFORM")
+fi
+
+MODE=check
+REBUILD=0
+for arg in "$@"; do
+  case "$arg" in
+    test)      MODE=test ;;
+    check)     MODE=check ;;
+    release)   MODE=release ;;
+    windows)   MODE=windows ;;
+    shell)     MODE=shell ;;
+    --rebuild) REBUILD=1 ;;
+    *) echo "unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
+
+if [[ "$REBUILD" == 1 ]] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "==> building $IMAGE (first run pulls + compiles deps; several minutes)"
+  docker build "${BUILD_ARGS[@]}" -f script/linux/Dockerfile.gate -t "$IMAGE" "$REPO_ROOT"
+fi
+
+# `test` mirrors .github/workflows/tests.yml exactly. Do not narrow it to a few
+# `-p` flags: a `-p warp -p warp_core` run covers ~5.1k of the ~7.7k tests CI
+# runs, and a real failure in `crates/ai` once shipped green that way.
+WORKSPACE_TEST_ARGS='--workspace --locked --exclude command-signatures-v2'
+case "$MODE" in
+  check) CMD='cargo check --workspace --all-targets' ;;
+  # The release job does not build with default features — script/linux/bundle
+  # uses `--features release_bundle,crash_reporting`. Checking only the default
+  # set leaves that configuration unbuilt until the 2h release workflow runs.
+  release) CMD='cargo check -p warp --features release_bundle,crash_reporting' ;;
+  test)  CMD="cargo nextest run $WORKSPACE_TEST_ARGS --profile ci --retries 2 -E 'not package(integration)'" ;;
+  # PARTIAL Windows signal — read the limits before trusting it:
+  #   * compile-only (no link), so it catches type/API breakage, not link errors;
+  #   * scoped to the UI crates, NOT the workspace. A full-workspace cross-check
+  #     is blocked by openssl-sys: there is no system OpenSSL for the MSVC target,
+  #     so it builds a vendored copy, and OpenSSL's `Configure` refuses a Linux
+  #     perl for VC-WIN64A ("this perl implementation doesn't produce Windows
+  #     like paths"). That needs a Windows-native perl, so `app/`'s 37
+  #     windows-gated files stay uncovered here.
+  # The authoritative Windows signal is still tests.yml — push to main and let it
+  # run BEFORE tagging (~12 min) rather than discovering breakage in the 2h release.
+  windows) CMD='cargo xwin check -p warpui -p warpui_extras -p warpui_core --target x86_64-pc-windows-msvc' ;;
+  shell) CMD='exec bash' ;;
+esac
+
+echo "==> running Linux gate: $MODE"
+# Allocate a tty only when there is one; `docker run -t` fails under CI/pipes.
+[[ -t 0 && -t 1 ]] && RUN_ARGS+=(-it) || RUN_ARGS+=(-i)
+
+# The git-checkout volume must persist alongside the target volume, not just the
+# registry: `warp-workflows`' build.rs generates `src/generated_workflows/` inside
+# its own checkout directory. With an ephemeral checkout but a cached target dir,
+# cargo finds a fresh fingerprint, skips the build script, and rustc then fails
+# with a misleading "file not found for module `generated_workflows`".
+#
+# Codegen for the `warp` lib is the memory high-water mark of the whole build:
+# with the default job count it OOM-kills rustc (SIGKILL) inside Docker's VM.
+# Dropping debuginfo and bounding parallelism keeps it under the limit — this
+# gate exists to surface compile errors, so debuginfo buys nothing here.
+#
+# `check`/`release`/`windows` fit comfortably. `test` additionally needs full
+# codegen for the `warp` lib and still OOMs at -j4 on a 15.6GB Docker VM; raise
+# Docker Desktop's memory or use ZAP_GATE_JOBS=1 if you need it to complete.
+# Note that `check --all-targets` already type-checks every test target, so the
+# Linux *compile* signal does not depend on `test` succeeding — `test` only adds
+# Linux test *execution*, which tests.yml also provides on every push to main.
+JOBS="${ZAP_GATE_JOBS:-2}"
+
+exec docker run --rm "${RUN_ARGS[@]}" \
+  -v "$REPO_ROOT":/workspace \
+  -v zap-linux-gate-target:/gate-target \
+  -v zap-linux-gate-cargo:/root/.cargo/registry \
+  -v zap-linux-gate-git:/root/.cargo/git \
+  -e CARGO_TARGET_DIR=/gate-target \
+  -e CARGO_BUILD_JOBS="$JOBS" \
+  -e CARGO_INCREMENTAL=0 \
+  -e CARGO_PROFILE_DEV_DEBUG=0 \
+  -e CARGO_PROFILE_TEST_DEBUG=0 \
+  -w /workspace \
+  "$IMAGE" \
+  bash -lc "$CMD"
