@@ -45,6 +45,28 @@ const CODEX_BYPASS_HOOK_TRUST_FLAG: &str = "--dangerously-bypass-hook-trust";
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 impl ThirdPartyHarness for CodexHarness {
+    fn runtime_error_patterns(&self) -> &'static [&'static str] {
+        &[
+            // Quota / billing.
+            "Quota exceeded. Check your plan and billing details.",
+            "You've hit your usage limit",
+            // Upstream HTTP failures Codex surfaces verbatim. The 401 form
+            // matches invalid-API-key and wrong-endpoint variants.
+            "unexpected status 401",
+            "Incorrect API key provided",
+            "invalid API key",
+            // Region/endpoint block (Anthropic-style global vs US-only
+            // routing surfaced through Codex's upstream client).
+            "Access blocked by Cloudflare",
+            // OAuth refresh failures — all five Codex variants share this
+            // substring (see upstream session/token messages).
+            "could not be refreshed",
+            // Generically check for invalid request errors.
+            // Keep this last so more specific patterns can be matched first.
+            "\"type\": \"invalid_request_error\"",
+        ]
+    }
+
     fn harness(&self) -> Harness {
         Harness::Codex
     }

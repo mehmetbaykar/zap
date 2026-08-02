@@ -54,6 +54,7 @@ use crate::terminal::cli_agent_sessions::{
 };
 
 pub(crate) mod harness;
+pub(crate) mod harness_output_monitor;
 pub(super) mod output;
 pub(crate) mod terminal;
 
@@ -291,6 +292,14 @@ pub enum AgentDriverError {
     ConfigBuildFailed(#[source] anyhow::Error),
     #[error("Failed to initialize AWS Bedrock credentials: {0}")]
     AwsBedrockCredentialsFailed(String),
+    #[error("Harness '{harness}' reported a runtime failure matching '{pattern}'")]
+    HarnessRuntimeFailureDetected {
+        harness: String,
+        /// The originating needle from `runtime_error_patterns` that hit.
+        pattern: String,
+        /// Matching row(s) from the harness block, trimmed and capped.
+        excerpt: String,
+    },
     #[error("Harness command exited with code {exit_code}")]
     HarnessCommandFailed { exit_code: i32 },
     #[error("Harness '{harness}' setup failed: {reason}")]
@@ -975,7 +984,14 @@ impl AgentDriver {
                 let harness_exit_rx = Self::setup_harness(harness.as_ref(), &foreground).await?;
                 let runner =
                     Self::prepare_harness(&task.prompt, harness.as_ref(), &foreground).await?;
-                Self::run_harness(runner, &foreground, harness_exit_rx).await
+                Self::run_harness(
+                    runner,
+                    harness.runtime_error_patterns(),
+                    harness.cli_agent().display_name().to_owned(),
+                    &foreground,
+                    harness_exit_rx,
+                )
+                .await
             }
             HarnessKind::Unsupported(harness) => Err(AgentDriverError::HarnessSetupFailed {
                 harness: harness.to_string(),
@@ -1080,12 +1096,31 @@ impl AgentDriver {
     /// time to exit (either immediately on completion or after the idle timeout).
     async fn run_harness(
         runner: Arc<dyn harness::HarnessRunner>,
+        runtime_error_patterns: &'static [&'static str],
+        harness_name: String,
         foreground: &ModelSpawner<Self>,
         harness_exit_rx: oneshot::Receiver<()>,
     ) -> Result<(), AgentDriverError> {
         // Start the third-party harness.
-        let mut command_handle = runner.start(foreground).await?.fuse();
+        let command_handle = runner.start(foreground).await?;
+        let block_id = command_handle.block_id().clone();
+        let mut command_handle = command_handle.fuse();
         let mut harness_exit_rx = harness_exit_rx.fuse();
+
+        // Watch the harness block for known provider-rejection strings (invalid
+        // API key, exhausted credits, revoked OAuth). Without this the harness
+        // sits at its prompt forever and `run_harness` never returns.
+        let scanner_fut = harness_output_monitor::watch_block_for_errors(
+            block_id,
+            runtime_error_patterns,
+            foreground,
+        )
+        .fuse();
+        futures::pin_mut!(scanner_fut);
+
+        // Promoted to the return value after final-save + cleanup have run.
+        let mut detected_runtime_failure: Option<harness_output_monitor::DetectedHarnessError> =
+            None;
 
         // Periodically save the conversation while the command is running and handle
         // exiting gracefully once the idle timeout elapses.
@@ -1106,6 +1141,20 @@ impl AgentDriver {
                         .await
                         .context("Failed to exit harness"));
                 }
+                detected = scanner_fut => {
+                    if let Some(error) = detected {
+                        log::warn!(
+                            "Runtime failure detected for {harness_name}: pattern={}, excerpt={}",
+                            error.pattern,
+                            error.excerpt,
+                        );
+                        detected_runtime_failure = Some(error);
+                        report_if_error!(runner
+                            .exit(foreground)
+                            .await
+                            .context("Failed to exit harness after runtime failure"));
+                    }
+                }
             }
         };
 
@@ -1123,6 +1172,16 @@ impl AgentDriver {
                 .await
                 .context("Failed to clean up harness runtime state")
         );
+
+        // A detected provider rejection outranks the exit code: the harness
+        // usually exits 0 after `/exit`, which would otherwise look like success.
+        if let Some(error) = detected_runtime_failure {
+            return Err(AgentDriverError::HarnessRuntimeFailureDetected {
+                harness: harness_name,
+                pattern: error.pattern,
+                excerpt: error.excerpt,
+            });
+        }
 
         let exit_code = command_result?;
         log::debug!("Agent harness exited with status {exit_code}");

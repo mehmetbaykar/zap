@@ -20,7 +20,11 @@ use crate::ai::attachment_utils::attachments_download_dir;
 use crate::pane_group::NewTerminalOptions;
 use crate::root_view::{NewWorkspaceSource, open_new_with_workspace_source};
 use crate::terminal::TerminalView;
+use crate::terminal::model::RespectObfuscatedSecrets;
 use crate::terminal::model::block::{BlockId, SerializedBlock};
+use crate::terminal::model::find::RegexDFAs;
+use crate::terminal::model::grid::{Dimensions, RespectDisplayedOutput};
+use crate::terminal::model::index::Point;
 use crate::terminal::model::session::ExecuteCommandOptions;
 use crate::terminal::shared_session::IsSharedSessionCreator;
 use crate::terminal::shell::ShellType;
@@ -346,6 +350,53 @@ impl TerminalDriver {
                 })
         }
     }
+
+    pub fn block_output_plaintext(&self, block_id: &BlockId, ctx: &AppContext) -> Option<String> {
+        let terminal = self.terminal_view.as_ref(ctx);
+        let model = terminal.model.lock();
+        let block = model.block_list().block_with_id(block_id)?;
+        Some(block.output_grid().contents_to_string(
+            false, // include_escape_sequences
+            None,  // max_rows: full visible output
+        ))
+    }
+
+    pub fn find_first_match_in_block_output(
+        &self,
+        block_id: &BlockId,
+        dfas: &RegexDFAs,
+        ctx: &AppContext,
+    ) -> Option<BlockOutputMatch> {
+        let terminal = self.terminal_view.as_ref(ctx);
+        let model = terminal.model.lock();
+        let block = model.block_list().block_with_id(block_id)?;
+        let grid = block.output_grid();
+        let m = grid.find(dfas).next()?;
+        let handler = grid.grid_handler();
+        let matched_text = handler.bounds_to_string(
+            *m.start(),
+            *m.end(),
+            false, // include_esc_sequences
+            RespectObfuscatedSecrets::Yes,
+            false, // force_secrets_obfuscated
+            RespectDisplayedOutput::Yes,
+        );
+        let cols = handler.columns();
+        let row_start = Point::new(m.start().row, 0);
+        let row_end = Point::new(m.end().row, cols.saturating_sub(1));
+        let excerpt = handler.bounds_to_string(
+            row_start,
+            row_end,
+            false,
+            RespectObfuscatedSecrets::Yes,
+            false,
+            RespectDisplayedOutput::Yes,
+        );
+        Some(BlockOutputMatch {
+            matched_text: matched_text.trim().to_owned(),
+            excerpt: excerpt.trim().to_owned(),
+        })
+    }
 }
 
 /// A handle to a running terminal command.
@@ -422,4 +473,17 @@ impl TerminalDriver {
             _ => (),
         }
     }
+}
+
+/// The first DFA match returned by
+/// [`TerminalDriver::find_first_match_in_block_output`].
+///
+/// `matched_text` is the exact substring from the grid (no ANSI escapes),
+/// used by the harness output monitor to map the hit back to the originating
+/// pattern. `excerpt` is the full row(s) containing the match, also as
+/// plaintext, suitable for surfacing in user-visible error messages.
+#[derive(Debug, Clone)]
+pub(crate) struct BlockOutputMatch {
+    pub matched_text: String,
+    pub excerpt: String,
 }

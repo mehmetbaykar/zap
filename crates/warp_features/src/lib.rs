@@ -856,7 +856,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::DragTabsToWindows,
     FeatureFlag::ServerFileBrowser,
     FeatureFlag::TerminalLifecycleRecovery,
-    FeatureFlag::JupyterNotebookRendering,
     FeatureFlag::McpJsonTreeView,
     FeatureFlag::SoloUserByok,
     #[cfg(not(windows))]
@@ -868,7 +867,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::JupyterNotebookRendering,
     FeatureFlag::WaitForEventsParentRegistration,
     FeatureFlag::BoxDrawingGlyphs,
-    FeatureFlag::CloudAgentRunners,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Zap).

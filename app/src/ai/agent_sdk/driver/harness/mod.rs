@@ -41,6 +41,15 @@ use gemini::GeminiHarness;
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 pub(crate) trait ThirdPartyHarness: Send + Sync {
+    /// Substrings to scan for in the running harness block's output. A hit
+    /// indicates the harness can't make a successful API request (e.g.
+    /// invalid key, no billing, quota exhausted). The driver matches
+    /// case-insensitively against the block's plaintext via the same DFA
+    /// machinery used by the find feature.
+    fn runtime_error_patterns(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Returns the [`Harness`] variant this implementation corresponds to.
     fn harness(&self) -> Harness;
 
