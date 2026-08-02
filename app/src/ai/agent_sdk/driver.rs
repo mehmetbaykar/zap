@@ -300,6 +300,11 @@ pub enum AgentDriverError {
         /// Matching row(s) from the harness block, trimmed and capped.
         excerpt: String,
     },
+    #[error("Setup command '{command}' exited the shell")]
+    SetupCommandExitedShell {
+        /// The command that was running when the shell exited (secret-redacted).
+        command: String,
+    },
     #[error("Harness command exited with code {exit_code}")]
     HarnessCommandFailed { exit_code: i32 },
     #[error("Harness '{harness}' setup failed: {reason}")]

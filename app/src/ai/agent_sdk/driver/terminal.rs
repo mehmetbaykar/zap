@@ -15,6 +15,7 @@ use warpui::r#async::FutureExt;
 use warpui::{AppContext, Entity, ModelContext, ModelHandle, ViewHandle};
 
 use super::AgentDriverError;
+use crate::ai::agent::redaction::redact_secrets;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::attachment_utils::attachments_download_dir;
 use crate::pane_group::NewTerminalOptions;
@@ -54,12 +55,20 @@ pub(crate) enum TerminalDriverEvent {
 pub(crate) struct TerminalDriver {
     terminal_view: ViewHandle<TerminalView>,
     session_bootstrapped: Condition,
-    waiting_command: Option<oneshot::Sender<ExitCode>>,
+    waiting_command: Option<oneshot::Sender<Result<ExitCode, AgentDriverError>>>,
 
     /// State for the pending command we're expecting to start executing.
     /// The `String` is the expected command text, and the sender is used
     /// to send the block ID to the waiting caller.
-    pending_command_start: Option<(String, oneshot::Sender<BlockId>)>,
+    pending_command_start: Option<(String, oneshot::Sender<Result<BlockId, AgentDriverError>>)>,
+    /// True once the shell process backing this session has exited
+    /// post-bootstrap. No further commands can execute, so `execute_command`
+    /// fails fast instead of waiting forever.
+    shell_exited: bool,
+    /// Most recently submitted command (secret-redacted), used to attribute a
+    /// shell exit to the command that caused it. Redacted because it flows
+    /// into error reports.
+    last_command: Option<String>,
 }
 
 impl Entity for TerminalDriver {
@@ -167,6 +176,8 @@ impl TerminalDriver {
             session_bootstrapped,
             waiting_command: None,
             pending_command_start: None,
+            shell_exited: false,
+            last_command: None,
         }
     }
 
@@ -214,8 +225,13 @@ impl TerminalDriver {
         impl Future<Output = Result<CommandHandle, AgentDriverError>> + use<>,
         AgentDriverError,
     > {
-        let (exit_tx, exit_rx) = oneshot::channel::<ExitCode>();
-        let (start_tx, start_rx) = oneshot::channel::<BlockId>();
+        // The shell has exited, so no further command can run in this session.
+        // Fail fast instead of waiting forever on a command that can never start.
+        if self.shell_exited {
+            return Err(self.shell_exited_error());
+        }
+        let (exit_tx, exit_rx) = oneshot::channel::<Result<ExitCode, AgentDriverError>>();
+        let (start_tx, start_rx) = oneshot::channel::<Result<BlockId, AgentDriverError>>();
 
         // We should not be able to execute a command while we are still waiting on another one.
         // This is enforced by the caller by waiting on rx before continuing.
@@ -224,6 +240,11 @@ impl TerminalDriver {
         }
 
         let command_string = command.to_string();
+        // Redacted copy for shell-exit attribution: this text can flow into
+        // error reports, so never retain the raw command.
+        let mut redacted_command = command_string.clone();
+        redact_secrets(&mut redacted_command);
+        self.last_command = Some(redacted_command);
         self.terminal_view.update(ctx, |terminal, ctx| {
             self.waiting_command = Some(exit_tx);
             self.pending_command_start = Some((command_string, start_tx));
@@ -233,7 +254,7 @@ impl TerminalDriver {
         Ok(async move {
             let block_id = start_rx
                 .await
-                .map_err(|_| AgentDriverError::InvalidRuntimeState)?;
+                .map_err(|_| AgentDriverError::InvalidRuntimeState)??;
             Ok(CommandHandle {
                 exit_status_rx: exit_rx,
                 block_id,
@@ -405,7 +426,7 @@ impl TerminalDriver {
 /// Also carries the [`BlockId`] so callers can retrieve the block snapshot
 /// after completion.
 pub(crate) struct CommandHandle {
-    exit_status_rx: oneshot::Receiver<ExitCode>,
+    exit_status_rx: oneshot::Receiver<Result<ExitCode, AgentDriverError>>,
     block_id: BlockId,
 }
 
@@ -422,7 +443,10 @@ impl Future for CommandHandle {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.exit_status_rx)
             .poll(cx)
-            .map(|result| result.map_err(|_| AgentDriverError::InvalidRuntimeState))
+            .map(|result| match result {
+                Ok(exit_status) => exit_status,
+                Err(_) => Err(AgentDriverError::InvalidRuntimeState),
+            })
     }
 }
 
@@ -448,7 +472,7 @@ impl TerminalDriver {
                     let block_id = self.terminal_view.read(ctx, |terminal, _| {
                         terminal.model.lock().block_list().active_block_id().clone()
                     });
-                    let _ = sender.send(block_id);
+                    let _ = sender.send(Ok(block_id));
                 }
             }
             crate::terminal::view::Event::BlockCompleted { block, .. } => {
@@ -467,10 +491,33 @@ impl TerminalDriver {
                     // we instead simply make sure it was not a background block.
                     bootstrapping_done && !block.is_background
                 }) {
-                    let _ = sender.send(block.exit_code);
+                    let _ = sender.send(Ok(block.exit_code));
+                }
+            }
+            crate::terminal::view::Event::Exited => {
+                // The shell is gone: no further command can start or finish.
+                // Fail any in-flight command so the run reports the failure
+                // instead of hanging until the session is torn down.
+                self.shell_exited = true;
+                if let Some((_, sender)) = self.pending_command_start.take() {
+                    let _ = sender.send(Err(self.shell_exited_error()));
+                }
+                if let Some(sender) = self.waiting_command.take() {
+                    let _ = sender.send(Err(self.shell_exited_error()));
                 }
             }
             _ => (),
+        }
+    }
+
+    /// The error reported for commands affected by a shell exit, naming the
+    /// most recently submitted command as the cause.
+    fn shell_exited_error(&self) -> AgentDriverError {
+        AgentDriverError::SetupCommandExitedShell {
+            command: self
+                .last_command
+                .clone()
+                .unwrap_or_else(|| "<unknown>".to_string()),
         }
     }
 }
