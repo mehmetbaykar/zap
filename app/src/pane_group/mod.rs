@@ -4043,19 +4043,23 @@ impl PaneGroup {
         }
 
         // If this pane is a child agent, re-hide it instead of closing it.
+        //
+        // Zap: this fork keeps the pre-#10327 "hidden-in-tree" child-agent model.
+        // Upstream reworked closing to drop the pane off-tree and rebuild it lazily
+        // on the next reveal, via `ensure_hidden_child_agent_pane_for_conversation`
+        // and `unhide_child_agent_pane_for_split_off` (child_agent/restoration.rs,
+        // which this fork does not carry). Our reveal path is still the older
+        // `show_pane_for_child_agent`, which requires a `hidden_panes` entry with
+        // `HiddenPaneReason::ChildAgent` -- so closing MUST put the pane back there.
+        //
+        // Taking upstream's off-tree close body while keeping this reveal path left
+        // the pane neither visible nor hidden, with `child_agent_panes` still
+        // pointing at it: reopening a closed child agent silently did nothing.
+        // Do not re-adopt upstream's close body without also porting its reveal side.
         if self.is_child_agent_pane(pane_id) {
-            // Revert the swap if the child is currently swapped in.
-            if self.panes.original_pane_for_replacement(pane_id).is_some() {
-                self.panes.revert_temporary_replacement(pane_id);
+            if !self.panes.is_pane_hidden(&pane_id) {
+                self.panes.hide_pane_for_child_agent(pane_id);
             }
-            // Or remove the child from the tree if it was split off.
-            else if self.panes.is_pane_in_tree(pane_id) && !self.panes.remove(pane_id) {
-                log::error!("close_pane: failed to remove split-off child pane from tree");
-            }
-            // Drop any leftover swap entry recording this child as the
-            // original side. Otherwise a later revert of the surviving
-            // sibling could resurrect the just-closed pane.
-            self.panes.remove_hidden_pane(pane_id);
 
             // Clear the split-off marker so the next reveal renders pills
             // rather than breadcrumbs.
