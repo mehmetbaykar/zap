@@ -5801,6 +5801,93 @@ fn paste_raw_image_clipboard_in_cli_agent_sends_correct_bytes() {
 }
 
 #[test]
+fn paste_text_with_incidental_image_flavor_in_cli_agent_sends_the_text() {
+    // Copying a rich-text selection out of a browser leaves BOTH text and an image
+    // flavor on the macOS pasteboard, and `Clipboard::read` fills `images` from any
+    // png/jpeg/gif/webp/svg flavor it finds. Keying the image path off
+    // `has_image_data()` alone therefore swallowed ordinary text pastes into a CLI
+    // agent: a bare SYN went to the PTY and the text was dropped. Text present means
+    // the user copied text, not an image.
+    fn run_for_agent(agent: CLIAgent) {
+        App::test((), move |mut app| async move {
+            initialize_app_for_terminal_view(&mut app);
+            let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+            let terminal = add_window_with_terminal(&mut app, None);
+
+            let pty_writes: Rc<RefCell<Vec<Vec<u8>>>> = Rc::new(RefCell::new(Vec::new()));
+            let writes = pty_writes.clone();
+            app.update(|ctx| {
+                ctx.subscribe_to_view(&terminal, move |_, event, _| {
+                    if let Event::WriteBytesToPty { bytes } = event {
+                        writes.borrow_mut().push(bytes.to_vec());
+                    }
+                });
+            });
+
+            terminal.update(&mut app, |view, ctx| {
+                CLIAgentSessionsModel::handle(ctx).update(ctx, |sessions, ctx| {
+                    sessions.set_session(
+                        view.view_id,
+                        CLIAgentSession {
+                            agent,
+                            status: CLIAgentSessionStatus::InProgress,
+                            session_context: CLIAgentSessionContext::default(),
+                            input_state: CLIAgentInputState::Closed,
+                            should_auto_toggle_input: false,
+                            listener: None,
+                            remote_host: None,
+                            plugin_version: None,
+                            draft_text: None,
+                            custom_command_prefix: None,
+                            received_rich_notification: false,
+                        },
+                        ctx,
+                    );
+                });
+
+                {
+                    let mut model = view.model.lock();
+                    model.simulate_long_running_block(agent.command_prefix(), "");
+                    model.set_mode(ansi::Mode::BracketedPaste);
+                }
+
+                // Text AND an image flavor, exactly as a browser copy arrives.
+                ctx.clipboard().write(ClipboardContent {
+                    plain_text: "hello from the browser".to_string(),
+                    images: Some(vec![warpui::clipboard::ImageData {
+                        data: vec![0x89, 0x50, 0x4E, 0x47], // PNG magic bytes
+                        mime_type: "image/png".to_string(),
+                        filename: None,
+                    }]),
+                    ..Default::default()
+                });
+
+                view.handle_action(&TerminalAction::Paste, ctx);
+            });
+
+            let writes = pty_writes.borrow();
+            assert_eq!(writes.len(), 1, "expected exactly 1 PTY write");
+            assert_ne!(
+                writes[0],
+                vec![C0::SYN],
+                "text paste must not be replaced by the image-paste SYN"
+            );
+
+            let mut expected = Vec::new();
+            expected.extend_from_slice(BRACKETED_PASTE_START);
+            expected.extend_from_slice(b"hello from the browser");
+            expected.extend_from_slice(BRACKETED_PASTE_END);
+            assert_eq!(writes[0], expected);
+        })
+    }
+
+    run_for_agent(CLIAgent::Claude);
+    run_for_agent(CLIAgent::OpenCode);
+    run_for_agent(CLIAgent::Codex);
+}
+
+#[test]
 fn submit_without_auto_dismiss_keeps_rich_input_open() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);

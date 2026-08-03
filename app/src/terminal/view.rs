@@ -15210,7 +15210,19 @@ impl TerminalView {
         } else {
             let clipboard_content = ctx.clipboard().read();
 
-            if is_cli_agent_paste && clipboard_content.has_image_data() {
+            // Zap: the `plain_text` guard is a fork divergence from upstream, which tests
+            // `has_image_data()` alone. macOS's `Clipboard::read` fills `images`
+            // unconditionally from any png/jpeg/gif/webp/svg pasteboard flavor, and browsers
+            // publish such a flavor alongside the text when you copy a rich-text selection.
+            // Without this guard, copying text out of a browser and pasting it into a CLI
+            // agent sent a bare SYN and returned, silently discarding the text — and over SSH
+            // that SYN can never work anyway, since the remote agent would be reading the
+            // remote machine's clipboard. Only treat this as an image paste when the
+            // clipboard carries no usable text.
+            if is_cli_agent_paste
+                && clipboard_content.has_image_data()
+                && clipboard_content.plain_text.trim().is_empty()
+            {
                 if !cfg!(windows) {
                     self.write_user_bytes_to_pty(vec![escape_sequences::C0::SYN], ctx);
                     return;
