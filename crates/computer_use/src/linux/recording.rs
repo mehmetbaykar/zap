@@ -159,6 +159,12 @@ fn new_ffmpeg_capture_command(
     command
         // Composite the X11 cursor. Must come BEFORE -i so ffmpeg
         // treats it as an x11grab input option, not an output option.
+        //
+        // Zap: upstream turns this off because its post-stop burn-in
+        // synthesizes a cursor from recorded pointer events. That overlay
+        // depends on the pointer-sink subsystem this fork does not carry, so
+        // it was not adopted — leaving -draw_mouse at 0 would produce
+        // recordings with no cursor at all, neither native nor synthetic.
         .args(["-draw_mouse", "1"])
         // Limit capture wall-clock time as an INPUT option so the duration
         // bound is the real capture wall-clock time. The Linux master is

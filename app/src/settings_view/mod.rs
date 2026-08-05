@@ -30,7 +30,7 @@ use warpui::elements::{
     ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, DispatchEventResult, Empty,
     EventHandler, Expanded, Fill, Flex, MainAxisSize, OffsetPositioning, ParentAnchor,
     ParentElement, ParentOffsetBounds, Radius, SavePosition, ScrollbarWidth, Shrinkable, Stack,
-    Text, get_rich_content_position_id,
+    Text, Wrap, get_rich_content_position_id,
 };
 use warpui::fonts::{Properties, Weight};
 use warpui::keymap::{ContextPredicate, EnabledPredicate, FixedBinding};
@@ -135,6 +135,11 @@ const SECTION_BORDER_WIDTH: f32 = 1.;
 
 const POSITION_ID: &str = "settings_pane";
 
+// Zap de-clouded fork: upstream's `PlanHeaderPresentation` / `plan_header_presentation`
+// (Account + Billing and Usage v2 plan badges) were physically removed along with the
+// Account settings page and the `billing_and_usage` module — the fork has no plan headers
+// to feed them, so the helper had zero callers.
+
 pub(super) fn editor_text_colors(appearance: &Appearance) -> TextColors {
     let theme = appearance.theme();
     TextColors {
@@ -162,7 +167,8 @@ pub(super) fn render_beta_chip(appearance: &Appearance) -> Box<dyn Element> {
     .finish()
 }
 
-/// Renders a horizontal row of pill-shaped chips for model labels.
+/// Renders a wrapping row of pill-shaped chips for model labels, which flow
+/// onto additional lines instead of overflowing the container horizontally.
 /// Used by custom inference endpoint cards and the remove confirmation dialog.
 pub(super) fn render_model_chips(
     labels: impl IntoIterator<Item = String>,
@@ -185,7 +191,7 @@ pub(super) fn render_model_chips(
         ..Default::default()
     };
 
-    let mut chips = Flex::row().with_spacing(8.);
+    let mut chips = Wrap::row().with_spacing(8.).with_run_spacing(8.);
     for label in labels {
         chips.add_child(Chip::new(label, chip_style).build().finish());
     }

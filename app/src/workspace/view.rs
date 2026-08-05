@@ -5570,6 +5570,7 @@ impl Workspace {
                     LocalOrRemotePath::Local(path.clone()),
                     session,
                     layout,
+                    Some(code_source),
                     ctx,
                 );
             }
@@ -5702,6 +5703,11 @@ impl Workspace {
                                 )),
                                 None,
                                 *layout,
+                                // No `CodeSource` to hand to the raw-code toggle here:
+                                // remote sources carry no line range, and
+                                // `replace_file_pane_with_code_pane` rebuilds
+                                // `CodeSource::RemoteFileTree` from the remote path.
+                                None,
                                 ctx,
                             );
                         }
@@ -6022,7 +6028,7 @@ impl Workspace {
                     line_col,
                     CodeSource::Link {
                         path,
-                        range_start: None,
+                        range_start: line_col,
                         range_end: None,
                     },
                     ctx,
@@ -8094,6 +8100,7 @@ impl Workspace {
         path: LocalOrRemotePath,
         session: Option<Arc<Session>>,
         layout: EditorLayout,
+        code_source: Option<CodeSource>,
         ctx: &mut ViewContext<Self>,
     ) {
         let existing_file_pane = {
@@ -8114,11 +8121,14 @@ impl Workspace {
             });
             return;
         }
+        // The notebook viewer renders markdown rather than raw lines, but it
+        // hands this source back when the user toggles to the raw code view, so
+        // keeping it preserves the requested line for that view.
         let pane = FilePane::new(
             Some(path),
             session,
             #[cfg(feature = "local_fs")]
-            None,
+            code_source,
             ctx,
         );
 
@@ -10185,7 +10195,7 @@ impl Workspace {
                     *line_col,
                     CodeSource::Link {
                         path: path.clone(),
-                        range_start: None,
+                        range_start: *line_col,
                         range_end: None,
                     },
                     ctx,
@@ -12372,7 +12382,7 @@ impl Workspace {
     ) {
         let source = CodeSource::Link {
             path: file_path,
-            range_start: None,
+            range_start: line_and_column,
             range_end: None,
         };
         let pane = CodePane::new(source, line_and_column, ctx);
@@ -14494,6 +14504,7 @@ impl Workspace {
                         path.clone().into(),
                         Some(session.clone()),
                         layout,
+                        None,
                         ctx,
                     );
                 }
@@ -15378,7 +15389,11 @@ impl Workspace {
                     *line_col,
                     CodeSource::Link {
                         path: path.clone(),
-                        range_start: None,
+                        // Keep the requested line on the source: consumers that
+                        // re-derive the jump target from the `CodeSource` (e.g.
+                        // `CodePane::pre_attach`) would otherwise open the file
+                        // at the top instead of the requested line.
+                        range_start: *line_col,
                         range_end: None,
                     },
                     ctx,
@@ -19446,7 +19461,10 @@ impl Workspace {
         let tab_bar_border =
             Border::bottom(TAB_BAR_BORDER_HEIGHT).with_border_fill(appearance.theme().outline());
 
-        let mut tab_bar_container = Container::new(
+        // The tab bar paints no base fill so it inherits the terminal background
+        // from the workspace column behind it; the bottom border is what
+        // separates the bar from the content.
+        let tab_bar_container = Container::new(
             EventHandler::new(Clipped::new(self.render_tab_bar_hoverable(bar_contents)).finish())
                 .on_back_mouse_down(move |ctx, _app, _position| {
                     ctx.dispatch_typed_action(WorkspaceAction::ActivatePrevTab);
@@ -19459,10 +19477,6 @@ impl Workspace {
                 .finish(),
         )
         .with_border(tab_bar_border);
-        if FeatureFlag::NewTabStyling.is_enabled() {
-            tab_bar_container = tab_bar_container
-                .with_background(internal_colors::fg_overlay_1(appearance.theme()));
-        }
         let tab_bar_element = tab_bar_container.finish();
 
         let dimming_color = appearance.theme().background().into();

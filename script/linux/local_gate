@@ -57,7 +57,9 @@ done
 
 if [[ "$REBUILD" == 1 ]] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "==> building $IMAGE (first run pulls + compiles deps; several minutes)"
-  docker build "${BUILD_ARGS[@]}" -f script/linux/Dockerfile.gate -t "$IMAGE" "$REPO_ROOT"
+  # ${arr[@]+"${arr[@]}"} — expanding an empty array under `set -u` is an error on
+  # bash 3.2 (macOS's default); this form yields nothing instead of exploding.
+  docker build ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -f script/linux/Dockerfile.gate -t "$IMAGE" "$REPO_ROOT"
 fi
 
 # `test` mirrors .github/workflows/tests.yml exactly. Do not narrow it to a few
@@ -108,7 +110,7 @@ echo "==> running Linux gate: $MODE"
 # Linux test *execution*, which tests.yml also provides on every push to main.
 JOBS="${ZAP_GATE_JOBS:-2}"
 
-exec docker run --rm "${RUN_ARGS[@]}" \
+exec docker run --rm ${RUN_ARGS[@]+"${RUN_ARGS[@]}"} \
   -v "$REPO_ROOT":/workspace \
   -v zap-linux-gate-target:/gate-target \
   -v zap-linux-gate-cargo:/root/.cargo/registry \

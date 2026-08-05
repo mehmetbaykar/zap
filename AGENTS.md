@@ -273,7 +273,7 @@ Fork identity & upstream sync state (2026-07-19):
 - **Recent fork fixes** (details in git log): BYOP tool-call reliability wave `e94283114..8b13ec8d5` (Anthropic/OpenAI streamer hardening, real gzip-off + CRLF SSE tolerance, structured errors + 20s/300s timeouts, token-limit truncation reported as `truncated_output`; debug switch `ZAP_BYOP_DIAG=1` dumps full request JSON); SSH skill-load blank-pane fix `1fb6de95a` (remote bare-name skill paths + never-drop-task guard in `AddMessagesToTask`); stale remote file-tree fix `1901b3d2e` (`replace_children_of` prune + remote expand-refresh + failed-open self-heal; no wire change); `.zap_cli` TUI-config-dir isolation `49f3a1f78` (path fns remain in use).
 - **Operational gotchas (hard-won — keep)**:
   1. `git rerere` replays bad resolutions — `git rerere forget <file>` before redoing a resolution.
-  2. After any merge involving deferred/stripped subsystems, diff the WHOLE subsystem against pre-merge — clean auto-merges sneak in alongside conflicts (incl. `*_tests.rs` of kept-ours files).
+  2. After any merge involving deferred/stripped subsystems, diff the WHOLE subsystem against pre-merge — clean auto-merges sneak in alongside conflicts (incl. `*_tests.rs` of kept-ours files). **Sweep method (2026-08-05 wave, which this caught 5 defects with):** for every file the merge touched, list the upstream commits touching it (`git log BASE..upstream -- <file>`); if they are ALL strip-commits, revert it to HEAD. That wave had 9 such files silently auto-merging onboarding paywall cards, Warp-hosted Factory MCP, TUI zero-state and session-sharing. Three traps: (a) sweep `--diff-filter=A` too, not just `M` — 5 more strip files arrived as *additions*; (b) `git rm`-ing DU paths leaves EMPTY DIRECTORIES, and `members = ["crates/*"]` then fails with "failed to load manifest for workspace member" — `find crates app -type d -empty -delete`; (c) an import can auto-merge in *outside* any conflict marker (a phantom `use ...::manager::Manager;` in `tab.rs`), so grep resolved files for symbols the fork deleted.
   3. Never run two cargo gate/build invocations concurrently (target/ corruption).
   4. History rewrites over merge commits need `-- --first-parent` (gpg-signed upstream commits rehash, ancestry severs).
   5. Gate-4 is **nextest** (process-per-test): `cargo test -p warp --lib` shows ~6 known thread-parallel flakes (`terminal::view::*`, `util::path::test_resolve_command`) that are not regressions.
@@ -298,6 +298,12 @@ Fork identity & upstream sync state (2026-07-19):
 - Macros such as `println!` / `format!` should use inline format arguments (`"{x}"` rather than `"{}", x`) to satisfy `uninlined_format_args`.
 - `match` statements **must not use the `_` wildcard** (unless truly necessary); keep matches exhaustive.
 - Do not delete/change existing comments because of an unrelated modification.
+- The formatter (`./script/format`) is configured with a `max_width` (max line length) of 100. Reflow comment line-wrapping to fill that full width rather than wrapping early at a narrower column, so comments span as few lines as possible.
+
+**Comments**: comments have a cost — they carry a maintenance burden, because they must be kept in sync with the code they describe. It is tempting to assume more comments are always better, but be judicious about when one is actually necessary because the code cannot speak for itself.
+- **Minimalist comments**: assume the reader is a senior engineer. Never comment to explain WHAT or HOW code works if self-documenting names accomplish that.
+- **Strictly "why" only**: reserve inline comments for non-obvious rationale, workarounds for third-party bugs, complex algorithms, unidiomatic code, or unexpected edge cases.
+- **No line-by-line narration**: never restate the syntax (omit `// Initialize array`, `// Loop over users`).
 
 ### 5.3 Terminal model lock (high priority!)
 - Calling `TerminalModel::lock()` deadlocks very easily (on macOS this shows up as a frozen UI / spinning beachball).

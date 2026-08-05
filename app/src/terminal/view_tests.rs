@@ -5702,7 +5702,13 @@ fn drag_drop_image_in_cli_agent_long_running_command_pastes_via_clipboard() {
         } else {
             vec![0x16]
         };
-        assert_eventually!(
+        // 200 ticks x 5ms = 1s, well above the 60-tick default: this waits on a real
+        // async chain (stat + read the dropped file off-thread, hop back to the view,
+        // write the clipboard, then the keystroke). Under a full parallel nextest run
+        // the default budget expires before the file read returns, so the test failed
+        // all retries while passing in isolation. The assertion itself is unchanged —
+        // still exactly one write, with exactly the expected bytes.
+        assert_eventually!(200 =>
             pty_writes.borrow().len() == 1 && pty_writes.borrow()[0] == expected_paste_bytes,
             "expected single paste-keystroke PTY write {:?}; got {:?}",
             expected_paste_bytes,
