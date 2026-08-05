@@ -34,6 +34,13 @@ env:
   # Same exclusion set as upstream ci.yml: command-signatures-v2 needs its own feature setup and is
   # tested separately by script/presubmit locally.
   WORKSPACE_TEST_ARGS: --workspace --locked --exclude command-signatures-v2
+  # Debug info dominates both peak rustc memory and target/ size. On 2026-08-05 the
+  # Linux runner OOM-killed "Compile tests" (exit 143 = SIGTERM, zero compile errors)
+  # while macOS and Windows passed. Tests need pass/fail plus panic locations, and
+  # #[track_caller] gives those without debuginfo. `script/linux/local_gate` sets the
+  # same two variables for the same reason.
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
 
 jobs:
   test:
@@ -61,6 +68,17 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # GitHub's Linux runner is the tightest of the three on both RAM and disk, and it is
+      # the one that OOM-died compiling this workspace. Reclaim the preinstalled toolchains
+      # this job never uses (~25GB), exactly as zap_release_linux.yml already does.
+      - name: Free up disk space
+        if: ${{ matrix.os == 'linux' }}
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift || true
+          df -h /
 
       # Shared setup: rust toolchain (rust-toolchain.toml → 1.92.0), protoc, Git LFS payloads,
       # node/corepack, and the build cache. On Linux install_test_deps also provisions nextest;
