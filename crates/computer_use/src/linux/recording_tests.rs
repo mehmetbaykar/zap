@@ -386,12 +386,17 @@ fn linux_capture_command_captures_at_1x_without_setpts() {
     );
 }
 
-/// The capture composites no X11 cursor: XFixes only reports the user's core
-/// pointer (never the background agent seat's), so the post-stop burn-in
-/// synthesizes the cursor from recorded pointer events instead — identically
-/// for screen and window scopes.
+/// The capture composites the native X11 cursor, identically for screen and
+/// window scopes.
+///
+/// Zap: upstream asserts `-draw_mouse 0` here, because its post-stop burn-in
+/// synthesizes a cursor from recorded pointer events. That overlay depends on
+/// the pointer-sink subsystem this fork does not carry and was not adopted, so
+/// disabling compositing would leave recordings with no cursor at all — neither
+/// native nor synthetic. Keep this assertion and `recording.rs` in agreement: if
+/// the synthetic overlay is ever adopted, both flip to "0" together.
 #[test]
-fn capture_command_disables_cursor_compositing_for_screen_and_window() {
+fn capture_command_composites_cursor_for_screen_and_window() {
     let config = RecordingConfig::default();
     for window in [None, Some(0x0060_0011)] {
         let command = super::new_ffmpeg_capture_command(&config, ":99", 1920, 1080, window);
@@ -404,7 +409,7 @@ fn capture_command_disables_cursor_compositing_for_screen_and_window() {
             .iter()
             .position(|arg| arg == "-draw_mouse")
             .expect("argv should contain -draw_mouse");
-        assert_eq!(args.get(index + 1), Some(&"0".to_string()), "{args:?}");
+        assert_eq!(args.get(index + 1), Some(&"1".to_string()), "{args:?}");
         let i_index = args
             .iter()
             .position(|arg| arg == "-i")
