@@ -2914,6 +2914,19 @@ impl CodeReviewView {
             // GlobalBufferModel. Instead, use the non-global buffer approach which directly
             // populates the editor with content_at_head.
             self.create_code_review_model(file, ctx)
+        } else if repo_path.as_remote().is_some() {
+            // Zap: a remote (SSH) repo has no local file for GlobalBufferModel to open,
+            // and `to_local_path()` in the branch below returns None for Remote — the `?`
+            // then aborted editor creation entirely, so remote code review rendered the
+            // changed-file list with no diff preview at all. Fall back to the direct
+            // content_at_head editor, exactly as the Deleted case above does for files
+            // that likewise have nothing on disk.
+            //
+            // Upstream solves this differently: its `new_with_global_buffer` takes a
+            // host-aware `BufferFileLocation` and handles Remote natively, while this
+            // fork's still takes `&Path`. If that signature is ever brought over, this
+            // branch can go away in favour of passing `full_file_location` straight in.
+            self.create_code_review_model(file, ctx)
         } else {
             let self_handle = ctx.handle();
             let full_file_location = repo_path.join(&file.file_diff.file_path);
