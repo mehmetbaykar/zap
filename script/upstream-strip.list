@@ -271,3 +271,14 @@ app/src/ai/blocklist/action_model/execute/search_codebase.rs
 crates/ai/src/agent/action/convert_tests.rs
 crates/ai/src/agent/orchestration_config_tests.rs
 agents/specs
+# Wave 2026-08-09: these auto-merged in as pure ADDS (no conflict marker).
+# factory-mcp is the dangerous one: if its code half is resolved keep-ours,
+# activation_for_bundled_skill falls through to `_ => Always` and a cloud-foreman
+# SKILL.md becomes an always-on descriptor in every agent conversation.
+resources/bundled/skills/factory-mcp/SKILL.md
+resources/bundled/skills/factory-mcp/references/factory-mcp-tools.md
+app/src/ai/pricing_promotion.rs
+app/src/ai/pricing_promotion_tests.rs
+app/src/workspace/view/agent_cli_launch_modal/mod.rs
+app/src/workspace/view/agent_cli_launch_modal/view.rs
+app/assets/async/png/onboarding/agent_cli_launch_banner.png

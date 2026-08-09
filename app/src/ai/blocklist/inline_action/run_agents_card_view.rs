@@ -43,6 +43,7 @@ use crate::ai::blocklist::inline_action::requested_action::{
 };
 use crate::ai::llms::{LLMPreferences, LLMPreferencesEvent};
 use crate::appearance::Appearance;
+use crate::features::FeatureFlag;
 use crate::menu::{Event as MenuEvent, Menu, MenuItemFields, MenuVariant};
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
@@ -766,7 +767,17 @@ fn render_summary(state: &RunAgentsEditState, appearance: &Appearance) -> Box<dy
     .with_selectable(true)
     .finish();
 
-    Container::new(summary_text)
+    let mut column = Flex::column()
+        .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+        .with_child(summary_text);
+    // Zap: upstream shows a "these agents may start their own child agents"
+    // disclosure here, gated on FeatureFlag::MultiLevelOrchestration. This fork
+    // does not grant children the run_agents tool at all — chat_stream.rs filters
+    // CHILD_ORCHESTRATION_TOOLS out of a child's tool list whenever
+    // parent_agent_id is set — so the disclosure would be untrue and the flag is
+    // not carried. If depth >= 2 is ever enabled, restore both together.
+
+    Container::new(column.finish())
         .with_margin_bottom(12.)
         .finish()
 }
