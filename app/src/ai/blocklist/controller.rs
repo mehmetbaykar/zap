@@ -32,7 +32,7 @@ use super::context_model::{BlocklistAIContextModel, PendingAttachment, PendingFi
 use super::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use super::input_model::InputConfig;
 use super::queued_query::{QueuedQueryId, QueuedQueryModel};
-use super::{BlocklistAIInputModel, InputType, ResponseStreamId};
+use super::{BlocklistAIInputModel, InputType, ResponseStreamId, orchestration_topology};
 use crate::ai::agent::api::{self, ServerConversationToken};
 use crate::ai::agent::conversation::{AIConversation, AIConversationId, ConversationStatus};
 use crate::ai::agent::task::TaskId;
@@ -216,6 +216,7 @@ pub struct RequestInput {
 struct RequestConversationSnapshot {
     conversation_data: api::ConversationData,
     parent_agent_id: Option<String>,
+    orchestration_depth: u32,
     agent_name: Option<String>,
 }
 
@@ -2058,6 +2059,10 @@ impl BlocklistAIController {
         Ok(RequestConversationSnapshot {
             conversation_data,
             parent_agent_id: conversation.parent_agent_id().map(str::to_string),
+            orchestration_depth: orchestration_topology::orchestration_depth_for_conversation(
+                history_model.as_ref(ctx),
+                conversation_id,
+            ),
             agent_name: conversation.agent_name().map(str::to_string),
         })
     }
@@ -2068,6 +2073,7 @@ impl BlocklistAIController {
         conversation_data: api::ConversationData,
         query_metadata: Option<RequestMetadata>,
         parent_agent_id: Option<String>,
+        orchestration_depth: u32,
         agent_name: Option<String>,
         ctx: &mut ModelContext<Self>,
     ) -> api::RequestParams {
@@ -2082,6 +2088,7 @@ impl BlocklistAIController {
             ctx,
         );
         request_params.parent_agent_id = parent_agent_id;
+        request_params.orchestration_depth = orchestration_depth;
         request_params.agent_name = agent_name;
 
         let compaction_cfg = crate::ai::byop_compaction::CompactionConfig::from_settings(ctx);
@@ -2437,6 +2444,7 @@ impl BlocklistAIController {
             snapshot.conversation_data,
             query_metadata,
             snapshot.parent_agent_id,
+            snapshot.orchestration_depth,
             snapshot.agent_name,
             ctx,
         );
@@ -3028,6 +3036,7 @@ impl BlocklistAIController {
             conversation_data.clone(),
             query_metadata.clone(),
             request_snapshot.parent_agent_id,
+            request_snapshot.orchestration_depth,
             request_snapshot.agent_name,
             ctx,
         );

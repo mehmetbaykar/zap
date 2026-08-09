@@ -1260,7 +1260,7 @@ fn apply_child_model_id_override(
     };
     let llm_id: ai::LLMId = model_id.into();
     LLMPreferences::handle(ctx).update(ctx, |preferences, ctx| {
-        preferences.update_preferred_agent_mode_llm(&llm_id, child_terminal_view_id, ctx);
+        preferences.set_agent_mode_llm_override(child_terminal_view_id, llm_id, ctx);
     });
 }
 

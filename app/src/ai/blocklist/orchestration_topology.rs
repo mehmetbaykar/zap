@@ -123,6 +123,37 @@ pub fn orchestration_root_conversation_id(
     None
 }
 
+/// Returns how many orchestration ancestors `conversation_id` has: 0 for a
+/// user-started root conversation, 1 for an agent that root spawned, 2 for a
+/// grandchild, and so on.
+///
+/// Zap: upstream enforces its orchestration depth budget server-side, so its
+/// client never needs this. This fork has no server, so the budget is enforced
+/// client-side against [`crate::ai::agent_providers::chat_stream::MAX_ORCHESTRATION_DEPTH`].
+///
+/// Shares the cycle guard of [`orchestration_root_conversation_id`]: a corrupt
+/// parent chain terminates instead of looping.
+pub fn orchestration_depth_for_conversation(
+    history: &BlocklistAIHistoryModel,
+    conversation_id: AIConversationId,
+) -> u32 {
+    let mut depth = 0;
+    let mut current = conversation_id;
+    let mut visited = HashSet::new();
+    while visited.insert(current) {
+        let Some(conversation) = history.conversation(&current) else {
+            break;
+        };
+        let Some(parent) = history.resolved_parent_conversation_id_for_conversation(conversation)
+        else {
+            break;
+        };
+        depth += 1;
+        current = parent;
+    }
+    depth
+}
+
 const DONE_STATUS_KEY: u8 = 3;
 
 fn pill_status_sort_key(status: Option<&ConversationStatus>) -> u8 {

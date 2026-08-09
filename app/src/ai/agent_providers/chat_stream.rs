@@ -2717,6 +2717,24 @@ const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
 /// filters with no shared helper -- keep gating from one place.
 const CHILD_ORCHESTRATION_TOOLS: &[&str] = &[tools::run_agents::TOOL_NAME];
 
+/// How many levels of orchestration this fork allows: a user-started root agent
+/// (depth 0) may spawn children (depth 1), and those children may spawn
+/// grandchildren (depth 2). Depth-2 agents get no `run_agents` tool, which
+/// terminates the recursion.
+///
+/// Zap: upstream ships the same tool but enforces its depth budget server-side,
+/// so its client has no equivalent constant — see
+/// `orchestration_topology::orchestration_depth_for_conversation`. The cap is
+/// deliberately small: each level multiplies fan-out, and under BYOP every
+/// agent bills the user's own API key.
+pub const MAX_ORCHESTRATION_DEPTH: u32 = 2;
+
+/// Whether `run_agents` is exposed this turn: the profile permission must allow
+/// it and the conversation must sit above the depth budget.
+fn child_orchestration_enabled(params: &RequestParams) -> bool {
+    params.run_agents_enabled && params.orchestration_depth < MAX_ORCHESTRATION_DEPTH
+}
+
 /// Lists the tool names actually fed to the upstream model this turn (built-in REGISTRY + current MCP tools),
 /// sharing the same gating as `build_tools_array` (LRC / `web_search_enabled` /
 /// `suggest_new_conversation` / `plan_mode`). For `prompt_renderer` to inject into the
@@ -2724,7 +2742,7 @@ const CHILD_ORCHESTRATION_TOOLS: &[&str] = &[tools::run_agents::TOOL_NAME];
 pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
     let is_lrc = params.lrc_command_id.is_some();
     let web_enabled = params.web_search_enabled;
-    let child_orchestration_enabled = params.run_agents_enabled && params.parent_agent_id.is_none();
+    let child_orchestration_enabled = child_orchestration_enabled(params);
     let plan_mode = is_plan_mode_turn(&params.input);
     let mut names: Vec<String> = tools::REGISTRY
         .iter()
@@ -2773,10 +2791,8 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
     // information gathering and asking back.
     let is_lrc = params.lrc_command_id.is_some();
     let web_enabled = params.web_search_enabled;
-    // start_agent / run_agents: profile `run_agents` permission gate + single-level
-    // recursion guard — a child agent (parent_agent_id set) never gets to spawn
-    // grandchildren, whether one at a time or as a batch.
-    let child_orchestration_enabled = params.run_agents_enabled && params.parent_agent_id.is_none();
+    // run_agents: profile `run_agents` permission gate + client-side depth budget.
+    let child_orchestration_enabled = child_orchestration_enabled(params);
     let plan_mode = is_plan_mode_turn(&params.input);
     // Zap BYOP: the `suggest_prompt` chip UI is restored via the view layer subscribing to
     // PromptSuggestionExecutorEvent (see `terminal/view.rs::
@@ -7908,11 +7924,37 @@ mod run_agents_gating_tests {
         assert!(tools_array_has_run_agents(&params));
     }
 
+    /// A child agent may itself orchestrate: only the depth budget stops the
+    /// recursion, not the mere presence of a parent.
     #[test]
-    fn hidden_for_child_agents() {
+    fn exposed_for_child_agents_within_depth_budget() {
+        for depth in 0..MAX_ORCHESTRATION_DEPTH {
+            let mut params = params();
+            params.run_agents_enabled = true;
+            params.parent_agent_id = (depth > 0).then(|| "parent-1".to_string());
+            params.orchestration_depth = depth;
+            assert!(has_run_agents(&params), "depth {depth} should be allowed");
+            assert!(tools_array_has_run_agents(&params));
+        }
+    }
+
+    #[test]
+    fn hidden_at_max_orchestration_depth() {
         let mut params = params();
         params.run_agents_enabled = true;
         params.parent_agent_id = Some("parent-1".to_string());
+        params.orchestration_depth = MAX_ORCHESTRATION_DEPTH;
+        assert!(!has_run_agents(&params));
+        assert!(!tools_array_has_run_agents(&params));
+    }
+
+    /// A depth past the cap (a corrupt or migrated conversation) must stay
+    /// blocked rather than wrapping back into the allowed range.
+    #[test]
+    fn hidden_beyond_max_orchestration_depth() {
+        let mut params = params();
+        params.run_agents_enabled = true;
+        params.orchestration_depth = MAX_ORCHESTRATION_DEPTH + 5;
         assert!(!has_run_agents(&params));
         assert!(!tools_array_has_run_agents(&params));
     }
@@ -7923,14 +7965,15 @@ mod run_agents_gating_tests {
     /// change.
     #[test]
     fn orchestration_tools_share_one_gate() {
-        for (run_agents_enabled, parent) in [
-            (false, None),
-            (true, None),
-            (true, Some("parent-1".to_string())),
+        for (run_agents_enabled, orchestration_depth) in [
+            (false, 0),
+            (true, 0),
+            (true, MAX_ORCHESTRATION_DEPTH - 1),
+            (true, MAX_ORCHESTRATION_DEPTH),
         ] {
             let mut params = params();
             params.run_agents_enabled = run_agents_enabled;
-            params.parent_agent_id = parent;
+            params.orchestration_depth = orchestration_depth;
             let names = available_tool_names(&params);
             let exposed: Vec<&str> = CHILD_ORCHESTRATION_TOOLS
                 .iter()

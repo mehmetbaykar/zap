@@ -780,3 +780,81 @@ fn shared_model_picker_query_orders_filters_and_marks_disabled_choices() {
         assert!(filtered[0].is_selectable());
     });
 }
+
+#[test]
+fn explicit_child_model_pin_preserves_gui_behavior_and_only_emits_for_effective_changes() {
+    App::test((), |mut app| async move {
+        initialize_settings_for_tests(&mut app);
+        app.add_singleton_model(AgentProviderSecrets::new);
+        app.add_singleton_model(UserWorkspaces::default_mock);
+        app.add_singleton_model(UpdateManager::mock);
+        app.add_singleton_model(ObjectStoreModel::mock);
+        app.add_singleton_model(|_| TemplatableMCPServerManager::default());
+
+        let profiles = app.add_singleton_model(|ctx| {
+            AIExecutionProfilesModel::new(&LaunchMode::new_for_unit_test(), ctx)
+        });
+        let preferences = app.add_singleton_model(|_| preferences_for_profile_model_tests());
+        let active_model_events = std::rc::Rc::new(std::cell::Cell::new(0));
+        let captured_events = active_model_events.clone();
+        app.update(|ctx| {
+            ctx.subscribe_to_model(&preferences, move |_, event, _| {
+                if matches!(event, LLMPreferencesEvent::UpdatedActiveAgentModeLLM) {
+                    captured_events.set(captured_events.get() + 1);
+                }
+            });
+        });
+
+        // Pinning the model that is already effective stores the override but
+        // must not notify subscribers: nothing the user sees changed.
+        let surface_id = EntityId::new();
+        preferences.update(&mut app, |preferences, ctx| {
+            preferences.set_agent_mode_llm_override(surface_id, LLMId::from("auto"), ctx);
+        });
+        assert_eq!(active_model_events.get(), 0);
+        preferences.read(&app, |preferences, ctx| {
+            assert_eq!(
+                preferences
+                    .get_active_base_model(ctx, Some(surface_id))
+                    .id
+                    .as_str(),
+                "auto"
+            );
+            assert_eq!(
+                preferences
+                    .base_llm_for_terminal_view
+                    .get(&surface_id)
+                    .map(LLMId::as_str),
+                Some("auto")
+            );
+        });
+
+        // The pin outlives a profile default change. `update_preferred_agent_mode_llm`
+        // would have dropped the override here, letting the child drift onto the
+        // new profile default.
+        profiles.update(&mut app, |profiles, ctx| {
+            let profile_id = profiles.active_profile(Some(surface_id), ctx).id().clone();
+            profiles.set_base_model(&profile_id, Some(LLMId::from("claude-opus")), ctx);
+        });
+        preferences.read(&app, |preferences, ctx| {
+            assert_eq!(
+                preferences
+                    .get_active_base_model(ctx, Some(surface_id))
+                    .id
+                    .as_str(),
+                "auto"
+            );
+        });
+
+        // A pin that changes the effective model emits once, and re-pinning the
+        // same model is a no-op.
+        preferences.update(&mut app, |preferences, ctx| {
+            preferences.set_agent_mode_llm_override(surface_id, LLMId::from("claude-opus"), ctx);
+        });
+        assert_eq!(active_model_events.get(), 1);
+        preferences.update(&mut app, |preferences, ctx| {
+            preferences.set_agent_mode_llm_override(surface_id, LLMId::from("claude-opus"), ctx);
+        });
+        assert_eq!(active_model_events.get(), 1);
+    });
+}

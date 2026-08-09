@@ -111,6 +111,11 @@ pub struct RequestParams {
     pub byop_readiness_attempt_id: Option<String>,
     /// The conversation ID of the parent agent that spawned this child agent, if any.
     pub parent_agent_id: Option<String>,
+    /// Zap only: how many orchestration ancestors this conversation has (0 = a
+    /// user-started root). Stamped by the controller from
+    /// `orchestration_topology::orchestration_depth_for_conversation`, and used
+    /// to enforce the client-side depth budget that upstream enforces server-side.
+    pub orchestration_depth: u32,
     /// The display name for this agent (e.g. "Agent 1"), assigned by the orchestrator.
     pub agent_name: Option<String>,
     /// Zap BYOP only: the LRC (Long Running Command) block id associated with this request.
@@ -222,6 +227,7 @@ impl RequestParams {
             byop_conversation_id: Some(AIConversationId::new()),
             byop_readiness_attempt_id: None,
             parent_agent_id: None,
+            orchestration_depth: 0,
             agent_name: None,
             lrc_command_id: None,
             lrc_running_command: None,
@@ -422,6 +428,7 @@ impl RequestParams {
             byop_conversation_id: Some(conversation.id),
             byop_readiness_attempt_id: None,
             parent_agent_id: None,
+            orchestration_depth: 0,
             agent_name: None,
             lrc_command_id: None,
             lrc_running_command: None,

@@ -29,8 +29,9 @@
 //! orchestration is gated:
 //! - `RequestParams.run_agents_enabled` — the active profile's `run_agents`
 //!   permission is `NeverAllow` → tool not exposed.
-//! - `RequestParams.parent_agent_id.is_some()` — child agents cannot spawn
-//!   grandchildren (single-level recursion guard).
+//! - `RequestParams.orchestration_depth` — the client-side depth budget
+//!   (`chat_stream::MAX_ORCHESTRATION_DEPTH`) terminates the recursion. Upstream
+//!   enforces the equivalent budget server-side.
 //! - Plan Mode blocks it (side-effectful).
 //! - `chat_stream` caps calls per assistant turn (`MAX_RUN_AGENTS_CALLS_PER_TURN`);
 //!   `from_args` additionally caps children per call (`MAX_AGENTS_PER_CALL`), since

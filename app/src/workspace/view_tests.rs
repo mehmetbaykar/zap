@@ -7,6 +7,7 @@ use pane_group::{NotebookPane, PaneState, SplitPaneState, TerminalPaneId};
 use repo_metadata::RepoMetadataModel;
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
+use tempfile::TempDir;
 use terminal::view::ActiveSessionState;
 use warpui::platform::WindowStyle;
 use warpui::{AddSingletonModel, App, ViewHandle};
@@ -67,7 +68,6 @@ use crate::workflows::local_workflows::LocalWorkflows;
 use crate::workspaces::user_profiles::UserProfiles;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{GlobalResourceHandlesProvider, ObjectActions, experiments, workspace};
-use tempfile::TempDir;
 
 // Zap (localization, Phase 5): `PreferencesSyncer` has been physically removed.
 
