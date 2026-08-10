@@ -2400,8 +2400,8 @@ pub struct TerminalView {
     onekey_search_editor: ViewHandle<EditorView>,
     /// The current query string in the OneKey search box; affects filtering and sorting of the menu's items list.
     onekey_query: String,
-    /// True between when `secret_injector` takes off and when it completes/times out. When the OneKey
-    /// listener sees true it skips directly, to avoid popping up the menu at the same time as automatic injection.
+    /// True between when `su_password_injector` takes off and when it completes/times out. When the
+    /// OneKey listener sees true it skips, to avoid popping up the menu during an automatic injection.
     ssh_secret_auto_injection_in_flight: bool,
     /// Stashes the root password when a su root password prompt is detected, awaiting user confirmation before injection.
     pub(crate) su_root_password: Option<zeroize::Zeroizing<String>>,
@@ -8730,8 +8730,8 @@ impl TerminalView {
         ctx.emit(Event::WriteBytesToPty { bytes: data.into() });
     }
 
-    /// Exposes the receiving end of the PTY output broadcast for non-recording subscribers (currently
-    /// the SSH manager's SecretInjector, see `app/src/ssh_manager/secret_injector.rs`). Returns
+    /// Exposes the receiving end of the PTY output broadcast for non-recording subscribers (the SSH
+    /// manager's startup-command and su-password injectors, and the OneKey prompt listener). Returns
     /// `None` when the current session is not a local TTY (wasm / remote session).
     pub fn inactive_pty_reads_rx(
         &self,
@@ -16881,17 +16881,7 @@ impl TerminalView {
         self.close_context_menu(ctx, true);
     }
 
-    pub(crate) fn note_ssh_secret_auto_injected(&mut self, ctx: &mut ViewContext<Self>) {
-        self.onekey_last_prompt_at = Some(Instant::now());
-        if matches!(
-            self.context_menu_state.map(|state| state.menu_type),
-            Some(ContextMenuType::OneKeyPrompt)
-        ) {
-            self.close_context_menu(ctx, true);
-        }
-    }
-
-    /// Only called by `secret_injector` on take-off/finish. See the field docs for details.
+    /// Called by `su_password_injector` on take-off/finish. See the field docs for details.
     pub(crate) fn set_ssh_secret_auto_injection_in_flight(&mut self, in_flight: bool) {
         self.ssh_secret_auto_injection_in_flight = in_flight;
     }

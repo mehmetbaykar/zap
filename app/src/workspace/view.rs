@@ -5870,14 +5870,20 @@ impl Workspace {
         );
     }
 
-    /// Open a new terminal pane in the current tab, automatically run the `ssh ...` command, and spawn a
-    /// SecretInjector to watch the PTY output, automatically injecting the secret from the keychain when a
-    /// `password:` / `passphrase:` prompt appears.
+    /// Open a new terminal pane in the current tab and automatically run the `ssh ...` command.
     ///
-    /// **The boundary for passwordless public-key login**: the user has configured authorized_keys on the server side, the client's
-    /// default private-key handshake succeeds → no prompt appears → the injector silently times out (15s) and exits,
-    /// **without injecting anything into the post-login shell**. This is an inherent property of SecretInjector: strict
-    /// end-of-line matching + one-shot trigger + deadline.
+    /// A stored login password / key passphrase is deliberately NOT typed into the PTY. This used to
+    /// spawn a `secret_injector` that watched PTY bytes for a `password:` / `passphrase:` prompt and
+    /// wrote the keychain secret when one matched. Those bytes are attacker-controlled: a hostile or
+    /// compromised host can print a matching line in its SSH banner or MOTD and harvest the secret,
+    /// which was demonstrated against a local sshd — including after a successful public-key login,
+    /// where ssh never prompts at all. Under `AuthType::Key` the harvested value is the private-key
+    /// passphrase, which must never reach a server.
+    ///
+    /// Zap now matches upstream Warp: a likely password prompt is detected from LOCAL terminal state
+    /// (`!ECHO && ICANON`, `local_tty::terminal_manager`), which a remote host cannot forge, and the
+    /// only action taken is a notification (`TerminalView::on_possible_password_prompt`). The user
+    /// types the credential. Do not reintroduce PTY-side secret injection here.
     ///
     /// **shell bootstrap timing**: `execute_command_or_set_pending` drops the ssh command
     /// into the pending queue and waits for the `BootstrapPrecmdDone` event before flushing -- so it won't get
@@ -5890,30 +5896,20 @@ impl Workspace {
     ) {
         use warp_ssh_manager::{KeychainSecretStore, SecretKind, SshRepository, SshSecretStore};
 
-        let (server_for_connection, secret_lookup_id, secret_kind) =
-            match warp_ssh_manager::with_conn(|conn| {
-                let resolved_auth = SshRepository::resolve_server_auth(conn, &server)?;
-                let mut server_for_connection = server.clone();
-                server_for_connection.username = resolved_auth.username;
-                server_for_connection.auth_type = resolved_auth.auth_type;
-                server_for_connection.key_path = resolved_auth.key_path;
-                Ok((
-                    server_for_connection,
-                    resolved_auth.secret_lookup_id,
-                    resolved_auth.secret_kind,
-                ))
-            }) {
-                Ok(resolved) => resolved,
-                Err(e) => {
-                    log::warn!("ssh auth resolution failed (will continue without injection): {e}");
-                    let fallback_kind = match server.auth_type {
-                        warp_ssh_manager::AuthType::Password => SecretKind::Password,
-                        warp_ssh_manager::AuthType::Key => SecretKind::Passphrase,
-                        warp_ssh_manager::AuthType::OneKey => SecretKind::OneKeyPassword,
-                    };
-                    (server.clone(), node_id.clone(), fallback_kind)
-                }
-            };
+        let server_for_connection = match warp_ssh_manager::with_conn(|conn| {
+            let resolved_auth = SshRepository::resolve_server_auth(conn, &server)?;
+            let mut server_for_connection = server.clone();
+            server_for_connection.username = resolved_auth.username;
+            server_for_connection.auth_type = resolved_auth.auth_type;
+            server_for_connection.key_path = resolved_auth.key_path;
+            Ok(server_for_connection)
+        }) {
+            Ok(resolved) => resolved,
+            Err(e) => {
+                log::warn!("ssh auth resolution failed: {e}");
+                server.clone()
+            }
+        };
         let cmd = warp_ssh_manager::build_ssh_command_line(&server_for_connection);
         let window_id = ctx.window_id();
 
@@ -5945,25 +5941,6 @@ impl Workspace {
                 view.set_enter_agent_view_after_ssh_bootstrap();
             });
         }
-
-        // 1. Synchronously read the keychain (OK on the main thread). OneKey servers use the shared credential ID.
-        let secret = match KeychainSecretStore.get(&secret_lookup_id, secret_kind) {
-            Ok(opt) => opt.unwrap_or_else(|| zeroize::Zeroizing::new(String::new())),
-            Err(e) => {
-                log::warn!("ssh keychain read failed (will continue without injection): {e}");
-                zeroize::Zeroizing::new(String::new())
-            }
-        };
-
-        // 2. The injector spawn must start before execute_command -- otherwise the password prompt
-        //    flies past in the broadcast before the spawn, and the injector won't catch it.
-        let pty_reads_rx = terminal_view.read(ctx, |v, c| v.inactive_pty_reads_rx(c));
-        crate::ssh_manager::secret_injector::spawn_password_injector(
-            pty_reads_rx,
-            terminal_view.downgrade(),
-            secret,
-            ctx,
-        );
 
         // Startup command injector -- waits until the shell is ready, then automatically runs startup_command
         if let Some(ref startup_cmd) = server.startup_command

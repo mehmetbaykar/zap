@@ -10,7 +10,6 @@ pub mod notifier;
 pub mod onekey;
 pub mod panel;
 pub mod password_prompt;
-pub mod secret_injector;
 pub mod server_view;
 pub mod shell_prompt;
 pub mod startup_command_injector;

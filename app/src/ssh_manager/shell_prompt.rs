@@ -1,6 +1,6 @@
-//! Shell prompt detection. For SSH injectors (`secret_injector` /
-//! `startup_command_injector` / `su_password_injector`) to trigger their action
-//! only after waiting for login to complete and the shell to be ready.
+//! Shell prompt detection. For SSH injectors (`startup_command_injector` /
+//! `su_password_injector`) to trigger their action only after waiting for login
+//! to complete and the shell to be ready.
 //!
 //! It only looks at the last 256 bytes of the buffer, matching the end of
 //! several common prompts:
