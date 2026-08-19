@@ -282,3 +282,63 @@ app/src/ai/pricing_promotion_tests.rs
 app/src/workspace/view/agent_cli_launch_modal/mod.rs
 app/src/workspace/view/agent_cli_launch_modal/view.rs
 app/assets/async/png/onboarding/agent_cli_launch_banner.png
+# Wave 2026-08-19 (7d93fa468..04a7f8342, 110 commits). Verified absent in the fork,
+# present upstream. Most are NEW upstream files that auto-merge as pure ADDS with no
+# conflict marker, so they must be deleted explicitly after every merge.
+# Cloud handoff/checkpoint pipeline (REMOTE-2111) — drives the stripped snapshot.rs:
+app/src/ai/agent_sdk/driver/checkpoint_coordinator.rs
+app/src/ai/agent_sdk/driver/checkpoint_coordinator_tests.rs
+app/src/ai/agent_sdk/driver_tests.rs
+app/src/ai/agent_sdk/runner.rs
+app/src/ai/harness_availability.rs
+# Cloud orchestration unified stack (QUALITY-928 M1/M2):
+app/src/ai/blocklist/orchestration_child_tracker.rs
+app/src/ai/blocklist/orchestration_child_tracker_tests.rs
+app/src/pane_group/child_agent/materialization.rs
+app/src/pane_group/child_agent/materialization_tests.rs
+app/src/pane_group/mod_tests.rs
+# Cloud run details / runner platform UI:
+app/src/ai/runner_display.rs
+app/src/ai/runner_display_tests.rs
+app/assets/bundled/svg/apple.svg
+app/src/ai/cloud_agent_config
+app/src/ai/ambient_agents/scheduled.rs
+app/src/ai/agent_management/agent_management_model.rs
+# Session sharing (fork deleted shared_session/manager.rs and the sharing header):
+app/src/terminal/shared_session/manager.rs
+app/src/pane_group/pane/view/header/sharing.rs
+app/src/drive/sharing/dialog/mod_tests.rs
+app/src/terminal/view/shared_session/cloud_conversation_continuation.rs
+# Teams / workspaces / cloud environments settings:
+app/src/settings_view/teams_page_tests.rs
+app/src/settings_view/environments_page.rs
+app/src/settings_view/update_environment_form_tests.rs
+app/src/workspaces/user_workspaces_tests.rs
+# Warp server / telemetry:
+app/src/server/server_api_tests.rs
+app/src/server/cloud_objects/fake_object_client.rs
+app/src/server/telemetry/events.rs
+# Factory (cloud foreman) — same trap as factory-mcp above:
+resources/bundled/skills/factory-files
+script/test_factory_files_skill.py
+# TUI (crate removed 2026-07-19):
+app/src/tui_test_support.rs
+# Cloud-agent build cache crate (born REMOTE-2051, never in the fork workspace):
+crates/build_cache
+# Upstream dev-process automation the fork does not run:
+.github/actions/docubot/action.yml
+.github/actions/docubot/prompt.txt
+.github/workflows/changelog_draft.yml
+# Specs for stripped features:
+specs/GH14069/product.md
+specs/GH14069/tech.md
+specs/QUALITY-928/TECH.md
+specs/REMOTE-2727/TECH.md
+specs/code-1946-tui-multi-level-orchestration/PRODUCT.md
+specs/code-1946-tui-multi-level-orchestration/TECH.md
+# Misc fork-absent test files whose fixtures/subsystems are stripped:
+app/src/terminal/input/prompts/data_source_tests.rs
+# DEFERRED, not rejected: upstream's full-source embedding index is a subsystem the fork
+# has never adopted (fork ships app/src/ai/codebase_auto_indexing.rs instead). Keep it out
+# of merges until it is evaluated as a feature project on its own.
+crates/ai/src/index/full_source_code_embedding

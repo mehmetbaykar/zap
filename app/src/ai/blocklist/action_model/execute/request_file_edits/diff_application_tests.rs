@@ -635,6 +635,7 @@ fn test_format_match_error() {
             fuzzy_match_failures: 1,
             noop_deltas: 0,
             missing_line_numbers: 0,
+            fuzzy_match_failure_details: Vec::new(),
         },
     };
 
@@ -649,6 +650,7 @@ fn test_format_match_error() {
             fuzzy_match_failures: 0,
             noop_deltas: 1,
             missing_line_numbers: 0,
+            fuzzy_match_failure_details: Vec::new(),
         },
     };
 
@@ -663,6 +665,7 @@ fn test_format_match_error() {
             fuzzy_match_failures: 2,
             noop_deltas: 2,
             missing_line_numbers: 0,
+            fuzzy_match_failure_details: Vec::new(),
         },
     };
 
@@ -684,6 +687,7 @@ fn test_format_multiple_errors() {
                 fuzzy_match_failures: 1,
                 noop_deltas: 0,
                 missing_line_numbers: 0,
+            fuzzy_match_failure_details: Vec::new(),
             },
         },
     ];

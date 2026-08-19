@@ -2232,6 +2232,17 @@ struct TerminalViewMouseStates {
     breadcrumbs_horizontal_scroll: ClippedScrollStateHandle,
 }
 
+/// The output a test-only dummy AI block should report, selecting which
+/// `FakeAIBlockModel` shape backs the inserted block.
+#[cfg(any(test, feature = "integration_tests"))]
+enum DummyAIBlockOutput {
+    /// Still streaming, so the block never finishes.
+    Streaming,
+    Complete(crate::ai::agent::AIAgentOutput),
+    /// The stream was cancelled with this partial output.
+    Cancelled(crate::ai::agent::AIAgentOutput),
+}
+
 /// Where content was routed when sent to a CLI agent.
 /// Returned by [`TerminalView::try_send_text_to_cli_agent_or_rich_input`]
 /// so callers can report the correct telemetry destination without a
@@ -5862,8 +5873,7 @@ impl TerminalView {
                     );
                 });
                 let ai_block_clone = ai_block.clone();
-                let is_passive_conversation =
-                    ai_block_clone.as_ref(ctx).is_passive_conversation(ctx);
+                let is_passive_conversation = ai_block_clone.as_ref(ctx).is_passive_conversation();
                 self.find_model.update(ctx, move |find_model, _ctx| {
                     find_model.register_findable_rich_content_view(ai_block_clone);
                 });
@@ -7394,21 +7404,24 @@ impl TerminalView {
                 .get_pending_action(app)
                 .map(|action| match &action.action {
                     AIAgentActionType::RequestCommandOutput { command, .. } => {
-                        format!("Oz needs your permission to run `{command}`")
+                        format!("Warp Agent needs your permission to run `{command}`")
                     }
                     AIAgentActionType::ReadFiles(..) => {
-                        "Oz needs your permission to read files".to_string()
+                        "Warp Agent needs your permission to read files".to_string()
+                    }
+                    AIAgentActionType::SearchCodebase(..) => {
+                        "Warp Agent needs your permission to search your codebase".to_string()
                     }
                     AIAgentActionType::RequestFileEdits { .. } => {
-                        "Oz needs your permission to edit a file".to_string()
+                        "Warp Agent needs your permission to edit a file".to_string()
                     }
                     AIAgentActionType::WriteToLongRunningShellCommand { .. } => {
-                        "Oz needs your permission to interact with a running shell command"
+                        "Warp Agent needs your permission to interact with a running shell command"
                             .to_string()
                     }
-                    _ => "Oz needs your confirmation to continue".to_string(),
+                    _ => "Warp Agent needs your confirmation to continue".to_string(),
                 })
-                .unwrap_or("Oz needs your confirmation to continue".to_string());
+                .unwrap_or("Warp Agent needs your confirmation to continue".to_string());
             return Some(AIBlockNotificationSummary {
                 success: false,
                 title,
@@ -13932,7 +13945,7 @@ impl TerminalView {
                 if ai_metadata
                     .ai_block_handle
                     .as_ref(ctx)
-                    .is_passive_conversation(ctx)
+                    .is_passive_conversation()
                     && matches!(
                         ai_metadata.ai_block_handle.as_ref(ctx).status(ctx),
                         AIBlockOutputStatus::Failed { .. }
@@ -13959,7 +13972,7 @@ impl TerminalView {
         self.rich_content_views.retain(|rich_content| {
             if let Some(ai_metadata) = rich_content.ai_block_metadata() {
                 let is_hidden = ai_metadata.ai_block_handle.read(ctx, |ai_block, ctx| {
-                    ai_block.is_hidden(ctx) && ai_block.is_passive_conversation(ctx)
+                    ai_block.is_passive_conversation() && ai_block.is_hidden(ctx)
                 });
                 if is_hidden {
                     ai_block_ids_to_remove.push(ai_metadata.ai_block_handle.id());
@@ -14976,7 +14989,9 @@ impl TerminalView {
 
         let new_size = size_update.new_size.pane_size_px();
         if new_size.x() == 0. || new_size.y() == 0. {
-            log::info!("Tried to resize with size {new_size:?}. Skipping resize");
+            // This can recur on every layout pass (e.g. while a pane is collapsed),
+            // so keep it at debug to avoid flooding release logs at frame rate.
+            log::debug!("Tried to resize with size {new_size:?}. Skipping resize");
             return;
         }
 
@@ -20125,8 +20140,8 @@ impl TerminalView {
             let ai_block = ai_metadata.ai_block_handle.as_ref(ctx);
 
             (!ai_block.is_finished()
-                && !ai_block.is_hidden(ctx)
-                && !ai_block.is_passive_conversation(ctx))
+                && !ai_block.is_passive_conversation()
+                && !ai_block.is_hidden(ctx))
             .then_some(&ai_metadata.ai_block_handle)
         })
     }
@@ -22045,7 +22060,23 @@ impl TerminalView {
         output: String,
         ctx: &mut ViewContext<Self>,
     ) -> ViewHandle<AIBlock> {
-        self.insert_dummy_ai_block_internal(query, Some(output), ctx)
+        use crate::ai::agent::{
+            AIAgentOutput, AIAgentOutputMessage, AIAgentText, AIAgentTextSection, MessageId,
+        };
+
+        let output = AIAgentOutput {
+            messages: vec![AIAgentOutputMessage::text(
+                MessageId::new("fake-id".to_owned()),
+                AIAgentText {
+                    sections: vec![AIAgentTextSection::PlainText {
+                        text: output.into(),
+                    }],
+                },
+            )],
+            server_output_id: Some(Self::dummy_server_output_id()),
+            ..Default::default()
+        };
+        self.insert_dummy_ai_block_internal(query, DummyAIBlockOutput::Complete(output), ctx)
     }
 
     /// Inserts a dummy AI block that is still streaming (unfinished), for tests
@@ -22056,25 +22087,96 @@ impl TerminalView {
         query: String,
         ctx: &mut ViewContext<Self>,
     ) -> ViewHandle<AIBlock> {
-        self.insert_dummy_ai_block_internal(query, None, ctx)
+        self.insert_dummy_ai_block_internal(query, DummyAIBlockOutput::Streaming, ctx)
+    }
+
+    /// Inserts a dummy AI block whose stream was cancelled while a `run_agents`
+    /// tool call for `agent_names` was still streaming, so the call never
+    /// reached the action queue and has no action status.
+    #[cfg(any(test, feature = "integration_tests"))]
+    pub fn insert_dummy_cancelled_run_agents_ai_block(
+        &mut self,
+        query: String,
+        summary: String,
+        agent_names: Vec<String>,
+        ctx: &mut ViewContext<Self>,
+    ) -> ViewHandle<AIBlock> {
+        use ai::agent::action::{
+            RunAgentsAgentRunConfig, RunAgentsExecutionMode, RunAgentsRequest,
+        };
+
+        use crate::ai::agent::task::TaskId;
+        use crate::ai::agent::{
+            AIAgentAction, AIAgentActionId, AIAgentActionType, AIAgentOutput, AIAgentOutputMessage,
+            AIAgentText, AIAgentTextSection, MessageId,
+        };
+
+        let request = RunAgentsRequest {
+            summary: summary.clone(),
+            base_prompt: "Shared instructions for every child agent.".to_owned(),
+            skills: vec![],
+            model_id: "auto".to_owned(),
+            harness_type: "oz".to_owned(),
+            execution_mode: RunAgentsExecutionMode::Local,
+            agent_run_configs: agent_names
+                .into_iter()
+                .map(|name| RunAgentsAgentRunConfig {
+                    name,
+                    prompt: "Do the work.".to_owned(),
+                    title: String::new(),
+                    model_id: String::new(),
+                })
+                .collect(),
+            plan_id: String::new(),
+            harness_auth_secret_name: None,
+        };
+
+        let output = AIAgentOutput {
+            messages: vec![
+                AIAgentOutputMessage::text(
+                    MessageId::new("fake-run-agents-text-id".to_owned()),
+                    AIAgentText {
+                        sections: vec![AIAgentTextSection::PlainText {
+                            text: summary.into(),
+                        }],
+                    },
+                ),
+                AIAgentOutputMessage::action(
+                    MessageId::new("fake-run-agents-action-message-id".to_owned()),
+                    AIAgentAction {
+                        id: AIAgentActionId::from("fake-run-agents-action-id".to_owned()),
+                        task_id: TaskId::new("fake-task-id".to_owned()),
+                        action: AIAgentActionType::RunAgents(request),
+                        requires_result: true,
+                    },
+                ),
+            ],
+            server_output_id: Some(Self::dummy_server_output_id()),
+            ..Default::default()
+        };
+        self.insert_dummy_ai_block_internal(query, DummyAIBlockOutput::Cancelled(output), ctx)
+    }
+
+    #[cfg(any(test, feature = "integration_tests"))]
+    fn dummy_server_output_id() -> crate::ai::agent::ServerOutputId {
+        use rand::distributions::{Alphanumeric, DistString};
+
+        crate::ai::agent::ServerOutputId::new(format!(
+            "test_output_id_{}",
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 24)
+        ))
     }
 
     /// Shared body for the dummy AI block insertion helpers. Creates a fresh
-    /// conversation for the block; a `None` output models a block that is
-    /// still streaming (unfinished).
+    /// conversation for the block.
     #[cfg(any(test, feature = "integration_tests"))]
     fn insert_dummy_ai_block_internal(
         &mut self,
         query: String,
-        output: Option<String>,
+        output: DummyAIBlockOutput,
         ctx: &mut ViewContext<Self>,
     ) -> ViewHandle<AIBlock> {
-        use rand::distributions::{Alphanumeric, DistString};
-
-        use crate::ai::agent::{
-            AIAgentInput, AIAgentOutput, AIAgentOutputMessage, AIAgentText, AIAgentTextSection,
-            MessageId, ServerOutputId,
-        };
+        use crate::ai::agent::AIAgentInput;
         use crate::ai::blocklist::FakeAIBlockModel;
 
         let inputs = vec![AIAgentInput::UserQuery {
@@ -22092,22 +22194,6 @@ impl TerminalView {
             intended_agent: None,
         }];
 
-        let output = output.map(|output| AIAgentOutput {
-            messages: vec![AIAgentOutputMessage::text(
-                MessageId::new("fake-id".to_owned()),
-                AIAgentText {
-                    sections: vec![AIAgentTextSection::PlainText {
-                        text: output.into(),
-                    }],
-                },
-            )],
-            server_output_id: Some(ServerOutputId::new(format!(
-                "test_output_id_{}",
-                Alphanumeric.sample_string(&mut rand::thread_rng(), 24)
-            ))),
-            ..Default::default()
-        });
-
         // Create a real conversation in the history model for this dummy block so it renders.
         let terminal_view_id = ctx.view_id();
         let mut new_conversation_id = None;
@@ -22121,8 +22207,11 @@ impl TerminalView {
         let conversation_id = new_conversation_id.expect("conversation created for dummy AI block");
 
         let ai_block_model = Rc::new(match output {
-            Some(output) => FakeAIBlockModel::new(inputs, output),
-            None => FakeAIBlockModel::new_streaming(inputs),
+            DummyAIBlockOutput::Complete(output) => FakeAIBlockModel::new(inputs, output),
+            DummyAIBlockOutput::Streaming => FakeAIBlockModel::new_streaming(inputs),
+            DummyAIBlockOutput::Cancelled(output) => {
+                FakeAIBlockModel::new_cancelled(inputs, output)
+            }
         });
         let ai_block = ctx.add_typed_action_view(|ctx| {
             AIBlock::new(

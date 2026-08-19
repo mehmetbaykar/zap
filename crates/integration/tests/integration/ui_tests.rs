@@ -217,6 +217,7 @@ integration_tests! {
     test_osc8_file_scheme_opens_url,
     test_osc8_no_regression_on_url_autodetect,
 
+    test_cycle_active_tab_color_with_keybinding,
     test_active_session_follows_focus,
     test_tab_context_menu_copies_metadata,
     test_vertical_tab_context_menu_copies_metadata,
@@ -317,6 +318,7 @@ integration_tests! {
     #[ignore = "Affected by agent_view feature flag UI changes"]
     test_selection_last_to_ai_lines,
     test_restored_ai_block_renders_mermaid_and_local_images,
+    test_cancelled_run_agents_card_renders_cancelled_state,
 
     // Middle-click-paste is only implemented for Linux right now.
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]

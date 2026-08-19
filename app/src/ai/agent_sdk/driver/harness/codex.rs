@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tempfile::NamedTempFile;
 use warp_cli::agent::Harness;
+use warp_core::safe_info;
 use warp_managed_secrets::ManagedSecretValue;
 use warpui::{ModelHandle, ModelSpawner};
 
@@ -285,7 +286,42 @@ fn prepare_codex_environment_config(
         working_dir,
         openai_base_url.as_deref(),
     )?;
+    publish_warp_skill_dirs_for_codex(working_dir);
     Ok(())
+}
+
+/// Publish the skills listed in `WARP_SKILL_DIRS`, under their own names, as
+/// symlinks under `<working_dir>/.agents/skills`, so an agent running on
+/// Codex sees the same skills the local harness loads from `WARP_SKILL_DIRS`.
+///
+/// Published into the task's own working directory rather than `$HOME` or
+/// `CODEX_HOME`: Codex discovers `.agents/skills` as a REPO-scoped root by
+/// walking up from its starting directory to the repository root (falling
+/// back to just the starting directory itself when no repository is found),
+/// so a task's own working directory is a skill root Codex already searches
+/// on its own. A published skill overrides any existing entry with the same
+/// name (see `skill_dirs_publish::publish_skill`), with the
+/// conflict-resolution behavior depending on whether this run is sandboxed
+/// (see `warp_isolation_platform::detect`). A no-op when `WARP_SKILL_DIRS`
+/// is not configured for this run.
+fn publish_warp_skill_dirs_for_codex(working_dir: &Path) {
+    let source_dirs = super::skill_dirs_publish::warp_skill_source_dirs(working_dir);
+    if source_dirs.is_empty() {
+        return;
+    }
+    let skill_root = working_dir.join(".agents").join("skills");
+    let is_sandbox = warp_isolation_platform::detect().is_some();
+    let published =
+        super::skill_dirs_publish::publish_skill_dirs(&skill_root, &source_dirs, is_sandbox);
+    if published > 0 {
+        safe_info!(
+            safe: ("Published {published} WARP_SKILL_DIRS skill(s) to the Codex skill root"),
+            full: (
+                "Published {published} WARP_SKILL_DIRS skill(s) to Codex skill root {}",
+                skill_root.display()
+            )
+        );
+    }
 }
 
 fn codex_config_dir() -> Result<PathBuf> {
