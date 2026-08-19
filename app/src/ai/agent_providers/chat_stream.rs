@@ -4708,6 +4708,7 @@ pub async fn generate_byop_output(
                 total_input_tokens: captured_prompt_tokens.max(0) as u32,
                 // Warp-cloud billing concepts with no BYOP equivalent.
                 platform_credits_spent: 0.0,
+                total_charges: None,
                 custom_endpoint_token_usage: std::collections::HashMap::new(),
                 context_window_segments: Vec::new(),
             })
@@ -5364,6 +5365,7 @@ fn make_finished_done(
                 token_usage: vec![],
                 should_refresh_model_config: false,
                 request_cost: None,
+                request_charges: None,
             },
         )),
     }
