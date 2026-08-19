@@ -118,6 +118,7 @@ struct PanelMouseStates {
     copy_run_id: MouseStateHandle,
     copy_environment_id: MouseStateHandle,
     copy_error: MouseStateHandle,
+    copy_initial_query: MouseStateHandle,
 }
 
 /// Tracks which copy button action was last triggered (for checkmark feedback).
@@ -128,6 +129,7 @@ enum CopyButtonKind {
     RunId,
     EnvironmentId,
     Error,
+    InitialQuery,
 }
 
 /// Information about a principal involved in a conversation.
@@ -445,6 +447,7 @@ pub enum ConversationDetailsPanelAction {
     CopyRunId,
     CopyEnvironmentId,
     CopyError,
+    CopyInitialQuery,
 }
 
 /// Events emitted by the panel to its parent view.
@@ -467,6 +470,11 @@ pub struct ConversationDetailsPanel {
 }
 
 pub fn init(_app: &mut AppContext) {}
+
+fn trimmed_initial_query(source_prompt: &Option<String>) -> Option<&str> {
+    let trimmed = source_prompt.as_ref()?.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
 
 impl ConversationDetailsPanel {
     pub fn new(show_actions: bool, width: f32, ctx: &mut ViewContext<Self>) -> Self {
@@ -955,8 +963,15 @@ impl ConversationDetailsPanel {
             fields.push(self.render_field_row("Skill", skill_spec.to_string(), appearance));
         }
 
-        if let Some(source_prompt) = &self.data.source_prompt {
-            fields.push(self.render_field_row("Prompt", source_prompt.clone(), appearance));
+        if let Some(source_prompt) = trimmed_initial_query(&self.data.source_prompt) {
+            fields.push(self.render_copyable_field_row(
+                "Prompt",
+                source_prompt,
+                CopyButtonKind::InitialQuery,
+                self.mouse_states.copy_initial_query.clone(),
+                ConversationDetailsPanelAction::CopyInitialQuery,
+                appearance,
+            ));
         }
 
         fields
@@ -1047,6 +1062,13 @@ impl TypedActionView for ConversationDetailsPanel {
                     ctx.clipboard()
                         .write(ClipboardContent::plain_text(message.clone()));
                     self.mark_copied(CopyButtonKind::Error, ctx);
+                }
+            }
+            ConversationDetailsPanelAction::CopyInitialQuery => {
+                if let Some(trimmed) = trimmed_initial_query(&self.data.source_prompt) {
+                    ctx.clipboard()
+                        .write(ClipboardContent::plain_text(trimmed.to_string()));
+                    self.mark_copied(CopyButtonKind::InitialQuery, ctx);
                 }
             }
         }

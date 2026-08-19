@@ -174,7 +174,7 @@ impl TryFrom<&str> for JsonObjectType {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Revision(ServerTimestamp);
 
 impl Revision {

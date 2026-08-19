@@ -910,6 +910,8 @@ impl AgentConversationsModel {
         self.tasks.values()
     }
 
+    /// Seeds the task cache so tests can exercise cache-hit paths without a
+    /// server round trip.
     #[cfg(test)]
     pub(crate) fn insert_task_for_test(&mut self, task: AmbientAgentTask) {
         self.tasks.insert(task.task_id, task);

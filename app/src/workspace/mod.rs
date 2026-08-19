@@ -1567,7 +1567,7 @@ fn add_open_setting_pages_as_editable_binding(app: &mut AppContext) {
             BindingDescription::new(crate::t!(
                 "keybinding-desc-workspace-show-settings-mcp-servers"
             )),
-            WorkspaceAction::ShowSettingsPage(SettingsSection::MCPServers),
+            WorkspaceAction::ShowSettingsPage(SettingsSection::AgentMCPServers),
         )
         .with_group(bindings::BindingGroup::Settings.as_str())
         .with_context_predicate(id!("Workspace")),

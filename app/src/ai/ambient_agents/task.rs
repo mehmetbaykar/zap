@@ -1,11 +1,9 @@
 //! Ambient agent task types and utilities.
 
-use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use warp_cli::agent::Harness;
 use warp_core::ui::theme::WarpTheme;
-use warp_errors::report_error;
 use warpui::color::ColorU;
 
 use super::AmbientAgentTaskId;
@@ -148,6 +146,7 @@ pub enum AgentSource {
     Interactive,
     WebApp,
     GitHubAction,
+    Orchestration,
 }
 
 impl AgentSource {
@@ -163,6 +162,7 @@ impl AgentSource {
             AgentSource::Interactive => "LOCAL",
             AgentSource::WebApp => "WEB_APP",
             AgentSource::GitHubAction => "GITHUB_ACTION",
+            AgentSource::Orchestration => "ORCHESTRATION",
         }
     }
 
@@ -176,6 +176,7 @@ impl AgentSource {
             AgentSource::Interactive => "Zap (local agent)",
             AgentSource::WebApp => "Oz",
             AgentSource::GitHubAction => "GitHub Action",
+            AgentSource::Orchestration => "Orchestration",
         }
     }
 
@@ -190,7 +191,8 @@ impl AgentSource {
             AgentSource::Cli
             | AgentSource::ScheduledAgent
             | AgentSource::AgentWebhook
-            | AgentSource::GitHubAction => false,
+            | AgentSource::GitHubAction
+            | AgentSource::Orchestration => false,
         }
     }
 }
@@ -212,8 +214,9 @@ where
             "SCHEDULED_AGENT" => Some(AgentSource::ScheduledAgent),
             "WEB_APP" => Some(AgentSource::WebApp),
             "GITHUB_ACTION" => Some(AgentSource::GitHubAction),
+            "ORCHESTRATION" => Some(AgentSource::Orchestration),
             _ => {
-                report_error!(anyhow!("Unknown AmbientAgentSource: {}", s));
+                log::warn!("Unknown AmbientAgentSource: {s}");
                 None
             }
         },

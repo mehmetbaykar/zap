@@ -51,7 +51,9 @@ use crate::ai::blocklist::block::cli_controller::CLISubagentEvent;
 use crate::cmd_or_ctrl_shift;
 use crate::code_review::diff_state::GitDeltaPreference;
 use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
-use crate::server::telemetry::{CLIAgentType, CLISubagentControlState, TelemetryEvent};
+use crate::server::telemetry::{
+    CLIAgentType, CLISubagentControlState, FileTreeSource, TelemetryEvent,
+};
 use crate::settings::{
     AISettings, AISettingsChangedEvent, CompiledCommandsForCodingAgentToolbar, InputModeSettings,
 };
@@ -240,7 +242,11 @@ impl TerminalView {
                 );
             }
             UseAgentToolbarEvent::ToggleFileExplorer(cli_agent) => {
-                self.toggle_file_tree(Some((*cli_agent).into()), ctx);
+                let source = match cli_agent {
+                    Some(_) => FileTreeSource::CLIAgentView,
+                    None => FileTreeSource::AgentToolbelt,
+                };
+                self.toggle_file_tree(source, cli_agent.map(Into::into), ctx);
             }
             UseAgentToolbarEvent::OpenRichInput => {
                 if self.has_active_cli_agent_input_session(ctx) {
@@ -1212,7 +1218,7 @@ impl UseAgentToolbar {
                 ctx.emit(UseAgentToolbarEvent::ToggleCodeReviewPane(*agent));
             }
             AgentInputFooterEvent::ToggleFileExplorer(agent) => {
-                ctx.emit(UseAgentToolbarEvent::ToggleFileExplorer(*agent));
+                ctx.emit(UseAgentToolbarEvent::ToggleFileExplorer(Some(*agent)));
             }
             AgentInputFooterEvent::OpenRichInput => {
                 ctx.emit(UseAgentToolbarEvent::OpenRichInput);
@@ -1305,8 +1311,9 @@ pub enum UseAgentToolbarEvent {
     InsertIntoRichInput(String),
     /// Toggle the code review pane (from CLI agent view).
     ToggleCodeReviewPane(CLIAgent),
-    /// Toggle the file explorer (from CLI agent view).
-    ToggleFileExplorer(CLIAgent),
+    /// Toggle the file explorer. `None` when no CLI agent session is attached
+    /// to this pane.
+    ToggleFileExplorer(Option<CLIAgent>),
     /// Open the rich input editor for composing a prompt.
     OpenRichInput,
     /// Hide the rich input editor (same as Escape).

@@ -35,8 +35,8 @@ use warpui::ui_components::button::ButtonVariant;
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::{AppContext, Element, SingletonEntity, ViewContext, ViewHandle};
 
-use super::ai_page::{AISettingsPageAction, AISettingsPageView, ModelCapabilityKind};
 use super::settings_page::{HEADER_PADDING, SettingsWidget, build_sub_header};
+use super::warp_agent_page::{AISettingsPageAction, AISettingsPageView, ModelCapabilityKind};
 use crate::ai::agent_providers::AgentProviderSecrets;
 use crate::appearance::Appearance;
 use crate::editor::{

@@ -405,6 +405,8 @@ pub enum FileTreeSource {
     ForceOpened,
     /// Opened from the CLI agent view footer (e.g., Claude Code).
     CLIAgentView,
+    /// Opened from the File explorer chip in Warp's own agent input toolbelt.
+    AgentToolbelt,
 }
 
 #[cfg(feature = "local_fs")]
@@ -2002,6 +2004,15 @@ pub enum TelemetryEvent {
         /// vary by OS).  See `memory_footprint::memory_breakdown()`.
         memory_breakdown: serde_json::Value,
     },
+    /// Emitted when the OS memory footprint crossed `MEMORY_USAGE_WARNING_THRESHOLD_BYTES` but had
+    /// already dropped back under it by the time we re-checked on the next poll tick, so the spike
+    /// looks transient rather than sustained.
+    TransientMemorySpike {
+        /// The OS footprint, not RSS.
+        triggering_footprint_bytes: u64,
+        /// The OS footprint, not RSS, at confirmation time.
+        confirmation_footprint_bytes: u64,
+    },
     EnvVarCollectionInvoked(EnvVarTelemetryMetadata),
     EnvVarWorkflowParameterization(EnvVarTelemetryMetadata),
 
@@ -3377,6 +3388,13 @@ impl TelemetryEvent {
                 "total_application_usage_bytes": total_application_usage_bytes,
                 "memory_breakdown": memory_breakdown,
             })),
+            TelemetryEvent::TransientMemorySpike {
+                triggering_footprint_bytes,
+                confirmation_footprint_bytes,
+            } => Some(json!({
+                "triggering_footprint_bytes": triggering_footprint_bytes,
+                "confirmation_footprint_bytes": confirmation_footprint_bytes,
+            })),
             TelemetryEvent::EnvVarCollectionInvoked(metadata) => Some(json!(metadata)),
             TelemetryEvent::EnvVarWorkflowParameterization(metadata) => Some(json!(metadata)),
             TelemetryEvent::CompletedSettingsImport {
@@ -4475,6 +4493,7 @@ impl TelemetryEvent {
             | TelemetryEvent::ResourceUsageStats { .. }
             | TelemetryEvent::MemoryUsageStats { .. }
             | TelemetryEvent::MemoryUsageHigh { .. }
+            | TelemetryEvent::TransientMemorySpike { .. }
             | TelemetryEvent::EnvVarCollectionInvoked(_)
             | TelemetryEvent::EnvVarWorkflowParameterization(_)
             | TelemetryEvent::CompletedSettingsImport { .. }

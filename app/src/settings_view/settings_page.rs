@@ -28,15 +28,16 @@ use warpui::{Action, AppContext, SingletonEntity, ViewContext, ViewHandle};
 
 use super::SettingsSection;
 use super::about_page::AboutPageView;
-use super::ai_page::{AISettingsPageAction, AISettingsPageView};
 use super::appearance_page::AppearanceSettingsPageView;
-use super::code_page::CodeSettingsPageView;
+use super::code_editor_review_page::EditorAndCodeReviewPageView;
+use super::code_indexing_page::CodeIndexingPageView;
 use super::features_page::FeaturesPageView;
 use super::keybindings::KeybindingsView;
 use super::mcp_servers_page::MCPServersSettingsPageView;
 use super::network_page::NetworkPageView;
 use super::privacy_page::PrivacyPageView;
 use super::scripting_page::ScriptingSettingsPageView;
+use super::warp_agent_page::AISettingsPageView;
 use super::warp_drive_page::WarpDriveSettingsPageView;
 use super::warpify_page::WarpifyPageView;
 use crate::appearance::Appearance;
@@ -98,14 +99,19 @@ pub enum SettingsPageViewHandle {
     Features(ViewHandle<FeaturesPageView>),
     Keybindings(ViewHandle<KeybindingsView>),
     About(ViewHandle<AboutPageView>),
-    Code(ViewHandle<CodeSettingsPageView>),
+    CodeIndexing(ViewHandle<CodeIndexingPageView>),
+    EditorAndCodeReview(ViewHandle<EditorAndCodeReviewPageView>),
     // Zap Wave 3-1: the `OzCloudAPIKeys` variant was physically removed along with `platform_page`.
     // The cloud API key management UI entirely represents the Zap Inc cloud account and is unrelated to BYOP.
     // Zap Wave 6-8: the `SharedBlocks` / `Referrals` variants were physically removed along with `ShowBlocksView` /
     // `ReferralsPageView` and the corresponding ServerApi client traits.
     // Zap Wave 7-3: the `CloudEnvironments` variant was physically removed along with the ambient-agent UI subsystem.
+    // Upstream's `Teams` / `BillingAndUsage` / `AgentProfiles` cloud pages have no fork equivalent.
     Warpify(ViewHandle<WarpifyPageView>),
     Scripting(ViewHandle<ScriptingSettingsPageView>),
+    /// Backing page for every subpage of the Agents umbrella other than
+    /// `AgentMCPServers`. Upstream split this into four page views built on
+    /// cloud state; the fork keeps the single BYOP-aware page.
     AI(ViewHandle<AISettingsPageView>),
     MCPServers(ViewHandle<MCPServersSettingsPageView>),
     ZapDrive(ViewHandle<WarpDriveSettingsPageView>),
@@ -123,7 +129,8 @@ impl SettingsPageViewHandle {
             Features(view_handle) => ChildView::new(view_handle).finish(),
             Keybindings(view_handle) => ChildView::new(view_handle).finish(),
             About(view_handle) => ChildView::new(view_handle).finish(),
-            Code(view_handle) => ChildView::new(view_handle).finish(),
+            CodeIndexing(view_handle) => ChildView::new(view_handle).finish(),
+            EditorAndCodeReview(view_handle) => ChildView::new(view_handle).finish(),
             // Zap Wave 3-1: the `OzCloudAPIKeys` arm was physically removed along with `platform_page`.
             // Zap Wave 6-8: the `SharedBlocks` / `Referrals` arms were physically removed along with the variants.
             // Zap Wave 7-3: the `CloudEnvironments` arm was physically removed along with the ambient-agent UI.
@@ -392,7 +399,7 @@ pub fn render_full_pane_width_ai_button(
     text: &str,
     is_any_ai_enabled: bool,
     mouse_state: MouseStateHandle,
-    action: AISettingsPageAction,
+    action: impl Action + Clone,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
     let (text_color, bg, icon_bg) = if is_any_ai_enabled {

@@ -556,7 +556,10 @@ pub fn spawn_tui_driver<T: TuiView>(
         let repaint_timer = repaint_timer.clone();
         ctx.on_window_invalidated(window_id, move |_, ctx| {
             if let Err(error) = draw_and_schedule_repaint(&screen, &repaint_timer, ctx) {
-                report_error!(anyhow::Error::new(error).context("failed to draw a TUI frame"));
+                report_error!(
+                    anyhow::Error::new(error).context("failed to draw a TUI frame"),
+                    warp_errors::ReportErrorLogMode::OncePerRun
+                );
             }
         });
     }
@@ -578,18 +581,22 @@ pub fn spawn_tui_driver<T: TuiView>(
     // never blocked waiting for input.
     let reader = thread::Builder::new()
         .name("warp-tui-input".to_owned())
-        .spawn(move || loop {
-            match event::read() {
-                Ok(event) => {
-                    // The reader runs on a dedicated thread, so blocking on the
-                    // send is fine; an error means the receiver was dropped.
-                    if block_on(sender.send(event)).is_err() {
+        .spawn(move || {
+            loop {
+                match event::read() {
+                    Ok(event) => {
+                        // The reader runs on a dedicated thread, so blocking on the
+                        // send is fine; an error means the receiver was dropped.
+                        if block_on(sender.send(event)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        report_error!(
+                            anyhow::Error::new(error).context("failed to read a terminal event")
+                        );
                         break;
                     }
-                }
-                Err(error) => {
-                    report_error!("failed to read a terminal event", extra: { "error" => %error });
-                    break;
                 }
             }
         })?;
@@ -659,7 +666,10 @@ fn draw_and_schedule_repaint<T: TuiView, R: TuiTerminal + 'static>(
                 // handle; `async_task` defers destruction, so this in-flight
                 // poll completes normally.
                 if let Err(error) = draw_and_schedule_repaint(&screen, &timer_slot, ctx) {
-                    report_error!("failed to draw a TUI frame", extra: { "error" => %error });
+                    report_error!(
+                        anyhow::Error::new(error).context("failed to draw a TUI frame"),
+                        warp_errors::ReportErrorLogMode::OncePerRun
+                    );
                 }
             });
         })

@@ -326,9 +326,13 @@ pub trait StoredObject: Debug {
                 if ancestors.contains(&hashed_parent_id) {
                     return true;
                 }
-                ancestors.insert(hashed_parent_id.clone());
 
-                match object_store_model.get_by_uid(&hashed_parent_id) {
+                let parent = object_store_model.get_by_uid(&hashed_parent_id);
+
+                // Insert before checking parent to avoid infinite recursion in case of cycles.
+                ancestors.insert(hashed_parent_id);
+
+                match parent {
                     Some(parent) => parent.is_trashed_internal(object_store_model, ancestors),
                     None => {
                         // If the object has a parent, but the parent is not in ObjectStoreModel, assume
@@ -982,7 +986,6 @@ impl StoredObjectMetadataExt for StoredObjectMetadata {
         // Second, the time elapsed since the edit. For example, "just now" or "3 months ago".
         let time_ago_string = self
             .revision
-            .clone()
             .map(|r| format_approx_duration_from_now_utc(r.utc()));
 
         let full_string = match (editor_string, time_ago_string) {

@@ -795,6 +795,15 @@ pub enum FeatureFlag {
     /// orchestration (`run_agents`) confirmation card and plan-card config
     /// block for choosing a runner when starting remote child agents.
     CloudAgentRunners,
+
+    /// Observes Ctrl-C (`0x03`) written on the viewer input path to a terminal
+    /// with a working, rich-status-capable CLI agent session (e.g. Claude
+    /// Code). Arms a short grace window; if no further plugin activity is
+    /// seen, the session (and its ambient task) resolves to `Cancelled`.
+    /// Purely client-side status synthesis: the keystroke is always forwarded
+    /// unchanged and the harness process/sandbox are never signaled or torn
+    /// down.
+    CtrlCCancelsThirdPartyHarness,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -867,6 +876,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::JupyterNotebookRendering,
     FeatureFlag::WaitForEventsParentRegistration,
     FeatureFlag::BoxDrawingGlyphs,
+    FeatureFlag::CtrlCCancelsThirdPartyHarness,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Zap).

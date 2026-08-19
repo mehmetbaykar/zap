@@ -153,7 +153,7 @@ impl AIFactView {
                         name.clone(),
                         content.clone(),
                         *sync_id,
-                        revision_ts.clone(),
+                        *revision_ts,
                         ctx,
                     );
                 });

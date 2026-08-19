@@ -8799,9 +8799,25 @@ impl TerminalView {
         });
     }
 
-    /// Writes a shared session viewer's bytes to the pty
+    /// Writes a shared session viewer's bytes to the pty.
+    ///
+    /// A lone Ctrl-C byte that is actually forwarded to the PTY is
+    /// additionally observed by `CLIAgentSessionsModel` so that an interrupt
+    /// which silently kills a third-party harness turn (no plugin hook fires
+    /// on user interrupt) can still resolve the session, and its task, to
+    /// Cancelled. See `CLIAgentSessionsModel::observe_ctrl_c_write`.
+    /// Observation never delays or drops the write itself, and never arms a
+    /// window for a byte that `write_user_bytes_to_pty` rejected (e.g. the
+    /// active block is under agent control).
     pub fn write_viewer_bytes_to_pty(&mut self, bytes: Vec<u8>, ctx: &mut ViewContext<Self>) {
-        self.write_user_bytes_to_pty(bytes, ctx);
+        let is_ctrl_c = bytes == [0x03];
+        let forwarded = self.write_user_bytes_to_pty(bytes, ctx);
+        if forwarded && is_ctrl_c && FeatureFlag::CtrlCCancelsThirdPartyHarness.is_enabled() {
+            let terminal_view_id = self.view_id;
+            CLIAgentSessionsModel::handle(ctx).update(ctx, |sessions, ctx| {
+                sessions.observe_ctrl_c_write(terminal_view_id, ctx);
+            });
+        }
     }
 
     /// Ends the current line before writing the given bytes to the PTY.
@@ -8823,17 +8839,19 @@ impl TerminalView {
     }
 
     /// Writes to the PTY, resets selected blocks and updates scroll position.
-    /// Also calls logic to emit a sync event.
+    /// Also calls logic to emit a sync event. Returns whether the bytes were
+    /// actually forwarded to the PTY: `false` when the active block is under
+    /// agent control, in which case nothing is written.
     fn write_user_bytes_to_pty<B: Into<Cow<'static, [u8]>>>(
         &mut self,
         data: B,
         ctx: &mut ViewContext<Self>,
-    ) {
+    ) -> bool {
         {
             let mut terminal_model = self.model.lock();
             let active_block = terminal_model.block_list().active_block();
             if active_block.is_agent_in_control() {
-                return;
+                return false;
             }
             if active_block.is_active_and_long_running() && !active_block.has_received_user_input()
             {
@@ -8850,6 +8868,7 @@ impl TerminalView {
         self.update_scroll_position_locking(ScrollPositionUpdate::AfterWriteUserBytesToPty, ctx);
         self.write_to_pty(bytes, ctx);
         self.emit_non_editor_typed_event(bytes_vec, ctx);
+        true
     }
 
     /// Write to the PTY if the session has finished bootstrapping and
@@ -12743,7 +12762,9 @@ impl TerminalView {
                             ctx,
                         );
                     }
-                    CLIAgentSessionStatus::InProgress | CLIAgentSessionStatus::Success => {
+                    CLIAgentSessionStatus::InProgress
+                    | CLIAgentSessionStatus::Success
+                    | CLIAgentSessionStatus::Cancelled => {
                         // Auto-open rich input when the agent resumes or completes.
                         if !self.has_active_cli_agent_input_session(ctx) {
                             self.open_cli_agent_rich_input(CLIAgentInputEntrypoint::AutoShow, ctx);
@@ -24454,8 +24475,8 @@ impl TerminalView {
                     // Write unknown errors to the local log to help diagnose notification permission issues.
                     if let RequestPermissionsOutcome::OtherError { error_message } = &outcome {
                         report_error!(
-                            "Unknown error when requesting notification permissions",
-                            extra: { "error_message" => %error_message }
+                            anyhow::anyhow!("{error_message}")
+                                .context("Unknown error when requesting notification permissions")
                         );
                     }
 
@@ -25199,15 +25220,16 @@ impl TerminalView {
 
     pub(super) fn toggle_file_tree(
         &mut self,
+        source: crate::server::telemetry::FileTreeSource,
         cli_agent: Option<crate::server::telemetry::CLIAgentType>,
         ctx: &mut ViewContext<Self>,
     ) {
-        use crate::server::telemetry::{FileTreeSource, TelemetryEvent};
+        use crate::server::telemetry::TelemetryEvent;
 
         self.toggle_left_panel_file_tree(false, ctx);
         send_telemetry_from_ctx!(
             TelemetryEvent::FileTreeToggled {
-                source: FileTreeSource::LeftPanelToolbelt,
+                source,
                 is_code_mode_v2: true,
                 cli_agent,
             },

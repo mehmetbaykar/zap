@@ -269,7 +269,7 @@ impl ObjectStoreViewModel {
         let folder: Option<&FolderObject> = object.into();
         match folder {
             // For non-folder objects, always use the object's own timestamp.
-            None => object.metadata().revision.clone().map(Into::into),
+            None => object.metadata().revision.map(Into::into),
             Some(folder) => self
                 .folder_timestamp_cache
                 // Skip the cache if it's already mutably borrowed. This should not happen in practice,
@@ -291,7 +291,7 @@ impl ObjectStoreViewModel {
                         .max();
                     // The `Ord` implementation of `Option` always considers `None` less than
                     // `Some`.
-                    let folder_timestamp = folder.metadata().revision.clone().map(Into::into);
+                    let folder_timestamp = folder.metadata().revision.map(Into::into);
                     let timestamp = max_child_timestamp.max(folder_timestamp);
 
                     if let Some(timestamp) = timestamp

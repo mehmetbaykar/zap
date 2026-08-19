@@ -455,6 +455,12 @@ use crate::{
 };
 
 /// The padding that should be applied to the workspace as a whole.
+///
+/// Zero on web: browsers that round the viewport's corners clip this padding into a stray
+/// line along the top and left edges, so we rely on the browser's own edge there instead.
+#[cfg(target_family = "wasm")]
+pub const WORKSPACE_PADDING: f32 = 0.0;
+#[cfg(not(target_family = "wasm"))]
 pub const WORKSPACE_PADDING: f32 = 1.0;
 
 /// The minimum font size at which terminal text will be rendered.
@@ -13502,8 +13508,8 @@ impl Workspace {
                     }
                     RequestPermissionsOutcome::OtherError { error_message } => {
                         report_error!(
-                            "Unknown error when requesting notification permissions",
-                            extra: { "error_message" => %error_message }
+                            anyhow::anyhow!("{error_message}")
+                                .context("Unknown error when requesting notification permissions")
                         );
                     }
                 }
@@ -14147,7 +14153,7 @@ impl Workspace {
                 );
             }
             SettingsViewEvent::OpenMCPServerCollection => {
-                self.show_settings_with_section(Some(SettingsSection::MCPServers), ctx);
+                self.show_settings_with_section(Some(SettingsSection::AgentMCPServers), ctx);
 
                 send_telemetry_from_ctx!(
                     TelemetryEvent::MCPServerCollectionPaneOpened {
@@ -14366,8 +14372,8 @@ impl Workspace {
                                 &notification_error
                             {
                                 report_error!(
-                                    "Unknown error when sending notification",
-                                    extra: { "error_message" => %error_message }
+                                    anyhow::anyhow!("{error_message}")
+                                        .context("Unknown error when sending notification")
                                 );
                             }
                             send_telemetry_from_ctx!(
@@ -15924,7 +15930,7 @@ impl Workspace {
                 );
             }
             DrivePanelEvent::OpenMCPServerCollection => {
-                self.show_settings_with_section(Some(SettingsSection::MCPServers), ctx);
+                self.show_settings_with_section(Some(SettingsSection::AgentMCPServers), ctx);
 
                 send_telemetry_from_ctx!(
                     TelemetryEvent::MCPServerCollectionPaneOpened {
@@ -16950,7 +16956,7 @@ impl Workspace {
         autoinstall_gallery_title: Option<&str>,
         ctx: &mut ViewContext<Self>,
     ) {
-        self.show_settings_with_section(Some(SettingsSection::MCPServers), ctx);
+        self.show_settings_with_section(Some(SettingsSection::AgentMCPServers), ctx);
 
         self.settings_pane.update(ctx, |view, ctx| {
             view.open_mcp_servers_page(page, autoinstall_gallery_title, ctx);
@@ -22856,7 +22862,7 @@ impl TypedActionView for Workspace {
                 );
             }
             OpenMCPServerCollection => {
-                self.show_settings_with_section(Some(SettingsSection::MCPServers), ctx);
+                self.show_settings_with_section(Some(SettingsSection::AgentMCPServers), ctx);
 
                 send_telemetry_from_ctx!(
                     TelemetryEvent::MCPServerCollectionPaneOpened {

@@ -61,7 +61,10 @@ impl RegistryBackedPreferences {
                 let key = CURRENT_USER
                     .create(self.app_key_path.clone())
                     .map_err(|e| {
-                        log::error!("unable to access Zap app key in Windows Registry: {e:#}");
+                        report_error!(
+                            anyhow::Error::new(e.clone())
+                                .context("unable to access Zap app key in Windows Registry")
+                        );
                         super::Error::IoError(io::Error::from(e))
                     })?;
                 return f(&key);
@@ -72,7 +75,10 @@ impl RegistryBackedPreferences {
             let key = CURRENT_USER
                 .create(self.app_key_path.clone())
                 .map_err(|e| {
-                    log::error!("unable to access Zap app key in Windows Registry: {e:#}");
+                    report_error!(
+                        anyhow::Error::new(e.clone())
+                            .context("unable to access Zap app key in Windows Registry")
+                    );
                     super::Error::IoError(io::Error::from(e))
                 })?;
             *guard = Some(key);

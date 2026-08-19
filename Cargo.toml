@@ -353,7 +353,7 @@ unicode-general-category = "1.1.0"
 unicode-linebreak = "0.1.5"
 unicode-segmentation = "1.11.0"
 unicode-width = "0.1.12"
-uuid = { version = "1.1.2", features = ["v4", "serde", "js"] }
+uuid = { version = "1.1.2", features = ["v4", "v5", "serde", "js"] }
 vec1 = { version = "1.8.0", features = ["serde"] }
 version-compare = "0.1"
 vte = { git = "https://github.com/warpdotdev/vte.git", rev = "4b399c87b63ba88f45709edaa6383fc519f6c900", default-features = false }
@@ -405,7 +405,7 @@ aes-gcm = "0.10"
 sha2 = "0.10"
 shell-escape = "0.1.5"
 shellexpand = "3.1.1"
-warp-command-signatures = { git = "https://github.com/warpdotdev/command-signatures.git", rev = "32a7fd563b4fd94845f61e1632597fb2cd81f66f", default-features = false }
+warp-command-signatures = { git = "https://github.com/warpdotdev/command-signatures.git", rev = "ac69f9b00c48d6de229ba5905056d9302da1c5c4", default-features = false }
 winit = { git = "https://github.com/chenx-dust/winit.git", rev = "7ef914a440ad203da05355e6c3f8c482766987ec" }
 x11rb = "0.13.0"
 mockito = "1.7.0"
