@@ -91,6 +91,7 @@ pub(crate) fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(|_| SystemStats::new());
     app.add_singleton_model(ObjectStoreModel::mock);
+    app.add_singleton_model(|_| crate::tab::TabShortcutModifierState::new());
     app.add_singleton_model(UserWorkspaces::default_mock);
     app.add_singleton_model(|_ctx| UserProfiles::new(Vec::new()));
     app.add_singleton_model(UpdateManager::mock);

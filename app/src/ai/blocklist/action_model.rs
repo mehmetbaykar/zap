@@ -45,7 +45,9 @@ use self::execute::{
 };
 #[cfg(not(target_family = "wasm"))]
 use super::BlocklistAIHistoryModel;
-use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
+use crate::ai::agent::conversation::{
+    AIConversation, AIConversationId, ConversationStatus,
+};
 use crate::ai::agent::{
     AIAgentAction, AIAgentActionId, AIAgentActionResult, AIAgentActionResultType,
     AIAgentActionType, AIAgentActionTypeDiscriminants, AIAgentExchange, AIAgentInput,

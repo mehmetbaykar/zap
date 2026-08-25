@@ -4736,7 +4736,6 @@ impl AIBlock {
         {
             button_handles.reset_hover_state_on_focus_change();
         }
-
         ctx.notify();
     }
 
