@@ -6996,7 +6996,7 @@ fn submit_cli_agent_rich_input_opencode_defers_enter_and_close() {
 
         // Wait for the delayed \r to arrive.
         assert_eventually!(
-            pty_writes.borrow().len() == 2,
+            100 => pty_writes.borrow().len() == 2,
             "carriage return should be written after delay"
         );
         assert_eq!(pty_writes.borrow()[1], b"\r");
@@ -7465,7 +7465,7 @@ fn submit_with_plugin_but_auto_toggle_off_respects_auto_dismiss() {
         // auto_toggle is off, so auto_dismiss closes rich input.
         // Claude uses DelayedEnter, so the close happens after a timer.
         assert_eventually!(
-            terminal.read(&app, |view, ctx| !view
+            100 => terminal.read(&app, |view, ctx| !view
                 .has_active_cli_agent_input_session(ctx)),
             "Rich input should be closed after submit with auto_dismiss"
         );

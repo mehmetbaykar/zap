@@ -29,7 +29,7 @@ use warpui::{
 
 use super::privacy::{AddRegexModal, AddRegexModalEvent, AddRegexModalViewState};
 use super::settings_page::{
-    HEADER_PADDING, LocalOnlyIconState, MatchData, PageType, SettingsPageMeta,
+    HEADER_PADDING, LocalOnlyIconState, MatchData, PageTitle, PageType, SettingsPageMeta,
     SettingsPageViewHandle, SettingsWidget, TOGGLE_BUTTON_RIGHT_PADDING, ToggleState,
     render_body_item, render_sub_header,
 };
@@ -180,7 +180,7 @@ impl PrivacyPageView {
     fn build_page() -> PageType<Self> {
         let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
             vec![Box::new(SecretRedactionWidget::default())];
-        PageType::new_uncategorized(widgets, Some("Privacy"))
+        PageType::new_uncategorized(widgets, Some(PageTitle::new("Privacy")))
     }
 
     fn update_button_states(

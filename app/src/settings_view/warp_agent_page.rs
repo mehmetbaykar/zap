@@ -49,8 +49,7 @@ use super::settings_page::{
     build_sub_header, build_toggle_element, render_body_item_label,
     render_body_item_label_with_icon, render_custom_size_header, render_dropdown_item,
     render_dropdown_item_label, render_filterable_dropdown_item, render_full_pane_width_ai_button,
-    render_input_list, render_separator, render_settings_info_banner,
-};
+    render_input_list, render_separator, render_settings_info_banner, PageTitle};
 use super::{
     SettingActionPairContexts, SettingActionPairDescriptions, SettingsAction, SettingsSection,
     ToggleSettingActionPair, editor_text_colors, flags,
@@ -2616,7 +2615,7 @@ impl AISettingsPageView {
 
         // Subpage widgets render their own subheader-sized titles internally,
         // so we don't pass a page-level title to PageType.
-        let title: Option<&str> = None;
+        let title: Option<PageTitle<Self>> = None;
         PageType::new_uncategorized(widgets, title)
     }
 

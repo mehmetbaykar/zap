@@ -6323,14 +6323,17 @@ impl SettingsWidget for RightClickBehaviorWidget {
         app: &AppContext,
     ) -> Box<dyn Element> {
         let mut column = Flex::column();
+        let selection_settings = SelectionSettings::as_ref(app);
         add_setting(
             &mut column,
-            &SelectionSettings::as_ref(app).right_click_behavior,
+            &selection_settings.right_click_behavior,
             || {
                 render_dropdown_item(
                     appearance,
                     "Right-click:",
-                    None,
+                    selection_settings
+                        .right_click_pastes()
+                        .then_some("Shift+right-click to open the context menu."),
                     None,
                     LocalOnlyIconState::for_setting(
                         RightClickBehaviorSetting::storage_key(),

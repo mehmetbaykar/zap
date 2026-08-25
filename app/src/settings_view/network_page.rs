@@ -22,8 +22,7 @@ use super::SettingsSection;
 use super::settings_page::{
     AdditionalInfo, LocalOnlyIconState, MatchData, PageType, SettingsPageEvent, SettingsPageMeta,
     SettingsPageViewHandle, SettingsWidget, ToggleState, render_body_item, render_page_title,
-    render_sub_header_with_description,
-};
+    render_sub_header_with_description, HEADER_FONT_SIZE};
 use crate::appearance::Appearance;
 use crate::editor::{EditorView, InteractionState, SingleLineEditorOptions, TextOptions};
 use crate::report_if_error;
@@ -597,7 +596,7 @@ impl SettingsWidget for NetworkPageWidget {
 
         let mut content = Flex::column()
             .with_cross_axis_alignment(CrossAxisAlignment::Start)
-            .with_child(render_page_title(&page_title, appearance))
+            .with_child(render_page_title(&page_title, HEADER_FONT_SIZE, appearance))
             .with_child(render_sub_header_with_description(
                 appearance,
                 header,
