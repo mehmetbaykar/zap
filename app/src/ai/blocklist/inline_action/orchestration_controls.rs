@@ -48,6 +48,7 @@ use crate::view_components::FilterableDropdown;
 use crate::view_components::dropdown::{
     Dropdown, DropdownAction, DropdownItemAction, DropdownStyle,
 };
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 // ── Shared constants ────────────────────────────────────────────────
 

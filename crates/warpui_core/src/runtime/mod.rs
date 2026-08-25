@@ -41,6 +41,7 @@ use crate::r#async::executor::ForegroundTask;
 use crate::r#async::{Timer, block_on};
 use crate::elements::tui::{TuiEvent, TuiEventContext, TuiPoint, TuiRect, TuiSize};
 use crate::event::ModifiersState;
+use crate::platform::TerminationMode;
 use crate::presenter::tui::TuiPresenter;
 use crate::{App, AppContext, TuiView, ViewHandle, WindowId};
 
@@ -79,6 +80,92 @@ pub enum TuiFocusPolicy {
     Unrestricted,
     /// Return focus to the root when the focused view is outside the presented tree.
     PresentedTree,
+}
+#[derive(Debug, thiserror::Error)]
+pub enum TuiDriverStartupError {
+    #[error("host terminal disconnected while starting the TUI driver: {0}")]
+    TerminalDisconnected(#[source] io::Error),
+    #[error("failed to start the TUI driver: {0}")]
+    Unexpected(#[source] io::Error),
+}
+
+impl From<io::Error> for TuiDriverStartupError {
+    fn from(error: io::Error) -> Self {
+        if is_terminal_disconnect(&error) {
+            Self::TerminalDisconnected(error)
+        } else {
+            Self::Unexpected(error)
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TuiDriverIoOperation {
+    DrawFrame,
+    ReadEvent,
+}
+
+impl TuiDriverIoOperation {
+    fn error_context(self) -> &'static str {
+        match self {
+            Self::DrawFrame => "failed to draw a TUI frame",
+            Self::ReadEvent => "failed to read a terminal event",
+        }
+    }
+}
+
+enum TuiDriverEvent {
+    Terminal(CrosstermEvent),
+    InputFailed(io::Error),
+}
+
+fn is_terminal_disconnect(error: &io::Error) -> bool {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::NotConnected
+            | io::ErrorKind::UnexpectedEof
+    ) {
+        return true;
+    }
+
+    #[cfg(unix)]
+    if matches!(error.raw_os_error(), Some(libc::EIO | libc::ENXIO)) {
+        return true;
+    }
+
+    #[cfg(windows)]
+    if error.raw_os_error() == Some(233) {
+        return true;
+    }
+
+    false
+}
+
+fn fail_tui_driver(
+    error: io::Error,
+    operation: TuiDriverIoOperation,
+    failed: &Rc<Cell<bool>>,
+    repaint_timer: &Rc<RefCell<Option<ForegroundTask>>>,
+    ctx: &mut AppContext,
+) {
+    if failed.replace(true) {
+        return;
+    }
+    repaint_timer.borrow_mut().take();
+
+    let error_context = operation.error_context();
+    if is_terminal_disconnect(&error) {
+        log::error!("{error_context}: {error}");
+        ctx.terminate_app(TerminationMode::ForceTerminate, None);
+        return;
+    }
+
+    let error = anyhow::Error::new(error).context(error_context);
+    report_error!(&error);
+    ctx.terminate_app(TerminationMode::ForceTerminate, Some(Err(error)));
 }
 
 /// The rendering half of the TUI: owns the presenter, renderer, and host
@@ -574,7 +661,7 @@ pub fn spawn_tui_driver<T: TuiView>(
     draw_and_schedule_repaint(&screen, &repaint_timer, ctx)?;
 
     let weak_app = ctx.weak_app();
-    let (sender, receiver) = async_channel::unbounded::<CrosstermEvent>();
+    let (sender, receiver) = async_channel::unbounded::<TuiDriverEvent>();
 
     // Blocking terminal reads run off the main thread and are forwarded to the
     // foreground executor through the channel, so the main thread's event loop is
@@ -587,14 +674,13 @@ pub fn spawn_tui_driver<T: TuiView>(
                     Ok(event) => {
                         // The reader runs on a dedicated thread, so blocking on the
                         // send is fine; an error means the receiver was dropped.
-                        if block_on(sender.send(event)).is_err() {
+                        if block_on(sender.send(TuiDriverEvent::Terminal(event))).is_err() {
                             break;
                         }
                     }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
                     Err(error) => {
-                        report_error!(
-                            anyhow::Error::new(error).context("failed to read a terminal event")
-                        );
+                        let _ = block_on(sender.send(TuiDriverEvent::InputFailed(error)));
                         break;
                     }
                 }
@@ -603,7 +689,7 @@ pub fn spawn_tui_driver<T: TuiView>(
 
     let dispatch_screen = screen.clone();
     let task = ctx.foreground_executor().spawn(async move {
-        while let Ok(event) = receiver.recv().await {
+        while let Ok(driver_event) = receiver.recv().await {
             let Some(mut app) = weak_app.upgrade() else {
                 break;
             };
@@ -645,6 +731,9 @@ fn draw_and_schedule_repaint<T: TuiView, R: TuiTerminal + 'static>(
     timer_slot: &Rc<RefCell<Option<ForegroundTask>>>,
     ctx: &mut AppContext,
 ) -> io::Result<()> {
+    if failed.get() {
+        return Ok(());
+    }
     let deadline = screen.borrow_mut().draw(ctx)?;
     let timer = deadline.map(|deadline| {
         let screen = screen.clone();
