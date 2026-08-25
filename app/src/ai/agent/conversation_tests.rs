@@ -15,7 +15,7 @@ use crate::ai::byop_readiness::{
     RepairStateStatus, ToolCallKey,
 };
 use crate::persistence::ModelEvent;
-use crate::persistence::model::AgentConversationData;
+use crate::persistence::model::{AgentConversationData, ChargedUsageTotals};
 use crate::terminal::model::BlockId;
 use crate::terminal::model::block::{
     AgentInteractionMetadata, AgentViewVisibility, SerializedAIMetadata, SerializedBlock,
@@ -571,6 +571,34 @@ fn restored_conversation_with_empty_task_list_creates_in_progress_optimistic_roo
     );
     assert_eq!(conversation.status(), &ConversationStatus::InProgress);
     assert!(conversation.status_error_message().is_none());
+}
+
+/// A user-initiated turn starts a new response block, so the previous
+/// block's charged-usage breakdown must be cleared even when the new turn
+/// carries no `request_charges` of its own — otherwise a fresh credits
+/// figure would be paired with the previous block's stale token/cost
+/// details.
+#[test]
+fn update_cost_and_usage_resets_stale_charged_usage_for_last_block_on_new_user_turn() {
+    let mut conversation = AIConversation::new(false, false);
+    // Simulate a stale last-block breakdown left over from a previous
+    // response, as happens whenever this turn's request carries no
+    // `request_charges` (BYOP never populates them).
+    conversation.set_charged_usage_for_last_block_for_test(Some(ChargedUsageTotals {
+        input_tokens: 500,
+        ..Default::default()
+    }));
+
+    conversation
+        .update_cost_and_usage_for_request(None, None, vec![], None, true)
+        .expect("usage should update");
+
+    assert_eq!(
+        conversation.charged_usage_for_last_block(),
+        None,
+        "a new user-initiated turn must clear the previous block's stale charged usage, \
+         even when this turn's request itself carries no charges"
+    );
 }
 
 /// The legacy `AgentConversationData.root_task_is_optimistic` flag must be

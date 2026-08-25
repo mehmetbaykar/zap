@@ -461,6 +461,12 @@ pub enum FeatureFlag {
     /// the conversation usage card.
     ContextWindowUsageBreakdown,
 
+    /// Gates client-side display of the real dollar cost alongside credits in the
+    /// GUI usage surfaces. In this fork the figures come from the user's own
+    /// provider (BYOP), not from Warp billing; the flag stays off by default and
+    /// is not registered in any auto-enable list.
+    PricingTransparency,
+
     /// Enables global search
     GlobalSearch,
 

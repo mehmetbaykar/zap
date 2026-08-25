@@ -92,7 +92,7 @@ use crate::ai::blocklist::inline_action::web_fetch::WebFetchView;
 use crate::ai::blocklist::inline_action::web_search::WebSearchView;
 use crate::ai::blocklist::keyboard_navigable_buttons::KeyboardNavigableButtons;
 use crate::ai::blocklist::secret_redaction::SecretRedactionState;
-use crate::ai::blocklist::view_util::format_credits;
+use crate::ai::blocklist::view_util::{format_credits_with_cost, format_usage_parenthetical};
 use crate::ai::blocklist::{BlocklistAIActionModel, SuggestionChipView};
 use crate::ai::paths::shell_native_absolute_path;
 use crate::ai::skills::{
@@ -2936,6 +2936,15 @@ fn render_usage_button(props: Props, app: &AppContext) -> Box<dyn Element> {
         return Empty::new().finish();
     };
 
+    // Headline token/cost figures shown next to the credit count. `cost_in_cents` is the
+    // seeded provider-cost baseline; the token count only exists on the charged-usage
+    // breakdown. There is no orchestration credit rollup in this fork
+    // (`blocklist::usage::rollup` is stripped), so these are always the conversation's own
+    // totals.
+    let usage_totals = conversation.usage_totals();
+    let headline_cost_in_cents = usage_totals.cost_in_cents;
+    let headline_tokens = usage_totals.charged_usage.map(|usage| usage.total_tokens());
+
     // If this conversation has no usage metadata (e.g. a forked conversation from
     // mid-way through a prior conversation where the server did not send
     // ConversationUsageMetadata), avoid rendering the usage button entirely.
@@ -2957,7 +2966,8 @@ fn render_usage_button(props: Props, app: &AppContext) -> Box<dyn Element> {
     };
 
     let total_credits_spent = conversation.credits_spent();
-    let mut credit_usage_text = format_credits(total_credits_spent);
+    let mut credit_usage_text =
+        format_credits_with_cost(total_credits_spent, headline_tokens, headline_cost_in_cents);
     if let Some(credits_spent_for_last_block) = conversation.credits_spent_for_last_block() {
         // Only show the credits spent for the last block if it is different from the total credits spent
         // and we spent a non-zero amount of credits for the last block.
@@ -2968,15 +2978,24 @@ fn render_usage_button(props: Props, app: &AppContext) -> Box<dyn Element> {
             && props.model.status(app).error().is_none()
         {
             // If the first part of the decimal is 0, we just display the whole number.
-            if credits_spent_for_last_block.fract() < 0.1 {
-                credit_usage_text = format!(
-                    "{credit_usage_text} (+{})",
-                    credits_spent_for_last_block.trunc() as i32
-                );
+            let last_block_credits_text = if credits_spent_for_last_block.fract() < 0.1 {
+                format!("{}", credits_spent_for_last_block.trunc() as i32)
             } else {
-                credit_usage_text =
-                    format!("{credit_usage_text} (+{credits_spent_for_last_block:.1})");
-            }
+                format!("{credits_spent_for_last_block:.1}")
+            };
+            // The last-block token/cost detail stays bound to this conversation's own
+            // most recent block, same as `credits_spent_for_last_block` above.
+            let last_block_charged_usage = conversation.charged_usage_for_last_block();
+            let last_block_detail = format_usage_parenthetical(
+                last_block_charged_usage.map(|usage| usage.total_tokens()),
+                last_block_charged_usage.map(|usage| usage.total_cost_in_cents()),
+            );
+            credit_usage_text = match last_block_detail {
+                Some(detail) => {
+                    format!("{credit_usage_text} (+{last_block_credits_text}, {detail})")
+                }
+                None => format!("{credit_usage_text} (+{last_block_credits_text})"),
+            };
         }
     }
 

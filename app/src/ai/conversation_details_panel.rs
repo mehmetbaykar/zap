@@ -15,6 +15,11 @@
 //! - "Continue locally" for third-party-harness ambient tasks is dropped:
 //!   `WorkspaceAction::ContinueThirdPartyConversationLocally` does not exist in this fork (only
 //!   `ContinueConversationLocally` for local interactive conversations does).
+//! - The per-category usage/pricing plumbing (`total_tokens`, `charged_usage`,
+//!   `format_usage_parenthetical`) is adopted, but it renders through this fork's
+//!   `render_field_row` "Credits used" row rather than upstream's `render_simple_field`
+//!   section, and only `from_conversation` has a real token/charges source: the task- and
+//!   entry-backed constructors carry a bare credits total (gaps noted at each site).
 //! - Plan-artifact clicks dispatch `WorkspaceAction::OpenAIDocumentPane` directly (matching
 //!   `crate::notifications::item_rendering`'s established pattern) instead of bubbling a
 //!   `NotebookId`-based event, since the fork's `ArtifactButtonsRowEvent::OpenPlan` now carries a
@@ -49,9 +54,11 @@ use crate::ai::agent_management::telemetry::AgentManagementTelemetryEvent;
 use crate::ai::ambient_agents::task::TaskPrincipalInfo;
 use crate::ai::ambient_agents::{AmbientAgentTask, AmbientAgentTaskId};
 use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
+use crate::ai::blocklist::view_util::format_usage_parenthetical;
 use crate::ai::document::ai_document_model::AIDocumentModel;
 use crate::ai::harness_display;
 use crate::appearance::Appearance;
+use crate::persistence::model::ChargedUsageTotals;
 use crate::send_telemetry_from_ctx;
 use crate::util::time_format::{format_approx_duration_from_now, human_readable_precise_duration};
 use crate::view_components::DismissibleToast;
@@ -174,6 +181,15 @@ pub struct ConversationDetailsData {
     created_at: Option<DateTime<Local>>,
     /// Total credits spent on the conversation/task.
     credits: Option<f32>,
+    /// Total token count used, when the source provides it.
+    total_tokens: Option<u32>,
+    /// Cumulative per-category charged-usage breakdown (input/output/
+    /// cache-read/cache-write cost + token counts), gated by
+    /// `FeatureFlag::PricingTransparency`. `None` when the source doesn't
+    /// provide it — the task- and entry-backed constructors below carry a
+    /// bare credits total with no per-category charges counterpart
+    /// (documented gap at each site).
+    charged_usage: Option<ChargedUsageTotals>,
     /// Total duration of the conversation.
     run_time: Option<Duration>,
     /// Artifacts created during the conversation (plans, PRs, branches).
@@ -250,6 +266,9 @@ impl ConversationDetailsData {
                 executor,
                 created_at,
                 credits,
+                // GAP: see the `from_task` gap note below.
+                total_tokens: None,
+                charged_usage: None,
                 run_time: task.and_then(AmbientAgentTask::run_time),
                 artifacts: entry.display.artifacts.clone(),
                 open_action,
@@ -276,6 +295,11 @@ impl ConversationDetailsData {
             executor: None,
             created_at,
             credits: entry.display.request_usage,
+            // GAP: this branch has no linked `AmbientAgentTask` and the
+            // entry's denormalized total is a bare credits figure with no
+            // token/breakdown counterpart.
+            total_tokens: None,
+            charged_usage: None,
             run_time: None,
             artifacts: entry.display.artifacts.clone(),
             open_action,
@@ -330,6 +354,11 @@ impl ConversationDetailsData {
             executor: task.executor.as_ref().map(PrincipalInfo::from),
             created_at: Some(task.created_at.with_timezone(&Local)),
             credits: task.credits_used(),
+            // GAP: ambient-agent tasks are sourced from the REST `AmbientAgentTask`, which
+            // doesn't carry a per-category charges breakdown, so there is no token/cost
+            // counterpart to the bare credits total here.
+            total_tokens: None,
+            charged_usage: None,
             run_time: task.run_time(),
             artifacts: task.artifacts.clone(),
             open_action,
@@ -371,6 +400,12 @@ impl ConversationDetailsData {
             .clone()
             .or_else(|| source_prompt.clone())
             .unwrap_or_default();
+        let usage_totals = conversation.usage_totals();
+        let total_tokens: u32 = conversation
+            .token_usage()
+            .iter()
+            .map(|model| model.warp_tokens + model.byok_tokens + model.custom_endpoint_tokens)
+            .sum();
 
         ConversationDetailsData {
             mode: PanelMode::Conversation {
@@ -386,6 +421,8 @@ impl ConversationDetailsData {
             executor: None,
             created_at: None,
             credits: Some(conversation.credits_spent()),
+            total_tokens: (total_tokens > 0).then_some(total_tokens),
+            charged_usage: usage_totals.charged_usage,
             run_time: None,
             artifacts: conversation.artifacts().to_vec(),
             open_action: None,
@@ -427,6 +464,11 @@ impl ConversationDetailsData {
             executor: None,
             created_at: Some(created_at),
             credits,
+            // GAP: this legacy management-view constructor only accepts a
+            // bare credits total; no token/breakdown source is threaded
+            // through it.
+            total_tokens: None,
+            charged_usage: None,
             run_time: None,
             artifacts,
             open_action,
@@ -910,7 +952,22 @@ impl ConversationDetailsPanel {
             ));
         }
         if let Some(credits) = self.data.credits {
-            fields.push(self.render_field_row("Credits used", format!("{credits:.2}"), appearance));
+            // A single compact "X (N tokens, $Y)" line rather than separate rows for
+            // credits / tokens / per-category cost: for now this inline figure is enough
+            // (see `format_usage_parenthetical`'s doc comment for why the deeper
+            // per-category breakdown isn't rendered, though it is still computed and
+            // available on `self.data.charged_usage` for a future expandable treatment).
+            let cost_in_cents = self
+                .data
+                .charged_usage
+                .map(|charged_usage| charged_usage.total_cost_in_cents());
+            let mut formatted = format!("{credits:.2}");
+            if let Some(parenthetical) =
+                format_usage_parenthetical(self.data.total_tokens, cost_in_cents)
+            {
+                formatted = format!("{formatted} ({parenthetical})");
+            }
+            fields.push(self.render_field_row("Credits used", formatted, appearance));
         }
 
         let directory = self.data.directory();

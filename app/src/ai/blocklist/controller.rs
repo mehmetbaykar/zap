@@ -3938,6 +3938,7 @@ impl BlocklistAIController {
                 finished_event
                     .request_cost
                     .map(|cost| RequestCost::new(cost.exact.into())),
+                finished_event.request_charges.clone(),
                 finished_event.token_usage,
                 finished_event.conversation_usage_metadata.take(),
                 did_request_contain_user_query,

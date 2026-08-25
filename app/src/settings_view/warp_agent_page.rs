@@ -91,11 +91,11 @@ use crate::server::telemetry::{
 use crate::settings::{
     AIAutoDetectionEnabled, AICommandDenylist, AISettings, AISettingsChangedEvent,
     AgentModeCodingPermissionsType, AgentModeCommandExecutionDenylist,
-    AgentModeCommandExecutionPredicate, AgentModeQuerySuggestionsEnabled, FileBasedMcpEnabled,
-    GitOperationsAutogenEnabled, IncludeAgentCommandsInHistory, InputSettings,
-    IntelligentAutosuggestionsEnabled, MemoryEnabled, NLDInTerminalEnabled,
-    NaturalLanguageAutosuggestionsEnabled, OrchestrationMessageDisplayMode, PromptSubmissionMode,
-    RuleSuggestionsEnabled, ShouldRenderCLIAgentToolbar,
+    AgentModeCommandExecutionPredicate, AgentModeQuerySuggestionsEnabled,
+    EnableAiCommandSearchHashTrigger, FileBasedMcpEnabled, GitOperationsAutogenEnabled,
+    IncludeAgentCommandsInHistory, InputSettings, IntelligentAutosuggestionsEnabled, MemoryEnabled,
+    NLDInTerminalEnabled, NaturalLanguageAutosuggestionsEnabled, OrchestrationMessageDisplayMode,
+    PromptSubmissionMode, RuleSuggestionsEnabled, ShouldRenderCLIAgentToolbar,
     ShouldRenderUseAgentToolbarForUserCommands, ShowAgentTips, ShowAgentZeroStateHints,
     ShowConversationHistory, ShowHintText, ThinkingDisplayMode, VOICE_INPUT_LANGUAGES,
     VoiceInputEnabled, VoiceInputLanguage, VoiceInputToggleKey,
@@ -202,6 +202,20 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
             )
             .with_group(bindings::BindingGroup::WarpAi)
             .with_enabled(|| FeatureFlag::AgentView.is_enabled()),
+        ],
+        app,
+    );
+    ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
+        vec![
+            ToggleSettingActionPair::new(
+                "'#' trigger for AI command search",
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleAiCommandSearchHashTrigger,
+                )),
+                &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
+                flags::AI_COMMAND_SEARCH_HASH_TRIGGER_FLAG,
+            )
+            .with_group(bindings::BindingGroup::WarpAi),
         ],
         app,
     );
@@ -3363,6 +3377,7 @@ pub enum AISettingsPageAction {
     ToggleVoiceInput,
     HyperlinkClick(HyperlinkUrl),
     ToggleShowInputHintText,
+    ToggleAiCommandSearchHashTrigger,
     ToggleShowAgentTips,
     /// Toggle the "Show Agent shortcut hints" setting (the zero-state trio + the 4 hints at the bottom of the message bar).
     ToggleShowAgentZeroStateHints,
@@ -3896,6 +3911,25 @@ impl TypedActionView for AISettingsPageView {
                         TelemetryEvent::FeaturesPageAction {
                             action: "ToggleShowInputHintText".to_string(),
                             value: format!("{}", *input_settings.show_hint_text),
+                        },
+                        ctx
+                    );
+                });
+            }
+            AISettingsPageAction::ToggleAiCommandSearchHashTrigger => {
+                InputSettings::handle(ctx).update(ctx, |input_settings, ctx| {
+                    report_if_error!(
+                        input_settings
+                            .enable_ai_command_search_hash_trigger
+                            .toggle_and_save_value(ctx)
+                    );
+                    send_telemetry_from_ctx!(
+                        TelemetryEvent::FeaturesPageAction {
+                            action: "ToggleAiCommandSearchHashTrigger".to_string(),
+                            value: format!(
+                                "{}",
+                                *input_settings.enable_ai_command_search_hash_trigger
+                            ),
                         },
                         ctx
                     );
@@ -6270,6 +6304,7 @@ struct AIInputWidget {
     autodetection_toggle: SwitchStateHandle,
     nld_in_terminal_toggle: SwitchStateHandle,
     show_input_hint_toggle: SwitchStateHandle,
+    hash_trigger_toggle: SwitchStateHandle,
     show_agent_tips_toggle: SwitchStateHandle,
     // The switch state handle corresponding to the "Show Agent shortcut hints" toggle.
     show_agent_zero_state_hints_toggle: SwitchStateHandle,
@@ -6280,7 +6315,7 @@ impl SettingsWidget for AIInputWidget {
     type View = AISettingsPageView;
 
     fn search_terms(&self) -> &str {
-        "oz agent ai input natural language detection autodetection prompt terminal command commands history shell executed execution queue interrupt submission submit auto-queue response while responding default"
+        "oz agent ai input natural language detection autodetection prompt terminal command commands history shell executed execution queue interrupt submission submit auto-queue response while responding default # hash pound trigger ai command search shorthand shell comment"
     }
 
     fn render(
@@ -6320,11 +6355,22 @@ impl SettingsWidget for AIInputWidget {
             app,
         );
 
+        let hash_trigger_toggle = render_ai_setting_toggle::<EnableAiCommandSearchHashTrigger>(
+            "Enable '#' trigger for AI Command Search",
+            AISettingsPageAction::ToggleAiCommandSearchHashTrigger,
+            *InputSettings::as_ref(app).enable_ai_command_search_hash_trigger,
+            is_any_ai_enabled,
+            self.hash_trigger_toggle.clone(),
+            &view.local_only_icon_tooltip_states,
+            app,
+        );
+
         let mut widget_children = vec![
             render_separator(appearance),
             input_header,
             natural_language_detection_section,
             show_input_hint_text,
+            hash_trigger_toggle,
         ];
 
         if FeatureFlag::AgentTips.is_enabled() {

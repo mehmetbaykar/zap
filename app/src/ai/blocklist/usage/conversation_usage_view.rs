@@ -10,7 +10,7 @@ use warpui::elements::{
 use warpui::{AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext};
 
 use crate::ai::blocklist::usage::render_context_window_usage_icon;
-use crate::ai::blocklist::view_util::format_credits;
+use crate::ai::blocklist::view_util::format_credits_with_cost;
 use crate::appearance::Appearance;
 use crate::persistence::model::{
     FULL_TERMINAL_USE_CATEGORY, ModelTokenUsage, PRIMARY_AGENT_CATEGORY,
@@ -36,6 +36,23 @@ pub struct ConversationUsageInfo {
     pub lines_added: i32,
     pub lines_removed: i32,
     pub commands_executed: i32,
+    /// Total token count across the whole conversation so far, gated by
+    /// `FeatureFlag::PricingTransparency` (checked inside
+    /// `format_credits_with_cost`). `None` when the source doesn't provide
+    /// it (flag off, or a source that doesn't carry it yet — e.g. the
+    /// settings usage-history surface, which has no per-category charges
+    /// counterpart in this fork; documented gap).
+    pub total_tokens: Option<u32>,
+    /// Total real dollar cost across the whole conversation so far, in US
+    /// cents. `None` under the same conditions as `total_tokens`.
+    pub total_cost_in_cents: Option<f32>,
+    /// Total token count over the last block (see
+    /// `credits_spent_for_last_block`). `None` under the same conditions as
+    /// `total_tokens`.
+    pub tokens_for_last_block: Option<u32>,
+    /// Total real dollar cost over the last block, in US cents. `None`
+    /// under the same conditions as `total_tokens`.
+    pub cost_in_cents_for_last_block: Option<f32>,
 }
 
 /// Timing information for the last set of agent responses
@@ -161,19 +178,31 @@ impl ConversationUsageView {
                 appearance,
             ));
             values.push(render_value_text(
-                format_credits(last_block_credits),
+                format_credits_with_cost(
+                    last_block_credits,
+                    self.usage_info.tokens_for_last_block,
+                    self.usage_info.cost_in_cents_for_last_block,
+                ),
                 appearance,
             ));
 
             labels.push(render_label_text("Credits spent (total)", appearance));
             values.push(render_value_text(
-                format_credits(self.usage_info.credits_spent),
+                format_credits_with_cost(
+                    self.usage_info.credits_spent,
+                    self.usage_info.total_tokens,
+                    self.usage_info.total_cost_in_cents,
+                ),
                 appearance,
             ));
         } else {
             labels.push(render_label_text("Credits spent", appearance));
             values.push(render_value_text(
-                format_credits(self.usage_info.credits_spent),
+                format_credits_with_cost(
+                    self.usage_info.credits_spent,
+                    self.usage_info.total_tokens,
+                    self.usage_info.total_cost_in_cents,
+                ),
                 appearance,
             ));
         }
