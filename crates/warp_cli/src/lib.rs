@@ -29,8 +29,11 @@ pub mod model;
 pub mod provider;
 pub mod share;
 pub const OZ_RUN_ID_ENV: &str = "OZ_RUN_ID";
+pub const WARP_RUN_ID_ENV: &str = "WARP_RUN_ID";
 pub const OZ_PARENT_RUN_ID_ENV: &str = "OZ_PARENT_RUN_ID";
+pub const WARP_PARENT_RUN_ID_ENV: &str = "WARP_PARENT_RUN_ID";
 pub const OZ_CLI_ENV: &str = "OZ_CLI";
+pub const WARP_CLI_ENV: &str = "WARP_CLI";
 pub const OZ_HARNESS_ENV: &str = "OZ_HARNESS";
 
 /// Options related to the parent process that spawned this Zap instance.
