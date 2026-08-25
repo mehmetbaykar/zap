@@ -15564,7 +15564,7 @@ impl TerminalView {
                 Some(highlighted_link),
                 _,
             ) => {
-                match highlighted_link {
+                let mut items = match highlighted_link {
                     GridHighlightedLink::Url(url) => {
                         let url_content =
                             Some(model.link_at_range(url, RespectObfuscatedSecrets::Yes));
@@ -15644,7 +15644,14 @@ impl TerminalView {
                                 .into_item(),
                         ]
                     }
+                };
+
+                if !items.is_empty() {
+                    items.push(MenuItem::Separator);
                 }
+                items.push(self.paste_menu_item(ctx));
+
+                items
             }
             (
                 BlockListMenuSource::RegularTextRightClick { .. }
@@ -15752,6 +15759,15 @@ impl TerminalView {
 
                 // Zap: Removed the "Share block..." / "Share session..." entries (cloud dependency)
                 let _ = is_share_disabled;
+
+                // Only right-click sources offer general terminal actions like "Paste";
+                // the overflow-button and keybinding menus are scoped to the selected block(s).
+                let is_right_click_source = matches!(
+                    menu_source,
+                    BlockListMenuSource::RegularBlockRightClick { .. }
+                        | BlockListMenuSource::RichContentBlockRightClick { .. }
+                        | BlockListMenuSource::OutsideBlockRightClick { .. }
+                );
 
                 let mut items = vec![
                     MenuItemFields::new(copy_str)
@@ -15865,6 +15881,11 @@ impl TerminalView {
                     items.append(&mut prompt_items);
                 }
 
+                // "Paste" closes out the copy-related section so clipboard actions for
+                // the block sit together, ending with the general clipboard paste.
+                if is_right_click_source {
+                    items.push(self.paste_menu_item(ctx));
+                }
                 items.append(&mut vec![
                     MenuItem::Separator,
                     MenuItemFields::new(find_str)
@@ -16063,6 +16084,15 @@ impl TerminalView {
         }
 
         items
+    }
+
+    fn paste_menu_item(&self, ctx: &mut ViewContext<Self>) -> MenuItem<TerminalAction> {
+        let is_clipboard_empty = ctx.clipboard().read().is_empty();
+        MenuItemFields::new("Paste")
+            .with_on_select_action(TerminalAction::Paste)
+            .with_key_shortcut_label(keybinding_name_to_display_string("terminal:paste", ctx))
+            .with_disabled(is_clipboard_empty)
+            .into_item()
     }
 
     /// Builds the "Clear Blocks" entry for the terminal right-click context
