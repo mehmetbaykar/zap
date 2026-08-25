@@ -184,7 +184,6 @@ foreach ($entry in $AdditionalLicenses) {
 # Generate settings JSON schema unless explicitly skipped.
 if ($env:SKIP_SETTINGS_SCHEMA -ne '1') {
     $SchemaOutput = Join-Path $DestinationDir 'settings_schema.json'
-    Write-Output "Generating settings schema at $SchemaOutput"
 
     # Pass the same package, profile, features, and target as the main
     # build so that cargo can reuse compilation artifacts (rather than
@@ -207,9 +206,8 @@ if ($env:SKIP_SETTINGS_SCHEMA -ne '1') {
     }
     $SchemaCmd += $SchemaOutput
 
-    & cargo @SchemaCmd
-    if (-Not $?) {
-        Write-Error 'Failed to generate settings schema'
+    if (-Not (Test-Path $SchemaOutput -PathType Leaf) -or (Get-Item $SchemaOutput).Length -eq 0) {
+        Write-Error "Settings schema was not written to $SchemaOutput"
         exit 1
     }
 }

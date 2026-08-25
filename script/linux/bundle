@@ -341,6 +341,7 @@ if [ "${GITHUB_ACTIONS}" == "true" ]; then
   echo "debug_executable_path=$DEBUG_EXECUTABLE_PATH" >> "$GITHUB_OUTPUT"
   echo "packages_dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
   echo "bundled_resources_dir=${BUNDLED_RESOURCES_DIR:-}" >> "$GITHUB_OUTPUT"
+  echo "settings_schema_path=${SETTINGS_SCHEMA_SOURCE:-}" >> "$GITHUB_OUTPUT"
   echo "::echo::off"
 fi
 
