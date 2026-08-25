@@ -22,6 +22,7 @@ use warp_cli::agent::Harness;
 use warp_core::HostId;
 use warp_core::command::ExitCode;
 use warp_core::context_flag::ContextFlag;
+use warp_terminal::focus_env::add_session_focus_env_vars;
 use warp_terminal::shell::{ShellName, ShellType};
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 #[cfg(feature = "local_fs")]

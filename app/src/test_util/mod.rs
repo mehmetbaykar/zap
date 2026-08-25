@@ -1,12 +1,11 @@
 pub mod ai_agent_tasks;
-pub mod blockgrid;
 pub mod settings;
 pub mod terminal;
 mod virtual_fs;
 
-pub use blockgrid::mock_blockgrid;
 pub use terminal::add_window_with_terminal;
 pub use virtual_fs::{Stub, VirtualFS};
+pub use warp_terminal::test_util::mock_blockgrid;
 
 macro_rules! assert_eventually {
     // 60 ticks x 5ms = a 300ms budget. The old default of 20 (100ms) was too

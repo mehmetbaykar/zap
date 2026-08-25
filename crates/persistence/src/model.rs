@@ -129,6 +129,7 @@ pub struct TeamMemberRow {
     pub user_uid: String,
     pub email: String,
     pub role: String,
+    pub is_disabled: bool,
 }
 
 #[derive(Insertable)]
@@ -138,6 +139,7 @@ pub struct NewTeamMember {
     pub user_uid: String,
     pub email: String,
     pub role: String,
+    pub is_disabled: bool,
 }
 
 #[derive(Identifiable, Insertable, Queryable)]

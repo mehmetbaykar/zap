@@ -31,6 +31,7 @@ pub struct TeamMember {
     pub uid: UserUid,
     pub email: String,
     pub role: MembershipRole,
+    pub is_disabled: bool,
 }
 
 impl PartialOrd for TeamMember {

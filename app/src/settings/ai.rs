@@ -22,12 +22,12 @@ use warp_core::execution_mode::AppExecutionMode;
 use warp_core::features::FeatureFlag;
 use warpui::platform::OperatingSystem;
 use warpui::platform::keyboard::KeyCode;
-use warpui::{AppContext, Entity, ModelContext, SingletonEntity, UpdateModel};
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity, UpdateModel, WeakViewHandle};
 
 use crate::ai::execution_profiles::ExecutionProfilesConfig;
 use crate::ai::request_usage_model::RequestLimitInfo;
 use crate::report_if_error;
-use crate::terminal::CLIAgent;
+use crate::terminal::{CLIAgent, TerminalView};
 use crate::workspaces::user_workspaces::UserWorkspaces;
 
 pub enum FocusedTerminalInfoEvent {
@@ -39,16 +39,18 @@ pub enum FocusedTerminalInfoEvent {
 /// remote sessions.
 #[derive(Default, Clone, Debug)]
 pub struct FocusedTerminalInfo {
+    terminal: Option<WeakViewHandle<TerminalView>>,
     contains_any_remote_blocks: bool,
     contains_any_restored_remote_blocks: bool,
 }
 
 impl FocusedTerminalInfo {
     pub fn new(_: &mut ModelContext<Self>) -> Self {
-        Self {
-            contains_any_remote_blocks: false,
-            contains_any_restored_remote_blocks: false,
-        }
+        Self::default()
+    }
+
+    pub fn terminal(&self) -> Option<&WeakViewHandle<TerminalView>> {
+        self.terminal.as_ref()
     }
 
     pub fn contains_any_remote_blocks(&self) -> bool {
@@ -59,27 +61,31 @@ impl FocusedTerminalInfo {
         self.contains_any_restored_remote_blocks
     }
 
-    /// Updates both remote blocks and restored blocks status in a single atomic operation.
-    /// Only emits a TerminalInfoUpdated event if either value changes.
+    /// Records what the focused `terminal` contains, in a single atomic operation.
+    /// Only emits a TerminalInfoUpdated event if anything changes.
     /// Returns true if the event was emitted.
+    ///
+    /// The surface is written together with its flags rather than tracked separately so a
+    /// reader cannot resolve one terminal's team for another terminal's content.
     pub fn update(
         &mut self,
+        terminal: WeakViewHandle<TerminalView>,
         contains_any_remote_blocks: bool,
         contains_any_restored_remote_blocks: bool,
         ctx: &mut ModelContext<Self>,
     ) -> bool {
-        let remote_changed = self.contains_any_remote_blocks != contains_any_remote_blocks;
-        let restored_changed =
-            self.contains_any_restored_remote_blocks != contains_any_restored_remote_blocks;
-
-        if remote_changed || restored_changed {
-            self.contains_any_remote_blocks = contains_any_remote_blocks;
-            self.contains_any_restored_remote_blocks = contains_any_restored_remote_blocks;
-            ctx.emit(FocusedTerminalInfoEvent::TerminalInfoUpdated);
-            return true;
+        let unchanged = self.terminal.as_ref().map(|held| held.id()) == Some(terminal.id())
+            && self.contains_any_remote_blocks == contains_any_remote_blocks
+            && self.contains_any_restored_remote_blocks == contains_any_restored_remote_blocks;
+        if unchanged {
+            return false;
         }
 
-        false
+        self.terminal = Some(terminal);
+        self.contains_any_remote_blocks = contains_any_remote_blocks;
+        self.contains_any_restored_remote_blocks = contains_any_restored_remote_blocks;
+        ctx.emit(FocusedTerminalInfoEvent::TerminalInfoUpdated);
+        true
     }
 }
 

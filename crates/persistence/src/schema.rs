@@ -424,6 +424,7 @@ diesel::table! {
         user_uid -> Text,
         email -> Text,
         role -> Text,
+        is_disabled -> Bool,
     }
 }
 

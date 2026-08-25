@@ -13,6 +13,7 @@ fn team(name: &str, member_uids: &[&str]) -> Team {
                     uid: UserUid::new(uid),
                     email: format!("{uid}@example.com"),
                     role: MembershipRole::User,
+                    is_disabled: false,
                 })
                 .collect(),
         ),

@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use warp_completer::completer::MatchType;
 use warp_core::command::ExitCode;
 use warp_core::interval_timer::TimingDataPoint;
+pub use warp_terminal::ImageProtocol;
 use warpui::keymap::Keystroke;
 use warpui::notification::{NotificationSendError, RequestPermissionsOutcome};
 use warpui::rendering::ThinStrokes;
@@ -929,12 +930,6 @@ pub enum AgentModeCitation {
         #[serde(skip_serializing)]
         url: String,
     },
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub enum ImageProtocol {
-    Kitty,
-    ITerm,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Default)]
