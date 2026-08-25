@@ -62,8 +62,8 @@ pub struct CreateTeamResponse {
 
 /// The team an operation is scoped to, captured once from the window that started it.
 ///
-/// A logical operation carries its `TeamContext` from start to finish instead of asking a
-/// window which team is selected now, so concurrent windows on different teams stay
+/// A logical operation carries its `TeamContextForOperation` from start to finish instead of
+/// asking a window which team is selected now, so concurrent windows on different teams stay
 /// independent and a later team switch cannot retarget work already in flight.
 ///
 /// Deliberately neither `Clone` nor `Copy`. Moves make the handoff between the parts of an
@@ -73,28 +73,83 @@ pub struct CreateTeamResponse {
 /// share a lifetime, restructure so they share the single owner instead.
 ///
 /// This is scope, not authority: the server still authorizes every request made under it.
-// Only tests construct one today; remove this once a Group 1 migration PR mints one from a
-// real call site.
-#[allow(dead_code)]
-pub(crate) struct TeamContext {
-    team_uid: ServerId,
-}
-
-/// The team a view renders as, borrowed for the duration of a single render.
 ///
-/// Current-team UI must reflect the window's team as of this frame, so this is resolved
-/// per render rather than cached. The borrow is what enforces that: it cannot be stored in
-/// view state or moved into a `'static` future, and it deliberately offers no conversion to
-/// a team UID or to a [`TeamContext`]. A [`WeakViewHandle`] locates a window to read from;
-/// it is not evidence that the holder is running in that window, which is what minting
-/// operation scope requires.
-// Only tests construct one today; remove this once a Group 1 migration PR resolves one from a
-// real render.
+/// Prefer [`TeamContext`] when reasonable: convert a `ViewContext` to a `WeakViewHandle`,
+/// carry the handle through moved futures and callbacks, and mint the render context only at
+/// the point of use, so a policy read reflects the window's team at that moment. Reach for
+/// this type instead when the work's *destination* must not move once chosen -- e.g. creating
+/// a Drive object in the team the user was in when they clicked New -- and be ready to justify
+/// that choice; pinning is deliberate, not the default.
+///
+/// Only [`UserWorkspaces::team_context_for_operation`] mints one, always from a real window;
+/// there is no way to fabricate one without a window (there is deliberately no `teamless()`
+/// constructor). Its `team_uid` can still be `None` -- that means the minting window itself
+/// has no team selected, and a getter that accepts this scope should act as if the operation
+/// is not on a team. It must not read some other team's settings as a substitute: see
+/// [`TeamScope`]'s contract. Code with no window at all (e.g. background GEAP token refresh)
+/// is not this type's job -- it needs its own accessor that reads across every one of the
+/// user's teams explicitly, in the shape of `UserWorkspaces::teams_allow_codebase_context`.
+// Nothing constructs or consumes one outside this module's own tests yet; remove this
+// `#[allow(dead_code)]`, and widen visibility to `pub`, once a Group 1 migration PR has a real
+// call site.
 #[allow(dead_code)]
-pub(crate) struct TeamRenderContext<'a> {
-    team: &'a Team,
+pub(crate) struct TeamContextForOperation {
+    team_uid: Option<ServerId>,
 }
 
+/// Reads a [`TeamContextForOperation`] or [`TeamContext`]'s team, regardless of which one a
+/// caller was handed. Implemented only by those two types — see their docs for what each one
+/// promises about when it was resolved and what it can be used for.
+///
+/// The contract every settings getter built on this trait must follow: take a scope directly
+/// (`&impl TeamScope` or `&dyn TeamScope`), never an optional one (`Option<&dyn TeamScope>`).
+/// A caller with no scope to give has to confront that rather than pass `None` and inherit
+/// some fallback. `team_uid() == None` means the scope's own window/operation has no team, and
+/// the getter must act as if the operation is not on a team -- not substitute another team's
+/// settings. `current_workspace().settings` is a safe fallback only when the user belongs to
+/// no team at all: whenever the user has one or more teams, it is one arbitrarily-chosen
+/// team's effective settings (`GetEffectiveWorkspaceSettingsForWorkspace` server-side), not
+/// workspace-level data. Code with no window at all must not construct a scope to route around
+/// this; it should read across every team explicitly, the way
+/// `UserWorkspaces::teams_allow_codebase_context` does.
+#[allow(dead_code)]
+pub(crate) trait TeamScope {
+    fn team_uid(&self) -> Option<ServerId>;
+}
+
+impl TeamScope for TeamContextForOperation {
+    fn team_uid(&self) -> Option<ServerId> {
+        self.team_uid
+    }
+}
+
+#[cfg(test)]
+impl TeamContextForOperation {
+    // Nothing constructs a test context yet; remove this `#[allow(dead_code)]` once a Group 1
+    // migration PR has a real call site.
+    #[allow(dead_code)]
+    pub(crate) fn new_for_test(team_uid: ServerId) -> Self {
+        Self {
+            team_uid: Some(team_uid),
+        }
+    }
+}
+
+/// The team a view renders as, borrowed for the duration of a single read.
+///
+/// It is resolved at the point of use so policy reads follow the view between windows.
+pub(crate) struct TeamContext<'a> {
+    #[allow(dead_code)]
+    team_uid: Option<&'a ServerId>,
+}
+
+impl TeamScope for TeamContext<'_> {
+    fn team_uid(&self) -> Option<ServerId> {
+        self.team_uid.copied()
+    }
+}
+
+pub(crate) type TeamContextResolver = Box<dyn for<'a> Fn(&'a AppContext) -> TeamContext<'a>>;
 impl UserWorkspaces {
     #[cfg(test)]
     pub fn mock(cached_workspaces: Vec<Workspace>, _ctx: &mut ModelContext<Self>) -> Self {
