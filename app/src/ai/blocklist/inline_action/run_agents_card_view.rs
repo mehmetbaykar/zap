@@ -53,6 +53,7 @@ use crate::view_components::compactible_action_button::{
 use crate::view_components::compactible_split_action_button::CompactibleSplitActionButton;
 use crate::view_components::dropdown::DropdownEvent;
 use crate::view_components::{FilterableDropdownEvent, FilterableDropdownOrientation};
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 const RUN_AGENTS_CARD_TITLE: &str = "Can I start additional agents for this task?";
 const SPAWN_AGENTS_CANCELLED_LABEL: &str = "Spawn agents cancelled";
@@ -205,7 +206,7 @@ pub struct RunAgentsCardView {
 fn resolve_interactive_defaults(
     state: &mut RunAgentsEditState,
     block_model: &dyn AIBlockModel<View = AIBlock>,
-    ctx: &AppContext,
+    ctx: &ViewContext<RunAgentsCardView>,
 ) {
     if state.orch.model_id.is_empty() {
         let harness =
