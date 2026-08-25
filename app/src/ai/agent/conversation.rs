@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::Display;
 
 use ai::agent::orchestration_config::{OrchestrationConfig, OrchestrationConfigStatus};
 use ai::document::AIDocumentId;
@@ -7,8 +6,6 @@ use ai::skills::SkillPathOrigin;
 use anyhow::Context as _;
 use chrono::{DateTime, Local, TimeZone};
 use itertools::Itertools as _;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use vec1::{Size0Error, Vec1};
 use warp_cli::agent::Harness;
 use warp_core::command::ExitCode;
@@ -39,6 +36,7 @@ use super::{
     FinishedAIAgentOutput, MessageId, OutputModelInfo, RenderableAIError, RequestCost,
     ServerOutputId, Shared, SuggestedLoggingId, Suggestions,
 };
+use serde::{Deserialize, Serialize};
 use crate::ai::agent::api::convert_conversation::{
     ConvertToExchanges, compute_time_to_first_token_ms_from_messages,
     proto_timestamp_to_local_datetime,
@@ -4726,35 +4724,7 @@ pub enum UpdateConversationError {
     ByopPreflightPersistenceSend(String),
 }
 
-/// A globally unique ID for a conversation with an AI agent.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AIConversationId(Uuid);
-
-impl Display for AIConversationId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl AIConversationId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
-
-impl Default for AIConversationId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TryFrom<String> for AIConversationId {
-    type Error = anyhow::Error;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Ok(Self(Uuid::try_parse(&value)?))
-    }
-}
+pub use ai_types::AIConversationId;
 
 /// The harness that produced an agent conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

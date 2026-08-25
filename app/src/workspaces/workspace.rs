@@ -662,6 +662,9 @@ pub struct AiPermissionsSettings {
     pub remote_session_regex_list: Vec<Regex>,
 }
 
+/// The AI autonomy policy an admin has imposed, in the shape the enforcement paths
+/// consume: `None` on a field means no admin override, so the user's execution profile
+/// decides.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AiAutonomySettings {
     pub apply_code_diffs_setting: Option<ActionPermission>,

@@ -1235,6 +1235,18 @@ fn is_false(v: &bool) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AIAgentActionId(pub String);
 
+impl From<AIAgentActionId> for ai_types::AIAgentActionId {
+    fn from(value: AIAgentActionId) -> Self {
+        Self::from(value.0)
+    }
+}
+
+impl From<ai_types::AIAgentActionId> for AIAgentActionId {
+    fn from(value: ai_types::AIAgentActionId) -> Self {
+        AIAgentActionId(String::from(value))
+    }
+}
+
 pub type TokenUsageCategory = String;
 
 pub const PRIMARY_AGENT_CATEGORY: &str = "primary_agent";
