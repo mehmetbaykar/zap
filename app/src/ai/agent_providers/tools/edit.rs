@@ -34,7 +34,13 @@ enum Operation {
     },
     /// Create a new file.
     #[serde(rename = "create")]
-    Create { file_path: String, content: String },
+    Create {
+        file_path: String,
+        content: String,
+        /// Replace the file if it already exists; without it, creating an existing path fails.
+        #[serde(default)]
+        allow_overwrite: bool,
+    },
     /// Delete an existing file.
     #[serde(rename = "delete")]
     Delete { file_path: String },
@@ -68,7 +74,8 @@ fn parameters() -> Value {
                             "properties": {
                                 "op": {"type": "string", "enum": ["create"]},
                                 "file_path": {"type": "string"},
-                                "content": {"type": "string"}
+                                "content": {"type": "string"},
+                                "allow_overwrite": {"type": "boolean", "description": "Set to true to replace a file that already exists. Defaults to false, in which case creating a path that already exists fails."}
                             },
                             "required": ["op", "file_path", "content"]
                         },
@@ -105,8 +112,15 @@ fn from_args(args: &str) -> Result<api::message::tool_call::Tool> {
                 search,
                 replace,
             }),
-            Operation::Create { file_path, content } => new_files
-                .push(api::message::tool_call::apply_file_diffs::NewFile { file_path, content }),
+            Operation::Create {
+                file_path,
+                content,
+                allow_overwrite,
+            } => new_files.push(api::message::tool_call::apply_file_diffs::NewFile {
+                file_path,
+                content,
+                allow_overwrite,
+            }),
             Operation::Delete { file_path } => deleted_files
                 .push(api::message::tool_call::apply_file_diffs::DeleteFile { file_path }),
         }
