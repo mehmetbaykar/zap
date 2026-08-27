@@ -206,6 +206,12 @@ if ($env:SKIP_SETTINGS_SCHEMA -ne '1') {
     }
     $SchemaCmd += $SchemaOutput
 
+    & cargo @SchemaCmd
+    if (-Not $?) {
+        Write-Error 'Failed to generate settings schema'
+        exit 1
+    }
+
     if (-Not (Test-Path $SchemaOutput -PathType Leaf) -or (Get-Item $SchemaOutput).Length -eq 0) {
         Write-Error "Settings schema was not written to $SchemaOutput"
         exit 1
