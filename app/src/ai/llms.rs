@@ -434,7 +434,7 @@ impl AvailableLLMs {
         })
     }
 
-    fn info_for_id(&self, id: &LLMId) -> Option<&LLMInfo> {
+    pub(crate) fn info_for_id(&self, id: &LLMId) -> Option<&LLMInfo> {
         self.choices.iter().find(|info| info.id == *id)
     }
 
@@ -513,7 +513,7 @@ impl ModelsByFeature {
     ///
     /// For models that are available across multiple features,
     /// any one of the metadata will be returned.
-    fn info_for_id(&self, id: &LLMId) -> Option<&LLMInfo> {
+    pub(crate) fn info_for_id(&self, id: &LLMId) -> Option<&LLMInfo> {
         self.agent_mode.info_for_id(id)
     }
 }
