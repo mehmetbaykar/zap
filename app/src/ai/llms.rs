@@ -702,7 +702,7 @@ impl LLMPreferences {
         }
 
         let base_llm_for_terminal_view = HashMap::new();
-        let custom_llms = build_custom_llm_infos(ApiKeyManager::as_ref(ctx).keys());
+        let custom_llms = build_custom_llm_infos(ApiKeyManager::as_ref(ctx).custom_endpoints());
 
         // Hydrate `last_used_reasoning` from persisted BYOP settings so picker
         // remembers per-(api_type, model) effort across restarts and new tabs.
@@ -1250,11 +1250,11 @@ impl LLMPreferences {
         }
     }
 
-    /// Reads the user's current `ApiKeyManager.custom_endpoints` and replaces `custom_llms`
+    /// Reads the user's current joined custom endpoints and replaces `custom_llms`
     /// with synthetic `LLMInfo`s. Called on every `ApiKeyManagerEvent::KeysUpdated`, so adds,
     /// edits, and removals all propagate immediately.
     fn rebuild_custom_llms(&mut self, app: &AppContext) {
-        self.custom_llms = build_custom_llm_infos(ApiKeyManager::as_ref(app).keys());
+        self.custom_llms = build_custom_llm_infos(ApiKeyManager::as_ref(app).custom_endpoints());
     }
 
     /// Returns the default base model as a fallback.
@@ -1776,10 +1776,16 @@ fn get_new_agent_mode_choices(
         .collect()
 }
 
-/// Builds local picker entries from custom endpoints stored in secure storage.
-/// Incomplete endpoints and model rows stay hidden until they can be selected safely.
-fn build_custom_llm_infos(keys: &ai::api_keys::ApiKeys) -> Vec<LLMInfo> {
-    keys.custom_endpoints
+/// Builds synthetic [`LLMInfo`]s from the user's joined custom endpoints.
+///
+/// One entry per `CustomEndpointModel`. The display label is the **alias** when present,
+/// falling back to the raw model name. The `id` is the model's `config_key`, the stable
+/// local identifier the BYOP router resolves back to the user-provided endpoint.
+///
+/// Endpoints with empty URL or API key, and models with empty name or config_key, are
+/// skipped — they shouldn't surface in the picker until the user finishes configuring them.
+fn build_custom_llm_infos(endpoints: &[CustomEndpoint]) -> Vec<LLMInfo> {
+    endpoints
         .iter()
         .filter(|endpoint| !endpoint.url.trim().is_empty() && !endpoint.api_key.trim().is_empty())
         .flat_map(|endpoint| {

@@ -152,14 +152,17 @@ fn smoke_lookup_byop_resolves_custom_endpoint_config_key_locally() {
         app.update(|ctx| {
             ai::api_keys::ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
                 manager.add_custom_endpoint(
-                    "Local gateway".to_owned(),
-                    "http://127.0.0.1:8080/v1".to_owned(),
-                    "local-secret".to_owned(),
-                    vec![(
-                        "upstream-model".to_owned(),
-                        Some("Friendly model".to_owned()),
-                        Some(config_key.to_owned()),
-                    )],
+                    ai::api_keys::CustomEndpointParams {
+                        name: "Local gateway".to_owned(),
+                        url: "http://127.0.0.1:8080/v1".to_owned(),
+                        api_key: "local-secret".to_owned(),
+                        models: vec![(
+                            "upstream-model".to_owned(),
+                            Some("Friendly model".to_owned()),
+                            Some(config_key.to_owned()),
+                        )],
+                        schema: Default::default(),
+                    },
                     ctx,
                 );
             });

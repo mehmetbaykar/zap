@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use ::ai::api_keys::CustomEndpointDefinitions;
 use cfg_if::cfg_if;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
@@ -1908,6 +1909,19 @@ define_settings_group!(AISettings, settings: [
         toml_path: "agents.execution_profiles",
         max_table_depth: 2,
         description: "AI execution profiles and their permissions.",
+    }
+    // Non-secret custom inference endpoint definitions shared by GUI and TUI.
+    // Credentials remain in each surface's secure-storage namespace.
+    custom_endpoints: CustomEndpoints {
+        type: CustomEndpointDefinitions,
+        default: CustomEndpointDefinitions::default(),
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::ALL,
+        private: false,
+        toml_path: "agents.custom_endpoints",
+        max_table_depth: 2,
+        description: "Custom inference endpoint definitions.",
     }
     // Whether or not the profile-level command autoexecution speedbump has been shown.
     //

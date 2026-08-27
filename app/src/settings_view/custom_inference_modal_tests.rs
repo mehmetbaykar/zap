@@ -13,6 +13,7 @@ fn endpoint_with_models(model_count: usize) -> CustomEndpoint {
         name: "Test endpoint".to_string(),
         url: "https://api.example.com/v1".to_string(),
         api_key: "key".to_string(),
+        schema: Default::default(),
         models: (0..model_count)
             .map(|index| CustomEndpointModel {
                 name: format!("model-{index}"),

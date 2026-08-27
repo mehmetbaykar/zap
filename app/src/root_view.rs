@@ -1400,6 +1400,15 @@ impl NewWorkspaceSource {
             _ => false,
         }
     }
+
+    /// Whether this source points at specific content (e.g. a persisted conversation) that a
+    /// new window should reach directly, rather than being deferred behind product onboarding.
+    ///
+    /// Zap: upstream also matches `SharedSessionAsViewer`, which the fork removed together with
+    /// cloud session sharing; `FromCloudConversationId` is the only content deep link left.
+    pub(crate) fn is_content_deep_link(&self) -> bool {
+        matches!(self, NewWorkspaceSource::FromCloudConversationId { .. })
+    }
 }
 
 /// Args needed to construct a `Workspace`.
@@ -1529,6 +1538,7 @@ impl RootView {
             let should_show_local_onboarding = FeatureFlag::ZapNewSettingsModes.is_enabled()
                 && FeatureFlag::AgentOnboarding.is_enabled()
                 && !has_completed_local_onboarding(ctx)
+                && !workspace_args.workspace_setting.is_content_deep_link()
                 && !is_integration_test;
             if should_show_local_onboarding {
                 let workspace_args_box: Box<WorkspaceArgs> = workspace_args.into();
@@ -1785,11 +1795,12 @@ impl RootView {
         let fork_provider_count =
             |ctx: &AppContext| -> usize { AISettings::as_ref(ctx).agent_providers.value().len() };
         let keys = ApiKeyManager::as_ref(ctx).keys().clone();
+        let endpoint_count = ApiKeyManager::as_ref(ctx).custom_endpoints().len();
         let provider_count = fork_provider_count(ctx);
         onboarding_view.update(ctx, |view, ctx| {
             view.set_byok_status(
                 keys.provider_key_count(),
-                keys.custom_endpoints.len() + provider_count,
+                endpoint_count + provider_count,
                 ctx,
             );
         });
@@ -1799,11 +1810,12 @@ impl RootView {
             move |_, api_key_manager, event, ctx| {
                 if matches!(event, ApiKeyManagerEvent::KeysUpdated) {
                     let keys = api_key_manager.as_ref(ctx).keys().clone();
+                    let endpoint_count = api_key_manager.as_ref(ctx).custom_endpoints().len();
                     let provider_count = fork_provider_count(ctx);
                     onboarding_view_for_keys.update(ctx, |view, ctx| {
                         view.set_byok_status(
                             keys.provider_key_count(),
-                            keys.custom_endpoints.len() + provider_count,
+                            endpoint_count + provider_count,
                             ctx,
                         );
                     });
@@ -1958,8 +1970,7 @@ impl RootView {
             }
             AgentOnboardingEvent::AddCustomEndpointRequested => {
                 let existing = ApiKeyManager::as_ref(ctx)
-                    .keys()
-                    .custom_endpoints
+                    .custom_endpoints()
                     .first()
                     .cloned();
                 let is_editing = existing.is_some();
@@ -1984,12 +1995,18 @@ impl RootView {
                         url,
                         api_key,
                         models,
+                        schema,
                     } => {
-                        let (name, url, api_key, models) =
-                            (name.clone(), url.clone(), api_key.clone(), models.clone());
-                        ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
-                            manager.add_custom_endpoint(name, url, api_key, models, ctx);
-                        });
+                        let params = ::ai::api_keys::CustomEndpointParams {
+                            name: name.clone(),
+                            url: url.clone(),
+                            api_key: api_key.clone(),
+                            models: models.clone(),
+                            schema: schema.clone(),
+                        };
+                        if let Err(error) = crate::ai::custom_endpoints::add(params, ctx) {
+                            log::warn!("Could not add custom endpoint: {error:#}");
+                        }
                         me.add_custom_endpoint_modal = None;
                         me.focus(ctx);
                         ctx.notify();
@@ -2000,26 +2017,27 @@ impl RootView {
                         url,
                         api_key,
                         models,
+                        schema,
                     } => {
-                        let (index, name, url, api_key, models) = (
-                            *index,
-                            name.clone(),
-                            url.clone(),
-                            api_key.clone(),
-                            models.clone(),
-                        );
-                        ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
-                            manager.save_custom_endpoint(index, name, url, api_key, models, ctx);
-                        });
+                        let params = ::ai::api_keys::CustomEndpointParams {
+                            name: name.clone(),
+                            url: url.clone(),
+                            api_key: api_key.clone(),
+                            models: models.clone(),
+                            schema: schema.clone(),
+                        };
+                        if let Err(error) = crate::ai::custom_endpoints::save(*index, params, ctx) {
+                            log::warn!("Could not save custom endpoint: {error:#}");
+                        }
                         me.add_custom_endpoint_modal = None;
                         me.focus(ctx);
                         ctx.notify();
                     }
                     CustomEndpointModalEvent::RemoveEndpoint { index } => {
                         let index = *index;
-                        ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
-                            manager.remove_custom_endpoint(index, ctx);
-                        });
+                        if let Err(error) = crate::ai::custom_endpoints::remove(index, ctx) {
+                            log::warn!("Could not remove custom endpoint: {error:#}");
+                        }
                         me.add_custom_endpoint_modal = None;
                         me.focus(ctx);
                         ctx.notify();
@@ -2856,9 +2874,15 @@ impl AuthOnboardingState {
     fn try_open_onboarding_slides(&mut self, ctx: &mut ViewContext<RootView>) {
         let target = match self {
             AuthOnboardingState::Auth(args) | AuthOnboardingState::ConfirmIncomingAuth(args) => {
+                if args.workspace_setting.is_content_deep_link() {
+                    return;
+                }
                 AuthOnboardingTarget::Workspace(args.clone())
             }
             AuthOnboardingState::Terminal(workspace) => {
+                if workspace.as_ref(ctx).opened_from_content_deep_link() {
+                    return;
+                }
                 AuthOnboardingTarget::Terminal(workspace.clone())
             }
             _ => {

@@ -1939,6 +1939,7 @@ pub(crate) fn initialize_app(
     // localized scenario only local toml loading is kept.
     let _ = toml_file_path;
     let _ = startup_toml_parse_error_for_syncer;
+    ai::custom_endpoints::init(launch_mode, ctx);
 
     // LogManager must be registered before any subsystem (e.g. MCP, LSP) that creates file-based loggers.
     ctx.add_singleton_model(|_| simple_logger::manager::LogManager::new());

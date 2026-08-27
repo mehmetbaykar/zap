@@ -200,6 +200,7 @@ fn endpoint(
         name: name.into(),
         url: url.into(),
         api_key: api_key.into(),
+        schema: Default::default(),
         models,
     }
 }
@@ -234,7 +235,7 @@ fn custom_llm_infos_built_from_endpoints() {
         ..Default::default()
     };
 
-    let infos = build_custom_llm_infos(&keys);
+    let infos = build_custom_llm_infos(&keys.custom_endpoints);
 
     assert_eq!(infos.len(), 2);
     assert_eq!(infos[0].display_name, "fast");
@@ -267,7 +268,7 @@ fn custom_llm_display_name_uses_alias_or_model_name() {
         ..Default::default()
     };
 
-    let infos = build_custom_llm_infos(&keys);
+    let infos = build_custom_llm_infos(&keys.custom_endpoints);
 
     assert_eq!(infos[0].display_name, "My Alias");
     assert_eq!(infos[1].display_name, "raw-name");
@@ -290,7 +291,7 @@ fn custom_endpoint_usage_display_label_resolves_model_and_fallback() {
         base_llm_for_terminal_view: HashMap::new(),
         reasoning_effort_per_terminal: HashMap::new(),
         last_used_reasoning: HashMap::new(),
-        custom_llms: build_custom_llm_infos(&keys),
+        custom_llms: build_custom_llm_infos(&keys.custom_endpoints),
         custom_model_routers: Vec::new(),
     };
 
@@ -325,7 +326,7 @@ fn custom_llm_infos_skip_incomplete_endpoint_and_model_rows() {
         ..Default::default()
     };
 
-    let infos = build_custom_llm_infos(&keys);
+    let infos = build_custom_llm_infos(&keys.custom_endpoints);
 
     assert_eq!(infos.len(), 1);
     assert_eq!(infos[0].id.as_str(), "ready-id");
@@ -355,8 +356,8 @@ fn rebuilding_custom_llms_removes_deleted_models_and_endpoints() {
         ..Default::default()
     };
 
-    assert_eq!(build_custom_llm_infos(&before).len(), 3);
-    let infos = build_custom_llm_infos(&after);
+    assert_eq!(build_custom_llm_infos(&before.custom_endpoints).len(), 3);
+    let infos = build_custom_llm_infos(&after.custom_endpoints);
     assert_eq!(infos.len(), 1);
     assert_eq!(infos[0].id.as_str(), "a");
 }
@@ -410,14 +411,17 @@ fn active_models_fall_back_to_usable_choice_or_custom_endpoint_when_default_disa
         let custom_model_id = LLMId::from("custom-config-key");
         ApiKeyManager::handle(&app).update(&mut app, |api_key_manager, ctx| {
             api_key_manager.add_custom_endpoint(
-                "local".to_string(),
-                "https://example.com/v1".to_string(),
-                "test-key".to_string(),
-                vec![(
-                    "custom-model".to_string(),
-                    None,
-                    Some(custom_model_id.to_string()),
-                )],
+                ai::api_keys::CustomEndpointParams {
+                    name: "local".to_string(),
+                    url: "https://example.com/v1".to_string(),
+                    api_key: "test-key".to_string(),
+                    models: vec![(
+                        "custom-model".to_string(),
+                        None,
+                        Some(custom_model_id.to_string()),
+                    )],
+                    schema: ai::api_keys::CustomEndpointSchema::default(),
+                },
                 ctx,
             );
         });
@@ -570,14 +574,17 @@ fn reconcile_preserves_custom_models_saved_on_execution_profile() {
 
         ai::api_keys::ApiKeyManager::handle(&app).update(&mut app, |api_key_manager, ctx| {
             api_key_manager.add_custom_endpoint(
-                "local".to_owned(),
-                "https://example.com/v1".to_owned(),
-                "test-key".to_owned(),
-                vec![(
-                    "custom-model".to_owned(),
-                    Some("Custom Model".to_owned()),
-                    Some(custom_model_id.to_string()),
-                )],
+                ai::api_keys::CustomEndpointParams {
+                    name: "local".to_owned(),
+                    url: "https://example.com/v1".to_owned(),
+                    api_key: "test-key".to_owned(),
+                    models: vec![(
+                        "custom-model".to_owned(),
+                        Some("Custom Model".to_owned()),
+                        Some(custom_model_id.to_string()),
+                    )],
+                    schema: ai::api_keys::CustomEndpointSchema::default(),
+                },
                 ctx,
             );
         });

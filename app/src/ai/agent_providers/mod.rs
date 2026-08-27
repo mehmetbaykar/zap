@@ -180,8 +180,8 @@ pub fn lookup_byop(app: &AppContext, id: &ai::LLMId) -> Option<(AgentProvider, S
     }
 
     let config_key = id.as_str();
-    let keys = ai::api_keys::ApiKeyManager::as_ref(app).keys();
-    keys.custom_endpoints.iter().find_map(|endpoint| {
+    let manager = ai::api_keys::ApiKeyManager::as_ref(app);
+    manager.custom_endpoints().iter().find_map(|endpoint| {
         let model = endpoint
             .models
             .iter()

@@ -1,7 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-use ::ai::api_keys::CustomEndpoint;
-use url::Url;
+use ::ai::api_keys::{CustomEndpoint, CustomEndpointSchema, validate_custom_endpoint_url};
 use warp_editor::editor::NavigationKey;
 use warpui::elements::{
     Border, ChildView, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
@@ -54,6 +51,7 @@ pub enum CustomEndpointModalEvent {
         name: String,
         url: String,
         api_key: String,
+        schema: CustomEndpointSchema,
         models: Vec<(String, Option<String>, Option<String>)>,
     },
     SaveEndpoint {
@@ -61,6 +59,7 @@ pub enum CustomEndpointModalEvent {
         name: String,
         url: String,
         api_key: String,
+        schema: CustomEndpointSchema,
         models: Vec<(String, Option<String>, Option<String>)>,
     },
     RemoveEndpoint {
@@ -88,6 +87,11 @@ pub struct CustomEndpointModal {
     endpoint_name_editor: ViewHandle<EditorView>,
     endpoint_url_editor: ViewHandle<EditorView>,
     api_key_editor: ViewHandle<EditorView>,
+    /// Request/response protocol of the endpoint. Carried over from the endpoint being
+    /// edited (definitions in the shared `agents.custom_endpoints` setting may declare
+    /// it) and defaulted for new endpoints. Upstream's schema picker is omitted here
+    /// because this fork's `Dropdown` cannot render its popup on the outer stack.
+    schema: CustomEndpointSchema,
     model_rows: Vec<ModelRow>,
     cancel_button_mouse_state: MouseStateHandle,
     save_button_mouse_state: MouseStateHandle,
@@ -175,6 +179,7 @@ impl CustomEndpointModal {
             editor
         });
 
+        let schema = endpoint.map(|endpoint| endpoint.schema).unwrap_or_default();
         let mut model_rows = Vec::new();
         if let Some(ep) = endpoint {
             for model in &ep.models {
@@ -233,6 +238,7 @@ impl CustomEndpointModal {
             endpoint_name_editor,
             endpoint_url_editor,
             api_key_editor,
+            schema,
             model_rows,
             cancel_button_mouse_state: Default::default(),
             save_button_mouse_state: Default::default(),
@@ -319,6 +325,7 @@ impl CustomEndpointModal {
         self.api_key_editor.update(ctx, |editor, ctx| {
             editor.set_buffer_text(endpoint.map(|e| e.api_key.as_str()).unwrap_or(""), ctx);
         });
+        self.schema = endpoint.map(|endpoint| endpoint.schema).unwrap_or_default();
         // Rebuild model rows
         // Old model row editors will be dropped with the modal body
         self.model_rows.clear();
@@ -413,6 +420,7 @@ impl CustomEndpointModal {
         let name = self.endpoint_name_editor.as_ref(ctx).buffer_text(ctx);
         let url = self.endpoint_url_editor.as_ref(ctx).buffer_text(ctx);
         let api_key = self.api_key_editor.as_ref(ctx).buffer_text(ctx);
+        let schema = self.schema;
         let models: Vec<(String, Option<String>, Option<String>)> = self
             .model_rows
             .iter()
@@ -434,6 +442,7 @@ impl CustomEndpointModal {
                 name,
                 url,
                 api_key,
+                schema,
                 models,
             });
         } else {
@@ -441,6 +450,7 @@ impl CustomEndpointModal {
                 name,
                 url,
                 api_key,
+                schema,
                 models,
             });
         }
@@ -992,17 +1002,7 @@ fn validate_url(url: &str) -> Result<(), &'static str> {
     if url.trim().is_empty() {
         return Ok(());
     }
-    let parsed = Url::parse(url).map_err(|_| "Invalid URL")?;
-    if parsed.scheme() != "https" {
-        return Err("URL must use HTTPS");
-    }
-    let Some(host) = parsed.host_str().filter(|h| !h.is_empty()) else {
-        return Err("URL must include a host");
-    };
-    if is_restricted_host(host) {
-        return Err("URL must not use a local or private host");
-    }
-    Ok(())
+    validate_custom_endpoint_url(url)
 }
 
 fn is_endpoint_form_valid(name: &str, url: &str, api_key: &str, has_models: bool) -> bool {
@@ -1013,46 +1013,6 @@ fn is_endpoint_form_valid(name: &str, url: &str, api_key: &str, has_models: bool
         && validate_url(url).is_ok()
 }
 
-fn is_restricted_host(host: &str) -> bool {
-    let host = host
-        .strip_prefix('[')
-        .and_then(|host| host.strip_suffix(']'))
-        .unwrap_or(host);
-    if host.eq_ignore_ascii_case("localhost") {
-        return true;
-    }
-    host.parse::<IpAddr>().is_ok_and(is_restricted_ip)
-}
-
-fn is_restricted_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => is_restricted_ipv4(ip),
-        IpAddr::V6(ip) => is_restricted_ipv6(ip),
-    }
-}
-
-fn is_restricted_ipv4(ip: Ipv4Addr) -> bool {
-    ip.is_loopback() || ip.is_unspecified() || ip.is_private() || ip.is_link_local()
-}
-
-fn is_restricted_ipv6(ip: Ipv6Addr) -> bool {
-    if ip.is_loopback() || ip.is_unspecified() || is_ipv6_unique_local(ip) || is_ipv6_link_local(ip)
-    {
-        return true;
-    }
-    if let Some(ipv4) = ip.to_ipv4_mapped() {
-        return is_restricted_ipv4(ipv4);
-    }
-    false
-}
-
-fn is_ipv6_unique_local(ip: Ipv6Addr) -> bool {
-    ip.segments()[0] & 0xfe00 == 0xfc00
-}
-
-fn is_ipv6_link_local(ip: Ipv6Addr) -> bool {
-    ip.segments()[0] & 0xffc0 == 0xfe80
-}
 impl TypedActionView for CustomEndpointModal {
     type Action = CustomEndpointModalAction;
 

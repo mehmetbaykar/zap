@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use ::ai::api_keys::{ApiKeyManager, ApiKeys};
+use ::ai::api_keys::{ApiKeyManager, ApiKeys, CustomEndpointParams};
 #[cfg(not(target_family = "wasm"))]
 use ::ai::grok_subscription::oauth::{self, ManualCodeExchange};
 use enum_iterator::all;
@@ -1774,7 +1774,7 @@ impl AISettingsPageView {
             },
         );
         let custom_endpoint_edit_buttons = Self::create_custom_endpoint_edit_buttons(
-            ApiKeyManager::as_ref(ctx).keys().custom_endpoints.len(),
+            ApiKeyManager::as_ref(ctx).custom_endpoints().len(),
             is_any_ai_enabled,
             ctx,
         );
@@ -2105,8 +2105,7 @@ impl AISettingsPageView {
             return;
         }
         let Some(endpoint) = ApiKeyManager::as_ref(ctx)
-            .keys()
-            .custom_endpoints
+            .custom_endpoints()
             .get(endpoint_index)
             .cloned()
         else {
@@ -2140,7 +2139,7 @@ impl AISettingsPageView {
             button.set_disabled(!enabled, ctx);
         });
 
-        let endpoint_count = ApiKeyManager::as_ref(ctx).keys().custom_endpoints.len();
+        let endpoint_count = ApiKeyManager::as_ref(ctx).custom_endpoints().len();
         if self.custom_endpoint_edit_buttons.len() != endpoint_count {
             self.custom_endpoint_edit_buttons =
                 Self::create_custom_endpoint_edit_buttons(endpoint_count, enabled, ctx);
@@ -2190,8 +2189,7 @@ impl AISettingsPageView {
             return;
         }
         let Some(endpoint) = ApiKeyManager::as_ref(ctx)
-            .keys()
-            .custom_endpoints
+            .custom_endpoints()
             .get(index)
             .cloned()
         else {
@@ -2235,17 +2233,27 @@ impl AISettingsPageView {
                 name,
                 url,
                 api_key,
+                schema,
                 models,
             } => {
-                ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
-                    manager.add_custom_endpoint(
-                        name.clone(),
-                        url.clone(),
-                        api_key.clone(),
-                        models.clone(),
-                        ctx,
-                    );
-                });
+                if !Self::custom_inference_controls_enabled(ctx) {
+                    self.hide_custom_endpoint_modal(ctx);
+                    return;
+                }
+                let result = crate::ai::custom_endpoints::add(
+                    CustomEndpointParams {
+                        name: name.clone(),
+                        url: url.clone(),
+                        api_key: api_key.clone(),
+                        models: models.clone(),
+                        schema: *schema,
+                    },
+                    ctx,
+                );
+                if let Err(error) = result {
+                    log::warn!("Could not add custom endpoint: {error:#}");
+                    return;
+                }
                 self.hide_custom_endpoint_modal(ctx);
 
                 let window_id = ctx.window_id();
@@ -2258,8 +2266,7 @@ impl AISettingsPageView {
 
                 // The new endpoint is appended last.
                 let new_index = ApiKeyManager::as_ref(ctx)
-                    .keys()
-                    .custom_endpoints
+                    .custom_endpoints()
                     .len()
                     .saturating_sub(1);
                 self.maybe_prompt_set_default_model_for_custom_endpoint(new_index, ctx);
@@ -2270,18 +2277,28 @@ impl AISettingsPageView {
                 name,
                 url,
                 api_key,
+                schema,
                 models,
             } => {
-                ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
-                    manager.save_custom_endpoint(
-                        *index,
-                        name.clone(),
-                        url.clone(),
-                        api_key.clone(),
-                        models.clone(),
-                        ctx,
-                    );
-                });
+                if !Self::custom_inference_controls_enabled(ctx) {
+                    self.hide_custom_endpoint_modal(ctx);
+                    return;
+                }
+                let result = crate::ai::custom_endpoints::save(
+                    *index,
+                    CustomEndpointParams {
+                        name: name.clone(),
+                        url: url.clone(),
+                        api_key: api_key.clone(),
+                        models: models.clone(),
+                        schema: *schema,
+                    },
+                    ctx,
+                );
+                if let Err(error) = result {
+                    log::warn!("Could not save custom endpoint: {error:#}");
+                    return;
+                }
                 self.hide_custom_endpoint_modal(ctx);
 
                 let window_id = ctx.window_id();
@@ -2307,8 +2324,7 @@ impl AISettingsPageView {
         ctx: &mut ViewContext<Self>,
     ) {
         let Some(endpoint) = ApiKeyManager::as_ref(ctx)
-            .keys()
-            .custom_endpoints
+            .custom_endpoints()
             .get(index)
             .cloned()
         else {
@@ -2339,9 +2355,17 @@ impl AISettingsPageView {
                     .update(ctx, |dialog, ctx| dialog.hide(ctx));
             }
             RemoveCustomEndpointConfirmationDialogEvent::Confirm(index) => {
-                ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
-                    manager.remove_custom_endpoint(*index, ctx);
-                });
+                if !Self::custom_inference_controls_enabled(ctx) {
+                    self.remove_custom_endpoint_confirmation_dialog
+                        .update(ctx, |dialog, ctx| dialog.hide(ctx));
+                    ctx.emit(AISettingsPageEvent::HideModal);
+                    ctx.notify();
+                    return;
+                }
+                if let Err(error) = crate::ai::custom_endpoints::remove(*index, ctx) {
+                    log::warn!("Could not remove custom endpoint: {error:#}");
+                    return;
+                }
                 self.remove_custom_endpoint_confirmation_dialog
                     .update(ctx, |dialog, ctx| dialog.hide(ctx));
                 self.sync_custom_endpoint_buttons(ctx);
@@ -7848,8 +7872,7 @@ impl SettingsWidget for CustomEndpointsWidget {
             );
 
         for (index, endpoint) in ApiKeyManager::as_ref(app)
-            .keys()
-            .custom_endpoints
+            .custom_endpoints()
             .iter()
             .enumerate()
         {
