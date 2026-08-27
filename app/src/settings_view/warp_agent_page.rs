@@ -44,12 +44,13 @@ use super::remove_custom_endpoint_confirmation_dialog::{
 };
 use super::set_default_model_modal::{SetDefaultModelModalBody, SetDefaultModelModalBodyEvent};
 use super::settings_page::{
-    HEADER_PADDING, InputListItem, LocalOnlyIconState, MatchData, PageType, SettingsPageMeta,
-    SettingsPageViewHandle, SettingsWidget, TOGGLE_BUTTON_RIGHT_PADDING, ToggleState,
-    build_sub_header, build_toggle_element, render_body_item_label,
+    HEADER_PADDING, InputListItem, LocalOnlyIconState, MatchData, PageTitle, PageType,
+    SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, TOGGLE_BUTTON_RIGHT_PADDING,
+    ToggleState, build_sub_header, build_toggle_element, render_body_item_label,
     render_body_item_label_with_icon, render_custom_size_header, render_dropdown_item,
     render_dropdown_item_label, render_filterable_dropdown_item, render_full_pane_width_ai_button,
-    render_input_list, render_separator, render_settings_info_banner, PageTitle};
+    render_input_list, render_separator, render_settings_info_banner,
+};
 use super::{
     SettingActionPairContexts, SettingActionPairDescriptions, SettingsAction, SettingsSection,
     ToggleSettingActionPair, editor_text_colors, flags,
@@ -91,10 +92,11 @@ use crate::settings::{
     AIAutoDetectionEnabled, AICommandDenylist, AISettings, AISettingsChangedEvent,
     AgentModeCodingPermissionsType, AgentModeCommandExecutionDenylist,
     AgentModeCommandExecutionPredicate, AgentModeQuerySuggestionsEnabled,
-    EnableAiCommandSearchHashTrigger, FileBasedMcpEnabled, GitOperationsAutogenEnabled,
-    IncludeAgentCommandsInHistory, InputSettings, IntelligentAutosuggestionsEnabled, MemoryEnabled,
-    NLDInTerminalEnabled, NaturalLanguageAutosuggestionsEnabled, OrchestrationMessageDisplayMode,
-    PromptSubmissionMode, RuleSuggestionsEnabled, ShouldRenderCLIAgentToolbar,
+    AutoApproveBypassesCommandDenylist, EnableAiCommandSearchHashTrigger, FileBasedMcpEnabled,
+    GitOperationsAutogenEnabled, IncludeAgentCommandsInHistory, InputSettings,
+    IntelligentAutosuggestionsEnabled, MemoryEnabled, NLDInTerminalEnabled,
+    NaturalLanguageAutosuggestionsEnabled, OrchestrationMessageDisplayMode, PromptSubmissionMode,
+    RuleSuggestionsEnabled, ShouldRenderCLIAgentToolbar,
     ShouldRenderUseAgentToolbarForUserCommands, ShowAgentTips, ShowAgentZeroStateHints,
     ShowConversationHistory, ShowHintText, ThinkingDisplayMode, VOICE_INPUT_LANGUAGES,
     VoiceInputEnabled, VoiceInputLanguage, VoiceInputToggleKey,
@@ -443,6 +445,25 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
                 )),
                 &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
                 flags::INCLUDE_AGENT_COMMANDS_IN_HISTORY_FLAG,
+            )
+            .with_group(bindings::BindingGroup::WarpAi),
+            ToggleSettingActionPair::custom(
+                SettingActionPairDescriptions::new(
+                    "Allow auto-approve to bypass command denylist",
+                    "Require approval for denylisted commands in auto-approve",
+                ),
+                builder(SettingsAction::AI(
+                    AISettingsPageAction::ToggleAutoApproveBypassesCommandDenylist,
+                )),
+                SettingActionPairContexts::new(
+                    context.clone()
+                        & id!(flags::IS_ANY_AI_ENABLED)
+                        & !id!(flags::AUTO_APPROVE_BYPASSES_COMMAND_DENYLIST_FLAG),
+                    context.clone()
+                        & id!(flags::IS_ANY_AI_ENABLED)
+                        & id!(flags::AUTO_APPROVE_BYPASSES_COMMAND_DENYLIST_FLAG),
+                ),
+                None,
             )
             .with_group(bindings::BindingGroup::WarpAi),
             ToggleSettingActionPair::new(
@@ -3418,6 +3439,7 @@ pub enum AISettingsPageAction {
     CreateProfile,
     ToggleFileBasedMcp,
     ToggleIncludeAgentCommandsInHistory,
+    ToggleAutoApproveBypassesCommandDenylist,
     // Custom model routers
     #[cfg(feature = "local_fs")]
     OpenAddCustomRouter,
@@ -4248,6 +4270,16 @@ impl TypedActionView for AISettingsPageView {
             AISettingsPageAction::ToggleFileBasedMcp => {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.file_based_mcp_enabled.toggle_and_save_value(ctx));
+                });
+                ctx.notify();
+            }
+            AISettingsPageAction::ToggleAutoApproveBypassesCommandDenylist => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(
+                        settings
+                            .auto_approve_bypasses_command_denylist
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 ctx.notify();
             }
@@ -6308,13 +6340,14 @@ struct AIInputWidget {
     // The switch state handle corresponding to the "Show Agent shortcut hints" toggle.
     show_agent_zero_state_hints_toggle: SwitchStateHandle,
     include_agent_commands_in_history_toggle: SwitchStateHandle,
+    auto_approve_bypasses_command_denylist_toggle: SwitchStateHandle,
 }
 
 impl SettingsWidget for AIInputWidget {
     type View = AISettingsPageView;
 
     fn search_terms(&self) -> &str {
-        "oz agent ai input natural language detection autodetection prompt terminal command commands history shell executed execution queue interrupt submission submit auto-queue response while responding default # hash pound trigger ai command search shorthand shell comment"
+        "oz agent ai input natural language detection autodetection prompt terminal command commands history shell executed execution queue interrupt submission submit auto-queue response while responding default # hash pound trigger ai command search shorthand shell comment auto-approve fast forward denylist permissions"
     }
 
     fn render(
@@ -6405,6 +6438,28 @@ impl SettingsWidget for AIInputWidget {
             &view.local_only_icon_tooltip_states,
             app,
         ));
+
+        widget_children.push(
+            Flex::column()
+                .with_child(render_ai_setting_toggle::<
+                    AutoApproveBypassesCommandDenylist,
+                >(
+                    "Allow auto-approve to bypass command denylist",
+                    AISettingsPageAction::ToggleAutoApproveBypassesCommandDenylist,
+                    *ai_settings.auto_approve_bypasses_command_denylist,
+                    is_any_ai_enabled,
+                    self.auto_approve_bypasses_command_denylist_toggle
+                        .clone(),
+                    &view.local_only_icon_tooltip_states,
+                    app,
+                ))
+                .with_child(render_ai_setting_description(
+                    "When enabled, fast forward and auto-approve run denylisted commands without asking for confirmation.",
+                    is_any_ai_enabled,
+                    app,
+                ))
+                .finish(),
+        );
 
         if FeatureFlag::QueueSlashCommand.is_enabled() {
             widget_children.push(render_dropdown_item(

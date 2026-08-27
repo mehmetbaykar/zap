@@ -20,9 +20,10 @@ use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewCon
 
 use super::SettingsSection;
 use super::settings_page::{
-    AdditionalInfo, LocalOnlyIconState, MatchData, PageType, SettingsPageEvent, SettingsPageMeta,
-    SettingsPageViewHandle, SettingsWidget, ToggleState, render_body_item, render_page_title,
-    render_sub_header_with_description, HEADER_FONT_SIZE};
+    AdditionalInfo, HEADER_FONT_SIZE, LocalOnlyIconState, MatchData, PageType, SettingsPageEvent,
+    SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, ToggleState, render_body_item,
+    render_page_title, render_sub_header_with_description,
+};
 use crate::appearance::Appearance;
 use crate::editor::{EditorView, InteractionState, SingleLineEditorOptions, TextOptions};
 use crate::report_if_error;

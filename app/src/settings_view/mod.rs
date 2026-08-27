@@ -633,6 +633,8 @@ pub mod flags {
     pub const NATURAL_LANGUAGE_AUTOSUGGESTIONS_FLAG: &str = "Natural_Language_Autosuggestions";
     pub const GIT_OPERATIONS_AUTOGEN_FLAG: &str = "Git_Operations_Autogen";
     pub const INCLUDE_AGENT_COMMANDS_IN_HISTORY_FLAG: &str = "Include_Agent_Commands_In_History";
+    pub const AUTO_APPROVE_BYPASSES_COMMAND_DENYLIST_FLAG: &str =
+        "Auto_Approve_Bypasses_Command_Denylist";
     pub const AI_RULES_FLAG: &str = "AI_Rules";
     pub const SUGGESTED_RULES_FLAG: &str = "Suggested_Rules";
     pub const WARP_DRIVE_CONTEXT_FLAG: &str = "Warp_Drive_Context";

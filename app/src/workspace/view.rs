@@ -67,7 +67,6 @@ use warp_core::user_preferences::GetUserPreferences as _;
 use warp_editor::editor::NavigationKey;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warp_util::path::{LineAndColumnArg, user_friendly_path};
-use warpui_core::windowing::state::ApplicationStage;
 use warpui::accessibility::{
     AccessibilityContent, AccessibilityVerbosity, ActionAccessibilityContent, WarpA11yRole,
 };
@@ -100,6 +99,7 @@ use warpui::{
     AppContext, Entity, EntityId, FocusContext, ModelHandle, SingletonEntity, TypedActionView,
     UpdateModel, UpdateView, View, ViewAsRef, ViewContext, ViewHandle, WindowId,
 };
+use warpui_core::windowing::state::ApplicationStage;
 
 use self::vertical_tabs::telemetry::{VerticalTabsDisplayOption, VerticalTabsTelemetryEvent};
 use self::vertical_tabs::{
@@ -3021,7 +3021,8 @@ impl Workspace {
             }
             AISettingsChangedEvent::IsActiveAIEnabled { .. }
             | AISettingsChangedEvent::ThinkingDisplayMode { .. }
-            | AISettingsChangedEvent::PromptSubmissionMode { .. } => {
+            | AISettingsChangedEvent::PromptSubmissionMode { .. }
+            | AISettingsChangedEvent::AutoApproveBypassesCommandDenylist { .. } => {
                 ctx.notify();
             }
             AISettingsChangedEvent::ShowAgentNotifications { .. } => {
@@ -21286,6 +21287,12 @@ impl Workspace {
             context
                 .set
                 .insert(flags::INCLUDE_AGENT_COMMANDS_IN_HISTORY_FLAG);
+        }
+
+        if *ai_settings.auto_approve_bypasses_command_denylist.value() {
+            context
+                .set
+                .insert(flags::AUTO_APPROVE_BYPASSES_COMMAND_DENYLIST_FLAG);
         }
         if *ai_settings.memory_enabled.value() {
             context.set.insert(flags::AI_RULES_FLAG);
