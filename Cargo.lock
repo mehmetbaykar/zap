@@ -15854,6 +15854,7 @@ dependencies = [
  "rangemap",
  "regex",
  "regex-automata",
+ "sentry",
  "serde",
  "serde_json",
  "serial_test",
