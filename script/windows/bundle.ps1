@@ -215,19 +215,6 @@ if ($SKIP_BUILD_INSTALLER) {
 Write-Output "Built for $ARCH with executable at $BINARY_PATH"
 
 # Prepare bundled resources
-if ($env:SKIP_SETTINGS_SCHEMA -ne '1' -and -not $env:SETTINGS_SCHEMA_EXECUTABLE -and -not $env:SETTINGS_SCHEMA_SOURCE) {
-    if ($IS_TUI) {
-        Write-Error 'TUI bundles require SETTINGS_SCHEMA_SOURCE or SETTINGS_SCHEMA_EXECUTABLE.'
-        exit 1
-    } elseif ($SKIP_BUILD_BINARY) {
-        Write-Error '-skip_build_binary requires SETTINGS_SCHEMA_SOURCE or SETTINGS_SCHEMA_EXECUTABLE.'
-        exit 1
-    } elseif (-not $CAN_EXECUTE_ARCH) {
-        Write-Error "Cannot execute the just-built $ARCH binary on this $HOST_ARCH host to generate a settings schema; pass SETTINGS_SCHEMA_SOURCE or SETTINGS_SCHEMA_EXECUTABLE."
-        exit 1
-    }
-    $env:SETTINGS_SCHEMA_EXECUTABLE = $BINARY_PATH
-}
 $BUNDLED_RESOURCES_DIR = "$CARGO_TARGET_OUTPUT_DIR\resources"
 Write-Output 'Preparing bundled resources...'
 # Only forward --target to the schema generator when the build target is
