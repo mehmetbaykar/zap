@@ -450,6 +450,7 @@ fn restored_conversation_with_queries(queries: &[&str]) -> AIConversation {
 
 fn initialize_custom_endpoint_usage_test_app(app: &mut App) {
     initialize_settings_for_tests(app);
+    app.add_singleton_model(crate::ai::agent_providers::AgentProviderSecrets::new);
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(UserWorkspaces::default_mock);
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());

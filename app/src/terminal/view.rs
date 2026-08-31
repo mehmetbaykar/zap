@@ -12667,6 +12667,32 @@ impl TerminalView {
         }
     }
 
+    fn child_conversation_id_for_cli_status_updates(
+        &self,
+        ctx: &AppContext,
+    ) -> Option<AIConversationId> {
+        if let Some(conversation_id) = BlocklistAIHistoryModel::as_ref(ctx)
+            .active_conversation(self.view_id)
+            .and_then(|conversation| {
+                conversation
+                    .is_child_agent_conversation()
+                    .then_some(conversation.id())
+            })
+        {
+            return Some(conversation_id);
+        }
+
+        let mut child_conversation_ids = BlocklistAIHistoryModel::as_ref(ctx)
+            .all_live_conversations_for_terminal_surface(self.view_id)
+            .filter(|conversation| conversation.is_child_agent_conversation())
+            .map(|conversation| conversation.id());
+        let child_conversation_id = child_conversation_ids.next()?;
+        child_conversation_ids
+            .next()
+            .is_none()
+            .then_some(child_conversation_id)
+    }
+
     /// Resolves the conversation this pane's CLI agent status updates should
     /// be written to: the conversation whose `task_id` matches the ambient
     /// task this pane's CLI-harness session is registered under (see
@@ -12692,8 +12718,12 @@ impl TerminalView {
         ctx: &AppContext,
     ) -> Option<AIConversationId> {
         // Zap: no LocalAgentTaskSyncModel (cloud task sync removed); the pane's
-        // ambient-agent view model tracks the local task id for this view.
-        let task_id = self.ambient_agent_task_id_for_details_panel(ctx)?;
+        // ambient-agent view model tracks the local task id for this view. Panes
+        // without one (plain local CLI-harness sessions) keep the fork's
+        // child-conversation routing.
+        let Some(task_id) = self.ambient_agent_task_id_for_details_panel(ctx) else {
+            return self.child_conversation_id_for_cli_status_updates(ctx);
+        };
         let matches_task = |conversation: &&AIConversation| conversation.task_id() == Some(task_id);
 
         let history_model = BlocklistAIHistoryModel::as_ref(ctx);

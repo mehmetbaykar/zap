@@ -970,7 +970,7 @@ fn command_starts_non_terminating_session(command: &str) -> bool {
 /// The wrapper protocol looks like: `<wrapper> <generator_id> '<inner_command>' [extra flags...]`
 /// where:
 /// - `<wrapper>` is `warp_run_generator_command` (POSIX shell) or
-///   `Zap-Run-GeneratorCommand` (PowerShell, case-insensitive).
+///   `Warp-Run-GeneratorCommand` (PowerShell, case-insensitive).
 /// - `<generator_id>` is a numeric id, not parsed here and simply skipped.
 /// - `<inner_command>` is the real command string wrapped in single quotes — what we return.
 ///
@@ -980,7 +980,7 @@ fn command_starts_non_terminating_session(command: &str) -> bool {
 fn in_band_generator_command(command: &str) -> Option<String> {
     let tokens = shell_words::split(command.trim_start()).ok()?;
     if tokens.len() >= 3
-        && (tokens[0].eq_ignore_ascii_case("Zap-Run-GeneratorCommand")
+        && (tokens[0].eq_ignore_ascii_case("Warp-Run-GeneratorCommand")
             || tokens[0] == "warp_run_generator_command")
     {
         Some(tokens[2].clone())
