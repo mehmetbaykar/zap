@@ -815,6 +815,11 @@ pub enum FeatureFlag {
     /// unchanged and the harness process/sandbox are never signaled or torn
     /// down.
     CtrlCCancelsThirdPartyHarness,
+
+    /// Attaches process-tree liveness signals to long-running command
+    /// snapshots, giving the agent evidence that a silent command is still
+    /// doing work before it decides to cancel.
+    LrcActivitySignal,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -891,6 +896,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::PricingTransparency,
     FeatureFlag::CtrlCCancelsThirdPartyHarness,
     FeatureFlag::WarpingModelName,
+    FeatureFlag::LrcActivitySignal,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Zap).

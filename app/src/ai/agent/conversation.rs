@@ -20,7 +20,9 @@ use warp_multi_agent_api::response_event::stream_finished;
 use warp_multi_agent_api::response_event::stream_finished::TokenUsage;
 use warp_multi_agent_api::{self as api};
 use warpui::color::ColorU;
-use warpui::{EntityId, ModelContext, SingletonEntity};
+use warpui::{AppContext, EntityId, ModelContext, SingletonEntity};
+
+use crate::ai::llms::LLMPreferences;
 
 use super::api::ServerConversationToken;
 use super::task::helper::*;
@@ -88,8 +90,28 @@ impl TodoStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordingSpanInfo {
+    pub recording_id: String,
+    pub status: RecordingSpanStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordingSpanStatus {
+    Active,
+    Captured,
+}
+
+/// The wire counters are `uint64` while the persisted and displayed usage rows
+/// are `u32`, so an oversized count saturates instead of wrapping to a small
+/// number that would read as a plausible total.
+fn narrow_token_count(tokens: u64) -> u32 {
+    u32::try_from(tokens).unwrap_or(u32::MAX)
+}
+
 fn footer_model_token_usage(
     usage_metadata: &stream_finished::ConversationUsageMetadata,
+    llm_preferences: &LLMPreferences,
 ) -> Vec<ModelTokenUsage> {
     // Warp + BYOK rows merge on their server-known model id.
     let mut standard_usage: HashMap<String, ModelTokenUsage> = HashMap::new();
@@ -100,12 +122,15 @@ fn footer_model_token_usage(
                 model_id: model_id.clone(),
                 ..Default::default()
             });
-        entry.warp_tokens += usage.total_tokens;
+        entry.warp_tokens = entry
+            .warp_tokens
+            .saturating_add(narrow_token_count(usage.total_tokens));
         for (category, tokens) in &usage.token_usage_by_category {
-            *entry
+            let category_tokens = entry
                 .warp_token_usage_by_category
                 .entry(category.clone())
-                .or_default() += *tokens;
+                .or_default();
+            *category_tokens = category_tokens.saturating_add(narrow_token_count(*tokens));
         }
     }
     for (model_id, usage) in &usage_metadata.byok_token_usage {
@@ -115,16 +140,43 @@ fn footer_model_token_usage(
                 model_id: model_id.clone(),
                 ..Default::default()
             });
-        entry.byok_tokens += usage.total_tokens;
+        entry.byok_tokens = entry
+            .byok_tokens
+            .saturating_add(narrow_token_count(usage.total_tokens));
         for (category, tokens) in &usage.token_usage_by_category {
-            *entry
+            let category_tokens = entry
                 .byok_token_usage_by_category
                 .entry(category.clone())
-                .or_default() += *tokens;
+                .or_default();
+            *category_tokens = category_tokens.saturating_add(narrow_token_count(*tokens));
         }
     }
 
-    standard_usage.into_values().collect()
+    let mut custom_usage: HashMap<String, ModelTokenUsage> = HashMap::new();
+    for (config_key, usage) in &usage_metadata.custom_endpoint_token_usage {
+        let label = llm_preferences.custom_endpoint_usage_display_label(config_key);
+        let entry = custom_usage
+            .entry(config_key.clone())
+            .or_insert_with(|| ModelTokenUsage {
+                model_id: label,
+                ..Default::default()
+            });
+        entry.custom_endpoint_tokens = entry
+            .custom_endpoint_tokens
+            .saturating_add(narrow_token_count(usage.total_tokens));
+        for (category, tokens) in &usage.token_usage_by_category {
+            let category_tokens = entry
+                .custom_endpoint_token_usage_by_category
+                .entry(category.clone())
+                .or_default();
+            *category_tokens = category_tokens.saturating_add(narrow_token_count(*tokens));
+        }
+    }
+
+    standard_usage
+        .into_values()
+        .chain(custom_usage.into_values())
+        .collect()
 }
 
 /// Conversation usage totals for compact displays (the usage footer's entry
@@ -2170,6 +2222,7 @@ impl AIConversation {
         token_usage: Vec<TokenUsage>,
         usage_metadata: Option<stream_finished::ConversationUsageMetadata>,
         was_user_initiated_request: bool,
+        ctx: &AppContext,
     ) -> Result<(), UpdateConversationError> {
         for usage in token_usage.into_iter() {
             let entry = self
@@ -2236,8 +2289,9 @@ impl AIConversation {
                 .total_charges
                 .as_ref()
                 .map(ChargedUsageTotals::from);
+            let llm_preferences = LLMPreferences::as_ref(ctx);
             self.conversation_usage_metadata.token_usage =
-                footer_model_token_usage(&usage_metadata);
+                footer_model_token_usage(&usage_metadata, llm_preferences);
 
             self.conversation_usage_metadata.tool_usage_metadata = usage_metadata
                 .tool_usage_metadata
