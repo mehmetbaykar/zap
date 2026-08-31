@@ -354,6 +354,9 @@ impl AgentDriver {
         let mut env_vars = HashMap::with_capacity(secrets.len() + 1);
         for (name, secret) in &secrets {
             let (env_name, env_value) = match secret {
+                // A registry credential authenticates an image pull, not the agent process, and
+                // is never injected into the terminal session.
+                ManagedSecretValue::DockerRegistry { .. } => continue,
                 ManagedSecretValue::RawValue { value } => (name.as_str(), value.as_str()),
                 ManagedSecretValue::AnthropicApiKey { api_key } => {
                     ("ANTHROPIC_API_KEY", api_key.as_str())

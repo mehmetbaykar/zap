@@ -11349,6 +11349,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "regex_dfas"
+version = "0.0.0"
+dependencies = [
+ "regex",
+ "regex-automata",
+]
+
+[[package]]
 name = "remote_server"
 version = "0.1.0"
 dependencies = [
@@ -12193,6 +12201,22 @@ dependencies = [
  "serde",
  "sha2 0.10.9",
  "zbus 5.9.0",
+]
+
+[[package]]
+name = "secret_redaction"
+version = "0.0.0"
+dependencies = [
+ "itertools 0.14.0",
+ "lazy_static",
+ "log",
+ "parking_lot",
+ "regex",
+ "regex-automata",
+ "regex_dfas",
+ "string-offset",
+ "warp_core",
+ "warp_errors",
 ]
 
 [[package]]
@@ -15266,6 +15290,7 @@ dependencies = [
  "rustc-hash 2.1.1",
  "rustls",
  "schemars 1.0.4",
+ "secret_redaction",
  "security-framework-sys",
  "serde",
  "serde-bytes-repr",
@@ -15859,6 +15884,8 @@ dependencies = [
  "rangemap",
  "regex",
  "regex-automata",
+ "regex_dfas",
+ "secret_redaction",
  "serde",
  "serde_json",
  "serial_test",

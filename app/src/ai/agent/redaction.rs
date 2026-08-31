@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use super::super::blocklist::block::secret_redaction::{
-    SECRET_REDACTION_REPLACEMENT_CHARACTER, find_secrets_in_text,
-};
+pub(crate) use secret_redaction::redact_secrets;
+
 use crate::ai::agent::{
     AIAgentActionResultType, AIAgentAttachment, AIAgentContext, AIAgentInput, AnyFileContent,
     AskUserQuestionAnswerItem, AskUserQuestionResult, BlockContext, PassiveSuggestionResultType,
@@ -18,21 +17,6 @@ pub(crate) fn redact_running_command(rc: &mut RunningCommand) {
     redact_secrets(&mut rc.command);
     redact_secrets(&mut rc.grid_contents);
     redact_secrets(&mut rc.cursor);
-}
-
-/// Redact all detected secrets in-place within the given string.
-pub(crate) fn redact_secrets(input: &mut String) {
-    let mut secrets: Vec<_> = find_secrets_in_text(input)
-        .into_iter()
-        .map(|r| r.byte_range)
-        .collect();
-    // Replace from the end to preserve indices
-    secrets.sort_by_key(|range| range.start);
-    for range in secrets.into_iter().rev() {
-        let replacement =
-            SECRET_REDACTION_REPLACEMENT_CHARACTER.repeat(range.end.saturating_sub(range.start));
-        input.replace_range(range.start..range.end, &replacement);
-    }
 }
 
 /// Redact secrets in-place for all user-provided text fields inside the inputs that will be

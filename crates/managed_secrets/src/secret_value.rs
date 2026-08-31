@@ -9,6 +9,7 @@ pub enum ManagedSecretType {
     AnthropicBedrockAccessKey,
     AnthropicBedrockApiKey,
     Dotenvx,
+    DockerRegistry,
     RawValue,
 }
 
@@ -21,6 +22,7 @@ impl ManagedSecretType {
             ManagedSecretType::AnthropicBedrockAccessKey => "anthropic_bedrock_access_key",
             ManagedSecretType::AnthropicBedrockApiKey => "anthropic_bedrock_api_key",
             ManagedSecretType::Dotenvx => "dotenvx",
+            ManagedSecretType::DockerRegistry => "docker_registry",
             ManagedSecretType::RawValue => "raw_value",
         }
     }
@@ -69,6 +71,11 @@ pub enum ManagedSecretValue {
         #[serde(skip_serializing_if = "Option::is_none")]
         base_url: Option<String>,
     },
+    DockerRegistry {
+        registry_host: String,
+        username: String,
+        password: String,
+    },
 }
 
 impl ManagedSecretValue {
@@ -111,6 +118,19 @@ impl ManagedSecretValue {
         Self::OpenaiApiKey {
             api_key: api_key.into(),
             base_url,
+        }
+    }
+
+    /// Construct a container registry credential secret value.
+    pub fn docker_registry(
+        registry_host: impl Into<String>,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
+        Self::DockerRegistry {
+            registry_host: registry_host.into(),
+            username: username.into(),
+            password: password.into(),
         }
     }
 
@@ -166,6 +186,12 @@ impl ManagedSecretValue {
                 // base_url goes to a config file, not an env var argument.
                 check(ENV_VAR_OPENAI_API_KEY, api_key)
             }
+            ManagedSecretValue::DockerRegistry { .. } => {
+                // Never injected as an environment variable - it authenticates an image
+                // pull, not the agent process - so the MAX_ARG_STRLEN concern this
+                // function exists for does not apply.
+                Ok(())
+            }
         }
     }
 
@@ -180,6 +206,7 @@ impl ManagedSecretValue {
                 ManagedSecretType::AnthropicBedrockApiKey
             }
             ManagedSecretValue::OpenaiApiKey { .. } => ManagedSecretType::OpenaiApiKey,
+            ManagedSecretValue::DockerRegistry { .. } => ManagedSecretType::DockerRegistry,
         }
     }
 }
@@ -201,6 +228,9 @@ impl fmt::Debug for ManagedSecretValue {
                 .finish_non_exhaustive(),
             ManagedSecretValue::OpenaiApiKey { .. } => f
                 .debug_struct("ManagedSecret::OpenaiApiKey")
+                .finish_non_exhaustive(),
+            ManagedSecretValue::DockerRegistry { .. } => f
+                .debug_struct("ManagedSecret::DockerRegistry")
                 .finish_non_exhaustive(),
         }
     }
