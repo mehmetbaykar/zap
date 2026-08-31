@@ -1939,6 +1939,43 @@ pub enum TelemetryEvent {
         is_intelligent_autosuggestions_enabled: bool,
     },
 
+    /// Emitted when the user toggles global AI.
+    ToggleGlobalAI {
+        is_ai_enabled: bool,
+    },
+
+    /// Emitted when the user clicks "Connect SuperGrok subscription" (or
+    /// equivalent) in the AI settings page to begin the OAuth connection flow.
+    ///
+    /// This is emitted at the start of the attempt (immediately on click),
+    /// before binding the loopback callback server or opening the browser.
+    /// It is always followed by a `SuperGrokSubscriptionConnectFinished`
+    /// (success, cancellation, or a short stable error code on failure).
+    SuperGrokSubscriptionConnectInitiated,
+
+    /// Outcome (success, cancellation, or failure) of the user attempting to
+    /// connect their SuperGrok / xAI subscription via the OAuth flow in AI
+    /// settings.
+    ///
+    /// On failure or cancellation, `error` contains a short stable error
+    /// *code* (e.g. "bind_failed", "oauth_failed", "cancelled"). The full
+    /// error chain/body is emitted via `safe_error!` at the call site (only
+    /// the code goes into telemetry).
+    SuperGrokSubscriptionConnectFinished {
+        /// Short stable error code on failure or cancellation (e.g.
+        /// "bind_failed", "cancelled"); absent on success.
+        error: Option<String>,
+    },
+
+    /// Emitted when the user toggles codebase context.
+    ToggleCodebaseContext {
+        is_codebase_context_enabled: bool,
+    },
+
+    ToggleAutoIndexing {
+        is_autoindexing_enabled: bool,
+    },
+
     /// Emitted when the user toggles active AI.
     ToggleActiveAI {
         is_active_ai_enabled: bool,
@@ -4201,6 +4238,23 @@ impl TelemetryEvent {
             TelemetryEvent::QueuedPromptPanelCollapseToggled { collapsed } => Some(json!({
                 "collapsed": collapsed,
             })),
+            TelemetryEvent::ToggleGlobalAI { is_ai_enabled } => {
+                Some(json!({"is_ai_enabled": is_ai_enabled}))
+            }
+            TelemetryEvent::SuperGrokSubscriptionConnectInitiated => None,
+            TelemetryEvent::SuperGrokSubscriptionConnectFinished { error } => {
+                Some(json!({ "error": error }))
+            }
+            TelemetryEvent::ToggleCodebaseContext {
+                is_codebase_context_enabled,
+            } => Some(json!({
+                "is_codebase_context_enabled": is_codebase_context_enabled
+            })),
+            TelemetryEvent::ToggleAutoIndexing {
+                is_autoindexing_enabled,
+            } => Some(json!({
+                "is_autoindexing_enabled": is_autoindexing_enabled
+            })),
         }
     }
 
@@ -4626,6 +4680,11 @@ impl TelemetryEvent {
             | TelemetryEvent::AutoupdateMutexTimeout
             | TelemetryEvent::AutoupdateForcekillFailed { .. }
             | TelemetryEvent::AutoupdateMinidumpCleanupFailed { .. } => false,
+            TelemetryEvent::ToggleGlobalAI { .. }
+            | TelemetryEvent::SuperGrokSubscriptionConnectInitiated
+            | TelemetryEvent::SuperGrokSubscriptionConnectFinished { .. }
+            | TelemetryEvent::ToggleCodebaseContext { .. }
+            | TelemetryEvent::ToggleAutoIndexing { .. } => false,
         }
     }
 }
