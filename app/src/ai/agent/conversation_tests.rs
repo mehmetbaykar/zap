@@ -20,7 +20,6 @@ use super::{
     TaskId,
     artifact_from_fork_proto,
     footer_model_token_usage,
-    ConversationUsageTotals,
 };
 use crate::ai::artifacts::Artifact;
 use crate::ai::blocklist::SerializedBlockListItem;
