@@ -1,3 +1,4 @@
+use serde::Serialize;
 use warp_managed_secrets::{ManagedSecretValue, UploadKey, init_envelope};
 use wasm_bindgen::prelude::*;
 
