@@ -330,7 +330,7 @@ impl InBandCommandExecutor {
                 let in_band_command = match shell.shell_type() {
                     ShellType::PowerShell => {
                         format!(
-                            "Zap-Run-GeneratorCommand {id} '{escaped_command}' -ErrorAction Ignore"
+                            "Warp-Run-GeneratorCommand {id} '{escaped_command}' -ErrorAction Ignore"
                         )
                     }
                     ShellType::Fish => {
@@ -384,7 +384,7 @@ impl CommandExecutor for InBandCommandExecutor {
     /// the `pty_controller` passed to this executor during construction.
     ///
     /// The given `command` is executed in the active session using the
-    /// `warp_run_generator_command`/`Zap-Run-GeneratorCommand` shell script API that is declared as
+    /// `warp_run_generator_command`/`Warp-Run-GeneratorCommand` shell script API that is declared as
     /// part of Zap's bootstrap script.
     ///
     /// Internally, `command` is added to a queue of commands to be executed serially (this is to
@@ -443,8 +443,8 @@ impl CommandExecutor for InBandCommandExecutor {
 /// fish's command history.  Thus we strip leading whitespace before matching the `command`.
 pub fn is_in_band_command(command: &str) -> bool {
     let trimmed = command.trim_start();
-    trimmed.starts_with("Zap-Run-GeneratorCommand ")
-        || trimmed.starts_with("warp_run_generator_command ")
+    trimmed.starts_with("Warp-Run-GeneratorCommand")
+        || trimmed.starts_with("warp_run_generator_command")
 }
 
 #[cfg(test)]
