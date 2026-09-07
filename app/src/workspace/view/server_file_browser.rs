@@ -4607,7 +4607,7 @@ async fn download_file_with_progress(
     Ok(())
 }
 
-async fn delete_remote_path(
+pub(crate) async fn delete_remote_path(
     client: Option<Arc<RemoteServerClient>>,
     session: Option<Arc<Session>>,
     remote_session_id: Option<SessionId>,

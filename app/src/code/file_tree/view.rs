@@ -2401,9 +2401,15 @@ impl FileTreeView {
 
         if is_remote {
             // Remote file trees only support a limited set of actions:
-            // copying paths and attaching as context. File opening,
-            // creation, rename, delete, cd, and reveal are unavailable
-            // because there is no local filesystem or editor support.
+            // copying paths, attaching as context and (Zap) deleting through
+            // the remote server. File opening, creation, rename, cd, and
+            // reveal are unavailable because there is no local filesystem or
+            // editor support.
+            items.push(
+                MenuItemFields::new(crate::t!("menu-filetree-delete"))
+                    .with_on_select_action(FileTreeAction::Delete { id: id.clone() })
+                    .into_item(),
+            );
         } else {
             match item {
                 FileTreeItem::File { .. } => {
@@ -2676,6 +2682,103 @@ impl FileTreeView {
 
             ctx.notify();
         }
+    }
+
+    /// Zap: asks for confirmation before deleting a remote file tree item. Upstream
+    /// keeps remote trees read-only; the SSH file browser already deletes through
+    /// the remote server, so this reuses that path.
+    #[cfg(feature = "local_fs")]
+    fn confirm_delete_remote_item(
+        &mut self,
+        id: &FileTreeIdentifier,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        use warpui::modals::{AlertDialogWithCallbacks, ModalButton};
+
+        let Some(root_dir) = self.root_directories.get(&id.root) else {
+            return;
+        };
+        let Some(item) = root_dir.items.get(id.index) else {
+            return;
+        };
+        if root_dir.remote_host_id.is_none() {
+            return;
+        }
+        let is_directory = matches!(item, FileTreeItem::DirectoryHeader { .. });
+        let path = item.path().clone();
+        let root_path = id.root.clone();
+        let name = path
+            .file_name()
+            .map(|name| name.to_string())
+            .unwrap_or_else(|| path.to_string());
+        let info = if is_directory {
+            crate::t!("server-file-browser-delete-info-directory")
+        } else {
+            crate::t!("server-file-browser-delete-info-file")
+        };
+        let dialog = AlertDialogWithCallbacks::for_view(
+            crate::t!("server-file-browser-delete-title", name = name),
+            info,
+            vec![
+                ModalButton::for_view(
+                    crate::t!("common-delete"),
+                    move |me: &mut FileTreeView, ctx| {
+                        me.delete_remote_item(root_path.clone(), path.clone(), is_directory, ctx);
+                    },
+                ),
+                ModalButton::for_view(crate::t!("common-cancel"), |_: &mut FileTreeView, _| {}),
+            ],
+            |_, _| {},
+        );
+        ctx.show_native_platform_modal(dialog);
+    }
+
+    /// Zap: deletes `path` on the remote host owning `root_path`, then drops the
+    /// item locally and re-lists its parent directory.
+    #[cfg(feature = "local_fs")]
+    fn delete_remote_item(
+        &mut self,
+        root_path: StandardizedPath,
+        path: StandardizedPath,
+        is_directory: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        use crate::remote_server::manager::RemoteServerManager;
+        use crate::workspace::view::server_file_browser::delete_remote_path;
+
+        let Some(host_id) = self
+            .root_directories
+            .get(&root_path)
+            .and_then(|root_dir| root_dir.remote_host_id.clone())
+        else {
+            return;
+        };
+        let mgr = RemoteServerManager::as_ref(ctx);
+        let client = mgr.client_for_host(&host_id).cloned();
+        let remote_session_id = mgr.find_connected_session(&host_id);
+        if client.is_none() && remote_session_id.is_none() {
+            log::warn!("delete_remote_item: no connected remote server for host {host_id}");
+            return;
+        }
+        let remote_path = path.to_string();
+        let parent = path.parent();
+        ctx.spawn(
+            async move {
+                delete_remote_path(client, None, remote_session_id, remote_path, is_directory).await
+            },
+            move |me, result, ctx| match result {
+                Ok(()) => {
+                    me.rebuild_flattened_items_without(&path);
+                    if let Some(parent) = parent {
+                        me.force_reload_remote_directory(&root_path, &parent, ctx);
+                    }
+                    ctx.notify();
+                }
+                Err(error) => {
+                    log::warn!("Failed to delete remote path {path}: {error}");
+                }
+            },
+        );
     }
 
     /// Returns an iterator over the displayed root directories and their associated data.
@@ -3230,7 +3333,10 @@ impl TypedActionView for FileTreeView {
                 self.context_menu_state.take();
             }
             FileTreeAction::Delete { id } => {
-                if !self.is_remote_item(id) {
+                if self.is_remote_item(id) {
+                    #[cfg(feature = "local_fs")]
+                    self.confirm_delete_remote_item(id, ctx);
+                } else {
                     self.delete_item(id, ctx);
                 }
                 self.context_menu_state.take();
