@@ -290,6 +290,7 @@ use crate::terminal::universal_developer_input::AtContextMenuDisabledReason;
 use crate::terminal::view::CodeDiffAction;
 use crate::terminal::view::ambient_agent::{HarnessSelector, HostSelector, NakedHeaderButtonTheme};
 use crate::terminal::view::inline_banner::PromptSuggestionsView;
+use crate::terminal::view::init::{CAN_ATTACH_FILE_KEY, CLI_AGENT_SESSION_ACTIVE_KEY};
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
 use crate::user_config::WarpConfig;
@@ -5530,6 +5531,14 @@ impl Input {
         if did_start_listening {
             self.focus_input_box(ctx);
         }
+    }
+
+    pub(crate) fn attach_file(&mut self, ctx: &mut ViewContext<Self>) {
+        // Zap: route through the footer's own SelectFile action, which already handles both
+        // the CLI-agent file picker and the agent-mode attachment flow.
+        let window_id = ctx.window_id();
+        let footer_id = self.agent_input_footer.id();
+        ctx.dispatch_typed_action_for_view(window_id, footer_id, &crate::ai::blocklist::agent_view::agent_input_footer::AgentInputFooterAction::SelectFile);
     }
 
     fn select_image(&mut self, ctx: &mut ViewContext<Self>) {
@@ -14674,6 +14683,13 @@ impl View for Input {
             }
         }
 
+        if CLIAgentSessionsModel::as_ref(app)
+            .session(self.terminal_view_id)
+            .is_some()
+        {
+            ctx.set.insert(CLI_AGENT_SESSION_ACTIVE_KEY);
+        }
+
         if self.buffer_text(app).is_empty() {
             ctx.set.insert(flags::EMPTY_INPUT_BUFFER);
         }
@@ -14763,6 +14779,20 @@ impl View for Input {
         let model_lock = self.model.lock();
         ctx.set
             .insert(model_lock.shared_session_status().as_keymap_context());
+        // Zap: attach-file availability mirrors TerminalView::can_attach_file -- an active
+        // agent view or CLI-agent session, with no shared-session/cloud-viewer gating.
+        {
+            let agent_view_state = self.agent_view_controller.as_ref(app).agent_view_state();
+            let cli_agent_session_active = CLIAgentSessionsModel::as_ref(app)
+                .session(self.terminal_view_id)
+                .is_some();
+            if agent_view_state.is_fullscreen()
+                || agent_view_state.is_inline()
+                || cli_agent_session_active
+            {
+                ctx.set.insert(CAN_ATTACH_FILE_KEY);
+            }
+        }
 
         if model_lock
             .block_list()

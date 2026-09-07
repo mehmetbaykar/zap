@@ -15400,7 +15400,7 @@ dependencies = [
 [[package]]
 name = "warp-command-signatures"
 version = "0.0.0"
-source = "git+https://github.com/warpdotdev/command-signatures.git?rev=1776eb16fb911ee34e95b65c909c6faa3d5a8bb6#1776eb16fb911ee34e95b65c909c6faa3d5a8bb6"
+source = "git+https://github.com/warpdotdev/command-signatures.git?rev=6a39d62048abbf3885be54a7887f1916ebcf7445#6a39d62048abbf3885be54a7887f1916ebcf7445"
 dependencies = [
  "cfg-if",
  "itertools 0.10.5",
@@ -15418,7 +15418,7 @@ dependencies = [
 [[package]]
 name = "warp-completion-metadata"
 version = "0.0.0"
-source = "git+https://github.com/warpdotdev/command-signatures.git?rev=1776eb16fb911ee34e95b65c909c6faa3d5a8bb6#1776eb16fb911ee34e95b65c909c6faa3d5a8bb6"
+source = "git+https://github.com/warpdotdev/command-signatures.git?rev=6a39d62048abbf3885be54a7887f1916ebcf7445#6a39d62048abbf3885be54a7887f1916ebcf7445"
 dependencies = [
  "html-escape",
  "itertools 0.10.5",

@@ -335,6 +335,7 @@ pub enum TerminalAction {
     OpenAttachmentLightbox {
         index: usize,
     },
+    AttachFile,
     ToggleAutoexecuteMode,
     ToggleQueueNextPrompt,
     AgentModeSetupSpeedbumpBanner(AgentModeSetupSpeedbumpBannerAction),
@@ -636,6 +637,7 @@ impl fmt::Debug for TerminalAction {
             OpenAttachmentLightbox { index } => {
                 write!(f, "OpenAttachmentLightbox({index:?})")
             }
+            AttachFile => write!(f, "AttachFile"),
             ToggleAutoexecuteMode => write!(f, "ToggleAutoexecuteMode"),
             ToggleQueueNextPrompt => write!(f, "ToggleQueueNextPrompt"),
             AgentModeSetupSpeedbumpBanner(action) => {
