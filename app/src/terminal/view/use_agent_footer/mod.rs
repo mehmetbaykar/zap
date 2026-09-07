@@ -770,6 +770,68 @@ impl TerminalView {
         self.write_cli_agent_text_then_submit(text_bytes, strategy, ctx);
     }
 
+    /// Sends a raw Enter (`\r`) directly to the active CLI agent's PTY,
+    /// bypassing the rich-input submission pipeline used by
+    /// [`Self::submit_text_to_cli_agent_pty`] (which no-ops on empty text).
+    ///
+    /// Used by harness exit escalation to retry a bare Enter without
+    /// composing input text — e.g. to dismiss a confirmation dialog, or in
+    /// case a prior write to the pty was silently dropped. Returns without
+    /// writing if there is no active CLI agent session.
+    #[cfg(feature = "local_tty")]
+    pub(crate) fn submit_bare_enter_to_cli_agent_pty(&mut self, ctx: &mut ViewContext<Self>) {
+        if CLIAgentSessionsModel::as_ref(ctx)
+            .session(self.view_id)
+            .is_none()
+        {
+            return;
+        }
+        self.write_user_bytes_to_pty(b"\r".to_vec(), ctx);
+    }
+
+    /// Inserts `text` into the active CLI agent's input without submitting it.
+    ///
+    /// Voice transcription uses this when rich input is closed. Agents that
+    /// require bracketed paste receive one complete paste payload so embedded
+    /// newlines are inserted rather than interpreted as separate submissions.
+    fn insert_text_into_cli_agent_pty(&mut self, text: &str, ctx: &mut ViewContext<Self>) {
+        let Some(agent) = CLIAgentSessionsModel::as_ref(ctx)
+            .session(self.view_id)
+            .map(|s| s.agent)
+        else {
+            return;
+        };
+
+        if text.is_empty() {
+            return;
+        }
+
+        self.write_cli_agent_text(text.as_bytes(), rich_input_submit_strategy(agent), ctx);
+    }
+
+    fn write_cli_agent_text(
+        &mut self,
+        text_bytes: &[u8],
+        strategy: RichInputSubmitStrategy,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let bytes = match strategy {
+            RichInputSubmitStrategy::BracketedPaste
+            | RichInputSubmitStrategy::BracketedPasteDelayedEnter => {
+                let mut bytes = Vec::with_capacity(
+                    BRACKETED_PASTE_START.len() + text_bytes.len() + BRACKETED_PASTE_END.len(),
+                );
+                bytes.extend_from_slice(BRACKETED_PASTE_START);
+                bytes.extend_from_slice(text_bytes);
+                bytes.extend_from_slice(BRACKETED_PASTE_END);
+                bytes
+            }
+            RichInputSubmitStrategy::Inline | RichInputSubmitStrategy::DelayedEnter => {
+                text_bytes.to_vec()
+            }
+        };
+        self.write_user_bytes_to_pty(bytes, ctx);
+    }
     /// Simulates clipboard image paste for each pending image attachment by
     /// writing the image to the system clipboard and sending Ctrl+V to the PTY.
     /// After all images are pasted, the text prompt is sent via the normal
