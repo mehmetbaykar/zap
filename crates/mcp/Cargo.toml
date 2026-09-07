@@ -11,6 +11,7 @@ async-channel.workspace = true
 async-trait.workspace = true
 cfg-if.workspace = true
 futures.workspace = true
+handlebars.workspace = true
 http = "1"
 log.workspace = true
 oauth2.workspace = true

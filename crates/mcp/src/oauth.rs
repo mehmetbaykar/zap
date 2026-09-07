@@ -274,6 +274,10 @@ pub async fn make_authenticated_client(
                  in the Zap desktop app first."
             );
         }
+        // Naming the alternatives matters more than it looks: a cloud agent
+        // often runs somewhere its operator cannot open a browser against, so
+        // "authenticate in the desktop app" is not always a remedy they can
+        // act on.
         return Err(AuthError::AuthorizationFailed(
             "MCP server requires OAuth authentication. Please authenticate this server in the \
              Zap desktop app first, then try again."

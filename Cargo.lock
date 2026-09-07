@@ -8191,6 +8191,7 @@ dependencies = [
  "axum",
  "cfg-if",
  "futures",
+ "handlebars",
  "http 1.4.0",
  "log",
  "oauth2",
