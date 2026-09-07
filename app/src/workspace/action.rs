@@ -131,25 +131,14 @@ pub enum WorkspaceAction {
     RenamePane(PaneViewLocator),
     ResetPaneName(PaneViewLocator),
     RenameActiveTab,
-    /// Renames the focused pane in the active tab. Mirrors `RenameActiveTab`
-    /// so the action is reachable from the binding registry / Command Palette
-    /// (see #9351). The context-menu path keeps using `RenamePane(locator)`.
     RenameActivePane,
     SetActiveTabName(String),
     CycleActiveTabColor,
-    /// Sets the manual color override for the active tab.
-    ///
-    /// - `Color(_)` — apply that color.
-    /// - `Cleared` — explicitly clear (suppresses any directory default).
-    /// - `Unset` — remove the manual override (lets the directory default apply, if any).
     SetActiveTabColor(SelectedTabColor),
     ToggleTabRightClickMenu {
         tab_index: usize,
         anchor: TabContextMenuAnchor,
     },
-    /// Toggles the multi-tab selection right-click menu.
-    /// Dispatched by the UI when the right-clicked tab is part of a multi-tab
-    /// selection (cmd-click or shift-click).
     ToggleTabSelectionRightClickMenu {
         tab_index: usize,
         anchor: TabContextMenuAnchor,
@@ -177,9 +166,6 @@ pub enum WorkspaceAction {
     ToggleTabGroupCollapsed(TabGroupId),
     /// Opens an inline editor over the given group's header for renaming.
     RenameTabGroup(TabGroupId),
-    /// Cancels any active rename (tab, pane, or group) without committing the
-    /// new name. Dispatched when clicking on the vtab panel background while a
-    /// rename editor is open.
     CancelActiveRename,
     /// Creates a new tab group containing the tab at the given index.
     NewTabGroupFromTab(usize),
@@ -200,8 +186,7 @@ pub enum WorkspaceAction {
     ToggleTabMultiSelection {
         locator: PaneViewLocator,
     },
-    /// Clears the tab multi-selection. Dispatched from the UI when the user takes
-    /// an action that should cancel any active selections.
+    /// Clears the tab multi-selection.
     ClearTabMultiSelection,
     /// Creates a new tab group from the current tab multi-selection.
     NewTabGroupFromSelectedTabs,
@@ -344,8 +329,6 @@ pub enum WorkspaceAction {
         color: AnsiColorIdentifier,
         tab_index: usize,
     },
-    /// Toggles the color for a tab group. Clears the color if it was already
-    /// set to `color`; otherwise applies `color` as the uniform group color.
     ToggleTabGroupColor {
         color: AnsiColorIdentifier,
         group_id: TabGroupId,
@@ -359,6 +342,7 @@ pub enum WorkspaceAction {
     ClickedAIAssistantIcon,
     ToggleKeybindingsPage,
     ShowCommandSearch(CommandSearchOptions),
+    TriggerExternalCtrlTFileSearch,
     CreatePersonalNotebook,
     ImportToPersonalDrive,
     CreatePersonalWorkflow,
@@ -939,6 +923,7 @@ impl WorkspaceAction {
             | ToggleAIAssistant
             | ToggleKeybindingsPage
             | ShowCommandSearch(_)
+            | TriggerExternalCtrlTFileSearch
             | ToggleMouseReporting
             | ToggleScrollReporting
             | ToggleFocusReporting

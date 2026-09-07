@@ -345,6 +345,7 @@ use crate::terminal::ligature_settings::should_use_ligature_rendering;
 #[cfg(feature = "local_tty")]
 use crate::terminal::local_tty::docker_sandbox::resolve_sbx_path_from_user_shell;
 use crate::terminal::model::blockgrid::BlockGrid;
+use crate::terminal::model::escape_sequences::C0;
 #[cfg(feature = "local_fs")]
 use crate::terminal::model::session::Session;
 use crate::terminal::model::session::SessionId;
@@ -4050,7 +4051,6 @@ impl Workspace {
     }
 
     /// Returns the type of simplified WASM tab bar content to display, if any.
-    /// Used to determine whether to show the simplified tab bar layout on WASM.
     #[cfg(target_family = "wasm")]
     fn get_simplified_wasm_tab_bar_content(
         &self,
@@ -4058,21 +4058,34 @@ impl Workspace {
     ) -> Option<SimplifiedWasmTabBarContent> {
         let pane_group = self.active_tab_pane_group().as_ref(ctx);
 
-        // Check if focused pane is a terminal with special state
         if let Some(terminal_view) = pane_group.focused_session_view(ctx) {
-            let model = terminal_view.as_ref(ctx).model.lock();
+            let view = terminal_view.as_ref(ctx);
+            let (is_transcript_viewer, is_sharer_or_viewer, model_task_id) = {
+                let model = view.model.lock();
+                (
+                    model.is_conversation_transcript_viewer(),
+                    model.shared_session_status().is_sharer_or_viewer(),
+                    model.ambient_agent_task_id(),
+                )
+            };
 
-            // Conversation transcript viewer takes priority
-            if model.is_conversation_transcript_viewer() {
+            if is_transcript_viewer {
                 return Some(SimplifiedWasmTabBarContent::ConversationTranscript {
-                    task_id: model.ambient_agent_task_id(),
+                    task_id: model_task_id,
                 });
             }
 
-            // Check for shared session (viewer or writer)
-            if model.shared_session_status().is_sharer_or_viewer() {
+            if is_sharer_or_viewer {
                 return Some(SimplifiedWasmTabBarContent::SharedSession {
-                    task_id: model.ambient_agent_task_id(),
+                    task_id: model_task_id,
+                });
+            }
+
+            // Owned HandoffCloudCloud restores leave NotShared without transcript-viewer
+            // status; deep-linked WASM workspaces still need the web conversation chrome.
+            if self.opened_from_content_deep_link {
+                return Some(SimplifiedWasmTabBarContent::ConversationTranscript {
+                    task_id: view.ambient_agent_task_id_for_details_panel(ctx),
                 });
             }
         }
@@ -15579,6 +15592,15 @@ impl Workspace {
             return;
         }
 
+        if query_filter.is_none()
+            && let Some(terminal_view_handle) = self.active_session_view(ctx)
+            && terminal_view_handle.update(ctx, |terminal_view, ctx| {
+                terminal_view.maybe_trigger_external_ctrl_r_history_search(ctx)
+            })
+        {
+            return;
+        }
+
         // Close all overlays including chip menus before opening command search
         self.close_all_overlays(ctx);
 
@@ -15653,6 +15675,21 @@ impl Workspace {
             ctx.focus(&self.command_search_view);
         } else {
             report_error!("Command search keybinding triggered but no session is active!");
+        }
+    }
+
+    /// If the active session's shell has rebound ctrl-t to an external file-search widget
+    /// (e.g. fzf), hands the keypress off to it.
+    fn trigger_external_ctrl_t_file_search(&mut self, ctx: &mut ViewContext<Self>) {
+        if self.is_readonly_shared_session_active(ctx) {
+            return;
+        }
+        if let Some(terminal_view_handle) = self.active_session_view(ctx) {
+            terminal_view_handle.update(ctx, |terminal_view, ctx| {
+                if !terminal_view.maybe_trigger_external_ctrl_t_file_search(ctx) {
+                    terminal_view.write_user_bytes_to_pty(vec![C0::DC4], ctx);
+                }
+            });
         }
     }
 
@@ -22228,6 +22265,7 @@ impl TypedActionView for Workspace {
                 filter,
                 init_content,
             }) => self.show_command_search(*filter, init_content, ctx),
+            TriggerExternalCtrlTFileSearch => self.trigger_external_ctrl_t_file_search(ctx),
             ImportToPersonalDrive => {
                 if let Some(personal_drive) = UserWorkspaces::as_ref(ctx).personal_drive(ctx) {
                     self.open_import_modal(personal_drive, &None, ctx);
@@ -23935,7 +23973,10 @@ impl View for Workspace {
         }
 
         #[cfg(target_family = "wasm")]
-        if self.is_conversation_transcript_viewer_focused(app) {
+        if matches!(
+            self.get_simplified_wasm_tab_bar_content(app),
+            Some(SimplifiedWasmTabBarContent::ConversationTranscript { .. })
+        ) {
             context.set.insert("Workspace_CloudConversationWebViewer");
         }
 
