@@ -525,6 +525,17 @@ pub enum FeatureFlag {
     /// Enables video recording of computer-use sessions for cloud agents.
     VideoRecording,
 
+    /// Gates the Windows `gdigrab` recorder behind its own switch, on top of
+    /// [`FeatureFlag::VideoRecording`]. Windows capture is newer and less proven than the
+    /// macOS/Linux ffmpeg paths, so it rolls out and can be killed independently of them.
+    WindowsVideoRecording,
+
+    /// Enables team API key creation in the API key management UI.
+    TeamApiKeys,
+
+    /// Enables cloud conversation loading via the CLI --conversation flag.
+    CloudConversations,
+
     /// Enables the "New agent" prompt chip in terminal mode when AgentView is enabled.
     ///
     /// When disabled (the default), the terminal message bar is shown instead.
