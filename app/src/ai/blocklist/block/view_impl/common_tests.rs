@@ -111,6 +111,7 @@ fn query_context_references_only_returns_real_at_attachments() {
         user_query_mode: UserQueryMode::Normal,
         running_command: None,
         intended_agent: None,
+        base: None,
     };
 
     assert_eq!(

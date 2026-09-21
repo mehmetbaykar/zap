@@ -104,6 +104,7 @@ use regex::Regex;
 use repo_metadata::repositories::{DetectedRepositories, RepoDetectionSource};
 use serde::Serialize;
 use serde_json::json;
+use session_sharing_protocol::common::ServerConversationToken as SessionSharingServerConversationToken;
 use settings::{Setting, ToggleableSetting};
 use shared_session::{SharedSessionAdapter, Viewer};
 use ssh_file_upload::{FileUpload, FileUploadEvent};
@@ -5322,13 +5323,6 @@ impl TerminalView {
                             // while idle; reaching one here means neither applied (e.g. a prior
                             // dispatch was deferred because a CLI subagent was active), so try
                             // dispatching the head row now that this turn finished.
-                            self.ai_controller.update(ctx, |controller, ctx| {
-                                controller.dispatch_queued_warp_agent_prompt(
-                                    conversation_id,
-                                    None,
-                                    ctx,
-                                );
-                            });
                             return;
                         }
                         self.input.update(ctx, |input, ctx| {
@@ -8275,19 +8269,6 @@ impl TerminalView {
     /// interrupt) for the live conversation bound to `server_conversation_token`. The conversation
     /// is stopped the same way a local stop is, so an in-flight agent command is interrupted along
     /// with the turn rather than left running to completion.
-    #[cfg(feature = "local_tty")]
-    pub(crate) fn handle_shared_session_cancel_action(
-        &mut self,
-        server_conversation_token: SessionSharingServerConversationToken,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        let conversation_id = self.ai_controller.update(ctx, |controller, ctx| {
-            controller.conversation_for_shared_session_cancel_action(server_conversation_token, ctx)
-        });
-        if let Some(conversation_id) = conversation_id {
-            self.stop_local_agent_conversation(conversation_id, ctx);
-        }
-    }
 
     fn user_write_ctrl_c_to_pty(&mut self, ctx: &mut ViewContext<Self>) {
         self.write_user_bytes_to_pty(vec![escape_sequences::C0::ETX], ctx);
@@ -20121,6 +20102,8 @@ impl TerminalView {
     ) {
         let conversation_id = block.as_ref(ctx).conversation_id();
         match event {
+            // The per-turn request-metadata panel is not built in this fork.
+            AIBlockEvent::TurnPanelToggled { .. } => {}
             // -- Live-only events (no-op for restored blocks) ---------------------------
             AIBlockEvent::ActionBlockedOnUserConfirmation => {
                 if is_restored {

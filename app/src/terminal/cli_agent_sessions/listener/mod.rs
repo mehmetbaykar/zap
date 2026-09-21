@@ -80,7 +80,9 @@ fn create_handler(agent: &CLIAgent) -> Option<Box<dyn CLIAgentSessionHandler>> {
         | CLIAgent::Pi
         | CLIAgent::Antigravity
         | CLIAgent::OhMyPi => Some(Box::new(DefaultSessionListener)),
-        CLIAgent::Codex => Some(Box::new(CodexSessionHandler)),
+        CLIAgent::Codex | CLIAgent::Grok => {
+            Some(Box::new(Osc9FallbackSessionHandler { agent: *agent }))
+        }
         CLIAgent::DeepSeek => Some(Box::new(DeepSeekSessionHandler)),
         CLIAgent::Hermes
         | CLIAgent::Amp

@@ -3089,6 +3089,7 @@ pub fn render_failed_output(props: FailedOutputProps, app: &AppContext) -> Box<d
     }
 
     let error_text = match props.error {
+        RenderableAIError::AgentStreamFailure { .. } => ERROR_APOLOGY_TEXT.to_string(),
         RenderableAIError::QuotaLimit {
             user_display_message,
         } => {

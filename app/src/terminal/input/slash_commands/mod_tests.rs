@@ -129,6 +129,7 @@ mod gui {
                                 user_query_mode: UserQueryMode::Normal,
                                 running_command: None,
                                 intended_agent: None,
+                                base: None,
                             }],
                             output_status: AIAgentOutputStatus::Streaming { output: None },
                             added_message_ids: Default::default(),

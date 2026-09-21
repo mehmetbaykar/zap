@@ -4003,7 +4003,10 @@ impl BlocklistAIController {
                     }
                 }
             }
-            Some(warp_multi_agent_api::response_event::stream_finished::Reason::Other(_)) => {
+            Some(
+                warp_multi_agent_api::response_event::stream_finished::Reason::ChatgptSubscriptionError(_),
+            )
+            | Some(warp_multi_agent_api::response_event::stream_finished::Reason::Other(_)) => {
                 let error_message = "Response stream finished unexpectedly (with finish reason `Other`).";
                 history_model.update(ctx, |history_model, ctx| {
                     history_model.mark_response_stream_completed_with_error(
@@ -4219,6 +4222,7 @@ fn input_for_query(
         user_query_mode,
         running_command,
         intended_agent,
+        base: None,
     }
 }
 

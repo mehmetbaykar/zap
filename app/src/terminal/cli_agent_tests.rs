@@ -5,6 +5,7 @@ use chrono::Local;
 use smol_str::SmolStr;
 use warp_editor::render::model::LineCount;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
+use crate::ui_components::icons::Icon;
 use warp_util::path::EscapeChar;
 use warpui::App;
 

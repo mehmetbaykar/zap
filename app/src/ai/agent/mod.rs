@@ -2764,6 +2764,16 @@ pub enum UserQueryMode {
     Plan,
 }
 
+/// Splits a submitted query into its mode prefix and the remaining text.
+/// Upstream also recognizes `/orchestrate`; this fork has no orchestration
+/// mode, so only `/plan` is extracted.
+pub fn extract_user_query_mode(query: String) -> (String, UserQueryMode) {
+    match commands::strip_command_prefix(&query, commands::PLAN_NAME) {
+        Some(query) => (query, UserQueryMode::Plan),
+        None => (query, UserQueryMode::Normal),
+    }
+}
+
 // TODO(zachbai): Refactor this to consolidate with `LongRunningCommandSnapshot` and `Snapshot`
 // variants of `ReadShellCommandOutputResult` and `WriteToLongRunningShellCommandResult`.
 #[derive(Clone, Debug, PartialEq)]

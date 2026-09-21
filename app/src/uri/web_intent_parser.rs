@@ -127,7 +127,7 @@ impl WebIntent {
     pub fn is_conversation_or_session_view(url: &Url) -> bool {
         matches!(
             Self::try_from_url(url),
-            Ok(WebIntent::ConversationView(_) | WebIntent::SessionView(_))
+            Ok(WebIntent::ConversationView(_))
         )
     }
 }

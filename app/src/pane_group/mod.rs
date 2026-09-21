@@ -2685,8 +2685,6 @@ impl PaneGroup {
                 // Undo-close retains views and their conversations after their panes detach.
                 self.find_pane_id_for_terminal_view(*terminal_view_id, ctx)
                     .is_some_and(|pane_id| !self.is_pane_hidden_for_close(pane_id))
-                    || ActiveAgentViewsModel::as_ref(ctx)
-                        .is_terminal_view_attached(*terminal_view_id, ctx)
             })
     }
 
@@ -6179,23 +6177,6 @@ impl PaneGroup {
     pub fn reattach_panes(&mut self, ctx: &mut ViewContext<Self>) {
         for pane in self.pane_contents.values() {
             self.attach_pane(pane.as_ref(), ctx);
-        }
-    }
-
-    fn remove_transferred_child_agent_panes(&mut self, ctx: &mut ViewContext<Self>) {
-        let transferred_children = self
-            .child_agent_panes
-            .iter()
-            .filter_map(|(conversation_id, pane_id)| {
-                let owner = BlocklistAIHistoryModel::as_ref(ctx)
-                    .terminal_surface_id_for_conversation(conversation_id)?;
-                let terminal_view = self.terminal_view_from_pane_id(*pane_id, ctx)?;
-                (owner != terminal_view.id()).then_some(*conversation_id)
-            })
-            .collect_vec();
-
-        for conversation_id in transferred_children {
-            self.discard_child_agent_pane_for_conversation(conversation_id, ctx);
         }
     }
 

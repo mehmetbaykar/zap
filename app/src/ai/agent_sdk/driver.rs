@@ -357,6 +357,7 @@ impl AgentDriver {
                 // A registry credential authenticates an image pull, not the agent process, and
                 // is never injected into the terminal session.
                 ManagedSecretValue::DockerRegistry { .. } => continue,
+                ManagedSecretValue::AwsEcrCredential { .. } => continue,
                 ManagedSecretValue::RawValue { value } => (name.as_str(), value.as_str()),
                 ManagedSecretValue::AnthropicApiKey { api_key } => {
                     ("ANTHROPIC_API_KEY", api_key.as_str())

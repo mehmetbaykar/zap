@@ -409,6 +409,7 @@ fn byop_user_query_message(
             referenced_attachments: Default::default(),
             mode: None,
             intended_agent: Default::default(),
+            ..Default::default()
         })),
         request_id: request_id.to_owned(),
         timestamp: None,

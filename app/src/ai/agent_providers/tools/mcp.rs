@@ -180,6 +180,7 @@ pub fn parse_mcp_tool_call(
             name: tool_name.to_owned(),
             args: Some(args_struct),
             server_id: server.id.clone(),
+            server_identity: Default::default(),
         },
     ))
 }
@@ -250,6 +251,7 @@ fn parse_read_resource(
         api::message::tool_call::ReadMcpResource {
             uri: parsed.uri,
             server_id,
+            server_identity: Default::default(),
         },
     ))
 }

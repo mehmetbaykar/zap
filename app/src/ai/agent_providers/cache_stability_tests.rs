@@ -154,6 +154,7 @@ fn serialize_mcp_tool_call_is_deterministic() {
                 name: "echo".to_owned(),
                 args: Some(Struct { fields }),
                 server_id: server_id.clone(),
+                server_identity: Default::default(),
             },
         )),
     };

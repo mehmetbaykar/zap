@@ -72,10 +72,6 @@ use crate::{GlobalResourceHandlesProvider, ObjectActions, experiments, workspace
 // Zap (localization, Phase 5): `PreferencesSyncer` has been physically removed.
 
 pub(crate) fn initialize_app(app: &mut App) {
-    initialize_app_with_team_client(app, Arc::new(MockTeamClient::new()));
-}
-
-pub(crate) fn initialize_app_with_team_client(app: &mut App, team_client: Arc<dyn TeamClient>) {
     initialize_settings_for_tests(app);
 
     // Add the necessary singleton models to the App

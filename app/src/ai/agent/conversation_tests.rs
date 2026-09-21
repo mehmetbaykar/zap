@@ -77,6 +77,7 @@ fn user_query_message(id: &str, request_id: &str, query: &str) -> api::Message {
             origin: None,
             author: None,
             source_message: None,
+            ..Default::default()
         })),
         request_id: request_id.to_string(),
         timestamp: None,
@@ -132,6 +133,7 @@ fn user_query_message_with_shell_context(
             referenced_attachments,
             mode: None,
             intended_agent: Default::default(),
+            ..Default::default()
         })),
         request_id: request_id.to_string(),
         timestamp: None,

@@ -1084,11 +1084,6 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
         )
     };
 
-    // A user is present for any launch with a UI, so it may query microphone authorization.
-    if !launch_mode.is_headless() {
-        app_builder.enable_windowless_microphone_access_query();
-    }
-
     // A windowless invocation has no Dock presence, so it performs no Dock-visible
     // setup at all (Dock icon, Dock menu, menu bar). See APP-2946.
     #[cfg(target_os = "macos")]

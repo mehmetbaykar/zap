@@ -17136,17 +17136,6 @@ impl Workspace {
         self.close_all_overlays(ctx);
         self.open_settings_pane(section, Some(search_query), ctx);
     }
-    fn browse_teams(&mut self, ctx: &mut ViewContext<Self>) {
-        let show_join_modal = UserWorkspaces::as_ref(ctx)
-            .team_for_window(self.window_id)
-            .is_some();
-        self.show_settings_with_section(Some(SettingsSection::Teams), ctx);
-        if show_join_modal {
-            self.settings_pane.update(ctx, |view, ctx| {
-                view.open_teams_page_join_modal(ctx);
-            });
-        }
-    }
 
     /// Opens the MCP servers settings page, optionally triggering auto-install of a gallery MCP.
     pub fn open_mcp_servers_page(
@@ -19608,10 +19597,6 @@ impl Workspace {
                 .with_margin_left(TAB_BAR_PADDING_LEFT)
                 .finish(),
             );
-        }
-
-        if let Some(pill) = self.render_team_switcher_pill(appearance, ctx) {
-            target.add_child(pill);
         }
 
         if FeatureFlag::AvatarInTabBar.is_enabled() {

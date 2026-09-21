@@ -757,6 +757,7 @@ fn build_serializer_readiness_projection(
         };
 
         match inner {
+            api::message::Message::RequestMetadata(_) => {}
             api::message::Message::UserQuery(_) => {
                 builder.push_user_boundary(msg.task_id.clone(), msg.id.clone());
             }
@@ -923,6 +924,7 @@ fn build_controller_readiness_projection(
         };
 
         match inner {
+            api::message::Message::RequestMetadata(_) => {}
             api::message::Message::UserQuery(_) => {
                 builder.push_user_boundary(msg.task_id.clone(), msg.id.clone());
             }
@@ -1335,6 +1337,7 @@ fn build_chat_request(
             continue;
         };
         match inner {
+            api::message::Message::RequestMetadata(_) => {}
             api::message::Message::UserQuery(u) => {
                 flush_assistant_buffer(&mut buf, &mut messages, &mut outbound_tool_groups);
                 // Zap: historical-turn multimodal keep-alive. warp's own path relies on the cloud server to re-inject InputContext,
@@ -6316,6 +6319,7 @@ mod serializer_readiness_tests {
             user_query_mode: UserQueryMode::default(),
             running_command: None,
             intended_agent: None,
+            base: None,
         }
     }
 

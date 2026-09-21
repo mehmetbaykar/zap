@@ -13,6 +13,7 @@ use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp_cli::agent::Harness;
+use warp_multi_agent_api::RequestCharges;
 use warp_multi_agent_api::client_action::{Action, StartNewConversation};
 use warp_multi_agent_api::message::tool_call::Tool;
 use warp_multi_agent_api::response_event::stream_finished::{
@@ -3348,6 +3349,7 @@ fn byop_result_message_ids_by_tool_call_key(
         let mut active_saw_tool_result = false;
         for message in &task.messages {
             match message.message.as_ref() {
+                Some(warp_multi_agent_api::message::Message::RequestMetadata(_)) => continue,
                 Some(warp_multi_agent_api::message::Message::ToolCall(tool_call)) => {
                     if tool_call.subagent().is_some() {
                         continue;
@@ -3440,6 +3442,7 @@ fn byop_tool_call_keys_by_message_id(
         let mut pending_assistant_message_id: Option<String> = None;
         for message in &task.messages {
             match message.message.as_ref() {
+                Some(warp_multi_agent_api::message::Message::RequestMetadata(_)) => continue,
                 Some(warp_multi_agent_api::message::Message::ToolCall(tool_call)) => {
                     if tool_call.subagent().is_some() {
                         continue;

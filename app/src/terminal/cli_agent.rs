@@ -123,6 +123,14 @@ const DEEPSEEK_COLOR: ColorU = ColorU {
     a: 255,
 };
 
+/// Grok / SpaceXAI brand color (near-black, monochrome logomark on circular tile)
+const GROK_COLOR: ColorU = ColorU {
+    r: 16,
+    g: 16,
+    b: 16,
+    a: 255,
+};
+
 /// Antigravity brand color (#7C3AED, purple from official banner accent)
 const ANTIGRAVITY_PURPLE: ColorU = ColorU {
     r: 0x7C,
@@ -165,6 +173,7 @@ pub enum CLIAgent {
     Goose,
     DeepSeek,
     Antigravity,
+    Grok,
     Hermes,
     Vibe,
     /// Represents an unknown/custom CLI agent matched by user-configured regex patterns.
@@ -189,6 +198,7 @@ impl CLIAgent {
             CLIAgent::Goose => "goose",
             CLIAgent::DeepSeek => "deepseek",
             CLIAgent::Antigravity => "agy",
+            CLIAgent::Grok => "grok",
             CLIAgent::Hermes => "hermes",
             CLIAgent::Vibe => "vibe",
             CLIAgent::Unknown => "",
@@ -252,6 +262,7 @@ impl CLIAgent {
             CLIAgent::Goose => "Goose",
             CLIAgent::DeepSeek => "DeepSeek",
             CLIAgent::Antigravity => "Antigravity",
+            CLIAgent::Grok => "Grok Build",
             CLIAgent::Hermes => "Hermes",
             CLIAgent::Vibe => "Mistral Vibe",
             CLIAgent::Unknown => "CLI Agent",
@@ -275,6 +286,7 @@ impl CLIAgent {
             CLIAgent::Goose => Some(Icon::GooseLogo),
             CLIAgent::DeepSeek => Some(Icon::DeepSeekLogo),
             CLIAgent::Antigravity => Some(Icon::AntigravityLogo),
+            CLIAgent::Grok => Some(Icon::GrokLogo),
             CLIAgent::Hermes => None,
             // Vibe is recognized but ships without a brand asset. The brand color
             // still drives the toolbar tile; an `Icon::MistralLogo` can be wired
@@ -311,6 +323,7 @@ impl CLIAgent {
             CLIAgent::Goose => &[SkillProvider::Agents],
             CLIAgent::DeepSeek => &[SkillProvider::Agents],
             CLIAgent::Antigravity => &[SkillProvider::Agents],
+            CLIAgent::Grok => &[SkillProvider::Agents],
             CLIAgent::Hermes => &[SkillProvider::Agents],
             CLIAgent::Vibe => &[SkillProvider::Agents],
             CLIAgent::Unknown => &[],
@@ -365,6 +378,7 @@ impl CLIAgent {
             CLIAgent::Goose => Some(GOOSE_COLOR),
             CLIAgent::DeepSeek => Some(DEEPSEEK_COLOR),
             CLIAgent::Antigravity => Some(ANTIGRAVITY_PURPLE),
+            CLIAgent::Grok => Some(GROK_COLOR),
             CLIAgent::Hermes => Some(HERMES_PURPLE),
             CLIAgent::Vibe => Some(MISTRAL_ORANGE),
             CLIAgent::Unknown => None,
@@ -654,6 +668,7 @@ impl From<CLIAgent> for CLIAgentType {
             CLIAgent::Goose => CLIAgentType::Goose,
             CLIAgent::DeepSeek => CLIAgentType::DeepSeek,
             CLIAgent::Antigravity => CLIAgentType::Antigravity,
+            CLIAgent::Grok => CLIAgentType::Grok,
             CLIAgent::Hermes => CLIAgentType::Hermes,
             CLIAgent::Vibe => CLIAgentType::Vibe,
             CLIAgent::Unknown => CLIAgentType::Unknown,

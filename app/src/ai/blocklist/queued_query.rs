@@ -30,6 +30,11 @@ impl QueuedQueryId {
 pub enum QueuedQueryOrigin {
     /// Filed via the `/queue <prompt>` slash command.
     QueueSlashCommand,
+    /// Filed as the locked initial prompt of a cloud-mode conversation. Upstream-only;
+    /// kept so merged cloud-mode paths stay exhaustive.
+    InitialCloudMode,
+    /// Filed by a shared-session participant's injected prompt.
+    SharedSessionInjection,
     /// Filed via the auto-queue toggle in the warping indicator.
     AutoQueueToggle,
     /// Filed because auto-queue was in effect during an agent-requested long-running command.

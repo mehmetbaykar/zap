@@ -42,7 +42,7 @@ fn convert_request_computer_use_result(
                                 height_px: screenshot.original_height as i32,
                             }),
                             initial_screenshot: Some(api::RawImage {
-                                data: screenshot.data,
+                                source: Some(api::raw_image::Source::Data(screenshot.data)),
                                 mime_type: screenshot.mime_type.to_string(),
                                 width: screenshot.width as i32,
                                 height: screenshot.height as i32,
@@ -86,7 +86,7 @@ fn convert_use_computer_result(
                         windows: Vec::new(),
                         captured_window: None,
                         screenshot: result.screenshot.map(|screenshot| api::RawImage {
-                            data: screenshot.data,
+                            source: Some(api::raw_image::Source::Data(screenshot.data)),
                             mime_type: screenshot.mime_type.to_string(),
                             width: screenshot.width as i32,
                             height: screenshot.height as i32,

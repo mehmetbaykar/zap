@@ -422,7 +422,7 @@ fn modeled_fields_are_written_over_the_base() {
         context: Arc::new([]),
         static_query_type: None,
         referenced_attachments: HashMap::new(),
-        user_query_mode: UserQueryMode::Orchestrate,
+        user_query_mode: UserQueryMode::Plan,
         running_command: None,
         intended_agent: Some(api::AgentType::Primary),
         base: Some(base),

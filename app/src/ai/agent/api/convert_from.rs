@@ -24,8 +24,8 @@ use crate::ai::agent::util::parse_markdown_into_text_and_code_sections;
 use crate::ai::agent::{
     AIAgentAction, AIAgentActionType, AIAgentAttachment, AIAgentCitation, AIAgentInput,
     AIAgentOutputMessage, AIAgentText, AIAgentTodo, ArtifactCreatedData, BaseUserQuery,
-    CloneRepositoryURL, InvokeSkillUserQuery, MessageId, RunAgentsAgentRunConfig,
-    RunAgentsExecutionMode, RunAgentsRequest, SubagentCall, SubagentType,
+    CloneRepositoryURL, InvokeSkillUserQuery, MessageId, ReadSkillRequest, SubagentCall,
+    SubagentType,
     SuggestedAgentModeWorkflow, SuggestedRule, Suggestions, SummarizationType, TodoOperation,
     UserQueryMode, WebFetchStatus, WebSearchStatus,
 };
@@ -206,6 +206,9 @@ impl ConvertAPIMessageToClientOutputMessage for api::Message {
             .collect::<Vec<AIAgentCitation>>();
 
         match message {
+            api::message::Message::RequestMetadata(_) => {
+                Ok(MaybeAIAgentOutputMessage::NoClientRepresentation)
+            }
             api::message::Message::AgentOutput(output) => Ok(MaybeAIAgentOutputMessage::Message(
                 AIAgentOutputMessage::text(MessageId::new(self.id), output.into())
                     .with_citations(citations),

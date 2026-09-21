@@ -574,6 +574,7 @@ fn user_query(id: &str, task_id: &str, request_id: &str, seconds: i64) -> api::M
             mode: None,
             referenced_attachments: Default::default(),
             intended_agent: Default::default(),
+            ..Default::default()
         })),
         request_id: request_id.to_string(),
         timestamp: Some(ts(seconds)),

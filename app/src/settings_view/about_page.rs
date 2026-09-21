@@ -63,10 +63,6 @@ impl Entity for AboutPageView {
     type Event = SettingsPageEvent;
 }
 impl TypedActionView for AboutPageView {
-    type Action = ();
-}
-
-impl TypedActionView for AboutPageView {
     type Action = AboutPageAction;
 
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {

@@ -98,8 +98,8 @@ use crate::ai::agent::{
     AIAgentOutputMessage, AIAgentOutputMessageType, AIAgentTextSection, AIIdentifiers,
     CancellationReason, CreateDocumentsRequest, CreateDocumentsResult, DocumentToCreate,
     EditDocumentsResult, MessageId, PassiveSuggestionTrigger, ProgrammingLanguage,
-    RenderableAIError, RequestCommandOutputResult, RequestFileEditsResult, ScreenshotSource,
-    SearchCodebaseResult, ServerOutputId, SubagentCall, SubagentType, SuggestPromptRequest,
+    RenderableAIError, RequestCommandOutputResult, RequestFileEditsResult, ServerOutputId,
+    SubagentCall, SubagentType, SuggestPromptRequest,
     SuggestPromptResult, SuggestedLoggingId, SummarizationType, TodoOperation,
 };
 use crate::ai::agent_conversations_model::{AgentConversationsModel, AgentConversationsModelEvent};

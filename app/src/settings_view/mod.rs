@@ -2098,16 +2098,6 @@ impl SettingsView {
         }
     }
 
-    pub fn open_teams_page_join_modal(&mut self, ctx: &mut ViewContext<Self>) {
-        if let Some(team_page) = self.settings_page(SettingsSection::Teams)
-            && let SettingsPageViewHandle::Teams(view) = &team_page.view_handle
-        {
-            view.update(ctx, |view, ctx| {
-                view.handle_action(&TeamsPageAction::ShowJoinTeamsModal, ctx);
-            });
-        }
-    }
-
     /// Open the MCP servers page, optionally to list page or edit page.
     /// If `autoinstall_gallery_title` is provided, triggers auto-install of the specified gallery MCP.
     pub fn open_mcp_servers_page(

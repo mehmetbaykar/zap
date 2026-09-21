@@ -9,16 +9,10 @@ mod imp;
 mod mock;
 mod noop;
 mod overlay;
-#[cfg(any(macos, linux, windows))]
+#[cfg(any(macos, linux))]
 mod recording_metadata;
 #[cfg(any(macos, linux, windows))]
-mod recording_paths;
-#[cfg(any(linux, windows))]
-mod recording_post_process;
-#[cfg(any(macos, linux, windows))]
 mod screenshot_utils;
-#[cfg(any(macos, linux, windows))]
-mod thumbnail;
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -272,10 +266,10 @@ pub trait Actor: Send + Sync + 'static {
 
 /// Returns a recorder that can capture a video of the computer-use display.
 ///
-/// Real recorders are available on Linux (X11), macOS (avfoundation), and
-/// Windows (gdigrab). Other platforms and any `test-util` build get a no-op
-/// recorder. On macOS, setting `WARP_MOCK_RECORDER` opts into a mock recorder
-/// for UI testing (see `mock`).
+/// A real recorder is available on Linux (X11) and macOS (avfoundation); every
+/// other platform, and any `test-util` build, gets a no-op recorder that reports
+/// recording as unsupported. On macOS, setting `WARP_MOCK_RECORDER` opts into a
+/// mock recorder for UI testing (see `mock`).
 pub fn create_recorder() -> Box<dyn Recorder> {
     #[cfg(macos)]
     if std::env::var_os("WARP_MOCK_RECORDER").is_some() {
@@ -289,8 +283,8 @@ pub fn create_recorder() -> Box<dyn Recorder> {
 }
 
 /// Applies platform-specific post-processing and returns the path to upload.
-/// Linux and Windows trim inactive gaps and burn action overlays; other
-/// platforms return `input` unchanged.
+/// Linux trims inactive gaps and burns action overlays; other platforms return
+/// `input` unchanged.
 pub async fn post_process_recording(
     input: &Path,
     entries: &[ActionLogEntry],
@@ -298,18 +292,11 @@ pub async fn post_process_recording(
     source_duration: Duration,
     frame_rate: u32,
 ) -> Result<PathBuf, RecordingError> {
-    #[cfg(all(any(linux, windows), not(noop)))]
+    #[cfg(all(linux, not(noop)))]
     {
-        recording_post_process::post_process_recording(
-            input,
-            entries,
-            dimensions,
-            source_duration,
-            frame_rate,
-        )
-        .await
+        imp::post_process_recording(input, entries, dimensions, source_duration, frame_rate).await
     }
-    #[cfg(not(all(any(linux, windows), not(noop))))]
+    #[cfg(not(all(linux, not(noop))))]
     {
         let _ = (entries, dimensions, source_duration, frame_rate);
         Ok(input.to_path_buf())
@@ -317,49 +304,15 @@ pub async fn post_process_recording(
 }
 /// Reads the duration encoded in a finalized recording's media timeline.
 pub async fn finalized_video_duration(input: &Path) -> Result<Duration, RecordingError> {
-    #[cfg(any(macos, linux, windows))]
+    #[cfg(any(macos, linux))]
     {
         recording_metadata::video_duration(input).await
     }
-    #[cfg(not(any(macos, linux, windows)))]
+    #[cfg(not(any(macos, linux)))]
     {
         let _ = input;
         Err(RecordingError::Finalize {
             reason: "video duration probing is unsupported on this platform".to_string(),
-        })
-    }
-}
-
-/// Generates a PR video thumbnail for `video`: extracts a representative,
-/// downscaled frame with ffmpeg, composites a centered play-button glyph, and
-/// writes the PNG to a sibling `{artifact_uid}-thumb.png`. Returns the thumbnail
-/// path; the caller owns cleanup of both the video and the thumbnail.
-///
-/// `artifact_uid` is the uploaded video's artifact UID; the server links the
-/// thumbnail to its video by the `{artifact_uid}-thumb.png` filename convention.
-///
-/// Best-effort by design: the caller treats any error as "no thumbnail" and
-/// falls back to a plain link, never blocking the video upload or PR creation.
-/// Recording and ffmpeg are available on macOS, Linux, and Windows; every other
-/// platform reports thumbnail generation as unsupported.
-pub async fn generate_video_thumbnail(
-    video: &Path,
-    artifact_uid: &str,
-) -> Result<PathBuf, RecordingError> {
-    #[cfg(any(macos, linux, windows))]
-    {
-        thumbnail::generate_video_thumbnail(
-            video,
-            thumbnail::DEFAULT_THUMBNAIL_MAX_WIDTH,
-            artifact_uid,
-        )
-        .await
-    }
-    #[cfg(not(any(macos, linux, windows)))]
-    {
-        let _ = (video, artifact_uid);
-        Err(RecordingError::Finalize {
-            reason: "video thumbnail generation is unsupported on this platform".to_string(),
         })
     }
 }
@@ -423,20 +376,19 @@ impl Default for RecordingConfig {
 pub struct RecordingHandle {
     width: u32,
     height: u32,
-    capture_origin: Vector2I,
     exit_state: RecordingExitState,
     // The live capture process plus the fields used to finalize it are only
-    // populated by the real platform recorders; the no-op recorders never
+    // populated by the real Linux and macOS recorders; the no-op recorders never
     // construct a handle.
-    #[cfg(any(linux, macos, windows))]
+    #[cfg(any(linux, macos))]
     path: PathBuf,
-    #[cfg(any(linux, macos, windows))]
+    #[cfg(any(linux, macos))]
     started_at: instant::Instant,
-    #[cfg(any(linux, macos, windows))]
+    #[cfg(any(linux, macos))]
     process: Option<tokio::process::Child>,
     // The handle owns and deletes partial output until `Recorder::stop`
     // validates the file and transfers its path to `RecordingOutput`.
-    #[cfg(any(linux, macos, windows))]
+    #[cfg(any(linux, macos))]
     cleanup_on_drop: bool,
 }
 
@@ -451,11 +403,6 @@ impl RecordingHandle {
         self.height
     }
 
-    /// The immutable physical-pixel geometry selected when capture started.
-    pub fn geometry(&self) -> RecordingGeometry {
-        RecordingGeometry::new(self.capture_origin, self.width, self.height)
-    }
-
     /// Checks whether capture exited without an explicit stop.
     pub fn poll_exit(&mut self) -> Option<RecordingExitKind> {
         if let Some(kind) = *self
@@ -466,7 +413,7 @@ impl RecordingHandle {
             return Some(kind);
         }
 
-        #[cfg(any(linux, macos, windows))]
+        #[cfg(any(linux, macos))]
         if let Some(process) = self.process.as_mut()
             && let Ok(Some(status)) = process.try_wait()
         {
@@ -491,34 +438,28 @@ impl RecordingHandle {
         let handle = Self {
             width,
             height,
-            capture_origin: Vector2I::new(0, 0),
             exit_state: exit_state.clone(),
-            #[cfg(any(linux, macos, windows))]
+            #[cfg(any(linux, macos))]
             path: PathBuf::new(),
-            #[cfg(any(linux, macos, windows))]
+            #[cfg(any(linux, macos))]
             started_at: instant::Instant::now(),
-            #[cfg(any(linux, macos, windows))]
+            #[cfg(any(linux, macos))]
             process: None,
-            #[cfg(any(linux, macos, windows))]
+            #[cfg(any(linux, macos))]
             cleanup_on_drop: false,
         };
         (handle, exit_state)
     }
 }
 
-#[cfg(any(linux, macos, windows))]
+#[cfg(any(linux, macos))]
 impl Drop for RecordingHandle {
     fn drop(&mut self) {
+        // A handle can be abandoned without reaching `Recorder::stop`, notably
+        // when a start action finishes after cancellation. The child process's
+        // kill-on-drop handles ffmpeg; this removes its partial output. A
+        // successful stop disables cleanup and transfers file ownership.
         if self.cleanup_on_drop {
-            // Windows can't delete a file ffmpeg still has open, and `Drop` can't `.await` a
-            // process reap, so cleanup runs on a background thread there instead of blocking
-            // (or leaking the file) here; see `windows::recording::spawn_abandoned_cleanup`.
-            // POSIX allows unlinking a still-open file, so mac/Linux clean up synchronously.
-            #[cfg(windows)]
-            if let Some(process) = self.process.take() {
-                imp::spawn_abandoned_cleanup(process, self.path.clone());
-                return;
-            }
             let _ = std::fs::remove_file(&self.path);
             let _ = std::fs::remove_file(self.path.with_extension("log"));
         }
@@ -693,144 +634,6 @@ pub struct Options {
     /// exactly like the legacy full-screen path: any window target is ignored, only the main
     /// display is captured, and no window list or captured-window metadata is returned.
     pub background_enabled: bool,
-    /// When set, a recording is active and the actor records each resolved pointer event here
-    /// (capture-space coordinate, kind, and offset from capture start) for post-stop burn-in.
-    /// `None` on non-recording, CLI, and test paths; actors without burn-in support ignore it.
-    pub pointer_sink: Option<PointerSink>,
-}
-
-/// Collects resolved pointer events during a recording so the finalize pass can burn in
-/// click/drag annotations. The Linux X11 and Windows actors populate it.
-pub struct PointerSink {
-    /// Capture start instant; event offsets are measured from here.
-    pub started_at: instant::Instant,
-    /// The surface being recorded, so the actor can resolve each event into the recording's
-    /// capture-space pixels.
-    pub recording_target: Target,
-    /// The immutable physical-pixel capture geometry selected by the recorder.
-    pub recording_geometry: RecordingGeometry,
-    /// Events collected in dispatch order; drained by the caller after the batch completes.
-    pub events: Arc<Mutex<Vec<PointerEvent>>>,
-    /// Recording-scoped pointer session shared with every `UseComputer` call's sink, so a
-    /// release in a later call reuses the last resolved capture-space point even when the
-    /// press happened in an earlier call. See [`PointerSession`].
-    pub session: PointerSession,
-}
-
-/// The physical-pixel bounds selected for a recording when capture starts.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct RecordingGeometry {
-    origin: Vector2I,
-    width: u32,
-    height: u32,
-}
-
-impl RecordingGeometry {
-    pub(crate) fn new(origin: Vector2I, width: u32, height: u32) -> Self {
-        Self {
-            origin,
-            width,
-            height,
-        }
-    }
-
-    /// Maps a physical desktop point into the captured frame and clamps it to the frame bounds.
-    pub fn frame_point(self, point: Vector2I) -> Vector2I {
-        let max_x = i64::from(self.width.saturating_sub(1));
-        let max_y = i64::from(self.height.saturating_sub(1));
-        let x = (i64::from(point.x()) - i64::from(self.origin.x())).clamp(0, max_x);
-        let y = (i64::from(point.y()) - i64::from(self.origin.y())).clamp(0, max_y);
-        Vector2I::new(x as i32, y as i32)
-    }
-}
-
-/// Recording-scoped pointer session state, shared between the recording
-/// controller and each `UseComputer` call's [`PointerSink`]. It persists the
-/// last resolved capture-space point and the currently pressed button across
-/// action-call boundaries, so a drag split into separate `Down`/`Move`/`Up`
-/// `UseComputer` calls still records its release at the last point (a release
-/// carries no coordinate of its own). Owned by the active recording, which
-/// hands an `Arc` clone to each call's sink; reset when a call fails or is
-/// cancelled so a later click cannot inherit an abandoned press.
-///
-/// The finalize pass classifies one flattened recording-level pointer stream
-/// (see [`overlay::build_overlay_ass`]), so reconstructing the release here is
-/// what lets a split-call drag render a single continuous trail with a release
-/// fade rather than a per-call held press plus stray moves.
-#[derive(Debug, Clone)]
-pub struct PointerSession {
-    state: Arc<Mutex<PointerSessionState>>,
-}
-
-#[derive(Debug, Default)]
-struct PointerSessionState {
-    /// The last capture-space point resolved during a press or move.
-    last_point: Option<Vector2I>,
-    /// The button currently held down, if any.
-    active_button: Option<MouseButton>,
-}
-
-impl PointerSession {
-    /// Creates a fresh, empty session for a new recording.
-    pub fn new() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(PointerSessionState::default())),
-        }
-    }
-
-    /// Records a press or coordinate-carrying pointer sample resolved at
-    /// `point`. A press (`Down`) sets the active button and last point; a move
-    /// or scroll sample updates the last point (the pointer physically warped
-    /// there before the wheel turned) without touching the active button. A
-    /// new press while a button is already active replaces it (the prior
-    /// incomplete press is closed as a held drag by the classifier).
-    pub fn record_press_or_move(
-        &self,
-        kind: PointerEventKind,
-        button: Option<MouseButton>,
-        point: Vector2I,
-    ) {
-        if let Ok(mut state) = self.state.lock() {
-            state.last_point = Some(point);
-            if kind == PointerEventKind::Down {
-                state.active_button = button;
-            }
-        }
-    }
-
-    /// Records a release of `button`, returning the last resolved point only when
-    /// the released button matches the active press — so an unmatched release
-    /// (a different button, or a release with no prior press) is ignored and no
-    /// stale-coordinate event is emitted. Clears the active button on a matching
-    /// release; the last point is retained (harmless, and a following move
-    /// overwrites it).
-    pub fn record_release(&self, button: MouseButton) -> Option<Vector2I> {
-        self.state.lock().ok().and_then(|mut state| {
-            if state.active_button == Some(button) {
-                state.active_button = None;
-                state.last_point
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Clears the active pointer state (last point and held button). Used when a
-    /// press/move targets a surface that does not match the recording (so a
-    /// following release is not recorded at a stale in-frame coordinate), and
-    /// when a `UseComputer` call fails or is cancelled so a later call cannot
-    /// inherit an abandoned press.
-    pub fn clear(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            *state = PointerSessionState::default();
-        }
-    }
-}
-
-impl Default for PointerSession {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// The buttons of a mouse.

@@ -250,6 +250,7 @@ impl SlashCommandRequest {
                 user_query_mode: UserQueryMode::Normal,
                 running_command: None,
                 intended_agent: None,
+                base: None,
             }],
             SlashCommandRequest::Summarize { prompt, overflow } => {
                 vec![AIAgentInput::SummarizeConversation {
@@ -270,6 +271,7 @@ impl SlashCommandRequest {
                         crate::ai::agent::InvokeSkillUserQuery {
                             query: user_query,
                             referenced_attachments,
+                            base: None,
                         }
                     })
                 } else {

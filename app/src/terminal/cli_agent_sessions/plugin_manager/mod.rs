@@ -245,6 +245,7 @@ pub(crate) fn plugin_manager_for_with_shell(
     path_env_var: Option<String>,
 ) -> Option<Box<dyn CliAgentPluginManager>> {
     match agent {
+        CLIAgent::Grok => None,
         CLIAgent::Claude => Some(Box::new(ClaudeCodePluginManager::new(
             shell_path,
             shell_type,

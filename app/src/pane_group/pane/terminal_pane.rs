@@ -1505,7 +1505,6 @@ fn launch_local_harness_child(
                             working_dir: startup_directory_for_task.clone(),
                         }),
                     },
-                    &team_context,
                     ctx,
                 )
                 else {

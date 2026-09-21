@@ -62,14 +62,6 @@ impl AppBuilder {
         }
     }
 
-    /// Allows a windowless frontend with microphone functionality to query the
-    /// platform's existing microphone authorization state.
-    pub fn enable_windowless_microphone_access_query(&mut self) {
-        if let AppBackend::Windowless(inner) = &mut self.inner {
-            inner.enable_microphone_access_query();
-        }
-    }
-
     /// Constructs a new application using the windowless backend.
     pub fn new_windowless(
         callbacks: AppCallbacks,
