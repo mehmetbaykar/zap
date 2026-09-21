@@ -49,6 +49,8 @@ pub struct TemplatableMCPServerManager {
     templatable_mcp_server_objects: HashMap<Uuid, TemplatableMCPServerObject>,
     locally_installed_servers: HashMap<Uuid, TemplatableMCPServerInstallation>,
     server_states: HashMap<Uuid, MCPServerState>,
+    /// Retained across restarts so a later config edit cannot reopen the initial readiness wait.
+    completed_initial_startups: HashSet<Uuid>,
     active_servers: HashMap<Uuid, TemplatableMCPServerInfo>,
 
     #[cfg_attr(target_family = "wasm", allow(dead_code))]
@@ -210,6 +212,10 @@ impl TemplatableMCPServerManager {
         }
     }
 
+    pub(crate) fn has_completed_initial_startup(&self, installation_uuid: Uuid) -> bool {
+        self.completed_initial_startups.contains(&installation_uuid)
+    }
+
     pub fn get_server_state(&self, installation_uuid: Uuid) -> Option<MCPServerState> {
         self.server_states.get(&installation_uuid).copied()
     }
@@ -353,4 +359,3 @@ impl Entity for TemplatableMCPServerManager {
 }
 
 impl SingletonEntity for TemplatableMCPServerManager {}
-

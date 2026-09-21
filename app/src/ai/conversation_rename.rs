@@ -19,7 +19,7 @@ pub(crate) fn rename_conversation<T: View>(
     conversation_id: AIConversationId,
     title: String,
     ctx: &mut ViewContext<T>,
-) {
+) -> bool {
     let title = match validate_conversation_title(title) {
         Ok(title) => title,
         Err(message) => {
@@ -27,7 +27,7 @@ pub(crate) fn rename_conversation<T: View>(
             ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                 toast_stack.add_ephemeral_toast(DismissibleToast::error(message), window_id, ctx);
             });
-            return;
+            return false;
         }
     };
     if BlocklistAIHistoryModel::as_ref(ctx)
@@ -42,10 +42,10 @@ pub(crate) fn rename_conversation<T: View>(
                 ctx,
             );
         });
-        return;
+        return false;
     }
     if conversation_already_has_title(conversation_id, &title, ctx) {
-        return;
+        return true;
     }
 
     let result = BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
@@ -61,6 +61,7 @@ pub(crate) fn rename_conversation<T: View>(
                     ctx,
                 );
             });
+            true
         }
         Err(err) => {
             let message = match err {
@@ -76,6 +77,7 @@ pub(crate) fn rename_conversation<T: View>(
                     ctx,
                 );
             });
+            false
         }
     }
 }

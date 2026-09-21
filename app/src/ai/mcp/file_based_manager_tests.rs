@@ -1,18 +1,26 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::Duration;
 
+use futures::FutureExt as _;
 use repo_metadata::RepoMetadataModel;
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
 use settings::Setting as _;
 use uuid::Uuid;
 use warp_core::features::FeatureFlag;
+use warpui::r#async::FutureExt as _;
 use warpui::{App, Entity, ModelHandle, SingletonEntity as _};
 use watcher::HomeDirectoryWatcher;
 
-use super::{FileBasedMCPManager, FileBasedMCPManagerEvent, MCPProvider};
+use super::{
+    FileBasedMCPManager, FileBasedMCPManagerEvent, InitialGlobalMcpScanState, MCPProvider,
+};
 use crate::ai::mcp::file_mcp_watcher::{FileMCPConfigDiagnostic, FileMCPConfigDiagnosticKind};
-use crate::ai::mcp::{FileMCPWatcher, FileMCPWatcherEvent, ParsedTemplatableMCPServerResult};
+use crate::ai::mcp::{
+    FileMCPWatcher, FileMCPWatcherEvent, MCPServerState, ParsedTemplatableMCPServerResult,
+    TemplatableMCPServerManager,
+};
 use crate::auth::AuthStateProvider;
 use crate::settings::{AISettings, FocusedTerminalInfo};
 use crate::warp_managed_paths_watcher::{WarpManagedPathsWatcher, warp_managed_mcp_config_path};
@@ -25,7 +33,7 @@ fn setup_app(app: &mut App) -> warpui::ModelHandle<FileBasedMCPManager> {
     app.add_singleton_model(RepoMetadataModel::new);
     app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
     app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
-    app.add_singleton_model(FileMCPWatcher::new);
+    app.add_singleton_model(|_| FileMCPWatcher::new_inert());
     app.add_singleton_model(AISettings::new_with_defaults);
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
     app.add_singleton_model(UserWorkspaces::default_mock);
@@ -65,10 +73,287 @@ fn subscribe_events(
                 me.despawned_uuids
                     .extend(installation_uuids.iter().copied());
             }
-            FileBasedMCPManagerEvent::PurgeCredentials { .. } => {}
+            FileBasedMCPManagerEvent::PurgeCredentials { .. }
+            | FileBasedMCPManagerEvent::InitialGlobalMcpScanComplete { .. } => {}
         });
     });
     events
+}
+
+fn setup_readiness_app(
+    app: &mut App,
+) -> (
+    ModelHandle<FileBasedMCPManager>,
+    ModelHandle<TemplatableMCPServerManager>,
+) {
+    let manager = setup_app(app);
+    let servers = app.add_singleton_model(|_| TemplatableMCPServerManager::default());
+    (manager, servers)
+}
+
+fn seed_initial_server(manager: &mut FileBasedMCPManager, name: &str) -> Uuid {
+    let json = serde_json::json!({ name: { "command": "synthetic-command" } }).to_string();
+    let installation = parse_mcp_json(&json)
+        .pop()
+        .unwrap()
+        .templatable_mcp_server_installation
+        .unwrap();
+    let uuid = installation.uuid();
+    let hash = installation.hash().unwrap();
+    manager.file_based_servers.insert(hash, installation);
+    manager
+        .file_based_servers_by_root
+        .entry(PathBuf::from("/synthetic/home"))
+        .or_default()
+        .entry(MCPProvider::Claude)
+        .or_default()
+        .insert(hash);
+    let InitialGlobalMcpScanState::Pending(uuids) = &mut manager.initial_global_scan_state else {
+        panic!("seed before scan completion");
+    };
+    uuids.push(uuid);
+    uuid
+}
+
+#[test]
+fn empty_initial_scan_releases_all_waiters_and_is_cached_for_late_requests() {
+    let _flag = FeatureFlag::FileBasedMcp.override_enabled(true);
+    App::test((), |mut app| async move {
+        let (manager, _) = setup_readiness_app(&mut app);
+        let first = manager.update(&mut app, |manager, ctx| {
+            manager.wait_for_initial_servers(ctx).unwrap()
+        });
+        let second = manager.update(&mut app, |manager, ctx| {
+            manager.wait_for_initial_servers(ctx).unwrap()
+        });
+        manager.update(&mut app, |manager, ctx| {
+            manager.handle_watcher_event(&FileMCPWatcherEvent::InitialGlobalScanComplete, ctx);
+        });
+        futures::join!(first, second);
+        manager.update(&mut app, |manager, ctx| {
+            assert_eq!(manager.initial_global_scan_result(), Some([].as_slice()));
+            assert!(manager.wait_for_initial_servers(ctx).is_none());
+            assert!(manager.initial_readiness_timeout.is_none());
+        });
+    });
+}
+
+#[test]
+fn pending_requests_share_one_deadline_instead_of_restarting_the_budget() {
+    let _flag = FeatureFlag::FileBasedMcp.override_enabled(true);
+    App::test((), |mut app| async move {
+        let (manager, _) = setup_readiness_app(&mut app);
+        let first = manager.update(&mut app, |manager, ctx| {
+            manager
+                .wait_for_initial_servers_with_timeout(Duration::ZERO, ctx)
+                .unwrap()
+        });
+        let second = manager.update(&mut app, |manager, ctx| {
+            manager.wait_for_initial_servers_with_timeout(Duration::from_secs(3600), ctx)
+        });
+        first.with_timeout(Duration::from_secs(1)).await.unwrap();
+        if let Some(second) = second {
+            second.with_timeout(Duration::from_secs(1)).await.unwrap();
+        }
+        manager.read(&app, |manager, _| {
+            assert!(manager.initial_readiness_finished);
+        });
+    });
+}
+
+#[test]
+fn initial_readiness_waits_for_scan_and_running_or_failed_servers() {
+    let _flag = FeatureFlag::FileBasedMcp.override_enabled(true);
+    App::test((), |mut app| async move {
+        let (manager, servers) = setup_readiness_app(&mut app);
+        let (running, failed) = manager.update(&mut app, |manager, _| {
+            (
+                seed_initial_server(manager, "running"),
+                seed_initial_server(manager, "failed"),
+            )
+        });
+        let mut ready = Box::pin(manager.update(&mut app, |manager, ctx| {
+            manager.wait_for_initial_servers(ctx).unwrap()
+        }));
+        assert!(ready.as_mut().now_or_never().is_none());
+        servers.update(&mut app, |servers, ctx| {
+            servers.change_server_state(running, MCPServerState::Running, ctx);
+            servers.change_server_state(failed, MCPServerState::Starting, ctx);
+        });
+        assert!(
+            ready.as_mut().now_or_never().is_none(),
+            "scan has not settled"
+        );
+        manager.update(&mut app, |manager, ctx| {
+            manager.handle_watcher_event(&FileMCPWatcherEvent::InitialGlobalScanComplete, ctx);
+        });
+        assert!(
+            ready.as_mut().now_or_never().is_none(),
+            "second server is still starting"
+        );
+        servers.update(&mut app, |servers, ctx| {
+            servers.change_server_state(failed, MCPServerState::FailedToStart, ctx);
+        });
+        ready.await;
+        assert!(
+            manager
+                .update(&mut app, |manager, ctx| manager
+                    .wait_for_initial_servers(ctx))
+                .is_none()
+        );
+    });
+}
+
+#[test]
+fn initial_readiness_handles_late_subscribers_and_ignores_restarts() {
+    let _flag = FeatureFlag::FileBasedMcp.override_enabled(true);
+    App::test((), |mut app| async move {
+        let (manager, servers) = setup_readiness_app(&mut app);
+        let uuid = manager.update(&mut app, |manager, ctx| {
+            let uuid = seed_initial_server(manager, "already-running");
+            manager.handle_watcher_event(&FileMCPWatcherEvent::InitialGlobalScanComplete, ctx);
+            uuid
+        });
+        servers.update(&mut app, |servers, ctx| {
+            servers.change_server_state(uuid, MCPServerState::Running, ctx);
+            servers.change_server_state(uuid, MCPServerState::Starting, ctx);
+        });
+        assert!(
+            manager
+                .update(&mut app, |manager, ctx| manager
+                    .wait_for_initial_servers(ctx))
+                .is_none()
+        );
+        manager.read(&app, |manager, _| {
+            assert_eq!(
+                manager.initial_global_scan_result(),
+                Some([uuid].as_slice())
+            );
+        });
+    });
+}
+
+#[test]
+fn initial_readiness_disabled_needs_no_server_singleton_or_timer() {
+    let _flag = FeatureFlag::FileBasedMcp.override_enabled(false);
+    App::test((), |mut app| async move {
+        let manager = app.add_model(|_| FileBasedMCPManager::default());
+        manager.update(&mut app, |manager, ctx| {
+            assert!(manager.wait_for_initial_servers(ctx).is_none());
+            assert!(manager.initial_readiness_timeout.is_none());
+            assert!(manager.initial_readiness_waiters.is_empty());
+        });
+    });
+}
+
+#[test]
+fn initial_readiness_timeout_is_nonfatal_during_scan_or_server_startup() {
+    let _flag = FeatureFlag::FileBasedMcp.override_enabled(true);
+    for finish_scan in [false, true] {
+        App::test((), |mut app| async move {
+            let (manager, servers) = setup_readiness_app(&mut app);
+            let uuid = manager.update(&mut app, |manager, ctx| {
+                let uuid = seed_initial_server(manager, "never-ready");
+                if finish_scan {
+                    manager
+                        .handle_watcher_event(&FileMCPWatcherEvent::InitialGlobalScanComplete, ctx);
+                }
+                uuid
+            });
+            servers.update(&mut app, |servers, ctx| {
+                servers.change_server_state(uuid, MCPServerState::Starting, ctx)
+            });
+            let ready = manager.update(&mut app, |manager, ctx| {
+                manager
+                    .wait_for_initial_servers_with_timeout(Duration::ZERO, ctx)
+                    .unwrap()
+            });
+            ready.with_timeout(Duration::from_secs(1)).await.unwrap();
+            manager.update(&mut app, |manager, ctx| {
+                assert!(manager.initial_readiness_finished);
+                assert!(manager.initial_readiness_waiters.is_empty());
+                assert!(manager.initial_readiness_timeout.is_none());
+                assert!(
+                    manager.wait_for_initial_servers(ctx).is_none(),
+                    "retries must not repeat the timeout"
+                );
+            });
+        });
+    }
+}
+
+#[test]
+fn removing_initial_server_unblocks_readiness_without_a_startup_event() {
+    let _flag = FeatureFlag::FileBasedMcp.override_enabled(true);
+    App::test((), |mut app| async move {
+        let (manager, _) = setup_readiness_app(&mut app);
+        manager.update(&mut app, |manager, ctx| {
+            seed_initial_server(manager, "removed");
+            manager.handle_watcher_event(&FileMCPWatcherEvent::InitialGlobalScanComplete, ctx);
+        });
+        let ready = manager.update(&mut app, |manager, ctx| {
+            manager.wait_for_initial_servers(ctx).unwrap()
+        });
+        manager.update(&mut app, |manager, ctx| {
+            manager.handle_watcher_event(
+                &FileMCPWatcherEvent::ConfigRemoved {
+                    config_path: PathBuf::from("/synthetic/home/.claude.json"),
+                    root_path: PathBuf::from("/synthetic/home"),
+                    provider: MCPProvider::Claude,
+                },
+                ctx,
+            );
+        });
+        ready.await;
+    });
+}
+
+#[test]
+fn initial_scan_freezes_only_auto_started_global_servers() {
+    let _flag = FeatureFlag::FileBasedMcp.override_enabled(true);
+    let root = warp_managed_mcp_config_path().unwrap().root_path;
+    let home = dirs::home_dir().unwrap();
+    App::test((), |mut app| async move {
+        let manager = setup_app(&mut app);
+        set_file_based_mcp_enabled(&mut app, false);
+        manager.update(&mut app, |manager, ctx| {
+            manager.apply_parsed_servers(
+                root.clone(),
+                MCPProvider::Zap,
+                parse_mcp_json(r#"{"startup":{"command":"synthetic-global"}}"#),
+                ctx,
+            );
+            let initial_uuid = manager.file_based_servers.values().next().unwrap().uuid();
+            manager.apply_parsed_servers(
+                home,
+                MCPProvider::Claude,
+                parse_mcp_json(r#"{"disabled-third-party":{"command":"synthetic-global"}}"#),
+                ctx,
+            );
+            manager.apply_parsed_servers(
+                PathBuf::from("/synthetic/project"),
+                MCPProvider::Codex,
+                parse_mcp_json(r#"{"project":{"command":"synthetic-project"}}"#),
+                ctx,
+            );
+            manager.complete_initial_global_scan(ctx);
+            assert_eq!(
+                manager.initial_global_scan_result(),
+                Some([initial_uuid].as_slice())
+            );
+            manager.apply_parsed_servers(
+                root,
+                MCPProvider::Zap,
+                parse_mcp_json(r#"{"later-config-edit":{"command":"synthetic-later"}}"#),
+                ctx,
+            );
+            manager.complete_initial_global_scan(ctx);
+            assert_eq!(
+                manager.initial_global_scan_result(),
+                Some([initial_uuid].as_slice())
+            );
+        });
+    });
 }
 
 /// Set the `file_based_mcp_enabled` toggle without going through preferences.

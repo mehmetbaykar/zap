@@ -131,6 +131,7 @@ impl MCPServersListPageView {
                         // Refresh cards when servers are spawned or removed.
                         me.refresh_file_based_server_cards(ctx);
                     }
+                    FileBasedMCPManagerEvent::InitialGlobalMcpScanComplete { .. } => {}
                 });
 
                 // Refresh cards when MCP config files are parsed or removed.
@@ -141,7 +142,8 @@ impl MCPServersListPageView {
                         me.refresh_file_based_server_cards(ctx);
                     }
                     // Invalid config snapshot: the last-known-good cards stay as-is.
-                    FileMCPWatcherEvent::ConfigError { .. } => {}
+                    FileMCPWatcherEvent::ConfigError { .. }
+                    | FileMCPWatcherEvent::InitialGlobalScanComplete => {}
                 });
             }
         );

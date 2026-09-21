@@ -13,6 +13,7 @@ pub use view::{CloseReason, InlineSlashCommandView, SlashCommandsEvent};
 use warp_core::features::FeatureFlag;
 use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::appearance::Appearance;
+use warp_core::ui::theme::AnsiColorIdentifier;
 #[cfg(feature = "local_fs")]
 use warp_util::path::{CleanPathResult, LineAndColumnArg};
 use warpui::clipboard::ClipboardContent;
@@ -27,6 +28,7 @@ use crate::ai::blocklist::{
     QueuedQueryModel, QueuedQueryOrigin, SlashCommandRequest,
     drive_object_attachment_for_reference,
 };
+use crate::ai::conversation_rename::rename_conversation;
 use crate::cloud_object::ObjectType;
 use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
@@ -36,6 +38,7 @@ use crate::search::slash_command_menu::{SlashCommandId, StaticCommand};
 use crate::server::ids::SyncId;
 use crate::server::telemetry::SlashCommandAcceptedDetails;
 use crate::settings::AISettings;
+use crate::tab::SelectedTabColor;
 use crate::terminal::input::decorations::InputBackgroundJobOptions;
 use crate::terminal::input::inline_menu::{InlineMenuAction, InlineMenuType};
 use crate::terminal::input::message_bar::Message;
@@ -49,6 +52,7 @@ use crate::terminal::input::{
 #[cfg(feature = "local_fs")]
 use crate::terminal::model::session::Session;
 use crate::terminal::view::TerminalAction;
+use crate::ui_components::color_dot;
 use crate::view_components::DismissibleToast;
 use crate::workflows::command_parser::compute_workflow_display_data;
 use crate::workspace::{ForkedConversationDestination, ToastStack, WorkspaceAction};
@@ -251,6 +255,37 @@ fn open_file_command_path(
         });
 
     (file_path, parsed_path.line_and_column_num)
+}
+
+fn parse_tab_color_argument(argument: Option<&str>) -> Result<SelectedTabColor, String> {
+    let supported_options = || {
+        color_dot::TAB_COLOR_OPTIONS
+            .iter()
+            .map(|color| color.to_string().to_ascii_lowercase())
+            .chain(std::iter::once("none".to_owned()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let Some(argument) = argument.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Err(format!(
+            "Please provide a color after /set-tab-color ({})",
+            supported_options()
+        ));
+    };
+    if argument.eq_ignore_ascii_case("none") {
+        return Ok(SelectedTabColor::Cleared);
+    }
+    argument
+        .parse::<AnsiColorIdentifier>()
+        .ok()
+        .filter(|color| color_dot::TAB_COLOR_OPTIONS.contains(color))
+        .map(SelectedTabColor::Color)
+        .ok_or_else(|| {
+            format!(
+                "Unknown tab color '{argument}'. Use one of: {}.",
+                supported_options()
+            )
+        })
 }
 
 impl Input {
@@ -585,6 +620,34 @@ impl Input {
                 };
 
                 ctx.dispatch_typed_action(&WorkspaceAction::SetActiveTabName(name.to_owned()));
+            }
+            name if name == commands::RENAME_CONVERSATION.name => {
+                let Some(conversation_id) = self
+                    .ai_context_model
+                    .as_ref(ctx)
+                    .selected_conversation_id(ctx)
+                else {
+                    show_error_toast(
+                        "/rename-conversation requires an active conversation".to_owned(),
+                        ctx,
+                    );
+                    return true;
+                };
+                if !rename_conversation(conversation_id, argument.cloned().unwrap_or_default(), ctx)
+                {
+                    return true;
+                }
+            }
+            name if name == commands::SET_TAB_COLOR.name => {
+                match parse_tab_color_argument(argument.map(String::as_str)) {
+                    Ok(color) => {
+                        ctx.dispatch_typed_action(&WorkspaceAction::SetActiveTabColor(color));
+                    }
+                    Err(message) => {
+                        show_error_toast(message, ctx);
+                        return true;
+                    }
+                }
             }
             create_project if command.name == commands::CREATE_NEW_PROJECT.name => {
                 if argument.is_none_or(|args| args.is_empty()) {

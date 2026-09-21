@@ -294,7 +294,7 @@ pub fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_| crate::code_review::git_repo_model::GitRepoModels::new());
     app.add_singleton_model(RepoMetadataModel::new);
     app.add_singleton_model(FileSearchModel::new);
-    // Zap: RepoOutlines removed, no longer registered.
+    app.add_singleton_model(crate::ai::outline::RepoOutlines::new_for_test);
     #[cfg(feature = "voice_input")]
     app.add_singleton_model(voice_input::VoiceInput::new);
 

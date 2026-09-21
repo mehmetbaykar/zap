@@ -72,6 +72,20 @@ fn should_suppress_runtime_failure_false_for_in_progress() {
 }
 
 #[test]
+fn structured_terminal_status_suppresses_runtime_failure() {
+    assert!(should_suppress_runtime_failure(Some(
+        &CLIAgentSessionStatus::Success
+    )));
+    assert!(should_suppress_runtime_failure(Some(
+        &CLIAgentSessionStatus::Failed {
+            error_type: Some("auth".into()),
+            message: Some("Sign in again".into()),
+        }
+    )));
+    assert!(!should_suppress_runtime_failure(None));
+}
+
+#[test]
 fn stall_confirmation_budget_matches_six_poll_intervals() {
     // The loop guarantees up to BUDGET/INTERVAL iterations. Pin the ratio
     // so a careless tweak to either constant can't accidentally turn the

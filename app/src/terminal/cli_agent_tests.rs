@@ -290,6 +290,54 @@ fn test_detect_known_agents() {
 }
 
 #[test]
+fn test_detect_executable_paths() {
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            for (command, expected) in [
+                ("/opt/tools/claude --help", Some(CLIAgent::Claude)),
+                ("./bin/codex", Some(CLIAgent::Codex)),
+                ("../bin/gemini chat", Some(CLIAgent::Gemini)),
+                (r"C:\tools\claude", Some(CLIAgent::Claude)),
+                ("/opt/tools/deepseek-tui", Some(CLIAgent::DeepSeek)),
+                ("./bin/vibe-acp", Some(CLIAgent::Vibe)),
+                ("/opt/claude/wrapper", None),
+                ("./bin/claude-wrapper", None),
+                ("./bin/vibe-other", None),
+                ("./bin/", None),
+            ] {
+                assert_eq!(
+                    CLIAgent::detect(command, None, None, ctx),
+                    expected,
+                    "{command}"
+                );
+            }
+        });
+    });
+}
+
+#[test]
+fn test_detect_executable_paths_with_shell_parsing_and_aliases() {
+    App::test((), |mut app| async move {
+        app.update(|ctx| {
+            let map = aliases(&[("c", "EXAMPLE=1 '/opt/test tools/claude'")]);
+            assert_eq!(
+                CLIAgent::detect("c --help", Some(EscapeChar::Backslash), Some(&map), ctx),
+                Some(CLIAgent::Claude),
+            );
+            assert_eq!(
+                CLIAgent::detect(
+                    "EXAMPLE=1 './test tools/codex' --help",
+                    Some(EscapeChar::Backslash),
+                    None,
+                    ctx,
+                ),
+                Some(CLIAgent::Codex),
+            );
+        });
+    });
+}
+
+#[test]
 fn test_detect_with_arguments() {
     App::test((), |mut app| async move {
         app.update(|ctx| {

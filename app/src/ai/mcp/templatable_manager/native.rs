@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_compat::CompatExt as _;
 use cfg_if::cfg_if;
 use futures::FutureExt as _;
+use http::HeaderValue;
 use mcp::oauth::{
     self, AuthContext, CallbackResult, FILE_BASED_MCP_CREDENTIALS_KEY,
     FileBasedPersistedCredentialsMap, PersistedCredentials, PersistedCredentialsMap,
@@ -283,6 +284,7 @@ impl TemplatableMCPServerManager {
             } => {
                 me.purge_file_based_server_credentials(installation_hashes, ctx);
             }
+            FileBasedMCPManagerEvent::InitialGlobalMcpScanComplete { .. } => {}
         });
 
         // TemplatableMCPServerManager is the source of truth for templatable MCP servers stored on the cloud
@@ -380,6 +382,7 @@ impl TemplatableMCPServerManager {
             locally_installed_servers,
             database_connection,
             server_error_messages: Default::default(),
+            completed_initial_startups: Default::default(),
             spawner: Some(ctx.spawner()),
             pending_reconnections: Default::default(),
             pending_oauth_csrf: Default::default(),
@@ -483,6 +486,15 @@ impl TemplatableMCPServerManager {
             return;
         }
         self.server_states.insert(installation_uuid, new_state);
+        if matches!(
+            new_state,
+            MCPServerState::Running
+                | MCPServerState::FailedToStart
+                | MCPServerState::NotRunning
+                | MCPServerState::ShuttingDown
+        ) {
+            self.completed_initial_startups.insert(installation_uuid);
+        }
         ctx.emit(TemplatableMCPServerManagerEvent::StateChanged {
             uuid: installation_uuid,
             state: new_state,
@@ -2092,6 +2104,56 @@ enum Transport {
     Sse(Option<rmcp::transport::auth::AuthClient<reqwest::Client>>),
 }
 
+fn has_caller_supplied_credential(headers: &HashMap<String, String>) -> bool {
+    headers.iter().any(|(name, value)| {
+        !value.trim().is_empty()
+            && ["authorization", "x-api-key", "api-key"]
+                .iter()
+                .any(|credential_name| name.eq_ignore_ascii_case(credential_name))
+    })
+}
+
+fn is_oauth_challenge(www_authenticate: &[u8]) -> bool {
+    // Header values permit opaque bytes; lossy decoding preserves the ASCII parameter delimiters.
+    let text = String::from_utf8_lossy(www_authenticate);
+    // Inspect parameter names only: quoted error descriptions can themselves mention resource_metadata.
+    let mut rest = &*text;
+    while let Some(equals) = rest.find('=') {
+        let name = rest[..equals]
+            .trim_end()
+            .rsplit([',', ' ', '\t'])
+            .next()
+            .unwrap_or_default()
+            .trim();
+        if name.eq_ignore_ascii_case("resource_metadata") {
+            return true;
+        }
+        let after_equals = rest[equals + 1..].trim_start();
+        rest = match after_equals.strip_prefix('"') {
+            Some(unquoted) => {
+                let mut escaped = false;
+                let closing_quote = unquoted.char_indices().find_map(|(index, character)| {
+                    if escaped {
+                        escaped = false;
+                        return None;
+                    }
+                    if character == '\\' {
+                        escaped = true;
+                        return None;
+                    }
+                    (character == '"').then_some(index)
+                });
+                closing_quote.map_or("", |closing| &unquoted[closing + 1..])
+            }
+            None => match after_equals.find(',') {
+                Some(comma) => &after_equals[comma + 1..],
+                None => "",
+            },
+        };
+    }
+    false
+}
+
 /// Determines which transport to use.
 ///
 /// This sends a "preflight" InitializeRequest to the server to determine whether the
@@ -2110,10 +2172,24 @@ async fn determine_transport(
             "Unexpected status code: {status}"
         ))
     }
-    match send_initialize_request(url, headers, None).await? {
+    let preflight = send_initialize_request(url, headers, None).await?;
+    match preflight.status {
         StatusCode::OK => Ok(Transport::Http(None)),
         StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED => Ok(Transport::Sse(None)),
         StatusCode::UNAUTHORIZED => {
+            if has_caller_supplied_credential(headers)
+                && !preflight
+                    .www_authenticate
+                    .iter()
+                    .any(|value| is_oauth_challenge(value.as_bytes()))
+            {
+                return Err(rmcp::RmcpError::transport_creation::<ReqwestHttpTransport>(
+                    format!(
+                        "MCP server '{server_name}' rejected the configured credentials (HTTP 401). \
+                         Check the token, its expiry, and its scope. The server did not ask for OAuth."
+                    ),
+                ));
+            }
             if !FeatureFlag::McpOauth.is_enabled() {
                 return Err(rmcp::RmcpError::transport_creation::<ReqwestHttpTransport>(
                     "Server requires authentication, which is not yet supported.".to_string(),
@@ -2132,7 +2208,10 @@ async fn determine_transport(
                 .boxed()
                 .await
                 .map_err(rmcp::RmcpError::transport_creation::<ReqwestHttpTransport>)?;
-            let transport = match send_initialize_request(url, headers, Some(&client)).await? {
+            let transport = match send_initialize_request(url, headers, Some(&client))
+                .await?
+                .status
+            {
                 StatusCode::OK => Ok(Transport::Http(Some(client))),
                 StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED => {
                     Ok(Transport::Sse(Some(client)))
@@ -2153,12 +2232,17 @@ async fn determine_transport(
     }
 }
 
-/// Sends an InitializeRequest to the server, and returns the HTTP status code from the response.
+struct PreflightResponse {
+    status: reqwest::StatusCode,
+    www_authenticate: Vec<HeaderValue>,
+}
+
+/// Retain every authentication challenge so transport selection can distinguish rejected credentials.
 async fn send_initialize_request(
     url: &str,
-    headers: &std::collections::HashMap<String, String>,
+    headers: &HashMap<String, String>,
     auth_client: Option<&rmcp::transport::auth::AuthClient<reqwest::Client>>,
-) -> Result<reqwest::StatusCode, rmcp::RmcpError> {
+) -> Result<PreflightResponse, rmcp::RmcpError> {
     use rmcp::transport::common::http_header::{EVENT_STREAM_MIME_TYPE, JSON_MIME_TYPE};
 
     let request = rmcp::model::InitializeRequest::new(make_client_info());
@@ -2188,7 +2272,16 @@ async fn send_initialize_request(
         .await
         .map_err(rmcp::RmcpError::transport_creation::<ReqwestHttpTransport>)?;
 
-    Ok(response.status())
+    let www_authenticate = response
+        .headers()
+        .get_all(http::header::WWW_AUTHENTICATE)
+        .iter()
+        .cloned()
+        .collect();
+    Ok(PreflightResponse {
+        status: response.status(),
+        www_authenticate,
+    })
 }
 
 /// Creates a [`ClientInfo`] for the MCP client.
@@ -2255,3 +2348,7 @@ impl<T: rmcp::transport::Transport<R>, R: rmcp::service::ServiceRole> rmcp::tran
         self.transport.close()
     }
 }
+
+#[cfg(test)]
+#[path = "native_tests.rs"]
+mod tests;

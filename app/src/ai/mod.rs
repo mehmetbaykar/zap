@@ -41,6 +41,7 @@ pub(crate) mod llms;
 pub(crate) mod local_harness_setup;
 pub(crate) mod metadata_project_rules;
 pub mod onboarding;
+pub mod outline;
 pub(crate) mod persisted_workspace;
 pub(crate) mod predict;
 pub(crate) mod project_rules_persister;

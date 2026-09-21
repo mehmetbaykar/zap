@@ -9,7 +9,7 @@ type EventParser = fn(&str) -> Option<CLIAgentEvent>;
 
 /// Sentinel title that identifies structured CLI agent events sent via OSC 777.
 /// The `"agent"` field in the JSON body distinguishes which agent sent it.
-pub const CLI_AGENT_NOTIFICATION_SENTINEL: &str = "warp://cli-agent";
+pub use warp_core::cli_agent_protocol::CLI_AGENT_NOTIFICATION_SENTINEL;
 
 /// The event type encoded in the `"event"` field of the JSON body.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +18,8 @@ pub enum CLIAgentEventType {
     PromptSubmit,
     ToolComplete,
     Stop,
+    /// Claude's turn ended with an error rather than a normal stop.
+    StopFailure,
     PermissionRequest,
     PermissionReplied,
     QuestionAsked,
@@ -47,6 +49,7 @@ pub struct CLIAgentEventPayload {
     pub tool_name: Option<String>,
     pub tool_input_preview: Option<String>,
     pub plugin_version: Option<String>,
+    pub error_type: Option<String>,
 }
 
 /// A parsed event from a CLI agent plugin.

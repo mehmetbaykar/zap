@@ -198,12 +198,14 @@ impl CLIAgent {
     fn command_prefix_aliases(&self) -> &'static [&'static str] {
         match self {
             CLIAgent::DeepSeek => &["deepseek-tui"],
+            CLIAgent::Vibe => &["vibe-acp"],
             _ => &[],
         }
     }
 
     fn matches_command_prefix(&self, command: &str) -> bool {
-        command == self.command_prefix() || self.command_prefix_aliases().contains(&command)
+        let basename = command.rsplit(['/', '\\']).next().unwrap_or(command);
+        basename == self.command_prefix() || self.command_prefix_aliases().contains(&basename)
     }
 
     /// Serialized version of the CLIAgent name (e.g. "Claude", "Gemini"). Used for the
@@ -430,15 +432,13 @@ impl CLIAgent {
         let resolved_first_word = Self::extract_first_command(&resolved_command, escape_char)?;
 
         // Check if resolved command matches any known CLI agent.
-        // Also matches `aifx agent run claude` as Claude for Uber employees,
-        // and the `vibe-acp` ACP-mode binary as Mistral Vibe.
+        // Also matches `aifx agent run claude` as Claude for Uber employees.
         enum_iterator::all::<CLIAgent>()
             .filter(|agent| !matches!(agent, CLIAgent::Unknown))
             .find(|agent| {
                 agent.matches_command_prefix(&resolved_first_word)
                     || (matches!(agent, CLIAgent::Claude)
                         && Self::is_aifx_agent_run_claude(&resolved_command, ctx))
-                    || (matches!(agent, CLIAgent::Vibe) && resolved_first_word == "vibe-acp")
             })
     }
 

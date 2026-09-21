@@ -189,10 +189,11 @@ impl FileTreeMapStore {
         gitignores: &mut Vec<Arc<Gitignore>>,
     ) -> Result<(), BuildTreeError> {
         let child_path: Arc<StandardizedPath> = Arc::new(path.clone());
+        let ignored = self.get(path).is_some_and(|entry| entry.ignored());
         let mut entry = Entry::Directory(DirectoryEntry {
             path: path.clone(),
             children: vec![],
-            ignored: false,
+            ignored,
             loaded: true,
         });
 

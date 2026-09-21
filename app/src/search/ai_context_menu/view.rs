@@ -6,6 +6,8 @@ use async_channel::Sender;
 use itertools::Itertools;
 #[cfg(not(target_family = "wasm"))]
 use repo_metadata::repositories::DetectedRepositories;
+#[cfg(not(target_family = "wasm"))]
+use settings::Setting as _;
 use warp_core::features::FeatureFlag;
 use warpui::elements::{
     AnchorPair, Border, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
@@ -27,6 +29,10 @@ use crate::debounce;
 use crate::drive::settings::WarpDriveSettings;
 #[cfg(not(target_family = "wasm"))]
 use crate::search::ai_context_menu::blocks::data_source::BlockDataSource;
+#[cfg(not(target_family = "wasm"))]
+use crate::search::ai_context_menu::code::data_source::{CodeSymbolCache, code_data_source};
+#[cfg(not(target_family = "wasm"))]
+use crate::search::ai_context_menu::code::is_code_symbols_indexing;
 #[cfg(not(target_family = "wasm"))]
 use crate::search::ai_context_menu::commands::data_source::CommandDataSource;
 use crate::search::ai_context_menu::conversations::data_source::ConversationDataSource;
@@ -220,6 +226,8 @@ pub struct AIContextMenu {
     /// a lot of helpful logic for managing the search state.
     search_bar: ViewHandle<SearchBar<AIContextMenuSearchableAction>>,
     search_bar_state: ModelHandle<SearchBarState<AIContextMenuSearchableAction>>,
+    #[cfg(not(target_family = "wasm"))]
+    code_symbol_cache: ModelHandle<CodeSymbolCache>,
     state: AIContextMenuState,
     /// Debounce channel for search queries
     search_debounce_tx: Sender<String>,
@@ -388,6 +396,28 @@ impl AIContextMenu {
             }
         };
 
+        let show_code = {
+            #[cfg(target_family = "wasm")]
+            {
+                false
+            }
+            #[cfg(not(target_family = "wasm"))]
+            {
+                FeatureFlag::AIContextMenuCode.is_enabled()
+                    && *InputSettings::as_ref(app)
+                        .outline_codebase_symbols_for_at_context_menu
+                        .value()
+                    && is_active_dir_in_git_repo
+                    && !is_shared_session_viewer
+                    && app
+                        .windows()
+                        .state()
+                        .active_window
+                        .and_then(|window_id| ActiveSession::as_ref(app).path_if_local(window_id))
+                        .is_some()
+            }
+        };
+
         // For CLI agent input, use a positive allowlist of categories that CLI agents
         // can interpret. This is safer than a blocklist because new categories added
         // to the enum in the future won't accidentally leak into the CLI agent menu.
@@ -400,8 +430,9 @@ impl AIContextMenu {
                     categories.push(AIContextMenuCategory::CurrentFolderFiles);
                 }
             }
-            // Zap: originally this would push the Code category based on the
-            // outline_codebase_symbols_for_at_context_menu setting; with outline removed, the Code category no longer appears.
+            if show_code {
+                categories.push(AIContextMenuCategory::Code);
+            }
             return categories;
         }
 
@@ -435,7 +466,9 @@ impl AIContextMenu {
                 categories.push(AIContextMenuCategory::Commands);
             }
             categories.push(AIContextMenuCategory::Blocks);
-            // Zap: the Code category was retired alongside outline removal and is no longer pushed.
+            if show_code {
+                categories.push(AIContextMenuCategory::Code);
+            }
             if show_warp_drive && FeatureFlag::DriveObjectsAsContext.is_enabled() {
                 categories.push(AIContextMenuCategory::Workflows);
                 categories.push(AIContextMenuCategory::Notebooks);
@@ -456,15 +489,16 @@ impl AIContextMenu {
             categories.push(AIContextMenuCategory::Skills);
             categories
         } else if !is_shared_session_viewer {
-            // Terminal mode: show Files category only.
-            // Zap: this used to also push the Code category based on outline_codebase_symbols_for_at_context_menu;
-            // with outline removed, the Code category no longer appears.
-
-            if is_active_dir_in_git_repo {
+            // Terminal mode: show Files and Code categories (when enabled).
+            let mut categories = if is_active_dir_in_git_repo {
                 vec![AIContextMenuCategory::RepoFiles]
             } else {
                 vec![AIContextMenuCategory::CurrentFolderFiles]
+            };
+            if show_code {
+                categories.push(AIContextMenuCategory::Code);
             }
+            categories
         } else {
             // File searching is not available in shared session viewers
             vec![]
@@ -578,14 +612,32 @@ impl AIContextMenu {
         // Get initial categories for proper initialization
         let initial_categories = Self::get_categories_for_mode(true, false, false, false, ctx); // Default to AI mode, not a viewer, not ambient agent, not CLI agent input
 
-        // Zap: this used to create a CodeSymbolCache (subscribing to RepoOutlines) to support
-        // code symbol search. That feature was retired alongside outline removal, so this subscription/creation code
-        // is removed as well.
+        #[cfg(not(target_family = "wasm"))]
+        let code_symbol_cache = ctx.add_model(CodeSymbolCache::new);
+
+        // Refresh an open symbol search when its local outline changes or finishes loading.
+        #[cfg(not(target_family = "wasm"))]
+        ctx.subscribe_to_model(&code_symbol_cache, |me, _, _, ctx| {
+            if matches!(
+                me.state.navigation_state,
+                NavigationState::Category(AIContextMenuCategory::Code)
+                    | NavigationState::AllCategories
+            ) {
+                me.mixer.update(ctx, |mixer, ctx| {
+                    if let Some(query) = mixer.current_query().cloned() {
+                        mixer.run_query(query, ctx);
+                    }
+                });
+                ctx.notify();
+            }
+        });
 
         let mut result = Self {
             mixer,
             search_bar,
             search_bar_state,
+            #[cfg(not(target_family = "wasm"))]
+            code_symbol_cache,
             state: AIContextMenuState {
                 navigation_state: if initial_categories.len() > 1 {
                     NavigationState::MainMenu
@@ -850,8 +902,28 @@ impl AIContextMenu {
                     );
                 });
             }
-            // Zap: the Code category was retired alongside outline removal. It does not appear in categories,
-            // but the enum variant is kept to avoid breaking matches extensively; this branch is never hit.
+            #[cfg(not(target_family = "wasm"))]
+            NavigationState::Category(AIContextMenuCategory::Code) => {
+                self.mixer.update(ctx, |mixer, ctx| {
+                    mixer.add_async_source(
+                        code_data_source(self.code_symbol_cache.as_ref(ctx)),
+                        [QueryFilter::Code],
+                        AddAsyncSourceOptions {
+                            debounce_interval: Some(Duration::from_millis(50)),
+                            run_in_zero_state: true,
+                            run_when_unfiltered: true,
+                        },
+                        ctx,
+                    );
+                    mixer.run_query(
+                        Query {
+                            text: "".into(),
+                            filters: HashSet::new(),
+                        },
+                        ctx,
+                    );
+                });
+            }
             #[cfg(not(target_family = "wasm"))]
             NavigationState::Category(AIContextMenuCategory::Workflows) => {
                 let workflow_data_source = ctx.add_model(|_| WorkflowDataSource::new());
@@ -1026,9 +1098,20 @@ impl AIContextMenu {
                         mixer.add_sync_source(block_data_source, [QueryFilter::Blocks]);
                     });
                 }
-                // Zap: the Code category was retired alongside outline removal; it never appears, but the noop branch is kept
-                // to avoid a match error.
-                AIContextMenuCategory::Code => {}
+                AIContextMenuCategory::Code => {
+                    self.mixer.update(ctx, |mixer, ctx| {
+                        mixer.add_async_source(
+                            code_data_source(self.code_symbol_cache.as_ref(ctx)),
+                            [QueryFilter::Code],
+                            AddAsyncSourceOptions {
+                                debounce_interval: Some(Duration::from_millis(50)),
+                                run_in_zero_state: true,
+                                run_when_unfiltered: true,
+                            },
+                            ctx,
+                        );
+                    });
+                }
                 AIContextMenuCategory::Workflows => {
                     let workflow_data_source = ctx.add_model(|_| WorkflowDataSource::new());
                     self.mixer.update(ctx, |mixer, _ctx| {
@@ -1318,9 +1401,22 @@ impl AIContextMenu {
         .finish()
     }
 
-    // Zap: `render_code_symbols_indexing` used to render the
-    // "Code symbols indexing..." hint while code symbols were being indexed. After outline removal that render path is never called,
-    // so the function is removed as well.
+    #[cfg(not(target_family = "wasm"))]
+    fn render_code_symbols_indexing(&self, app: &AppContext) -> Box<dyn Element> {
+        let appearance = Appearance::as_ref(app);
+        let theme = appearance.theme();
+        Container::new(
+            Text::new(
+                "Code symbols indexing...",
+                appearance.ui_font_family(),
+                appearance.monospace_font_size(),
+            )
+            .with_color(theme.main_text_color(theme.background()).into_solid())
+            .finish(),
+        )
+        .with_uniform_padding(PADDING)
+        .finish()
+    }
 
     fn render_matching_results(
         &self,
@@ -1527,9 +1623,10 @@ impl AIContextMenu {
         fallback: Box<dyn Element>,
         app: &AppContext,
     ) -> Box<dyn Element> {
-        // Zap: this used to check whether code symbols were being indexed under the Code category and, if so, show the
-        // `render_code_symbols_indexing` hint. After outline removal that category never appears, so it is fully removed.
-        let _ = category;
+        #[cfg(not(target_family = "wasm"))]
+        if category == Some(&AIContextMenuCategory::Code) && is_code_symbols_indexing(app) {
+            return self.render_code_symbols_indexing(app);
+        }
 
         if self.mixer.as_ref(app).is_loading() {
             self.render_loading_results(app)
@@ -1611,3 +1708,7 @@ impl View for AIContextMenu {
             .finish()
     }
 }
+
+#[cfg(all(test, not(target_family = "wasm")))]
+#[path = "view_tests.rs"]
+mod tests;

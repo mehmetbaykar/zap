@@ -2,6 +2,7 @@ pub(crate) mod convert_conversation;
 mod convert_from;
 mod convert_to;
 
+use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ pub use convert_from::{
     ConversionParams, ConvertAPIMessageToClientOutputMessage, MaybeAIAgentOutputMessage,
     MessageToAIAgentOutputMessageError, user_inputs_from_messages,
 };
+use futures::future::{self, Either};
 use futures_lite::Stream;
 use mcp::TemplatableMCPServerInfo;
 use serde::Serialize;
@@ -18,7 +20,7 @@ use warp_core::channel::ChannelState;
 use warp_core::execution_mode::AppExecutionMode;
 use warp_core::features::FeatureFlag;
 use warp_core::user_preferences::GetUserPreferences;
-use warpui::{AppContext, EntityId, SingletonEntity as _};
+use warpui::{AppContext, Entity, EntityId, ModelContext, ModelDropped, SingletonEntity as _};
 
 use super::{AIAgentInput, MCPContext, MCPServer, RequestMetadata, RunningCommand, Suggestions};
 use crate::ai::agent::conversation::AIConversationId;
@@ -29,6 +31,8 @@ use crate::ai::execution_profiles::AIExecutionProfileAppExt;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::facts::{AIFact, AIFactObjectModel};
 use crate::ai::llms::LLMId;
+#[cfg(feature = "local_fs")]
+use crate::ai::mcp::FileBasedMCPManager;
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::cloud_object::StoredObject;
 use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
@@ -258,72 +262,6 @@ impl RequestParams {
             Vec::new()
         };
 
-        // Build MCP context - either grouped by server or flat lists based on feature flag
-        let mcp_context = if FeatureFlag::MCPGroupedServerContext.is_enabled() {
-            // Group MCP tools and resources by server
-            let templatable_manager = TemplatableMCPServerManager::as_ref(app);
-
-            let mut active_servers: Vec<&TemplatableMCPServerInfo> = templatable_manager
-                .get_active_templatable_servers()
-                .values()
-                .copied()
-                .collect();
-
-            // If file-based MCP servers are enabled, add active servers in scope of
-            // the user's current working directory
-            if let Some(cwd) = session_context.current_working_directory() {
-                active_servers.extend(
-                    templatable_manager
-                        .get_active_file_based_servers(Path::new(cwd), app)
-                        .values(),
-                );
-            }
-
-            // Include any ephemeral MCP servers started via the Oz CLI.
-            active_servers.extend(
-                templatable_manager
-                    .get_active_cli_spawned_servers()
-                    .values(),
-            );
-
-            let servers: Vec<MCPServer> = active_servers
-                .into_iter()
-                .map(|server| MCPServer {
-                    name: server.name().to_string(),
-                    description: server.description().unwrap_or_default().to_string(),
-                    id: server.installation_id().to_string(),
-                    resources: server.resources().to_vec(),
-                    tools: server.tools().to_vec(),
-                })
-                .collect();
-
-            if servers.is_empty() {
-                None
-            } else {
-                #[allow(deprecated)]
-                Some(MCPContext {
-                    resources: vec![],
-                    tools: vec![],
-                    servers,
-                })
-            }
-        } else {
-            // Flat lists of resources and tools
-            let templatable_mcp_manager = TemplatableMCPServerManager::as_ref(app);
-            let resources = templatable_mcp_manager
-                .resources()
-                .cloned()
-                .collect::<Vec<_>>();
-            let tools = templatable_mcp_manager.tools().cloned().collect::<Vec<_>>();
-
-            #[allow(deprecated)]
-            (!resources.is_empty() || !tools.is_empty()).then_some(MCPContext {
-                resources,
-                tools,
-                servers: vec![],
-            })
-        };
-
         let should_redact_secrets = get_secret_obfuscation_mode(app).should_redact_secret();
 
         let allow_use_of_warp_credits = false;
@@ -413,7 +351,7 @@ impl RequestParams {
             is_memory_enabled,
             user_rules,
             warp_drive_context_enabled,
-            mcp_context,
+            mcp_context: None,
             planning_enabled: true,
             should_redact_secrets,
             allow_use_of_warp_credits,
@@ -438,6 +376,103 @@ impl RequestParams {
             // to avoid threading it through ConversationRequestData / non-BYOP paths).
             compaction_state: None,
             byop_repair_state: Default::default(),
+        }
+    }
+
+    /// Collect MCP tools only after initial discovery/startup has settled, before provider dispatch.
+    pub(crate) fn prepare_for_dispatch<M: Entity>(
+        mut self,
+        ctx: &mut ModelContext<M>,
+    ) -> impl Future<Output = Result<Self, ModelDropped>> + use<M> {
+        #[cfg(feature = "local_fs")]
+        let readiness = if FeatureFlag::FileBasedMcp.is_enabled() {
+            FileBasedMCPManager::handle(ctx)
+                .update(ctx, |manager, ctx| manager.wait_for_initial_servers(ctx))
+        } else {
+            None
+        };
+        #[cfg(not(feature = "local_fs"))]
+        let readiness = None::<future::Ready<()>>;
+
+        let Some(readiness) = readiness else {
+            self.mcp_context = self.snapshot_mcp_context(ctx);
+            return Either::Left(future::ready(Ok(self)));
+        };
+        let foreground = ctx.spawner();
+        Either::Right(async move {
+            readiness.await;
+            foreground
+                .spawn(move |_, ctx| {
+                    self.mcp_context = self.snapshot_mcp_context(ctx);
+                    self
+                })
+                .await
+        })
+    }
+
+    fn snapshot_mcp_context(&self, app: &AppContext) -> Option<MCPContext> {
+        // Build MCP context - either grouped by server or flat lists based on feature flag
+        if FeatureFlag::MCPGroupedServerContext.is_enabled() {
+            // Group MCP tools and resources by server
+            let templatable_manager = TemplatableMCPServerManager::as_ref(app);
+            let mut active_servers: Vec<&TemplatableMCPServerInfo> = templatable_manager
+                .get_active_templatable_servers()
+                .values()
+                .copied()
+                .collect();
+
+            // If file-based MCP servers are enabled, add active servers in scope of
+            // the user's current working directory
+            if let Some(cwd) = self.session_context.current_working_directory() {
+                active_servers.extend(
+                    templatable_manager
+                        .get_active_file_based_servers(Path::new(cwd), app)
+                        .values(),
+                );
+            }
+
+            // Include any ephemeral MCP servers started via the Oz CLI.
+            active_servers.extend(
+                templatable_manager
+                    .get_active_cli_spawned_servers()
+                    .values(),
+            );
+            let servers: Vec<MCPServer> = active_servers
+                .into_iter()
+                .map(|server| MCPServer {
+                    name: server.name().to_string(),
+                    description: server.description().unwrap_or_default().to_string(),
+                    id: server.installation_id().to_string(),
+                    resources: server.resources().to_vec(),
+                    tools: server.tools().to_vec(),
+                })
+                .collect();
+
+            if servers.is_empty() {
+                None
+            } else {
+                #[allow(deprecated)]
+                Some(MCPContext {
+                    resources: vec![],
+                    tools: vec![],
+                    servers,
+                })
+            }
+        } else {
+            // Flat lists of resources and tools
+            let templatable_mcp_manager = TemplatableMCPServerManager::as_ref(app);
+            let resources = templatable_mcp_manager
+                .resources()
+                .cloned()
+                .collect::<Vec<_>>();
+            let tools = templatable_mcp_manager.tools().cloned().collect::<Vec<_>>();
+
+            #[allow(deprecated)]
+            (!resources.is_empty() || !tools.is_empty()).then_some(MCPContext {
+                resources,
+                tools,
+                servers: vec![],
+            })
         }
     }
 

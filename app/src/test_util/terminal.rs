@@ -120,7 +120,7 @@ pub fn initialize_app_for_terminal_view(app: &mut App) {
     });
     app.add_singleton_model(FileSearchModel::new);
     app.add_singleton_model(|_| GitRepoModels::new());
-    // Zap: RepoOutlines has been removed, so it is no longer registered.
+    app.add_singleton_model(crate::ai::outline::RepoOutlines::new_for_test);
     app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
     app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
     app.add_singleton_model(SkillManager::new);

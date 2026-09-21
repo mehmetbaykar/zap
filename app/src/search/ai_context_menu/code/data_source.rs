@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "local_fs"), allow(dead_code))]
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(not(target_family = "wasm"))]
+use std::collections::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use std::path::Path;
 use std::path::PathBuf;
@@ -15,6 +17,8 @@ use instant::Instant;
 use itertools::Itertools;
 #[cfg(not(target_family = "wasm"))]
 use repo_metadata::repositories::DetectedRepositories;
+#[cfg(not(target_family = "wasm"))]
+use warp_util::git::run_git_command;
 #[cfg(not(target_family = "wasm"))]
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::AppContext;
@@ -31,8 +35,6 @@ use crate::ai::outline::{OutlineStatus, RepoOutlines, RepoOutlinesEvent};
 use crate::search::ai_context_menu::mixer::AIContextMenuSearchableAction;
 #[cfg(not(target_family = "wasm"))]
 use crate::search::data_source::{Query, QueryResult};
-#[cfg(not(target_family = "wasm"))]
-use crate::search::files::model::FileSearchModel;
 #[cfg(not(target_family = "wasm"))]
 use crate::search::mixer::{
     AsyncDataSource, BoxFuture, DataSourceRunError, DataSourceRunErrorWrapper,
@@ -130,7 +132,7 @@ impl CodeSymbolCache {
                     .and_then(|r| PathBuf::try_from(r).ok())
             })?;
 
-        let (outline_status, _) = RepoOutlines::as_ref(app).get_outline(&git_repo_path)?;
+        let outline_status = RepoOutlines::as_ref(app).get_outline_for_repo(&git_repo_path)?;
         let outline = match outline_status {
             OutlineStatus::Complete(outline) => outline,
             _ => return None,
@@ -198,34 +200,6 @@ impl CodeSymbolCache {
         }
         (i, batch)
     }
-
-    #[cfg(not(target_family = "wasm"))]
-    pub fn get_git_changed_files(&self, app: &AppContext) -> HashSet<String> {
-        let Some(git_repo_path) = app
-            .windows()
-            .state()
-            .active_window
-            .and_then(|window_id| ActiveSession::as_ref(app).path_if_local(window_id))
-            .and_then(|current_dir| {
-                DetectedRepositories::as_ref(app)
-                    .get_root_for_path(&LocalOrRemotePath::Local(
-                        Path::new(current_dir).to_path_buf(),
-                    ))
-                    .and_then(|r| PathBuf::try_from(r).ok())
-            })
-        else {
-            return HashSet::new();
-        };
-
-        FileSearchModel::as_ref(app)
-            .get_git_changed_files(&git_repo_path)
-            .unwrap_or_default()
-    }
-
-    #[cfg(target_family = "wasm")]
-    pub fn get_git_changed_files(&self, _app: &AppContext) -> HashSet<String> {
-        HashSet::new()
-    }
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -277,23 +251,19 @@ impl AsyncDataSource for CodeCursorDataSource {
         Box::pin(async move {
             let map_err = |_| -> DataSourceRunErrorWrapper { Box::new(CodeSearchError) };
 
-            // Populate cache, get repo path + count, and git-changed files if zero-state
-            let init_query = query_text.clone();
             let init = spawner
-                .spawn(move |cache, ctx| {
-                    let (repo_path, total) = cache.ensure_symbols_cached(ctx)?;
-                    let git_changed_files = if init_query.is_empty() {
-                        cache.get_git_changed_files(ctx)
-                    } else {
-                        HashSet::new()
-                    };
-                    Some((repo_path, total, git_changed_files))
-                })
+                .spawn(move |cache, ctx| cache.ensure_symbols_cached(ctx))
                 .await
                 .map_err(map_err)?;
 
-            let Some((repo_path, total, git_changed_files)) = init else {
+            let Some((repo_path, total)) = init else {
                 return Ok(Vec::new());
+            };
+            // Only model access belongs in ModelSpawner: Git status must not block the UI thread.
+            let git_changed_files = if is_zero_state {
+                git_changed_files(&repo_path).await
+            } else {
+                HashSet::new()
             };
 
             // We can't actually perform the search off of the main thread
@@ -337,6 +307,29 @@ pub fn code_data_source(cache: &CodeSymbolCache) -> CodeCursorDataSource {
     CodeCursorDataSource::new(cache.spawner())
 }
 
+#[cfg(not(target_family = "wasm"))]
+async fn git_changed_files(repo_path: &Path) -> HashSet<String> {
+    run_git_command(repo_path, &["status", "--porcelain"])
+        .await
+        .map(|output| parse_git_changed_files(&output))
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn parse_git_changed_files(output: &str) -> HashSet<String> {
+    output
+        .lines()
+        .filter_map(|line| line.get(3..))
+        .map(|filename| {
+            filename
+                .strip_prefix('"')
+                .and_then(|quoted| quoted.strip_suffix('"'))
+                .unwrap_or(filename)
+                .to_owned()
+        })
+        .collect()
+}
+
 /// Zero-state finalisation: prioritize symbols from git-changed files.
 #[cfg(not(target_family = "wasm"))]
 fn finalize_zero_state(
@@ -348,7 +341,7 @@ fn finalize_zero_state(
     // First, add all symbols from git-changed files (they get priority)
     for item in &items {
         let file_path_str = item.code_symbol.file_path.to_string_lossy().to_string();
-        if git_changed_files.contains(&file_path_str) {
+        if git_changed_files.contains(&file_path_str) && results.len() < MAX_RESULTS {
             let search_item = CodeSearchItem {
                 code_symbol: item.code_symbol.clone(),
                 match_result: FuzzyMatchResult {
@@ -383,6 +376,8 @@ fn finalize_zero_state(
 fn finalize_query(items: Vec<CodeSearchItem>) -> Vec<QueryResult<AIContextMenuSearchableAction>> {
     items
         .into_iter()
+        // Valid long-gap matches can have zero or negative scores.
+        .filter(|item| !item.match_result.matched_indices.is_empty())
         .k_largest_relaxed_by_key(MAX_RESULTS, |item| item.match_result.score)
         .map(QueryResult::from)
         .collect()
@@ -411,6 +406,6 @@ fn fuzzy_match_symbol_with_type(code_symbol: &CodeSymbol, query: &str) -> FuzzyM
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 #[path = "data_source_tests.rs"]
 mod tests;

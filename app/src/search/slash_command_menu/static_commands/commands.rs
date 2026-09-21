@@ -9,6 +9,7 @@ use super::Availability;
 use crate::search::slash_command_menu::StaticCommand;
 use crate::search::slash_command_menu::static_commands::Argument;
 use crate::t_static;
+use crate::ui_components::color_dot;
 
 pub static AGENT: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
     name: "/agent",
@@ -113,6 +114,38 @@ pub static RENAME_TAB: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand 
     availability: Availability::ALWAYS,
     auto_enter_ai_mode: false,
     argument: Some(Argument::required().with_hint_text(t_static!("slash-cmd-rename-tab-hint"))),
+});
+
+pub static RENAME_CONVERSATION: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
+    name: "/rename-conversation",
+    description: t_static!("slash-cmd-rename-conversation-desc"),
+    icon_path: "bundled/svg/pencil-line.svg",
+    availability: Availability::AGENT_VIEW
+        | Availability::ACTIVE_CONVERSATION
+        | Availability::AI_ENABLED,
+    auto_enter_ai_mode: false,
+    argument: Some(
+        Argument::required().with_hint_text(t_static!("slash-cmd-rename-conversation-hint")),
+    ),
+});
+
+static SET_TAB_COLOR_HINT: LazyLock<String> = LazyLock::new(|| {
+    let mut hint = String::from("<");
+    for color in color_dot::TAB_COLOR_OPTIONS {
+        hint.push_str(&color.to_string().to_ascii_lowercase());
+        hint.push('|');
+    }
+    hint.push_str("none>");
+    hint
+});
+
+pub static SET_TAB_COLOR: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
+    name: "/set-tab-color",
+    description: t_static!("slash-cmd-set-tab-color-desc"),
+    icon_path: "bundled/svg/ellipse.svg",
+    availability: Availability::ALWAYS,
+    auto_enter_ai_mode: false,
+    argument: Some(Argument::required().with_hint_text(SET_TAB_COLOR_HINT.as_str())),
 });
 
 pub static FORK: LazyLock<StaticCommand> = LazyLock::new(|| StaticCommand {
@@ -448,6 +481,8 @@ fn all_commands() -> Vec<StaticCommand> {
         PLAN.clone(),
         ORCHESTRATE.clone(),
         RENAME_TAB.clone(),
+        RENAME_CONVERSATION.clone(),
+        SET_TAB_COLOR.clone(),
         CONVERSATIONS.clone(),
         EXPORT_TO_CLIPBOARD.clone(),
         MODEL.clone(),
@@ -518,67 +553,5 @@ fn all_commands() -> Vec<StaticCommand> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::HashSet;
-
-    use super::*;
-
-    #[test]
-    fn command_names_are_unique() {
-        let names = COMMAND_REGISTRY.all_commands().map(|command| command.name);
-        let mut seen = HashSet::new();
-        for name in names {
-            assert!(seen.insert(name), "duplicate slash command name: {name}");
-        }
-    }
-
-    #[test]
-    fn rename_tab_command_requires_argument() {
-        // hint_text goes through i18n; initialize the loader to get the real English copy
-        crate::i18n::init(Some("en"));
-        let command = COMMAND_REGISTRY
-            .get_command_with_name(RENAME_TAB.name)
-            .expect("expected /rename-tab to be registered");
-        let argument = command
-            .argument
-            .as_ref()
-            .expect("expected /rename-tab to require an argument");
-
-        assert!(!argument.is_optional);
-        assert!(!argument.should_execute_on_selection);
-        assert_eq!(argument.hint_text, Some("<tab name>"));
-    }
-
-    #[test]
-    fn strip_command_prefix_no_match() {
-        let result = strip_command_prefix("just a normal query", "/plan");
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn strip_command_prefix_empty() {
-        let result = strip_command_prefix("", "/plan");
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn strip_command_prefix_no_trailing_space() {
-        // "/plan" alone (no trailing space) should NOT be stripped
-        let result = strip_command_prefix("/plan", "/plan");
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn strip_command_prefix_trailing_space_only() {
-        // "/plan " with nothing after should strip to empty string
-        let result = strip_command_prefix("/plan ", "/plan");
-        assert_eq!(result, Some(String::new()));
-    }
-
-    #[test]
-    fn strip_command_prefix_substring_not_matched() {
-        // "/planning" should not match "/plan"
-        let result = strip_command_prefix("/planning something", "/plan");
-        assert_eq!(result, None);
-    }
-}
+#[path = "commands_tests.rs"]
+mod tests;

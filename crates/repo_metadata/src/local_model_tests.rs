@@ -682,6 +682,78 @@ fn test_index_directory_path_upgrades_lazy_loaded_non_git_path() {
 }
 
 #[test]
+fn expanding_ignored_directory_preserves_default_context_filtering() {
+    VirtualFS::test("ignored_directory_context", |dirs, mut vfs| {
+        vfs.mkdir("repo/build/nested").with_files(vec![
+            Stub::FileWithContent("repo/.gitignore", "build/\n"),
+            Stub::FileWithContent("repo/README.md", "Project"),
+            Stub::FileWithContent("repo/build/out.o", "object"),
+            Stub::FileWithContent("repo/build/nested/other.o", "object"),
+        ]);
+        let repo = StandardizedPath::from_local_canonicalized(&dirs.tests().join("repo")).unwrap();
+        let repo_local = repo.to_local_path_lossy();
+        let build = StandardizedPath::try_from_local(&repo_local.join("build")).unwrap();
+        let nested = StandardizedPath::try_from_local(&repo_local.join("build/nested")).unwrap();
+        let out = StandardizedPath::try_from_local(&repo_local.join("build/out.o")).unwrap();
+        let mut gitignores = crate::gitignores_for_directory(&repo_local);
+        let root = Entry::build_tree(
+            &repo_local,
+            &mut Vec::new(),
+            &mut gitignores,
+            None,
+            usize::MAX,
+            0,
+            &IgnoredPathStrategy::IncludeLazy,
+            BudgetExceededBehavior::StopAndLazyLoad,
+        )
+        .unwrap();
+
+        App::test((), |mut app| async move {
+            let model = app.add_model(|_| LocalRepoMetadataModel::new_for_test());
+            model.update(&mut app, |model, ctx| {
+                let state = FileTreeState::new(root, gitignores, None);
+                assert!(state.entry.get(&build).unwrap().ignored());
+                assert!(state.entry.get(&out).is_none());
+                model
+                    .repositories
+                    .insert(repo.clone(), IndexedRepoState::Indexed(state));
+
+                for directory in [None, Some(&build), Some(&nested)] {
+                    if let Some(directory) = directory {
+                        model.load_directory(&repo, directory, ctx).unwrap();
+                    }
+                    let contents = model
+                        .get_repo_contents(&repo, GetContentsArgs::default())
+                        .unwrap()
+                        .contents;
+                    let paths: Vec<PathBuf> = contents
+                        .iter()
+                        .map(|entry| match entry {
+                            crate::RepoContent::File(file) => file.path.to_local_path_lossy(),
+                            crate::RepoContent::Directory(directory) => {
+                                directory.path.to_local_path_lossy()
+                            }
+                        })
+                        .collect();
+                    assert!(paths.contains(&repo_local.join("README.md")));
+                    assert!(
+                        paths
+                            .iter()
+                            .all(|path| !path.starts_with(repo_local.join("build")))
+                    );
+                }
+                let Some(IndexedRepoState::Indexed(state)) = model.repository_state(&repo) else {
+                    panic!("expected indexed repository");
+                };
+                assert!(state.entry.get(&build).unwrap().ignored());
+                assert!(state.entry.get(&out).unwrap().ignored());
+                assert!(state.entry.get(&nested).unwrap().ignored());
+            });
+        });
+    });
+}
+
+#[test]
 fn test_get_repo_contents_include_ignored() {
     VirtualFS::test("repo_contents_include_ignored_test", |dirs, mut vfs| {
         let test_repo = dirs.tests().join("test_repo");

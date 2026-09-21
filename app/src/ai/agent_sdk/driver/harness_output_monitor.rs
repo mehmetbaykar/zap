@@ -197,12 +197,11 @@ pub(crate) async fn watch_block_for_errors(
 }
 
 pub(crate) fn should_suppress_runtime_failure(status: Option<&CLIAgentSessionStatus>) -> bool {
-    // On CLIAgentSessionStatus::Failed, we directly update the task status,
-    // so we don't need to do runtime pattern matching to find the failure.
-    // Zap: our CLIAgentSessionStatus has no `Failed` variant (InProgress / Success /
-    // Blocked only), so there is no already-reported failure to suppress -- only the
-    // Success arm applies here. If `Failed` is ever ported, add it back.
-    matches!(status, Some(CLIAgentSessionStatus::Success))
+    // Plugin terminal states are authoritative; echoed provider messages must not override them.
+    matches!(
+        status,
+        Some(CLIAgentSessionStatus::Success | CLIAgentSessionStatus::Failed { .. })
+    )
 }
 
 /// Cap excerpt length so we don't blow up status messages or logs with

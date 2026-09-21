@@ -1,7 +1,11 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use futures::channel::oneshot;
+use futures::stream::AbortHandle;
 use itertools::Itertools as _;
 use repo_metadata::repositories::DetectedRepositories;
 use uuid::Uuid;
@@ -10,7 +14,8 @@ use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use super::file_mcp_watcher::FileMCPConfigDiagnostic;
-use super::{FileMCPWatcher, FileMCPWatcherEvent, MCPProvider};
+use super::templatable_manager::TemplatableMCPServerManagerEvent;
+use super::{FileMCPWatcher, FileMCPWatcherEvent, MCPProvider, TemplatableMCPServerManager};
 use crate::ai::mcp::ParsedTemplatableMCPServerResult;
 use crate::ai::mcp::templatable_installation::TemplatableMCPServerInstallation;
 use crate::settings::AISettingsChangedEvent;
@@ -32,7 +37,25 @@ pub struct FileBasedMCPManager {
     /// consumer can query the current config health. A successful parse or
     /// removal clears the diagnostic for that path.
     config_diagnostics_by_path: HashMap<PathBuf, FileMCPConfigDiagnostic>,
+    initial_global_scan_state: InitialGlobalMcpScanState,
+    initial_readiness_finished: bool,
+    initial_readiness_waiters: Vec<oneshot::Sender<()>>,
+    initial_readiness_timeout: Option<AbortHandle>,
 }
+
+#[derive(Debug)]
+enum InitialGlobalMcpScanState {
+    Pending(Vec<Uuid>),
+    Complete(Vec<Uuid>),
+}
+
+impl Default for InitialGlobalMcpScanState {
+    fn default() -> Self {
+        Self::Pending(Vec::new())
+    }
+}
+
+const INITIAL_MCP_STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl FileBasedMCPManager {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
@@ -48,11 +71,7 @@ impl FileBasedMCPManager {
             });
         }
 
-        Self {
-            file_based_servers: Default::default(),
-            file_based_servers_by_root: Default::default(),
-            config_diagnostics_by_path: Default::default(),
-        }
+        Self::default()
     }
 
     /// Handle an event from [`FileMCPWatcher`].
@@ -80,6 +99,104 @@ impl FileBasedMCPManager {
                 self.config_diagnostics_by_path
                     .insert(diagnostic.config_path.clone(), diagnostic.clone());
             }
+            FileMCPWatcherEvent::InitialGlobalScanComplete => {
+                self.complete_initial_global_scan(ctx);
+            }
+        }
+        if !self.initial_readiness_waiters.is_empty() && self.initial_servers_settled(ctx) {
+            self.finish_initial_readiness(ctx);
+        }
+    }
+
+    fn complete_initial_global_scan(&mut self, ctx: &mut ModelContext<Self>) {
+        let InitialGlobalMcpScanState::Pending(auto_started) = &mut self.initial_global_scan_state
+        else {
+            return;
+        };
+        let wait_server_uuids = std::mem::take(auto_started);
+        self.initial_global_scan_state =
+            InitialGlobalMcpScanState::Complete(wait_server_uuids.clone());
+        ctx.emit(FileBasedMCPManagerEvent::InitialGlobalMcpScanComplete { wait_server_uuids });
+    }
+
+    /// Cached because the scan normally finishes before a conversation subscribes to events.
+    pub fn initial_global_scan_result(&self) -> Option<&[Uuid]> {
+        match &self.initial_global_scan_state {
+            InitialGlobalMcpScanState::Pending(_) => None,
+            InitialGlobalMcpScanState::Complete(uuids) => Some(uuids),
+        }
+    }
+
+    fn initial_servers_settled(&self, app: &AppContext) -> bool {
+        self.initial_global_scan_result().is_some_and(|uuids| {
+            let manager = TemplatableMCPServerManager::as_ref(app);
+            uuids.iter().all(|uuid| {
+                self.get_installation_by_uuid(*uuid).is_none()
+                    || manager.has_completed_initial_startup(*uuid)
+            })
+        })
+    }
+
+    /// One shared, non-fatal budget for the initial scan and the servers it actually auto-started.
+    /// Neither later config edits nor retries reopen this wait after completion or timeout.
+    pub(crate) fn wait_for_initial_servers(
+        &mut self,
+        ctx: &mut ModelContext<Self>,
+    ) -> Option<impl Future<Output = ()> + use<>> {
+        self.wait_for_initial_servers_with_timeout(INITIAL_MCP_STARTUP_TIMEOUT, ctx)
+    }
+
+    fn wait_for_initial_servers_with_timeout(
+        &mut self,
+        timeout: Duration,
+        ctx: &mut ModelContext<Self>,
+    ) -> Option<impl Future<Output = ()> + use<>> {
+        if !FeatureFlag::FileBasedMcp.is_enabled() || self.initial_readiness_finished {
+            return None;
+        }
+        if self.initial_servers_settled(ctx) {
+            self.finish_initial_readiness(ctx);
+            return None;
+        }
+
+        let (tx, rx) = oneshot::channel();
+        self.initial_readiness_waiters.push(tx);
+        if self.initial_readiness_timeout.is_none() {
+            ctx.subscribe_to_model(
+                &TemplatableMCPServerManager::handle(ctx),
+                |me, _, event, ctx| {
+                    if matches!(event, TemplatableMCPServerManagerEvent::StateChanged { .. })
+                        && me.initial_servers_settled(ctx)
+                    {
+                        me.finish_initial_readiness(ctx);
+                    }
+                },
+            );
+            let timer = ctx.spawn(warpui::r#async::Timer::after(timeout), |me, _, ctx| {
+                if !me.initial_readiness_finished {
+                    log::warn!("Timed out waiting for initial global MCP scan/server startup; proceeding with available tools");
+                    me.finish_initial_readiness(ctx);
+                }
+            });
+            self.initial_readiness_timeout = Some(timer.abort_handle());
+        }
+        Some(async move {
+            if rx.await.is_err() {
+                log::warn!(
+                    "Initial MCP readiness manager dropped; proceeding with available tools"
+                );
+            }
+        })
+    }
+
+    fn finish_initial_readiness(&mut self, ctx: &mut ModelContext<Self>) {
+        self.initial_readiness_finished = true;
+        if let Some(timer) = self.initial_readiness_timeout.take() {
+            timer.abort();
+            ctx.unsubscribe_from_model(&TemplatableMCPServerManager::handle(ctx));
+        }
+        for tx in self.initial_readiness_waiters.drain(..) {
+            let _ = tx.send(());
         }
     }
 
@@ -349,6 +466,12 @@ impl FileBasedMCPManager {
                 log::info!(
                     "Auto-spawning file-based MCP server '{server_name}' ({installation_uuid})"
                 );
+                if let InitialGlobalMcpScanState::Pending(awaited) =
+                    &mut self.initial_global_scan_state
+                    && !awaited.contains(&installation_uuid)
+                {
+                    awaited.push(installation_uuid);
+                }
                 auto_started_uuids.push(installation_uuid);
                 to_spawn.push(installation);
             }
@@ -496,6 +619,9 @@ pub enum FileBasedMCPManagerEvent {
     },
     PurgeCredentials {
         installation_hashes: Vec<u64>,
+    },
+    InitialGlobalMcpScanComplete {
+        wait_server_uuids: Vec<Uuid>,
     },
 }
 

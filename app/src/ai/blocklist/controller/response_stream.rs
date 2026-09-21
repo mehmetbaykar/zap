@@ -282,7 +282,7 @@ impl ResponseStream {
         let start_time = Local::now();
 
         let request_id = Uuid::new_v4();
-        let params_clone = params.clone();
+        let prepared_params = params.clone().prepare_for_dispatch(ctx);
         // BYOP path: if the selected base model is an LLMId encoded by a user-defined provider,
         // extract (provider, api_key, model_id, root_task_id) from ctx before spawning and go
         // through custom chat completions. Otherwise return the local BYOP-required error below;
@@ -294,9 +294,14 @@ impl ResponseStream {
         let _ = ctx.spawn(
             async move {
                 if let Some(byop) = byop_dispatch {
+                    let Some((params, cancellation_rx)) =
+                        await_dispatch_preparation(prepared_params, cancellation_rx).await?
+                    else {
+                        return Ok(Box::pin(futures::stream::empty()) as api::ResponseStream);
+                    };
                     crate::ai::agent_providers::chat_stream::generate_byop_output(
                         crate::ai::agent_providers::chat_stream::ByopOutputInput {
-                            params: params_clone,
+                            params,
                             base_url: byop.base_url,
                             api_key: byop.api_key,
                             model_id: byop.model_id,
@@ -400,9 +405,15 @@ impl ResponseStream {
         self.current_request_id = Some(request_id);
         let params = self.params.clone();
         let byop_dispatch = byop_dispatch_info(&params, &self.ai_identifiers, ctx);
+        let prepared_params = params.prepare_for_dispatch(ctx);
         let _ = ctx.spawn(
             async move {
                 if let Some(byop) = byop_dispatch {
+                    let Some((params, cancellation_rx)) =
+                        await_dispatch_preparation(prepared_params, cancellation_rx).await?
+                    else {
+                        return Ok(Box::pin(futures::stream::empty()) as api::ResponseStream);
+                    };
                     crate::ai::agent_providers::chat_stream::generate_byop_output(
                         crate::ai::agent_providers::chat_stream::ByopOutputInput {
                             params,
@@ -663,6 +674,26 @@ pub enum ResponseStreamEvent {
 
 impl Entity for ResponseStream {
     type Event = ResponseStreamEvent;
+}
+
+#[cfg(test)]
+#[path = "dispatch_preparation_tests.rs"]
+mod dispatch_preparation_tests;
+
+async fn await_dispatch_preparation(
+    preparation: impl std::future::Future<Output = Result<api::RequestParams, warpui::ModelDropped>>,
+    cancellation_rx: oneshot::Receiver<()>,
+) -> Result<Option<(api::RequestParams, oneshot::Receiver<()>)>, ConvertToAPITypeError> {
+    // Poll cancellation first: an already-cancelled request must not open a provider connection
+    // even when readiness is also immediately available.
+    match futures::future::select(cancellation_rx, Box::pin(preparation)).await {
+        futures::future::Either::Left(_) => Ok(None),
+        futures::future::Either::Right((prepared, cancellation_rx)) => {
+            let params =
+                prepared.map_err(|_| anyhow!("Agent request was closed during preparation"))?;
+            Ok(Some((params, cancellation_rx)))
+        }
+    }
 }
 
 async fn byop_required_response_stream(

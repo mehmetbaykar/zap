@@ -33,6 +33,31 @@ fn parse_stop_notification() {
 }
 
 #[test]
+fn parse_claude_stop_failure_notification() {
+    let body = r#"{"v":1,"agent":"claude","event":"stop_failure","session_id":"abc","error_type":"authentication_failed","response":"Authentication failed"}"#;
+    let event = parse_event(Some("warp://cli-agent"), body).unwrap();
+    assert_eq!(event.agent, CLIAgent::Claude);
+    assert_eq!(event.event, CLIAgentEventType::StopFailure);
+    assert_eq!(
+        event.payload.error_type.as_deref(),
+        Some("authentication_failed")
+    );
+    assert_eq!(
+        event.payload.response.as_deref(),
+        Some("Authentication failed")
+    );
+
+    let event = parse_event(
+        Some("warp://cli-agent"),
+        r#"{"agent":"claude","event":"stop_failure"}"#,
+    )
+    .unwrap();
+    assert_eq!(event.event, CLIAgentEventType::StopFailure);
+    assert_eq!(event.payload.error_type, None);
+    assert_eq!(event.payload.response, None);
+}
+
+#[test]
 fn cli_agent_session_context_title_like_text_uses_trimmed_summary() {
     let context = CLIAgentSessionContext {
         summary: Some("  Reviewing changes  ".to_string()),
@@ -636,6 +661,45 @@ fn stop_clears_permission_scoped_state() {
 }
 
 #[test]
+fn stop_failure_clears_permission_state_and_allows_a_new_turn() {
+    let mut session = blocked_claude_session_with_permission_state();
+    session.session_context.query = Some("Fix the test".to_owned());
+    let mut event = rich_event(CLIAgentEventType::StopFailure);
+    event.payload.error_type = Some("authentication_failed".to_owned());
+    event.payload.response = Some("Authentication failed".to_owned());
+    let failed = CLIAgentSessionStatus::Failed {
+        error_type: event.payload.error_type.clone(),
+        message: event.payload.response.clone(),
+    };
+
+    assert_eq!(session.apply_event(&event), Some(failed.clone()));
+    assert_eq!(session.status, failed);
+    assert_eq!(
+        session.status.to_conversation_status(),
+        crate::ai::agent::conversation::ConversationStatus::Error
+    );
+    assert_eq!(
+        session.session_context.query.as_deref(),
+        Some("Fix the test")
+    );
+    assert_eq!(session.session_context.response, event.payload.response);
+    assert_eq!(session.session_context.summary, None);
+    assert_eq!(session.session_context.tool_name, None);
+    assert_eq!(session.session_context.tool_input_preview, None);
+
+    assert_eq!(
+        session.apply_event(&rich_event(CLIAgentEventType::IdlePrompt)),
+        None
+    );
+    assert_eq!(session.status, failed);
+    assert_eq!(
+        session.apply_event(&rich_event(CLIAgentEventType::PromptSubmit)),
+        Some(CLIAgentSessionStatus::InProgress),
+    );
+    assert_eq!(session.session_context.response, None);
+}
+
+#[test]
 fn permission_replied_clears_permission_scoped_state() {
     // When the user replies to a permission prompt the agent transitions back
     // to InProgress; the now-stale summary/tool fields must be cleared so they
@@ -1020,6 +1084,35 @@ fn assert_event_disarms_pending_cancel(disarming_event: CLIAgentEvent) {
 #[test]
 fn stop_event_disarms_pending_cancel() {
     assert_event_disarms_pending_cancel(rich_event(CLIAgentEventType::Stop));
+}
+
+#[test]
+fn stop_failure_event_disarms_pending_cancel() {
+    assert_event_disarms_pending_cancel(rich_event(CLIAgentEventType::StopFailure));
+}
+
+#[test]
+fn ctrl_c_does_not_cancel_failed_session() {
+    App::test((), |mut app| async move {
+        let model = app.add_singleton_model(|_| CLIAgentSessionsModel::new());
+        let view_id = EntityId::new();
+        model.update(&mut app, |model, ctx| {
+            model.set_session(
+                view_id,
+                cli_agent_session(CLIAgentSessionStatus::InProgress, true),
+                ctx,
+            );
+            model.update_from_event(view_id, &rich_event(CLIAgentEventType::PromptSubmit), ctx);
+            model.update_from_event(view_id, &rich_event(CLIAgentEventType::StopFailure), ctx);
+            model.observe_ctrl_c_write_with_window(view_id, TEST_WINDOW, ctx);
+            assert!(!model.has_pending_or_resolved_ctrl_c_cancel(view_id));
+            model.force_cancel(view_id, ctx);
+            assert!(matches!(
+                model.session(view_id).unwrap().status,
+                CLIAgentSessionStatus::Failed { .. }
+            ));
+        });
+    });
 }
 
 #[test]
