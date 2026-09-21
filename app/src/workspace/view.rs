@@ -7813,6 +7813,7 @@ impl Workspace {
         AuthManager::handle(ctx).update(ctx, |auth_manager, ctx| {
             auth_manager.set_user_onboarded(ctx);
         });
+        mark_hoa_onboarding_completed(ctx);
     }
 
     /// If the user is new and therefore has not seen the in app onboarding,

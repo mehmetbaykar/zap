@@ -68,4 +68,9 @@ impl Element for Overlay {
     fn is_overlay(&self) -> bool {
         true
     }
+
+    #[cfg(any(test, feature = "test-util"))]
+    fn debug_child_view_ids(&self) -> Vec<crate::EntityId> {
+        self.child.debug_child_view_ids()
+    }
 }

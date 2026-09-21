@@ -310,6 +310,7 @@ impl QueuedPromptsPanelView {
         };
         let queue_model = QueuedQueryModel::as_ref(ctx);
         self.enter_sends_queued_prompt(ctx)
+            && !queue_model.is_dispatch_blocked(conv_id)
             && queue_model.editing_row(conv_id).is_none()
             && !queue_model.queue(conv_id).is_empty()
     }
@@ -468,6 +469,7 @@ impl QueuedPromptsPanelView {
                 conversation_id, ..
             }
             | QueuedQueryEvent::RowUnlocked { conversation_id }
+            | QueuedQueryEvent::DispatchStateChanged { conversation_id }
             | QueuedQueryEvent::Reordered { conversation_id }
             | QueuedQueryEvent::EditEntered {
                 conversation_id, ..
@@ -554,7 +556,8 @@ impl QueuedPromptsPanelView {
                 }
                 self.update_send_now_availability(ctx);
             }
-            QueuedQueryEvent::RowUnlocked { .. } => {
+            QueuedQueryEvent::RowUnlocked { .. }
+            | QueuedQueryEvent::DispatchStateChanged { .. } => {
                 self.update_send_now_availability(ctx);
             }
             QueuedQueryEvent::Reordered { .. }

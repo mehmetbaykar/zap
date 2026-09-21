@@ -99,8 +99,8 @@ pub(crate) use persistence::PersistedAIInputType;
 pub use persistence::maybe_build_ai_query_upsert_event;
 pub(crate) use persistence::{PersistedAIInput, SerializedBlockListItem};
 pub(crate) use queued_query::{
-    AutofireAction, QueuedQuery, QueuedQueryEvent, QueuedQueryId, QueuedQueryModel,
-    QueuedQueryOrigin, is_lrc_auto_queue_active,
+    AutofireAction, QueuedPromptDeliveryMode, QueuedQuery, QueuedQueryEvent, QueuedQueryId,
+    QueuedQueryModel, QueuedQueryOrigin, is_lrc_auto_queue_active,
 };
 pub use suggestion_chip_view::*;
 pub use view_util::error_color;

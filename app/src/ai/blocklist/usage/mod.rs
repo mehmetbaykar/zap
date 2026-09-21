@@ -2,6 +2,7 @@ use warp_core::ui::Icon;
 use warp_core::ui::theme::{Fill, WarpTheme};
 use warpui::Element;
 
+mod colors;
 pub mod conversation_usage_view;
 
 pub fn icon_for_context_window_usage(context_window_usage: f32) -> Icon {

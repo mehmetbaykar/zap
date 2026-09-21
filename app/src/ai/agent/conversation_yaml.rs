@@ -244,7 +244,8 @@ fn write_task_messages(
             | Message::ServerEvent(_)
             | Message::InvokeSkill(_)
             // Cloud orchestration config: no fork equivalent, nothing to serialize.
-            | Message::OrchestrationConfigSnapshot(_) => {}
+            | Message::OrchestrationConfigSnapshot(_)
+            | Message::RequestMetadata(_) => {}
         }
     }
     Ok(())
