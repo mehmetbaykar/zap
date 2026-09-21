@@ -353,6 +353,7 @@ impl CLIAgent {
                 | CLIAgent::OpenCode
                 | CLIAgent::DeepSeek
                 | CLIAgent::OhMyPi
+                | CLIAgent::Grok
         )
     }
 

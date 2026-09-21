@@ -801,6 +801,8 @@ fn exchange_without_any_request_messages_is_not_eligible() {
 #[test]
 fn records_resolve_after_a_summarization_move() {
     App::test((), |mut app| async move {
+        // Conversation persistence reads GeneralSettings, which this fork's tests register here.
+        crate::test_util::settings::initialize_settings_for_tests(&mut app);
         let history_model =
             app.add_singleton_model(|_| BlocklistAIHistoryModel::new(vec![], vec![], &[]));
 

@@ -1580,11 +1580,7 @@ fn create_window(
             // operations like set_cloaked/set_visible which can reset DWMWA_SYSTEMBACKDROP_TYPE
             // to the Windows default (DWMSBT_AUTO), causing a light underpaint to show through
             // transparent content when background_opacity is near zero. Fixes #273.
-            window.set_system_backdrop(if window_options.background_blur_texture {
-                BackdropType::TransientWindow
-            } else {
-                BackdropType::None
-            });
+            window.set_system_backdrop(winit_backdrop(window_options.background_backdrop));
         }
     }
 

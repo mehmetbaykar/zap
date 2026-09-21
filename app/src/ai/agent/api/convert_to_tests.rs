@@ -422,7 +422,7 @@ fn modeled_fields_are_written_over_the_base() {
         context: Arc::new([]),
         static_query_type: None,
         referenced_attachments: HashMap::new(),
-        user_query_mode: UserQueryMode::Plan,
+        user_query_mode: UserQueryMode::Normal,
         running_command: None,
         intended_agent: Some(api::AgentType::Primary),
         base: Some(base),
@@ -431,12 +431,8 @@ fn modeled_fields_are_written_over_the_base() {
     let query = converted_user_query(input);
 
     assert_eq!(query.query, "seeded text");
-    assert_eq!(
-        query.mode,
-        Some(api::UserQueryMode {
-            r#type: Some(api::user_query_mode::Type::Orchestrate(())),
-        })
-    );
+    // The base still carries Plan; the modeled Normal mode has to win.
+    assert_eq!(query.mode, Some(api::UserQueryMode { r#type: None }));
     assert_eq!(query.intended_agent, i32::from(api::AgentType::Primary));
     assert_eq!(query.origin, Some(api::UserQueryOrigin::default()));
 }
