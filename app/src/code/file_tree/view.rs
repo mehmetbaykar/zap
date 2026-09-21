@@ -2688,11 +2688,7 @@ impl FileTreeView {
     /// keeps remote trees read-only; the SSH file browser already deletes through
     /// the remote server, so this reuses that path.
     #[cfg(feature = "local_fs")]
-    fn confirm_delete_remote_item(
-        &mut self,
-        id: &FileTreeIdentifier,
-        ctx: &mut ViewContext<Self>,
-    ) {
+    fn confirm_delete_remote_item(&mut self, id: &FileTreeIdentifier, ctx: &mut ViewContext<Self>) {
         use warpui::modals::{AlertDialogWithCallbacks, ModalButton};
 
         let Some(root_dir) = self.root_directories.get(&id.root) else {

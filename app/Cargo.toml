@@ -63,7 +63,6 @@ chrono.workspace = true
 clap.workspace = true
 command = { workspace = true }
 command-corrections.workspace = true
-command-signatures-v2 = { workspace = true, optional = true }
 computer_use.workspace = true
 crc.workspace = true
 content_inspector = "0.2.4"
@@ -217,7 +216,6 @@ warp_completer.workspace = true
 warp_core.workspace = true
 warp_editor.workspace = true
 warp_search_core.workspace = true
-warp_js = { workspace = true, optional = true }
 warp_ssh_manager.workspace = true
 zap_sftp = { path = "../crates/zap_sftp" }
 warp_util.workspace = true
@@ -310,7 +308,6 @@ aws-sdk-sts = { version = "1", default-features = false, features = ["default-ht
 aws-types = "1"
 
 notify-debouncer-full.workspace = true
-rquickjs = { workspace = true, optional = true }
 rustls.workspace = true
 syntect = "5.0"
 sysinfo.workspace = true
@@ -451,11 +448,6 @@ async_find = []
 changelog = []
 clear_autosuggestion_on_escape = []
 context_line_review_comments = []
-completions_v2 = [
-    "plugin_host",
-    "warp_completer/v2",
-    "dep:command-signatures-v2",
-]
 crash_reporting = [
     "dep:minidumper",
     "dep:crash-handler",
@@ -596,6 +588,11 @@ default = [
     "open_code_notifications",
     "cli_agent_rich_input",
     "ctrl_c_cancels_third_party_harness",
+    "ime_marked_text",
+    "shell_widget_handoff",
+    "native_shell_completions",
+    "history_search_ranking_v2",
+    "wait_for_events_parent_registration",
     "vertical_tabs",
     "vertical_tabs_summary_mode",
     "tab_configs",
@@ -719,10 +716,6 @@ resize_fix = []
 pluggable_notifications = []
 # This enables `read_files` to support images.
 read_image_files = []
-# This feature enables plugin support in Warp. Note that its typically checked
-# directly, rather than via the `FeatureFlag` enum, because its value is
-# required early in the app lifecycle prior to `FeatureFlag` initialization.
-plugin_host = ["dep:rquickjs", "dep:warp_js", "warp_cli/plugin_host"]
 # Enable this feature to automatically perform CPU profiling via pprof.  The
 # generated profile will be written to profile.pb in the current directory.
 # NOTE: This may slow down program execution.

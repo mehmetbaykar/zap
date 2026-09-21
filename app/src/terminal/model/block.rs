@@ -1,7 +1,6 @@
 mod interaction_mode;
 mod serialized_block;
 
-use warp_errors::report_error;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -10,6 +9,7 @@ use std::num::NonZeroUsize;
 use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use warp_errors::report_error;
 
 use chrono::{DateTime, Duration, FixedOffset, Local};
 use enum_iterator::all;

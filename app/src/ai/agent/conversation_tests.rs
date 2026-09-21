@@ -1,25 +1,19 @@
 use std::collections::HashMap;
 
+use crate::ai::llms::LLMPreferences;
+use crate::auth::AuthManager;
+use crate::auth::AuthStateProvider;
+use crate::network::NetworkStatus;
+use crate::test_util::settings::initialize_settings_for_tests;
+use crate::workspaces::user_workspaces::UserWorkspaces;
+use ai::api_keys::{ApiKeyManager, CustomEndpointParams, CustomEndpointSchema};
 use warp_core::features::FeatureFlag;
 use warp_multi_agent_api as api;
 use warpui::{App, SingletonEntity};
-use crate::workspaces::user_workspaces::UserWorkspaces;
-use crate::test_util::settings::initialize_settings_for_tests;
-use crate::network::NetworkStatus;
-use crate::auth::AuthManager;
-use crate::auth::AuthStateProvider;
-use crate::ai::llms::LLMPreferences;
-use ai::api_keys::{ApiKeyManager, CustomEndpointParams, CustomEndpointSchema};
 
 use super::{
-    AIConversation,
-    AIConversationAutoexecuteMode,
-    AIConversationId,
-    ConversationStatus,
-    RestoreConversationError,
-    TaskId,
-    artifact_from_fork_proto,
-    footer_model_token_usage,
+    AIConversation, AIConversationAutoexecuteMode, AIConversationId, ConversationStatus,
+    RestoreConversationError, TaskId, artifact_from_fork_proto, footer_model_token_usage,
 };
 use crate::ai::artifacts::Artifact;
 use crate::ai::blocklist::SerializedBlockListItem;
@@ -1476,8 +1470,6 @@ fn restored_conversation_does_not_re_enter_waiting_for_events() {
     assert_eq!(conversation.status(), &ConversationStatus::Success);
 }
 
-
-
 #[test]
 fn update_cost_and_usage_resolves_custom_endpoint_alias_for_footer_usage() {
     App::test((), |mut app| async move {
@@ -1565,7 +1557,6 @@ fn update_cost_and_usage_uses_fallback_label_for_unknown_custom_endpoint() {
         );
     });
 }
-
 
 #[allow(deprecated)]
 #[test]

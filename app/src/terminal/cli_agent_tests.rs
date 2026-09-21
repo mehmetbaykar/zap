@@ -354,6 +354,15 @@ fn test_detect_with_arguments() {
 }
 
 #[test]
+fn test_grok_public_configuration() {
+    assert_eq!(CLIAgent::Grok.command_prefix(), "grok");
+    assert_eq!(CLIAgent::Grok.display_name(), "Grok Build");
+    assert!(CLIAgent::Grok.supports_bash_mode());
+    assert_eq!(CLIAgent::Grok.skill_command_prefix(), "/");
+    assert_eq!(CLIAgent::Grok.icon(), Some(Icon::GrokLogo));
+}
+
+#[test]
 fn test_detect_vibe_acp_binary() {
     // The mistral-vibe package ships a `vibe-acp` ACP-mode binary alongside
     // the user-facing `vibe` TUI. Both must be detected as the same agent.

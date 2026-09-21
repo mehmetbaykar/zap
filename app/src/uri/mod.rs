@@ -1,6 +1,8 @@
 mod docker;
 pub mod web_intent_parser;
 
+pub(crate) mod browser_url_resolution;
+
 #[cfg(target_family = "wasm")]
 pub mod browser_url_handler;
 

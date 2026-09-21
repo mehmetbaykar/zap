@@ -33,7 +33,7 @@ env:
   CHANNEL: oss
   # Same exclusion set as upstream ci.yml: command-signatures-v2 needs its own feature setup and is
   # tested separately by script/presubmit locally.
-  WORKSPACE_TEST_ARGS: --workspace --locked --exclude command-signatures-v2
+  WORKSPACE_TEST_ARGS: --workspace --locked
   # Debug info dominates both peak rustc memory and target/ size. On 2026-08-05 the
   # Linux runner OOM-killed "Compile tests" (exit 143 = SIGTERM, zero compile errors)
   # while macOS and Windows passed. Tests need pass/fail plus panic locations, and

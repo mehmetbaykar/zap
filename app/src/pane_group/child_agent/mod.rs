@@ -121,6 +121,7 @@ fn start_new_child_conversation(
 pub(crate) fn create_hidden_child_agent_conversation(
     group: &mut PaneGroup,
     request: HiddenChildAgentConversationRequest,
+    settings_inheritance_scope: &impl TeamScope,
     ctx: &mut ViewContext<PaneGroup>,
 ) -> Option<HiddenChildAgentConversation> {
     let HiddenChildAgentConversationRequest {
@@ -172,6 +173,7 @@ fn create_error_child_agent_conversation_context(
     orchestration_harness: Option<Harness>,
     ctx: &mut ViewContext<PaneGroup>,
 ) -> Option<(Option<ViewHandle<TerminalView>>, EntityId, AIConversationId)> {
+    let settings_inheritance_scope = UserWorkspaces::as_ref(ctx).team_context_for_operation(ctx);
     if let Some(HiddenChildAgentConversation {
         terminal_view,
         terminal_view_id,
@@ -187,6 +189,7 @@ fn create_error_child_agent_conversation_context(
             env_vars: HashMap::new(),
             task_context: None,
         },
+        &settings_inheritance_scope,
         ctx,
     ) {
         return Some((Some(terminal_view), terminal_view_id, conversation_id));

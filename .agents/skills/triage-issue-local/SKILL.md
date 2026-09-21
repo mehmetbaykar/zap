@@ -31,7 +31,19 @@ Ask **at most 2 follow-up questions** per triage response. Each question must be
 
 ## Label taxonomy
 
-The label taxonomy for this repository is managed in `.github/issue-triage/config.json`. Prefer labels from that configuration, especially the `area:*`, `os:*`, `repro:*`, `accessibility`, `needs-info`, `duplicate`, and primary issue-type labels. Do not invent new labels unless the prompt explicitly allows it.
+The label taxonomy for this repository is managed in `.github/issue-triage/config.json`. Prefer labels from that configuration, especially the `area:*`, `os:*`, `repro:*`, `accessibility`, `needs-info`, `duplicate`, `agent:priority-high`, and primary agent issue-type labels (`agent:bug`, `agent:feature`, `agent:security`, `agent:documentation`). Do not invent new labels unless the prompt explicitly allows it.
+
+### Primary issue types
+
+Every issue should be classified with at least one primary agent type label:
+- `agent:bug`: Bugs/regressions. Assigned by Warp triage agent.
+- `agent:feature`: This issue is a feature request, not a bug report. Assigned by Warp triage agent.
+- `agent:security`: Security issues/vulnerabilities that are immediately escalated. Assigned by Warp triage agent.
+- `agent:documentation`: Missing documentation. Assigned by Warp triage agent.
+
+### Priority
+
+- `agent:priority-high`: High-priority issues that are immediately escalated. Assigned by Warp triage agent. Tag issues with `agent:priority-high` when there is evidence of a regression ("broke in recent version", "worked in previous build"), panic or crash, data loss, or a security vulnerability.
 
 Evaluate `ready-to-implement` during triage instead of relying on issue-template defaults. For bug reports, apply `ready-to-implement` only when the issue is reproducible from the provided evidence or straightforward local verification and the likely fix appears narrow enough to implement without a product spec, design mocks, or substantial investigation. If the bug is not reproducible, lacks a clear fix path, requires product/design decisions, or needs deeper technical discovery, omit `ready-to-implement` and prefer `needs-info`, `ready-to-spec`, `needs-mocks`, or the appropriate `repro:*` label.
 

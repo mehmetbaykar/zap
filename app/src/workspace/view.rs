@@ -1374,10 +1374,15 @@ impl Workspace {
             .is_any_tab_group_being_renamed()
         {
             match event {
-                EditorEvent::Blurred | EditorEvent::Enter => {
+                EditorEvent::Enter => {
                     self.finish_tab_group_rename(ctx);
                 }
-                EditorEvent::Escape => {
+                // Blur discards rather than commits. Focus can leave this editor without
+                // the user ever ending the rename — #14241 is one such case — and
+                // committing then writes a half-typed fragment as the group's real,
+                // persisted name. Discarding loses nothing the user cannot retype, and
+                // Enter remains the way to confirm.
+                EditorEvent::Blurred | EditorEvent::Escape => {
                     self.cancel_tab_group_rename(ctx);
                 }
                 _ => {}
@@ -6891,6 +6896,18 @@ impl Workspace {
         if let Some(group) = self.tab_groups.get_mut(&group_id) {
             group.collapsed = false;
             ctx.notify();
+        }
+    }
+
+    pub(crate) fn is_inline_rename_editor_focused(&self, ctx: &AppContext) -> bool {
+        match ctx.focused_view_id(self.window_id) {
+            Some(id) if id == self.tab_rename_editor.id() => {
+                self.current_workspace_state.is_tab_being_renamed()
+            }
+            Some(id) if id == self.tab_group_rename_editor.id() => self
+                .current_workspace_state
+                .is_any_tab_group_being_renamed(),
+            _ => false,
         }
     }
 
@@ -16514,6 +16531,12 @@ impl Workspace {
             WindowSettingsChangedEvent::BackgroundOpacity { .. } => {
                 ctx.notify();
             }
+            WindowSettingsChangedEvent::BackgroundBackdrop { .. } => {
+                let backdrop = *WindowSettings::as_ref(ctx).background_backdrop;
+                if let Some(window) = ctx.windows().platform_window(ctx.window_id()) {
+                    window.set_background_backdrop(backdrop);
+                }
+            }
             WindowSettingsChangedEvent::LeftPanelVisibilityAcrossTabs { .. } => {
                 if self.left_panel_visibility_across_tabs_enabled(ctx) {
                     self.left_panel_open = self
@@ -17006,6 +17029,17 @@ impl Workspace {
     ) {
         self.close_all_overlays(ctx);
         self.open_settings_pane(section, Some(search_query), ctx);
+    }
+    fn browse_teams(&mut self, ctx: &mut ViewContext<Self>) {
+        let show_join_modal = UserWorkspaces::as_ref(ctx)
+            .team_for_window(self.window_id)
+            .is_some();
+        self.show_settings_with_section(Some(SettingsSection::Teams), ctx);
+        if show_join_modal {
+            self.settings_pane.update(ctx, |view, ctx| {
+                view.open_teams_page_join_modal(ctx);
+            });
+        }
     }
 
     /// Opens the MCP servers settings page, optionally triggering auto-install of a gallery MCP.
@@ -21159,10 +21193,6 @@ impl Workspace {
         }
         if *window_settings.open_windows_at_custom_size {
             context.set.insert(flags::OPEN_WINDOWS_AT_CUSTOM_SIZE_FLAG);
-        }
-
-        if *window_settings.background_blur_texture {
-            context.set.insert(flags::WINDOW_BLUR_TEXTURE_FLAG);
         }
 
         if *window_settings.left_panel_visibility_across_tabs {

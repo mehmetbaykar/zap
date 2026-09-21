@@ -38,7 +38,6 @@ use super::{
     FinishedAIAgentOutput, MessageId, OutputModelInfo, RenderableAIError, RequestCost,
     ServerOutputId, Shared, SuggestedLoggingId, Suggestions,
 };
-use serde::{Deserialize, Serialize};
 use crate::ai::agent::api::convert_conversation::{
     ConvertToExchanges, compute_time_to_first_token_ms_from_messages,
     proto_timestamp_to_local_datetime,
@@ -74,6 +73,7 @@ use crate::terminal::model::block::{
 };
 use crate::ui_components::icons::Icon;
 use crate::{BlocklistAIHistoryModel, GlobalResourceHandlesProvider};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TodoStatus {

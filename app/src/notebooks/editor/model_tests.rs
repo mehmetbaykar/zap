@@ -93,7 +93,10 @@ fn model_from_markdown(
 
 /// Register the singletons and host window that a [`NotebooksEditorModel`] depends on, returning
 /// the window a model should bind to.
-fn setup_editor_window(app: &mut App, should_initialize_object_store_model: bool) -> warpui::WindowId {
+fn setup_editor_window(
+    app: &mut App,
+    should_initialize_object_store_model: bool,
+) -> warpui::WindowId {
     let global_resources = GlobalResourceHandles::mock(app);
     app.add_singleton_model(|_| GlobalResourceHandlesProvider::new(global_resources));
     app.add_singleton_model(|_| ActiveSession::default());

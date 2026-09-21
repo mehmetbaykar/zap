@@ -62,6 +62,9 @@ impl AboutPageView {
 impl Entity for AboutPageView {
     type Event = SettingsPageEvent;
 }
+impl TypedActionView for AboutPageView {
+    type Action = ();
+}
 
 impl TypedActionView for AboutPageView {
     type Action = AboutPageAction;
