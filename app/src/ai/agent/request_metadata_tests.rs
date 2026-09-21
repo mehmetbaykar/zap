@@ -801,8 +801,16 @@ fn exchange_without_any_request_messages_is_not_eligible() {
 #[test]
 fn records_resolve_after_a_summarization_move() {
     App::test((), |mut app| async move {
-        // Conversation persistence reads GeneralSettings, which this fork's tests register here.
+        // Conversation persistence reads GeneralSettings and the global resource
+        // handles, so wire both up the way this fork's other history tests do.
         crate::test_util::settings::initialize_settings_for_tests(&mut app);
+        let global_resource_handles =
+            crate::global_resource_handles::GlobalResourceHandles::mock(&mut app);
+        app.add_singleton_model(|_| {
+            crate::global_resource_handles::GlobalResourceHandlesProvider::new(
+                global_resource_handles,
+            )
+        });
         let history_model =
             app.add_singleton_model(|_| BlocklistAIHistoryModel::new(vec![], vec![], &[]));
 
