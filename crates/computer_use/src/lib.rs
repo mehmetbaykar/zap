@@ -12,6 +12,10 @@ mod overlay;
 #[cfg(any(macos, linux, windows))]
 mod recording_metadata;
 #[cfg(any(macos, linux, windows))]
+mod recording_paths;
+#[cfg(any(linux, windows))]
+mod recording_post_process;
+#[cfg(any(macos, linux, windows))]
 mod screenshot_utils;
 #[cfg(any(macos, linux, windows))]
 mod thumbnail;
@@ -285,8 +289,8 @@ pub fn create_recorder() -> Box<dyn Recorder> {
 }
 
 /// Applies platform-specific post-processing and returns the path to upload.
-/// Linux trims inactive gaps and burns action overlays; other platforms return
-/// `input` unchanged.
+/// Linux and Windows trim inactive gaps and burn action overlays; other
+/// platforms return `input` unchanged.
 pub async fn post_process_recording(
     input: &Path,
     entries: &[ActionLogEntry],
@@ -294,11 +298,18 @@ pub async fn post_process_recording(
     source_duration: Duration,
     frame_rate: u32,
 ) -> Result<PathBuf, RecordingError> {
-    #[cfg(all(linux, not(noop)))]
+    #[cfg(all(any(linux, windows), not(noop)))]
     {
-        imp::post_process_recording(input, entries, dimensions, source_duration, frame_rate).await
+        recording_post_process::post_process_recording(
+            input,
+            entries,
+            dimensions,
+            source_duration,
+            frame_rate,
+        )
+        .await
     }
-    #[cfg(not(all(linux, not(noop))))]
+    #[cfg(not(all(any(linux, windows), not(noop))))]
     {
         let _ = (entries, dimensions, source_duration, frame_rate);
         Ok(input.to_path_buf())
@@ -412,6 +423,7 @@ impl Default for RecordingConfig {
 pub struct RecordingHandle {
     width: u32,
     height: u32,
+    capture_origin: Vector2I,
     exit_state: RecordingExitState,
     // The live capture process plus the fields used to finalize it are only
     // populated by the real platform recorders; the no-op recorders never
@@ -437,6 +449,11 @@ impl RecordingHandle {
     /// The applied capture height in pixels.
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    /// The immutable physical-pixel geometry selected when capture started.
+    pub fn geometry(&self) -> RecordingGeometry {
+        RecordingGeometry::new(self.capture_origin, self.width, self.height)
     }
 
     /// Checks whether capture exited without an explicit stop.
@@ -474,6 +491,7 @@ impl RecordingHandle {
         let handle = Self {
             width,
             height,
+            capture_origin: Vector2I::new(0, 0),
             exit_state: exit_state.clone(),
             #[cfg(any(linux, macos, windows))]
             path: PathBuf::new(),
@@ -675,6 +693,144 @@ pub struct Options {
     /// exactly like the legacy full-screen path: any window target is ignored, only the main
     /// display is captured, and no window list or captured-window metadata is returned.
     pub background_enabled: bool,
+    /// When set, a recording is active and the actor records each resolved pointer event here
+    /// (capture-space coordinate, kind, and offset from capture start) for post-stop burn-in.
+    /// `None` on non-recording, CLI, and test paths; actors without burn-in support ignore it.
+    pub pointer_sink: Option<PointerSink>,
+}
+
+/// Collects resolved pointer events during a recording so the finalize pass can burn in
+/// click/drag annotations. The Linux X11 and Windows actors populate it.
+pub struct PointerSink {
+    /// Capture start instant; event offsets are measured from here.
+    pub started_at: instant::Instant,
+    /// The surface being recorded, so the actor can resolve each event into the recording's
+    /// capture-space pixels.
+    pub recording_target: Target,
+    /// The immutable physical-pixel capture geometry selected by the recorder.
+    pub recording_geometry: RecordingGeometry,
+    /// Events collected in dispatch order; drained by the caller after the batch completes.
+    pub events: Arc<Mutex<Vec<PointerEvent>>>,
+    /// Recording-scoped pointer session shared with every `UseComputer` call's sink, so a
+    /// release in a later call reuses the last resolved capture-space point even when the
+    /// press happened in an earlier call. See [`PointerSession`].
+    pub session: PointerSession,
+}
+
+/// The physical-pixel bounds selected for a recording when capture starts.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct RecordingGeometry {
+    origin: Vector2I,
+    width: u32,
+    height: u32,
+}
+
+impl RecordingGeometry {
+    pub(crate) fn new(origin: Vector2I, width: u32, height: u32) -> Self {
+        Self {
+            origin,
+            width,
+            height,
+        }
+    }
+
+    /// Maps a physical desktop point into the captured frame and clamps it to the frame bounds.
+    pub fn frame_point(self, point: Vector2I) -> Vector2I {
+        let max_x = i64::from(self.width.saturating_sub(1));
+        let max_y = i64::from(self.height.saturating_sub(1));
+        let x = (i64::from(point.x()) - i64::from(self.origin.x())).clamp(0, max_x);
+        let y = (i64::from(point.y()) - i64::from(self.origin.y())).clamp(0, max_y);
+        Vector2I::new(x as i32, y as i32)
+    }
+}
+
+/// Recording-scoped pointer session state, shared between the recording
+/// controller and each `UseComputer` call's [`PointerSink`]. It persists the
+/// last resolved capture-space point and the currently pressed button across
+/// action-call boundaries, so a drag split into separate `Down`/`Move`/`Up`
+/// `UseComputer` calls still records its release at the last point (a release
+/// carries no coordinate of its own). Owned by the active recording, which
+/// hands an `Arc` clone to each call's sink; reset when a call fails or is
+/// cancelled so a later click cannot inherit an abandoned press.
+///
+/// The finalize pass classifies one flattened recording-level pointer stream
+/// (see [`overlay::build_overlay_ass`]), so reconstructing the release here is
+/// what lets a split-call drag render a single continuous trail with a release
+/// fade rather than a per-call held press plus stray moves.
+#[derive(Debug, Clone)]
+pub struct PointerSession {
+    state: Arc<Mutex<PointerSessionState>>,
+}
+
+#[derive(Debug, Default)]
+struct PointerSessionState {
+    /// The last capture-space point resolved during a press or move.
+    last_point: Option<Vector2I>,
+    /// The button currently held down, if any.
+    active_button: Option<MouseButton>,
+}
+
+impl PointerSession {
+    /// Creates a fresh, empty session for a new recording.
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(PointerSessionState::default())),
+        }
+    }
+
+    /// Records a press or coordinate-carrying pointer sample resolved at
+    /// `point`. A press (`Down`) sets the active button and last point; a move
+    /// or scroll sample updates the last point (the pointer physically warped
+    /// there before the wheel turned) without touching the active button. A
+    /// new press while a button is already active replaces it (the prior
+    /// incomplete press is closed as a held drag by the classifier).
+    pub fn record_press_or_move(
+        &self,
+        kind: PointerEventKind,
+        button: Option<MouseButton>,
+        point: Vector2I,
+    ) {
+        if let Ok(mut state) = self.state.lock() {
+            state.last_point = Some(point);
+            if kind == PointerEventKind::Down {
+                state.active_button = button;
+            }
+        }
+    }
+
+    /// Records a release of `button`, returning the last resolved point only when
+    /// the released button matches the active press — so an unmatched release
+    /// (a different button, or a release with no prior press) is ignored and no
+    /// stale-coordinate event is emitted. Clears the active button on a matching
+    /// release; the last point is retained (harmless, and a following move
+    /// overwrites it).
+    pub fn record_release(&self, button: MouseButton) -> Option<Vector2I> {
+        self.state.lock().ok().and_then(|mut state| {
+            if state.active_button == Some(button) {
+                state.active_button = None;
+                state.last_point
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Clears the active pointer state (last point and held button). Used when a
+    /// press/move targets a surface that does not match the recording (so a
+    /// following release is not recorded at a stale in-frame coordinate), and
+    /// when a `UseComputer` call fails or is cancelled so a later call cannot
+    /// inherit an abandoned press.
+    pub fn clear(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            *state = PointerSessionState::default();
+        }
+    }
+}
+
+impl Default for PointerSession {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// The buttons of a mouse.

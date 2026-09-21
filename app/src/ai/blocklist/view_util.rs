@@ -139,9 +139,13 @@ pub fn get_ai_block_overflow_menu_element_position_id(view_id: EntityId) -> Stri
 }
 
 /// Formats credit count to display as whole numbers when the value is effectively a whole number,
-/// otherwise displays with one decimal place.
+/// otherwise displays with one decimal place. A non-zero amount below the displayed precision is
+/// shown as `<0.1 credits` rather than rounding to zero, which would read as no cost.
 /// Returns a formatted string with proper pluralization ("credit" vs "credits").
 pub fn format_credits(credits: f32) -> String {
+    if credits > 0.0 && credits < 0.1 {
+        return "<0.1 credits".to_string();
+    }
     // If the first part of the decimal is 0, we just display the whole number.
     if credits.fract() < 0.1 {
         let whole = credits.trunc() as i32;
@@ -155,41 +159,43 @@ pub fn format_credits(credits: f32) -> String {
     }
 }
 
-/// Builds the `"12,345 tokens, $0.36"`-style parenthetical shared by
-/// [`format_credits_with_cost`] and the conversation details panel's
-/// compact "Credits used" line, gated by `FeatureFlag::PricingTransparency`.
-///
-/// `tokens` and `cost_in_cents` are independent: either, both, or neither
-/// may be `None` (no baseline is available for that figure — never coerced
-/// to zero), and only the figures that are present are included. A `tokens`
-/// value of `0` is treated the same as `None` (omitted) since a "0 tokens"
-/// figure next to a non-zero credit/cost figure would be confusing rather
-/// than informative (e.g. a purely platform-cost request like a paid web
-/// search). Returns `None` when the flag is disabled, or when both figures
-/// are `None`/omitted.
-///
-/// This intentionally supersedes the previous standalone "PRICING
-/// BREAKDOWN" section (per-category input/cache/output/platform/web-search
-/// rows): for now a single inline token+dollar figure next to credits is
-/// enough. The deeper `ChargedUsageTotals` breakdown that section rendered
-/// is still computed and available for a future expandable/dropdown
-/// treatment.
-pub fn format_usage_parenthetical(
-    tokens: Option<u32>,
-    cost_in_cents: Option<f32>,
-) -> Option<String> {
-    if !FeatureFlag::PricingTransparency.is_enabled() {
-        return None;
+/// Formats a US-cent amount as dollars without rounding a positive charge down to zero.
+pub fn format_dollars(cost_in_cents: f32) -> String {
+    // Accumulated costs can produce negative zero, which would otherwise render as `$-0.00`.
+    let cost_in_cents = if cost_in_cents == 0.0 {
+        0.0
+    } else {
+        cost_in_cents
+    };
+    let dollars = cost_in_cents / 100.0;
+    if cost_in_cents > 0.0 && dollars < 0.01 {
+        "<$0.01".to_string()
+    } else {
+        format!("${dollars:.2}")
     }
-    let token_part = tokens
-        .filter(|&tokens| tokens > 0)
-        .map(|tokens| format!("{} tokens", tokens.separate_with_commas()));
-    let cost_part = cost_in_cents.map(|cost_in_cents| format!("${:.2}", cost_in_cents / 100.0));
-    match (token_part, cost_part) {
-        (Some(token_part), Some(cost_part)) => Some(format!("{token_part}, {cost_part}")),
-        (Some(token_part), None) => Some(token_part),
-        (None, Some(cost_part)) => Some(cost_part),
-        (None, None) => None,
+}
+
+fn effective_usage_unit(unit: UsageDisplayUnit, cost_in_cents: Option<f32>) -> UsageDisplayUnit {
+    if !FeatureFlag::PricingTransparency.is_enabled() {
+        return UsageDisplayUnit::Credits;
+    }
+    match unit {
+        UsageDisplayUnit::Credits => UsageDisplayUnit::Credits,
+        UsageDisplayUnit::Dollars if cost_in_cents.is_some() => UsageDisplayUnit::Dollars,
+        UsageDisplayUnit::Dollars => UsageDisplayUnit::Credits,
+    }
+}
+
+fn format_usage_unit_value(
+    credits: f32,
+    cost_in_cents: Option<f32>,
+    unit: UsageDisplayUnit,
+) -> String {
+    match unit {
+        UsageDisplayUnit::Credits => format_credits(credits),
+        UsageDisplayUnit::Dollars => cost_in_cents
+            .map(format_dollars)
+            .unwrap_or_else(|| format_credits(credits)),
     }
 }
 

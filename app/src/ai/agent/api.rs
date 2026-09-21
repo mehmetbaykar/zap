@@ -8,6 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use ai::agent::convert::ConvertToAPITypeError;
+pub(crate) use convert_from::convert_user_query_mode;
 pub use convert_from::{
     ConversionParams, ConvertAPIMessageToClientOutputMessage, MaybeAIAgentOutputMessage,
     MessageToAIAgentOutputMessageError, user_inputs_from_messages,

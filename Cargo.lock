@@ -12545,6 +12545,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "session-sharing-protocol"
+version = "0.0.0"
+source = "git+https://github.com/warpdotdev/session-sharing-protocol.git?rev=f86afe16e65a56ecb9c062c961fcd91167192e9f#f86afe16e65a56ecb9c062c961fcd91167192e9f"
+dependencies = [
+ "byte-unit",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "settings"
 version = "0.0.0"
 dependencies = [
@@ -15795,7 +15806,7 @@ dependencies = [
 [[package]]
 name = "warp_multi_agent_api"
 version = "0.0.0"
-source = "git+https://github.com/warpdotdev/warp-proto-apis.git?rev=2bd5df2e3a73ada980d1e9c613ce369232e8c41d#2bd5df2e3a73ada980d1e9c613ce369232e8c41d"
+source = "git+https://github.com/warpdotdev/warp-proto-apis.git?rev=f5c1878026bc11f429260c5e798e7bab6ed4e118#f5c1878026bc11f429260c5e798e7bab6ed4e118"
 dependencies = [
  "prost",
  "prost-reflect",
