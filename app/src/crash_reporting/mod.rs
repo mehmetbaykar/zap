@@ -425,3 +425,4 @@ impl ToCrashReportTags for &AntivirusInfo {
         )]
     }
 }
+

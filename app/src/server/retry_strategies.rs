@@ -52,6 +52,12 @@ pub(crate) struct HttpStatusError {
     pub body: String,
 }
 
+impl HttpStatusError {
+    pub(crate) fn new(status: u16, body: String) -> Self {
+        Self { status, body }
+    }
+}
+
 /// Classify an HTTP-backed error as transient (worth retrying) or permanent (fail fast).
 ///
 /// Transient: 5xx responses, 408, 429, or any error whose chain does not carry an
