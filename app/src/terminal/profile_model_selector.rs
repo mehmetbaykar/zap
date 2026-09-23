@@ -867,11 +867,28 @@ impl ProfileModelSelector {
             .cloned()
             .collect();
 
+        // Partition out custom-endpoint choices, which are rendered separately under a
+        // `Custom models` sub-header.
+        let custom_ids: std::collections::HashSet<LLMId> = llm_preferences
+            .custom_llm_choices()
+            .map(|info| info.id.clone())
+            .collect();
+        let server_choices: Vec<&LLMInfo> = self
+            .all_model_choices
+            .iter()
+            .filter(|llm| !custom_ids.contains(&llm.id))
+            .collect();
+        let custom_choices: Vec<&LLMInfo> = self
+            .all_model_choices
+            .iter()
+            .filter(|llm| custom_ids.contains(&llm.id))
+            .collect();
+
         // Group models by base_model_name to collapse reasoning variants.
         // Use "auto" as the key for all auto models so they collapse together.
         // Only group models that have reasoning levels - others stay separate.
         let mut groups: IndexMap<String, Vec<&LLMInfo>> = IndexMap::new();
-        for llm in &self.all_model_choices {
+        for llm in &server_choices {
             let key = if is_auto(llm) {
                 "auto".to_string()
             } else if llm.has_reasoning_level() {
@@ -879,7 +896,7 @@ impl ProfileModelSelector {
             } else {
                 llm.id.to_string()
             };
-            groups.entry(key).or_default().push(llm);
+            groups.entry(key).or_default().push(*llm);
         }
 
         // Split collapsed choices so custom models can be placed right after auto models.
@@ -915,6 +932,34 @@ impl ProfileModelSelector {
             true,
             ctx,
         );
+
+        // Append the "Custom models" section when the user has any custom endpoints configured.
+        // Each row gets its own atomic `SelectModel(config_key)` action; no auto/reasoning
+        // collapsing applies.
+        if !custom_choices.is_empty() {
+            let appearance = Appearance::as_ref(ctx);
+            if !items.is_empty() {
+                items.push(MenuItem::Separator);
+            }
+            items.push(MenuItem::Header {
+                fields: MenuItemFields::new(crate::t!("terminal-custom-models"))
+                    .with_override_text_color(
+                        appearance
+                            .theme()
+                            .sub_text_color(appearance.theme().background())
+                            .into_solid(),
+                    ),
+                clickable: false,
+                right_side_fields: None,
+            });
+            for llm in &custom_choices {
+                items.push(MenuItem::Item(
+                    MenuItemFields::new(llm.menu_display_name()).with_on_select_action(
+                        ProfileModelSelectorAction::SelectModel(llm.id.clone()),
+                    ),
+                ));
+            }
+        }
 
         if !other_choices.is_empty() {
             if !items.is_empty() {

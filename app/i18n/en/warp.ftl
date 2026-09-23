@@ -382,6 +382,7 @@ terminal-attach-file-tooltip = Attach file
 terminal-slash-commands-tooltip = Slash commands
 terminal-manage-api-keys-tooltip = Manage API keys
 terminal-profiles = Profiles
+terminal-custom-models = Custom models
 terminal-manage-profiles = Manage profiles
 terminal-continue-locally = Continue locally
 terminal-fork-conversation-locally-tooltip = Fork this conversation locally
