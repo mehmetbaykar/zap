@@ -4,12 +4,12 @@
 //! producing a byte-equal tools list when called multiple times for the same `MCPContext` across requests, otherwise
 //! Anthropic judges the tools fields as changed → all cache layers are invalidated.
 //!
-//! Note: `rmcp::model::Tool` and `rmcp::model::Resource` (= `Annotated<RawResource>`)
-//! come from an upstream vendor crate; only their public construction paths (`Tool::new` / `RawResource::new`) are used here.
+//! Note: `rmcp::model::Tool` and `rmcp::model::Resource` come from an upstream vendor crate;
+//! only their public construction paths (`Tool::new` / `Resource::new`) are used here.
 
 use std::sync::Arc;
 
-use rmcp::model::{AnnotateAble, RawResource, Tool};
+use rmcp::model::{Resource, Tool};
 use serde_json::json;
 
 use super::{build_mcp_tool_defs, function_name};
@@ -48,9 +48,7 @@ fn mk_server(
 }
 
 fn mk_resource(uri: &str, name: &str) -> rmcp::model::Resource {
-    // RawResource → Annotated<RawResource> (without annotation).
-    // The safe conversion entry point provided by upstream is `AnnotateAble::no_annotation`.
-    RawResource::new(uri, name).no_annotation()
+    Resource::new(uri, name)
 }
 
 /// Same ctx, built twice; the (name, description, schema) triple produced must be byte-equal.

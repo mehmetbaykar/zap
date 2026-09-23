@@ -28,8 +28,7 @@ fn ensure_crypto_provider() {
 fn test_builder() -> reqwest::ClientBuilder {
     ensure_crypto_provider();
     reqwest::ClientBuilder::new()
-        .tls_built_in_native_certs(false)
-        .tls_built_in_root_certs(false)
+        .tls_certs_only([])
 }
 
 #[test]

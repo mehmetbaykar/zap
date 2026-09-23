@@ -254,12 +254,10 @@ pub async fn make_authenticated_client(
             // store we already seeded with `persisted_credentials` above, then reconfigure
             // with the client secret that call doesn't set.
             auth_manager.initialize_from_store().await?;
-            auth_manager.configure_client(OAuthClientConfig {
-                client_id,
-                client_secret: Some(client_secret),
-                scopes: vec![],
-                redirect_uri: redirect_uri.clone(),
-            })?;
+            auth_manager.configure_client(
+                OAuthClientConfig::new(client_id, redirect_uri.clone())
+                    .with_client_secret(client_secret),
+            )?;
         }
         return Ok((AuthClient::new(reqwest::Client::new(), auth_manager), false));
     }
@@ -324,20 +322,18 @@ pub async fn make_authenticated_client(
 
         // Configure the auth manager based on the static MCP configuration for this issuer,
         // overriding whatever dynamic client registration produced (or fell back to) above.
-        auth_manager.configure_client(OAuthClientConfig {
-            client_id: provider.client_id.into_owned(),
-            client_secret: Some(provider.client_secret.into_owned()),
-            redirect_uri: redirect_uri.clone(),
-            scopes: vec![],
-        })?;
+        auth_manager.configure_client(
+            OAuthClientConfig::new(provider.client_id.into_owned(), redirect_uri.clone())
+                .with_client_secret(provider.client_secret.into_owned()),
+        )?;
     }
 
     let auth_url = auth_manager.get_authorization_url(scopes).await?;
-    let mut oauth_state = OAuthState::Session(AuthorizationSession {
+    let mut oauth_state = OAuthState::Session(AuthorizationSession::for_scope_upgrade(
         auth_manager,
-        auth_url: auth_url.clone(),
-        redirect_uri,
-    });
+        auth_url.clone(),
+        &redirect_uri,
+    ));
 
     // Extract the CSRF token that rmcp embedded as the `state` query parameter in the
     // authorization URL. We register a csrf→uuid mapping on the manager so that

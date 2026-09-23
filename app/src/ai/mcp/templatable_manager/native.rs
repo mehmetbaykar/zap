@@ -141,6 +141,8 @@ fn error_to_user_message(error: &rmcp::RmcpError) -> String {
             // `ServiceError` is non-exhaustive in the pinned rmcp API.
             _ => format!("Service error: {}", err),
         },
+        // The enum is marked as non-exhaustive, so we need a catch-all.
+        _ => format!("Error: {error}"),
     }
 }
 
@@ -2079,7 +2081,7 @@ async fn spawn_server(
     let server_info = service.peer_info();
     logger.log(format!("[info] MCP: Connected to server: {server_info:#?}"));
 
-    let capabilities = server_info.map(|info| &info.capabilities);
+    let capabilities = server_info.as_ref().map(|info| &info.capabilities);
 
     let resources =
         query_resources_for(capabilities, &server_name, || service.list_all_resources()).await;
@@ -2288,16 +2290,15 @@ async fn send_initialize_request(
 ///
 /// This tells the MCP server who we are and what capabilities we have.
 fn make_client_info() -> rmcp::model::ClientInfo {
-    rmcp::model::ClientInfo {
-        client_info: rmcp::model::Implementation {
-            name: warp_core::channel::ChannelState::app_id().to_string(),
-            version: warp_core::channel::ChannelState::app_version()
+    rmcp::model::ClientInfo::new(
+        Default::default(),
+        rmcp::model::Implementation::new(
+            warp_core::channel::ChannelState::app_id().to_string(),
+            warp_core::channel::ChannelState::app_version()
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
+        ),
+    )
 }
 
 /// A wrapper around a [`rmcp::transport::Transport`] that logs all requests and responses.
