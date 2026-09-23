@@ -591,7 +591,9 @@ fn test_github_pr_chip_empty_success_does_not_set_failure_suppression() {
                 state.last_computed_value.is_none(),
                 "chip value should be None after empty result"
             );
-            assert_eq!(state.update_status, ChipUpdateStatus::Ready);
+            // The first run validates the PR chip, which re-resolves the chip list; that
+            // second pass is a cache hit (the command still ran only once).
+            assert_eq!(state.update_status, ChipUpdateStatus::Cached);
         });
     });
 }
@@ -815,7 +817,9 @@ fn test_github_pr_chip_revisiting_failed_directory_uses_failure_suppression() {
                 .expect("expected github pr state");
             assert_eq!(state.last_computed_value, None);
             assert!(state.last_failure_fingerprint.is_some());
-            assert_eq!(state.update_status, ChipUpdateStatus::Error);
+            // Suppressing the PR chip re-resolves the chip list; the second pass takes the
+            // failure-suppression path instead of re-running `gh`.
+            assert_eq!(state.update_status, ChipUpdateStatus::Cached);
             assert_eq!(
                 *SessionSettings::as_ref(ctx).github_pr_chip_default_validation,
                 GithubPrPromptChipDefaultValidation::Suppressed
@@ -1005,7 +1009,8 @@ fn test_github_pr_chip_transient_failure_retries_with_same_fingerprint() {
                 Some("https://github.com/warp/warp/pull/456")
             );
             assert_eq!(state.last_failure_fingerprint, None);
-            assert_eq!(state.update_status, ChipUpdateStatus::Ready);
+            // Validating the PR chip re-resolves the chip list; that pass is a cache hit.
+            assert_eq!(state.update_status, ChipUpdateStatus::Cached);
             assert_eq!(
                 *SessionSettings::as_ref(ctx).github_pr_chip_default_validation,
                 GithubPrPromptChipDefaultValidation::Validated

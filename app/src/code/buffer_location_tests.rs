@@ -599,7 +599,29 @@ fn resolve_conflict_updates_content_and_clock() {
         });
         let file_id = _buffer_state.file_id;
 
-        let acked_sv = ContentVersion::new();
+        // Zap rejects a resolution that acknowledges a server version the buffer has
+        // moved past (stale conflict resolution), so a resolution must acknowledge the
+        // buffer's current server version.
+        let stale_result = gbm(&app).update(&mut app, |gbm, ctx| {
+            gbm.resolve_conflict(
+                file_id,
+                ContentVersion::new(),
+                ContentVersion::new(),
+                "stale content",
+                ctx,
+            )
+        });
+        assert!(stale_result.is_err());
+        assert_eq!(content(&app, file_id), "original");
+
+        let handle = gbm(&app);
+        let acked_sv = app.read(|ctx| {
+            handle
+                .as_ref(ctx)
+                .sync_clock_for_server_local(file_id)
+                .unwrap()
+                .server_version
+        });
 
         let client_cv = ContentVersion::new();
 
