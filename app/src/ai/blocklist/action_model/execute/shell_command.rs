@@ -356,6 +356,17 @@ impl ShellCommandExecutor {
                         RequestCommandOutputResult::CancelledBeforeExecution,
                     ));
                 }
+                // If another conversation has taken over the agent view since this command
+                // was requested, cancel instead of executing.
+                let is_displaced_by_other_conversation = model
+                    .block_list()
+                    .active_conversation_id()
+                    .is_some_and(|active_id| active_id != input.conversation_id);
+                if is_displaced_by_other_conversation {
+                    return ActionExecution::Sync(AIAgentActionResultType::RequestCommandOutput(
+                        RequestCommandOutputResult::CancelledBeforeExecution,
+                    ));
+                }
                 // Zap: synchronous wait-type commands (wait_until_completion=true) disable the pager unconditionally.
                 //
                 // The model's self-reported `uses_pager` is unreliable — small models like
