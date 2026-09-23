@@ -303,9 +303,11 @@ fn handles_inline_iterm_image_payload() {
     assert_eq!(metadata.image_size.y(), 1.0);
 }
 
-// Ensures that an ssh session successfully bootstraps even if the block list is empty.
+// Ensures that an SSH session successfully bootstraps even if the block list is empty and that
+// the parent shell resumes after the nested shell exits.
 #[test]
-fn ssh_bootstraps_if_blocklist_empty() {
+fn ssh_bootstraps_if_blocklist_empty_and_reconciles_parent_return() {
+    let _recovery_enabled = FeatureFlag::TerminalLifecycleRecovery.override_enabled(true);
     let mut terminal = TerminalModel::mock(None, None);
     command_finished_and_precmd(&mut terminal);
     command_finished_and_precmd(&mut terminal);
@@ -373,6 +375,46 @@ fn ssh_bootstraps_if_blocklist_empty() {
     command_finished_and_precmd(&mut terminal);
 
     assert!(terminal.is_active_block_bootstrapped());
+
+    let nested_prompt_block_id = terminal.active_block_id().clone();
+    terminal.exit_shell(ExitShellValue {
+        session_id: 0.into(),
+    });
+    let parent_next_block_id = BlockId::new();
+    let completion_metadata = CompletionMetadata {
+        exit_code: ExitCode::from(255),
+        next_block_id: parent_next_block_id.clone(),
+    };
+    terminal.command_finished(CommandFinishedValue {
+        completion_metadata: completion_metadata.clone(),
+        session_id: None,
+    });
+    terminal.precmd_with_completion_metadata(PrecmdValue {
+        completion_metadata,
+        prompt_metadata: PromptMetadata {
+            pwd: Some("/parent-return".to_owned()),
+            ..Default::default()
+        },
+    });
+
+    let completed_nested_prompt = terminal
+        .block_list()
+        .block_with_id(&nested_prompt_block_id)
+        .expect("The nested shell's final prompt block should be completed.");
+    assert_eq!(
+        completed_nested_prompt.state(),
+        BlockState::DoneWithExecution
+    );
+    assert_eq!(completed_nested_prompt.exit_code(), ExitCode::from(255));
+    assert_eq!(terminal.active_block_id(), &parent_next_block_id);
+    assert_eq!(
+        terminal
+            .block_list()
+            .active_block()
+            .pwd()
+            .map(String::as_str),
+        Some("/parent-return")
+    );
 }
 
 #[test]
@@ -2121,4 +2163,70 @@ fn repeated_precmd_with_completion_metadata_and_prompt_only_precmd_are_ignored_w
             .map(String::as_str),
         Some("/initial")
     );
+}
+
+#[test]
+fn command_finished_recovers_unknown_started_block_with_real_exit_code() {
+    let _recovery_enabled = FeatureFlag::TerminalLifecycleRecovery.override_enabled(true);
+    let mut terminal = TerminalModel::mock(None, None);
+    terminal.lifecycle_coordinator.reset_unknown();
+    terminal.block_list_mut().active_block_for_test().start();
+    for c in "unknown-command".chars() {
+        terminal.block_list_mut().active_block_for_test().input(c);
+    }
+    let completed_block_id = terminal.active_block_id().clone();
+    let next_block_id = BlockId::new();
+
+    terminal.command_finished(CommandFinishedValue {
+        completion_metadata: CompletionMetadata {
+            exit_code: ExitCode::from(29),
+            next_block_id: next_block_id.clone(),
+        },
+        session_id: None,
+    });
+
+    let completed_block = terminal
+        .block_list()
+        .block_with_id(&completed_block_id)
+        .expect("The recovered unknown-state block should remain in the block list.");
+    assert_eq!(completed_block.state(), BlockState::DoneWithExecution);
+    assert_eq!(completed_block.exit_code(), ExitCode::from(29));
+    assert_eq!(completed_block.command_to_string(), "unknown-command");
+    assert_eq!(terminal.active_block_id(), &next_block_id);
+}
+
+#[test]
+fn empty_and_syntax_error_commands_without_preexec_complete_as_execution() {
+    for (command, exit_code) in [("", ExitCode::from(0)), ("if then", ExitCode::from(2))] {
+        let mut terminal = TerminalModel::mock(None, None);
+        terminal.start_command_execution();
+        for c in command.chars() {
+            terminal.block_list_mut().active_block_for_test().input(c);
+        }
+        let completed_block_id = terminal.active_block_id().clone();
+        let next_block_id = BlockId::new();
+        let completion_metadata = CompletionMetadata {
+            exit_code,
+            next_block_id: next_block_id.clone(),
+        };
+
+        terminal.command_finished(CommandFinishedValue {
+            completion_metadata: completion_metadata.clone(),
+            session_id: None,
+        });
+        terminal.precmd_with_completion_metadata(PrecmdValue {
+            completion_metadata,
+            prompt_metadata: PromptMetadata::default(),
+        });
+
+        let completed_block = terminal
+            .block_list()
+            .block_with_id(&completed_block_id)
+            .expect("The completed block should remain in the block list.");
+        assert_eq!(completed_block.state(), BlockState::DoneWithExecution);
+        assert_eq!(completed_block.exit_code(), exit_code);
+        assert_eq!(completed_block.command_to_string(), command);
+        assert_eq!(completed_block.has_failed(), exit_code != ExitCode::from(0));
+        assert_eq!(terminal.active_block_id(), &next_block_id);
+    }
 }
