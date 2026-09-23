@@ -15,7 +15,7 @@ use warpui::{App, EntityId, ModelHandle, SingletonEntity};
 
 use super::{BlocklistAIContextModel, PendingAttachment, PendingFile};
 use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::agent::{AIAgentContext, ImageContext};
+use crate::ai::agent::{AIAgentAttachment, AIAgentContext, ImageContext};
 use crate::ai::agent_conversations_model::{
     AgentConversationEntry, AgentConversationListEntryState, AgentConversationListPolicy,
 };
@@ -253,89 +253,6 @@ fn build_test_context_model(app: &mut App) -> ModelHandle<BlocklistAIContextMode
     })
 }
 
-/// Builds context state for a TUI conversation surface.
-fn build_tui_context_model(app: &mut App) -> (ModelHandle<BlocklistAIContextModel>, EntityId) {
-    initialize_history_persistence_for_tests(app);
-    app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
-    let terminal_model = Arc::new(FairMutex::new(TerminalModel::new_for_test(
-        block_size(),
-        color::List::from(&Colors::default()),
-        ChannelEventListener::new_for_test(),
-        Arc::new(Background::default()),
-        false,
-        None,
-        false,
-        false,
-        None,
-    )));
-    let terminal_surface_id = EntityId::new();
-    let conversation_selection = app.add_model(|ctx| {
-        Box::new(TestConversationSelection::new(terminal_surface_id, ctx))
-            as Box<dyn ConversationSelection>
-    });
-    let model = app.add_model(|_| {
-        BlocklistAIContextModel::new_for_test(
-            terminal_model,
-            terminal_surface_id,
-            conversation_selection,
-        )
-    });
-    (model, terminal_surface_id)
-}
-
-#[test]
-fn tui_context_tracks_selected_conversation() {
-    App::test((), |mut app| async move {
-        let (model, _) = build_tui_context_model(&mut app);
-        let conversation_id = AIConversationId::new();
-
-        model.update(&mut app, |model, ctx| {
-            model.set_pending_query_state_for_existing_conversation(
-                conversation_id,
-                AgentViewEntryOrigin::Cli,
-                ctx,
-            );
-        });
-        model.read(&app, |model, ctx| {
-            assert_eq!(model.selected_conversation_id(ctx), Some(conversation_id));
-        });
-
-        model.update(&mut app, |model, ctx| {
-            model.set_pending_query_state_for_new_conversation(AgentViewEntryOrigin::Cli, ctx);
-        });
-        model.read(&app, |model, ctx| {
-            assert_eq!(model.selected_conversation_id(ctx), None);
-        });
-    });
-}
-
-#[test]
-fn tui_new_conversation_is_selected_and_terminal_surface_scoped() {
-    App::test((), |mut app| async move {
-        let (model, terminal_surface_id) = build_tui_context_model(&mut app);
-        let history = BlocklistAIHistoryModel::handle(&app);
-
-        let conversation_id = model
-            .update(&mut app, |model, ctx| {
-                model.try_start_new_conversation(AgentViewEntryOrigin::Cli, ctx)
-            })
-            .expect("TUI conversation creation should succeed");
-
-        model.read(&app, |model, ctx| {
-            assert_eq!(model.selected_conversation_id(ctx), Some(conversation_id));
-        });
-        history.read(&app, |history, _| {
-            assert_eq!(
-                history
-                    .all_live_conversations_for_terminal_surface(terminal_surface_id)
-                    .map(|conversation| conversation.id())
-                    .collect::<Vec<_>>(),
-                vec![conversation_id]
-            );
-        });
-    });
-}
-
 fn make_image_attachment(file_name: &str) -> PendingAttachment {
     PendingAttachment::Image(ImageContext {
         data: String::new(),
@@ -365,9 +282,9 @@ fn has_locking_attachment_is_false_for_default_state() {
 }
 
 #[test]
-fn has_locking_attachment_is_false_with_only_pending_block_id() {
-    // A pending block alone is *not* a locking attachment: only image/file attachments
-    // should force the input into AI mode (skipping NLD).
+fn has_locking_attachment_is_true_with_pending_block_id() {
+    // Zap keeps attached blocks as locking attachments: an explicitly attached block is a
+    // signal that the next query is intended for the agent.
     App::test((), |mut app| async move {
         let model = build_test_context_model(&mut app);
 
@@ -375,7 +292,7 @@ fn has_locking_attachment_is_false_with_only_pending_block_id() {
             m.insert_pending_block_id_for_test(BlockId::new());
         });
 
-        model.read(&app, |m, _| assert!(!m.has_locking_attachment()));
+        model.read(&app, |m, _| assert!(m.has_locking_attachment()));
     });
 }
 
@@ -499,7 +416,7 @@ fn pull_request_context_reads_github_repo_model() {
 fn has_locking_attachment_is_false_with_only_pending_selected_text() {
     // Selected text alone is *not* a locking attachment: the user could be selecting shell
     // command text (e.g. to copy a previously-run command), and forcing the input into AI
-    // mode in that case would be wrong. Only image or file attachments should force the lock.
+    // mode in that case would be wrong. Only images, files, or blocks should force the lock.
     App::test((), |mut app| async move {
         let model = build_test_context_model(&mut app);
 
@@ -617,6 +534,60 @@ fn enqueue_moves_staged_attachments_onto_the_row_and_clears_input() {
             assert_eq!(attachments.len(), 2);
             assert_eq!(attachments[0].file_name(), "a.png");
             assert_eq!(attachments[1].file_name(), "notes.txt");
+        });
+    });
+}
+
+#[test]
+fn referenced_at_context_attachments_prefers_longest_visible_reference() {
+    App::test((), |mut app| async move {
+        let model = build_test_context_model(&mut app);
+
+        model.update(&mut app, |m, _| {
+            m.register_at_context_attachment(
+                "@commit".to_owned(),
+                AIAgentAttachment::PlainText("old".to_owned()),
+            );
+            m.register_at_context_attachment(
+                "@commit (4)".to_owned(),
+                AIAgentAttachment::PlainText("new".to_owned()),
+            );
+        });
+
+        model.read(&app, |m, _| {
+            let attachments = m.referenced_at_context_attachments("@commit (4) hi");
+            assert_eq!(attachments.len(), 1);
+            assert_eq!(
+                attachments.get("@commit (4)"),
+                Some(&AIAgentAttachment::PlainText("new".to_owned()))
+            );
+        });
+    });
+}
+
+#[test]
+fn retain_at_context_attachments_in_query_drops_deleted_prefix_reference() {
+    App::test((), |mut app| async move {
+        let model = build_test_context_model(&mut app);
+
+        model.update(&mut app, |m, _| {
+            m.register_at_context_attachment(
+                "@commit".to_owned(),
+                AIAgentAttachment::PlainText("old".to_owned()),
+            );
+            m.register_at_context_attachment(
+                "@commit (4)".to_owned(),
+                AIAgentAttachment::PlainText("new".to_owned()),
+            );
+            m.retain_at_context_attachments_in_query("@commit (4) hi");
+        });
+
+        model.read(&app, |m, _| {
+            assert!(!m.pending_at_context_attachments().contains_key("@commit"));
+            assert!(
+                m.pending_at_context_attachments()
+                    .contains_key("@commit (4)")
+            );
         });
     });
 }

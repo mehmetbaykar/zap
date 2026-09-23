@@ -19,10 +19,16 @@ fn test_binary_files_not_openable() {
 fn test_open_code_panels_file_editor_default_is_warp() {
     use crate::util::file::external_editor::settings::OpenCodePanelsFileEditor;
 
-    assert_eq!(
-        OpenCodePanelsFileEditor::default_value(),
-        EditorChoice::Warp
-    );
+    assert_eq!(OpenCodePanelsFileEditor::default_value(), EditorChoice::Zap);
+}
+
+#[test]
+#[cfg(feature = "local_fs")]
+fn test_autosave_default_is_after_delay() {
+    use crate::util::file::external_editor::AutosaveMode;
+    use crate::util::file::external_editor::settings::Autosave;
+
+    assert_eq!(Autosave::default_value(), AutosaveMode::AfterDelay);
 }
 
 #[test]
@@ -44,7 +50,7 @@ fn test_resolve_file_target_markdown_viewer_precedence() {
 fn test_resolve_file_target_warp_uses_default_layout() {
     let target = resolve_file_target_with_editor_choice(
         Path::new("data.txt"),
-        EditorChoice::Warp,
+        EditorChoice::Zap,
         true, /* prefer_markdown_viewer */
         EditorLayout::NewTab,
         None,
@@ -59,8 +65,8 @@ fn test_resolve_file_target_warp_uses_default_layout() {
 #[cfg(feature = "local_fs")]
 fn test_resolve_file_target_to_open_in_warp_never_leaves_warp() {
     use crate::util::file::external_editor::settings::{
-        OpenCodePanelsFileEditor, OpenConversationLayoutPreference, OpenFileEditor, OpenFileLayout,
-        PreferMarkdownViewer, PreferTabbedEditorView,
+        Autosave, OpenCodePanelsFileEditor, OpenConversationLayoutPreference, OpenFileEditor,
+        OpenFileLayout, PreferMarkdownViewer, PreferTabbedEditorView,
     };
 
     let settings = EditorSettings {
@@ -69,6 +75,7 @@ fn test_resolve_file_target_to_open_in_warp_never_leaves_warp() {
             EditorChoice::ExternalEditor(Editor::VSCode),
         )),
         open_file_layout: OpenFileLayout::new(None),
+        autosave: Autosave::new(None),
         prefer_markdown_viewer: PreferMarkdownViewer::new(Some(false)),
         prefer_tabbed_editor_view: PreferTabbedEditorView::new(None),
         open_conversation_layout_preference: OpenConversationLayoutPreference::new(None),
@@ -89,14 +96,28 @@ fn test_resolve_file_target_to_open_in_warp_never_leaves_warp() {
 #[cfg(feature = "local_fs")]
 fn test_resolve_file_target_binary_is_system_generic() {
     let target = resolve_file_target_with_editor_choice(
-        Path::new("image.png"),
-        EditorChoice::Warp,
+        Path::new("video.mp4"),
+        EditorChoice::Zap,
         true, /* prefer_markdown_viewer */
         EditorLayout::SplitPane,
         None,
     );
 
     assert_eq!(target, FileTarget::SystemGeneric);
+}
+
+#[test]
+#[cfg(feature = "local_fs")]
+fn test_resolve_file_target_image_uses_image_viewer() {
+    let target = resolve_file_target_with_editor_choice(
+        Path::new("photo.png"),
+        EditorChoice::Zap,
+        true, /* prefer_markdown_viewer */
+        EditorLayout::NewTab,
+        None,
+    );
+
+    assert_eq!(target, FileTarget::ImageViewer(EditorLayout::NewTab));
 }
 
 #[test]
@@ -134,11 +155,11 @@ fn test_renders_in_warp_notebook_viewer() {
 #[cfg(feature = "local_fs")]
 fn test_resolve_file_target_jupyter_notebook_flag_on() {
     let _flag = FeatureFlag::JupyterNotebookRendering.override_enabled(true);
-    // Even with prefer_markdown_viewer off and an explicit Warp editor choice,
+    // Even with prefer_markdown_viewer off and an explicit Zap editor choice,
     // a Jupyter notebook routes to the notebook viewer (not the JSON editor).
     let target = resolve_file_target_with_editor_choice(
         Path::new("analysis.ipynb"),
-        EditorChoice::Warp,
+        EditorChoice::Zap,
         false, /* prefer_markdown_viewer */
         EditorLayout::SplitPane,
         None,
@@ -154,7 +175,7 @@ fn test_resolve_file_target_jupyter_notebook_flag_off() {
     // exactly as it does today.
     let target = resolve_file_target_with_editor_choice(
         Path::new("analysis.ipynb"),
-        EditorChoice::Warp,
+        EditorChoice::Zap,
         true, /* prefer_markdown_viewer */
         EditorLayout::SplitPane,
         None,

@@ -402,5 +402,5 @@ fn get_default_app_bundle_for_file(file_path: &NSString) -> Option<Retained<NSSt
 }
 
 #[cfg(test)]
-#[path = "mac_test.rs"]
+#[path = "mac_tests.rs"]
 mod tests;

@@ -5,10 +5,12 @@ use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
 use warp_files::FileModel;
 use warp_util::content_version::ContentVersion;
+use warp_util::file_type::is_markdown_file;
 use warp_util::host_id::HostId;
 use warp_util::standardized_path::StandardizedPath;
 use warpui::{App, ModelHandle, SingletonEntity};
 
+use super::{BufferLocation, RemotePath};
 use crate::code::global_buffer_model::{CharOffsetEdit, GlobalBufferModel, GlobalBufferModelEvent};
 use crate::test_util::settings::initialize_settings_for_tests;
 
@@ -844,4 +846,32 @@ fn handle_buffer_updated_push_multiple_edits_in_batch() {
 
         assert_eq!(content(&app, file_id), "xxx bbb zzz");
     })
+}
+
+// ── BufferLocation: remote Markdown detection ─────────────────────
+
+fn remote(path: &str) -> BufferLocation {
+    BufferLocation::Remote(RemotePath::new(
+        HostId::new("test-host".to_string()),
+        StandardizedPath::try_new(path).unwrap(),
+    ))
+}
+
+#[test]
+fn remote_markdown_detected_via_language_path() {
+    // Remote files have no local path, so Markdown detection must go through
+    // `language_path()` (suffix only).
+    assert!(is_markdown_file(
+        remote("/home/user/notes/README.md").language_path()
+    ));
+    assert!(is_markdown_file(
+        remote("/home/user/doc.markdown").language_path()
+    ));
+    assert!(is_markdown_file(remote("/srv/CHANGELOG").language_path()));
+    assert!(!is_markdown_file(
+        remote("/home/user/src/main.rs").language_path()
+    ));
+    assert!(!is_markdown_file(
+        remote("/home/user/data.json").language_path()
+    ));
 }

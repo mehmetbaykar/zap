@@ -136,34 +136,5 @@ impl SyncClock {
 }
 
 #[cfg(test)]
-mod tests {
-    use warp_util::file_type::is_markdown_file;
-
-    use super::*;
-
-    fn remote(path: &str) -> BufferLocation {
-        BufferLocation::Remote(RemotePath::new(
-            HostId::new("test-host".to_string()),
-            StandardizedPath::try_new(path).unwrap(),
-        ))
-    }
-
-    #[test]
-    fn remote_markdown_detected_via_language_path() {
-        // Remote files have no local path, so Markdown detection must go through
-        // `language_path()` (suffix only).
-        assert!(is_markdown_file(
-            remote("/home/user/notes/README.md").language_path()
-        ));
-        assert!(is_markdown_file(
-            remote("/home/user/doc.markdown").language_path()
-        ));
-        assert!(is_markdown_file(remote("/srv/CHANGELOG").language_path()));
-        assert!(!is_markdown_file(
-            remote("/home/user/src/main.rs").language_path()
-        ));
-        assert!(!is_markdown_file(
-            remote("/home/user/data.json").language_path()
-        ));
-    }
-}
+#[path = "buffer_location_tests.rs"]
+mod tests;

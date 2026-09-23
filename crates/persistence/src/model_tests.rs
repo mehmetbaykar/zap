@@ -401,6 +401,8 @@ fn agent_conversation_data_deserializes_legacy_payload_without_last_event_sequen
     assert_eq!(data.last_event_sequence, None);
     assert_eq!(data.orchestration_harness_type, None);
     assert!(!data.is_remote_child);
+    assert_eq!(data.byop_repair_state_json, None);
+    assert_eq!(data.cli_subagent_block_snapshots_json, None);
 }
 
 #[test]
@@ -410,6 +412,44 @@ fn agent_conversation_data_skips_serializing_none_last_event_sequence() {
     assert!(
         !json.contains("last_event_sequence"),
         "None should be skipped in serialized output: {json}"
+    );
+    assert!(
+        !json.contains("cli_subagent_block_snapshots_json"),
+        "None should be skipped in serialized output: {json}"
+    );
+}
+
+#[test]
+fn agent_conversation_data_roundtrips_byop_repair_sidecar() {
+    let data = AgentConversationData {
+        byop_repair_state_json: Some(r#"{"version":1,"records":[]}"#.to_string()),
+        ..Default::default()
+    };
+
+    let json = serde_json::to_string(&data).expect("serialize");
+    let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
+
+    assert_eq!(
+        roundtripped.byop_repair_state_json.as_deref(),
+        Some(r#"{"version":1,"records":[]}"#)
+    );
+}
+
+#[test]
+fn agent_conversation_data_roundtrips_cli_subagent_block_snapshots_sidecar() {
+    let data = AgentConversationData {
+        cli_subagent_block_snapshots_json: Some(
+            r#"[{"task_id":"cli-task","block_id":"cli-block","block":{}}]"#.to_string(),
+        ),
+        ..Default::default()
+    };
+
+    let json = serde_json::to_string(&data).expect("serialize");
+    let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
+
+    assert_eq!(
+        roundtripped.cli_subagent_block_snapshots_json,
+        data.cli_subagent_block_snapshots_json
     );
 }
 

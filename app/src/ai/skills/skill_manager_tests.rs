@@ -532,6 +532,7 @@ description: Test skill with variables
 ---
 
 Run `{{warp_cli_binary_name}}` to open {{settings_file_path}}.
+Use `{{warpctrl_binary_name}}` from {{warpctrl_wrapper_path}}.
 "#,
     )
     .unwrap();
@@ -547,6 +548,12 @@ Run `{{warp_cli_binary_name}}` to open {{settings_file_path}}.
             .content
             .contains(&format!("Run `{expected_cli}` to open "))
     );
+    let expected_warpctrl = ChannelState::channel().warpctrl_command_name();
+    let expected_wrapper = resources_dir.join("bin").join(expected_warpctrl);
+    assert!(skill.content.contains(&format!(
+        "Use `{expected_warpctrl}` from {}.",
+        expected_wrapper.display()
+    )));
 }
 
 #[test]
