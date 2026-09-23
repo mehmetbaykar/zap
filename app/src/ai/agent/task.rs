@@ -1088,3 +1088,7 @@ impl AIAgentExchange {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "task_tests.rs"]
+mod tests;
