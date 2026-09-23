@@ -3451,6 +3451,7 @@ ai-dont-show-suggested-code-banners-again = Don't show me suggested code banners
 ai-inline-code-diff-no-file-name = No file name
 ai-tool-call-cancelled = Tool call was cancelled
 ai-agent-view-open-in-different-pane = Open in different pane
+ai-agent-view-navigate-to-conversation-failed = Couldn't navigate to conversation.
 passive-suggestion-feature-or-bug-label = Code a feature or fix a bug in {1}
 passive-suggestion-help-feature-or-bug-label = Help me code a feature or fix a bug in {1}
 passive-suggestion-implement-feature-or-bug-query = Implement a feature or fix a bug in {1}. Ask me for all the details you need.
