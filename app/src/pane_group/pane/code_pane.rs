@@ -120,33 +120,29 @@ impl PaneContent for CodePane {
                 CodeViewEvent::Pane(pane_event) => {
                     pane_group.handle_pane_event(pane_id, pane_event, ctx)
                 }
-                CodeViewEvent::TabChanged { file_path, .. } => {
-                    if let Some(path) = file_path {
+                CodeViewEvent::TabChanged { location, .. } => {
+                    if let Some(loc) = location {
                         pane_group.active_file_model().update(ctx, |model, ctx| {
-                            model.active_file_changed(
-                                crate::code::buffer_location::BufferLocation::Local(path.clone()),
-                                ctx,
-                            );
+                            model.active_file_changed(loc.clone(), ctx);
                         });
                     }
                 }
-                CodeViewEvent::FileOpened { file_path, .. } => {
+                CodeViewEvent::FileOpened { location, .. } => {
                     pane_group.active_file_model().update(ctx, |model, ctx| {
-                        model.active_file_changed(
-                            crate::code::buffer_location::BufferLocation::Local(file_path.clone()),
-                            ctx,
-                        );
+                        model.active_file_changed(location.clone(), ctx);
                     });
 
-                    // Track the opened file in the OpenedFilesModel
+                    // Track the opened file in the OpenedFilesModel (local repos only here).
                     #[cfg(feature = "local_fs")]
                     {
                         use repo_metadata::repositories::DetectedRepositories;
 
                         use crate::code::opened_files::OpenedFilesModel;
 
-                        if let Some(repo_path) = DetectedRepositories::as_ref(ctx)
-                            .get_root_for_path(&LocalOrRemotePath::Local(file_path.clone()))
+                        if let crate::code::buffer_location::BufferLocation::Local(file_path) =
+                            location
+                            && let Some(repo_path) = DetectedRepositories::as_ref(ctx)
+                                .get_root_for_path(&LocalOrRemotePath::Local(file_path.clone()))
                         {
                             OpenedFilesModel::handle(ctx).update(ctx, |opened_files, ctx| {
                                 opened_files.file_opened(

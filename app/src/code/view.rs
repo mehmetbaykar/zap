@@ -191,11 +191,11 @@ pub enum CodeViewAction {
 pub enum CodeViewEvent {
     Pane(PaneEvent),
     TabChanged {
-        file_path: Option<PathBuf>,
+        location: Option<BufferLocation>,
         tab_index: usize,
     },
     FileOpened {
-        file_path: PathBuf,
+        location: BufferLocation,
         tab_index: usize,
     },
     RunTabConfigSkill {
@@ -969,13 +969,10 @@ impl CodeView {
         let active_tab_index = self.tab_group.len() - 1;
         self.set_active_tab_index(active_tab_index, ctx);
 
-        // `FileOpened` is only meaningful for local files (repo detection / OpenedFilesModel).
-        if let BufferLocation::Local(file_path) = location {
-            ctx.emit(CodeViewEvent::FileOpened {
-                file_path,
-                tab_index: self.active_tab_index,
-            });
-        }
+        ctx.emit(CodeViewEvent::FileOpened {
+            location,
+            tab_index: self.active_tab_index,
+        });
     }
 
     pub fn open_in_preview_or_promote_and_jump(
@@ -1077,13 +1074,10 @@ impl CodeView {
         let active_tab_index = self.tab_group.len() - 1;
 
         if let (Some(location), Some(tab)) = (location, self.tab_group.get(active_tab_index)) {
-            // `FileOpened` is only meaningful for local files (repo detection / OpenedFilesModel).
-            if let BufferLocation::Local(file_path) = &location {
-                ctx.emit(CodeViewEvent::FileOpened {
-                    file_path: file_path.clone(),
-                    tab_index: active_tab_index,
-                });
-            }
+            ctx.emit(CodeViewEvent::FileOpened {
+                location: location.clone(),
+                tab_index: active_tab_index,
+            });
 
             let scroll_position = match line_col {
                 Some(line_col) => ScrollPosition::LineAndColumn(line_col),
@@ -1764,9 +1758,9 @@ impl CodeView {
         self.active_tab_index = index;
         self.update_tab_bar_state(ctx);
 
-        let file_path = self.tab_at(index).and_then(|tab| tab.path());
+        let location = self.tab_at(index).and_then(|tab| tab.location.clone());
         ctx.emit(CodeViewEvent::TabChanged {
-            file_path,
+            location,
             tab_index: index,
         });
 
