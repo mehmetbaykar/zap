@@ -68,7 +68,8 @@ use crate::settings::{
     DEFAULT_QUAKE_MODE_SIZE_PERCENTAGES, DefaultSessionMode, EnableSlashCommandsInTerminal,
     EnableSshAutoDiscovery, ErrorUnderliningEnabled, ExtraMetaKeys, GPUSettings, GlobalHotkeyMode,
     InputSettings, InputSettingsChangedEvent, LinuxSelectionClipboard, MiddleClickPasteEnabled,
-    MouseScrollMultiplier, NativeShellCompletionsEnabled, PreferLowPowerGPU,
+    MouseScrollMultiplier, NativeShellCompletionsEnabled, OutlineCodebaseSymbolsForAtContextMenu,
+    PreferLowPowerGPU,
     PreferredGraphicsBackend, QUAKE_WINDOW_AUTOHIDE_SUPPORTED, QuakeModeSettings,
     RightClickBehavior, RightClickBehaviorSetting, ScrollSettings, ScrollSettingsChangedEvent,
     SelectionSettings, SelectionSettingsChangedEvent, ShowAutosuggestionIgnoreButton,
@@ -721,8 +722,23 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
             ),
         );
     }
-    // Zap: the codebase-symbols-in-'@'-context-menu command palette binding was removed along
-    // with the outline / RAG retirement (see `FeaturesPageAction` for details).
+    if FeatureFlag::AIContextMenuCode.is_enabled() {
+        toggle_binding_pairs.push(
+            ToggleSettingActionPair::new(
+                &crate::t!("toggle-suffix-outline-codebase-symbols"),
+                builder(SettingsAction::FeaturesPageToggle(
+                    FeaturesPageAction::ToggleOutlineCodebaseSymbolsForAtContextMenu,
+                )),
+                context,
+                flags::OUTLINE_CODEBASE_SYMBOLS_FOR_AT_CONTEXT_MENU_FLAG,
+            )
+            .is_supported_on_current_platform(
+                InputSettings::as_ref(app)
+                    .outline_codebase_symbols_for_at_context_menu
+                    .is_supported_on_current_platform(),
+            ),
+        );
+    }
     toggle_binding_pairs.push(
         ToggleSettingActionPair::new(
             "global workflows in Command Search",
@@ -882,7 +898,7 @@ pub enum FeaturesPageAction {
     ToggleShowAutosuggestionIgnoreButton,
     ToggleAtContextMenuInTerminalMode,
     ToggleSlashCommandsInTerminalMode,
-    // Zap: `ToggleOutlineCodebaseSymbolsForAtContextMenu` was removed along with the outline / RAG retirement.
+    ToggleOutlineCodebaseSymbolsForAtContextMenu,
     ToggleAutoOpenCodeReviewPane,
     ToggleShowTerminalInputMessageLine,
     TogglePreserveInputFocusOnBlockSelection,
@@ -1384,8 +1400,16 @@ impl FeaturesPageAction {
                         .value(),
                 ),
             },
-            // Zap: ToggleOutlineCodebaseSymbolsForAtContextMenu was retired,
-            // and its telemetry branch was removed along with it.
+            Self::ToggleOutlineCodebaseSymbolsForAtContextMenu => {
+                TelemetryEvent::FeaturesPageAction {
+                    action: "ToggleOutlineCodebaseSymbolsForAtContextMenu".to_string(),
+                    value: to_string(
+                        *InputSettings::as_ref(ctx)
+                            .outline_codebase_symbols_for_at_context_menu
+                            .value(),
+                    ),
+                }
+            }
             Self::MakeWarpDefaultTerminal => TelemetryEvent::FeaturesPageAction {
                 action: "MakeWarpDefaultTerminal".to_string(),
                 value: to_string(DefaultTerminal::as_ref(ctx).is_warp_default()),
@@ -2223,8 +2247,15 @@ impl TypedActionView for FeaturesPageView {
                     );
                 });
             }
-            // Zap: the `ToggleOutlineCodebaseSymbolsForAtContextMenu` action was removed
-            // along with the outline retirement.
+            ToggleOutlineCodebaseSymbolsForAtContextMenu => {
+                InputSettings::handle(ctx).update(ctx, |input_settings, ctx| {
+                    report_if_error!(
+                        input_settings
+                            .outline_codebase_symbols_for_at_context_menu
+                            .toggle_and_save_value(ctx)
+                    );
+                });
+            }
             ToggleAutoOpenCodeReviewPane => {
                 GeneralSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(
@@ -3053,6 +3084,16 @@ impl FeaturesPageView {
                 .is_supported_on_current_platform()
         {
             editor_widgets.push(Box::new(SlashCommandsInTerminalModeWidget::default()));
+        }
+
+        if input_settings
+            .outline_codebase_symbols_for_at_context_menu
+            .is_supported_on_current_platform()
+            && FeatureFlag::AIContextMenuCode.is_enabled()
+        {
+            editor_widgets.push(Box::new(
+                OutlineCodebaseSymbolsForAtContextMenuWidget::default(),
+            ));
         }
 
         if FeatureFlag::AgentView.is_enabled() {
@@ -6586,6 +6627,58 @@ impl SettingsWidget for AtContextMenuInTerminalModeWidget {
                 .on_click(move |ctx, _, _| {
                     ctx.dispatch_typed_action(
                         FeaturesPageAction::ToggleAtContextMenuInTerminalMode,
+                    );
+                })
+                .finish(),
+            None,
+        )
+    }
+}
+
+#[derive(Default)]
+struct OutlineCodebaseSymbolsForAtContextMenuWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for OutlineCodebaseSymbolsForAtContextMenuWidget {
+    type View = FeaturesPageView;
+
+    fn search_terms(&self) -> &str {
+        "outline codebase symbols context menu code indexing"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let ui_builder = appearance.ui_builder();
+        render_body_item::<FeaturesPageAction>(
+            crate::t!("settings-features-outline-codebase-symbols"),
+            None,
+            LocalOnlyIconState::for_setting(
+                OutlineCodebaseSymbolsForAtContextMenu::storage_key(),
+                OutlineCodebaseSymbolsForAtContextMenu::sync_to_cloud(),
+                &mut view
+                    .button_mouse_states
+                    .local_only_icon_tooltip_states
+                    .borrow_mut(),
+                app,
+            ),
+            ToggleState::Enabled,
+            appearance,
+            ui_builder
+                .switch(self.switch_state.clone())
+                .check(
+                    *InputSettings::as_ref(app)
+                        .outline_codebase_symbols_for_at_context_menu
+                        .value(),
+                )
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(
+                        FeaturesPageAction::ToggleOutlineCodebaseSymbolsForAtContextMenu,
                     );
                 })
                 .finish(),

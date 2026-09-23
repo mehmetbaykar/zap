@@ -21664,6 +21664,15 @@ impl Workspace {
                 .insert(flags::AI_COMMAND_SEARCH_HASH_TRIGGER_FLAG);
         }
 
+        if *input_settings
+            .outline_codebase_symbols_for_at_context_menu
+            .value()
+        {
+            context
+                .set
+                .insert(flags::OUTLINE_CODEBASE_SYMBOLS_FOR_AT_CONTEXT_MENU_FLAG);
+        }
+
         if *command_search_settings
             .show_global_workflows_in_universal_search
             .value()
