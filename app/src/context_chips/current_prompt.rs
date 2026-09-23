@@ -1340,6 +1340,12 @@ impl CurrentPrompt {
             // Recompute which chips to run when the agent footer config changes.
             self.update_states_with_new_context(ctx);
         }
+        if let SessionSettingsChangedEvent::GithubPrChipDefaultValidation { .. } = event {
+            // Re-resolve the default prompt's chip list (which gates the
+            // PR chip on `is_suppressed()`) and re-run chips with the new
+            // suppression state.
+            self.update_states_with_new_context(ctx);
+        }
 
         if let SessionSettingsChangedEvent::CLIAgentToolbarChipSelectionSetting { .. } = event {
             self.update_states_with_new_context(ctx);

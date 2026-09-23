@@ -6501,7 +6501,9 @@ impl CodeReviewView {
                 // `has_upstream` controls the label/icon on the push-chained
                 // intent (Commit and push vs Commit and publish).
                 let diff_state = self.diff_state_model.as_ref(ctx);
-                let allow_create_pr = !diff_state.is_on_main_branch(ctx);
+                let allow_create_pr = self.pr_info(ctx).is_none()
+                    && !self.is_pr_info_refreshing(ctx)
+                    && !diff_state.is_on_main_branch(ctx);
                 let has_upstream = diff_state.upstream_ref(ctx).is_some();
                 ctx.add_typed_action_view(|ctx| {
                     GitDialog::new_for_commit(
@@ -7172,6 +7174,27 @@ impl View for CodeReviewView {
     fn ui_name() -> &'static str {
         "CodeReviewView"
     }
+
+    fn keymap_context(&self, ctx: &AppContext) -> warpui::keymap::Context {
+        let mut context = Self::default_keymap_context();
+
+        // Suppress pane-level shortcuts (e.g. `F`) when a descendant text editor
+        // is focused; otherwise the binding fires before the editor receives
+        // the keystroke as text input. Covers the three text-input surfaces in
+        // this pane: diff editor (`CodeEditorView`), comment composers
+        // (`RichTextEditorView`), and the find bar (`EditorView`).
+        let editor_focused = ctx
+            .focused_view_id(self.window_id)
+            .and_then(|view_id| ctx.view_name(self.window_id, view_id))
+            .is_some_and(|name| {
+                matches!(name, "EditorView" | "RichTextEditorView" | "CodeEditorView")
+            });
+        if !editor_focused {
+            context.set.insert("CodeReviewView_NotEditing");
+        }
+
+        context
+    }
 }
 
 impl TypedActionView for CodeReviewView {
@@ -7327,6 +7350,7 @@ impl TypedActionView for CodeReviewView {
                     model.load_diffs_for_current_repo(false, true, preferred_session, ctx);
                     model.refresh_metadata_after_git_operation(ctx);
                 });
+                self.refresh_pr_info(ctx);
             }
             CodeReviewAction::UndoRevert => {
                 self.maybe_undo_revert(ctx);
