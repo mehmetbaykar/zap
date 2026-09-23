@@ -3131,7 +3131,7 @@ pub fn render_failed_output(props: FailedOutputProps, app: &AppContext) -> Box<d
                 format!("{ERROR_APOLOGY_TEXT}\n\n{error_message}")
             }
         }
-        RenderableAIError::AgentExitedShell => {
+        RenderableAIError::AgentExitedShell { .. } => {
             format!("{ERROR_APOLOGY_TEXT}\n\n{}", props.error)
         }
         RenderableAIError::TransientNetworkError { .. } => {

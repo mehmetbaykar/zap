@@ -3377,12 +3377,14 @@ impl BlocklistAIController {
     }
 
     /// Finalizes a conversation as a terminal failure because an agent-issued
-    /// command caused the shell process to exit.
+    /// command (the secret-redacted `command`) caused the shell process to exit.
     pub fn fail_conversation_due_to_shell_exit(
         &mut self,
         conversation_id: AIConversationId,
+        command: String,
         ctx: &mut ModelContext<Self>,
     ) {
+        let shell_exit_error = RenderableAIError::AgentExitedShell { command };
         let terminal_view_id = self.terminal_view_id;
         let history_model = BlocklistAIHistoryModel::handle(ctx);
 
@@ -3399,9 +3401,10 @@ impl BlocklistAIController {
             .stream_ids_for_conversation(conversation_id, ctx);
         let had_in_flight_stream = !stream_ids.is_empty();
         for stream_id in &stream_ids {
+            let error = shell_exit_error.clone();
             history_model.update(ctx, |history_model, ctx| {
                 history_model.mark_response_stream_completed_with_error(
-                    RenderableAIError::AgentExitedShell,
+                    error,
                     false,
                     stream_id,
                     conversation_id,
@@ -3430,7 +3433,7 @@ impl BlocklistAIController {
                     terminal_view_id,
                     conversation_id,
                     ConversationStatus::Error,
-                    Some(RenderableAIError::AgentExitedShell),
+                    Some(shell_exit_error),
                     ctx,
                 );
             });
