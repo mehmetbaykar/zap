@@ -283,3 +283,51 @@ fn should_show_agent_mode_ask_user_question_speedbump_round_trips_to_false() {
         });
     });
 }
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn open_code_action_routes_links_to_configured_editor_and_non_links_to_warp() {
+    let linked_source = crate::code::editor_management::CodeSource::Link {
+        path: PathBuf::from("/workspace/project/src/main.rs"),
+        range_start: Some(warp_util::path::LineAndColumnArg {
+            line_num: 42,
+            column_num: Some(7),
+        }),
+        range_end: None,
+    };
+
+    assert!(matches!(
+        super::open_code_action_event(
+            &linked_source,
+            crate::util::file::external_editor::settings::EditorLayout::SplitPane,
+        ),
+        super::AIBlockEvent::OpenDetectedFilePath {
+            absolute_path,
+            line_and_column_num: Some(warp_util::path::LineAndColumnArg {
+                line_num: 42,
+                column_num: Some(7),
+            }),
+            target_override: None,
+        } if absolute_path.as_path() == std::path::Path::new("/workspace/project/src/main.rs")
+    ));
+
+    let skill_path = PathBuf::from("/workspace/project/.warp/skills/example/SKILL.md");
+    let skill_source = crate::code::editor_management::CodeSource::Skill {
+        reference: SkillReference::Path(warp_util::local_or_remote_path::LocalOrRemotePath::Local(
+            skill_path.clone(),
+        )),
+        path: skill_path,
+        origin: crate::ai::skills::SkillOpenOrigin::ReadSkill,
+    };
+
+    assert!(matches!(
+        super::open_code_action_event(
+            &skill_source,
+            crate::util::file::external_editor::settings::EditorLayout::NewTab,
+        ),
+        super::AIBlockEvent::OpenCodeInWarp {
+            source,
+            layout: crate::util::file::external_editor::settings::EditorLayout::NewTab,
+        } if source == skill_source
+    ));
+}

@@ -1008,3 +1008,123 @@ fn finished_receiving_output_drains_queue_when_sibling_block_masks_turn_end() {
         });
     });
 }
+
+#[test]
+fn redetermine_terminal_focus_preserves_focused_queued_prompt_editor() {
+    App::test((), |mut app| async move {
+        let _queue_flag = FeatureFlag::QueueSlashCommand.override_enabled(true);
+        initialize_app_for_terminal_view(&mut app);
+
+        let terminal = add_window_with_terminal(&mut app, None);
+        let terminal_view_id = terminal.read(&app, |view, _| view.view_id);
+        let conversation_id =
+            BlocklistAIHistoryModel::handle(&app).update(&mut app, |history, ctx| {
+                let id = history.start_new_conversation(terminal_view_id, false, false, false, ctx);
+                history.set_active_conversation_id(id, terminal_view_id, ctx);
+                id
+            });
+        let input = terminal.read(&app, |view, _| view.input.clone());
+        let panel = input
+            .read(&app, |input, _| input.queued_prompts_panel().cloned())
+            .expect("queue flag should create a queued prompts panel");
+        let row_id = QueuedQueryModel::handle(&app).update(&mut app, |model, ctx| {
+            model.append(conversation_id, user_query("edit me"), ctx)
+        });
+
+        panel.update(&mut app, |panel, ctx| {
+            panel.handle_action(&QueuedPromptsPanelAction::StartEditingRow(row_id), ctx);
+        });
+        panel.read(&app, |panel, ctx| {
+            assert!(panel.is_inline_edit_editor_focused(ctx));
+        });
+
+        terminal.update(&mut app, |view, ctx| {
+            assert!(
+                !view.redetermine_terminal_focus(ctx),
+                "focused queued-prompt edits should hold focus during async focus reconciliation"
+            );
+        });
+
+        panel.read(&app, |panel, ctx| {
+            assert!(panel.is_inline_edit_editor_focused(ctx));
+        });
+        QueuedQueryModel::handle(&app).read(&app, |model, _| {
+            assert_eq!(model.editing_row(conversation_id), Some(row_id));
+        });
+    });
+}
+
+#[test]
+fn lrc_finish_queued_compact_and_sends_followup_after_summary() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+        let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+        let _queue_flag = FeatureFlag::QueueSlashCommand.override_enabled(true);
+        let _queued_prompts_v2 = FeatureFlag::QueuedPromptsV2.override_enabled(true);
+        let _summarization = FeatureFlag::SummarizationConversationCommand.override_enabled(true);
+
+        let terminal = add_window_with_terminal(&mut app, None);
+        let terminal_view_id = terminal.read(&app, |view, _| view.view_id);
+        let conversation_id =
+            BlocklistAIHistoryModel::handle(&app).update(&mut app, |history, ctx| {
+                let id = history.start_new_conversation(terminal_view_id, false, false, false, ctx);
+                history.set_active_conversation_id(id, terminal_view_id, ctx);
+                id
+            });
+        terminal.read(&app, |view, ctx| {
+            assert_eq!(
+                view.ai_context_model
+                    .as_ref(ctx)
+                    .selected_conversation_id(ctx),
+                None
+            );
+        });
+
+        QueuedQueryModel::handle(&app).update(&mut app, |model, ctx| {
+            model.append(
+                conversation_id,
+                QueuedQuery::new_with_attachments(
+                    format!(
+                        "{} follow up",
+                        crate::search::slash_command_menu::static_commands::commands::COMPACT_AND.name
+                    ),
+                    QueuedQueryOrigin::LrcAutoQueue,
+                    vec![image_attachment("queued-context.png")],
+                ),
+                ctx,
+            );
+        });
+
+        terminal.update(&mut app, |view, ctx| {
+            view.send_lrc_queued_prompts(conversation_id, ctx);
+        });
+
+        QueuedQueryModel::handle(&app).read(&app, |model, _| {
+            let queue = model.queue(conversation_id);
+            assert_eq!(queue.len(), 1);
+            assert_eq!(queue[0].text(), "follow up");
+            assert_eq!(queue[0].origin(), QueuedQueryOrigin::CompactAndSlashCommand);
+            assert_eq!(queue[0].attachments().len(), 1);
+        });
+
+        let ai_query_count = Rc::new(RefCell::new(0));
+        let input = terminal.read(&app, |view, _| view.input().clone());
+        let ai_query_count_for_subscription = ai_query_count.clone();
+        app.update(|ctx| {
+            ctx.subscribe_to_view(&input, move |_, event: &InputEvent, _| {
+                if matches!(event, InputEvent::ExecuteAIQuery) {
+                    *ai_query_count_for_subscription.borrow_mut() += 1;
+                }
+            });
+        });
+
+        terminal.update(&mut app, |view, ctx| {
+            view.drain_queued_prompts(conversation_id, FinishReason::Complete, ctx);
+        });
+
+        assert_eq!(*ai_query_count.borrow(), 1);
+        QueuedQueryModel::handle(&app).read(&app, |model, _| {
+            assert!(model.queue(conversation_id).is_empty());
+        });
+    });
+}
