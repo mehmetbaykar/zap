@@ -256,16 +256,14 @@ fn test_insert_hidden_child_agent_pane_keeps_focus_and_active_session() {
                 ctx,
             );
 
-            // Zap keeps a hidden child pane in the layout tree, marked hidden until it is
-            // revealed as a split (upstream attaches it off-tree instead).
-            assert_eq!(panes.pane_count(), initial_tree_pane_count + 1);
+            assert_eq!(panes.pane_count(), initial_tree_pane_count);
             assert_eq!(panes.pane_ids().count(), initial_content_pane_count + 1);
             assert_eq!(panes.terminal_pane_ids().count(), 2);
             assert_eq!(panes.visible_pane_count(), initial_visible_count);
             assert!(panes.has_pane_id(child_pane_id.into()));
-            assert!(panes.panes.is_pane_in_tree(child_pane_id.into()));
+            assert!(!panes.panes.is_pane_in_tree(child_pane_id.into()));
 
-            // The new child pane should remain hidden and not affect visible ordering.
+            // The new child pane should remain off-tree and not affect visible ordering.
             assert_eq!(panes.pane_id_by_index(0), Some(parent_pane_id));
             assert_eq!(panes.pane_id_by_index(1), None);
             let visible_terminal_views = panes.visible_terminal_views(ctx);
@@ -1279,6 +1277,1032 @@ fn test_undo_close_keeps_a_file_pane_watching_its_file() {
                 file_view.as_ref(ctx).file_id_for_test().is_none(),
                 "a permanently discarded pane should release its file"
             );
+        });
+    });
+}
+
+// Upstream #10327 (swap-in-place child navigation), #10371 (lazy hidden-child
+// restoration), #11776 (maximized state) and #15996 (reopened-tab ownership)
+// coverage, restored for the ported swap model. Remote/ambient (cloud)
+// variants are intentionally not carried: Zap's orchestration is local-only.
+
+fn restore_conversation_for_terminal_view(
+    terminal_view_id: EntityId,
+    conversation: AIConversation,
+    ctx: &mut ViewContext<PaneGroup>,
+) -> AIConversationId {
+    let conversation_id = conversation.id();
+
+    BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
+        history_model.restore_conversations(terminal_view_id, vec![conversation], ctx);
+    });
+
+    conversation_id
+}
+
+fn restore_child_conversation_for_terminal_view(
+    terminal_view_id: EntityId,
+    parent_conversation_id: AIConversationId,
+    ctx: &mut ViewContext<PaneGroup>,
+) -> AIConversationId {
+    let mut child_conversation = AIConversation::new(false, false);
+    child_conversation.set_parent_conversation_id(parent_conversation_id);
+    restore_conversation_for_terminal_view(terminal_view_id, child_conversation, ctx)
+}
+
+fn restore_child_conversation(
+    panes: &PaneGroup,
+    pane_id: PaneId,
+    parent_conversation_id: AIConversationId,
+    ctx: &mut ViewContext<PaneGroup>,
+) -> AIConversationId {
+    let terminal_view_id = panes
+        .terminal_view_from_pane_id(pane_id, ctx)
+        .expect("child pane should have a terminal view")
+        .id();
+    restore_child_conversation_for_terminal_view(terminal_view_id, parent_conversation_id, ctx)
+}
+
+fn enter_agent_view_for_conversation(
+    panes: &PaneGroup,
+    pane_id: PaneId,
+    conversation_id: AIConversationId,
+    ctx: &mut ViewContext<PaneGroup>,
+) {
+    panes
+        .terminal_view_from_pane_id(pane_id, ctx)
+        .expect("pane should have a terminal view")
+        .update(ctx, |terminal_view, ctx| {
+            terminal_view.enter_agent_view_for_conversation(
+                None,
+                AgentViewEntryOrigin::RestoreExistingConversation,
+                conversation_id,
+                ctx,
+            );
+        });
+}
+
+fn create_already_fullscreen_parent_pane_data(
+    panes: &PaneGroup,
+    ctx: &mut ViewContext<PaneGroup>,
+) -> (TerminalPane, PaneId, AIConversationId) {
+    let (pane_data, terminal_view) =
+        panes.create_terminal_pane_data(None, HashMap::new(), None, None, ctx);
+    let pane_id = pane_data.terminal_pane_id().into();
+    let parent_conversation_id =
+        start_parent_conversation_for_terminal_view(terminal_view.id(), ctx);
+    let child_conversation_id = restore_child_conversation_for_terminal_view(
+        terminal_view.id(),
+        parent_conversation_id,
+        ctx,
+    );
+
+    terminal_view.update(ctx, |terminal_view, ctx| {
+        terminal_view.enter_agent_view_for_conversation(
+            None,
+            AgentViewEntryOrigin::RestoreExistingConversation,
+            parent_conversation_id,
+            ctx,
+        );
+    });
+
+    (pane_data, pane_id, child_conversation_id)
+}
+
+/// Creates a fresh local child agent (same path as a local `run_agents`
+/// launch) under a new parent conversation in the group's first pane.
+/// Returns `(parent_pane_id, parent_conversation_id, child_pane_id,
+/// child_conversation_id)`.
+fn create_parent_with_fresh_local_child(
+    panes: &mut PaneGroup,
+    ctx: &mut ViewContext<PaneGroup>,
+) -> (PaneId, AIConversationId, PaneId, AIConversationId) {
+    let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+    let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+    let child = create_hidden_child_agent_conversation(
+        panes,
+        HiddenChildAgentConversationRequest {
+            parent_pane_id,
+            name: "Agent 1".to_string(),
+            parent_conversation_id,
+            orchestration_harness: None,
+            env_vars: HashMap::new(),
+            task_context: None,
+        },
+        ctx,
+    )
+    .expect("fresh hidden child conversation should be created");
+    let child_pane_id = panes
+        .child_agent_panes
+        .get(&child.conversation_id)
+        .copied()
+        .expect("fresh hidden child pane should be tracked");
+    (
+        parent_pane_id,
+        parent_conversation_id,
+        child_pane_id,
+        child.conversation_id,
+    )
+}
+
+#[test]
+fn test_swapping_to_child_agent_from_maximized_pane_keeps_maximized_state() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        pane_group.update(&mut app, |panes, ctx| {
+            let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+            panes.add_terminal_pane(Direction::Right, None, ctx);
+            panes.focus_pane(parent_pane_id, true, ctx);
+
+            let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+            let child = create_hidden_child_agent_conversation(
+                panes,
+                HiddenChildAgentConversationRequest {
+                    parent_pane_id,
+                    name: "Agent 1".to_string(),
+                    parent_conversation_id,
+                    orchestration_harness: None,
+                    env_vars: HashMap::new(),
+                    task_context: None,
+                },
+                ctx,
+            )
+            .expect("fresh hidden child conversation should be created");
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child.conversation_id)
+                .copied()
+                .expect("fresh hidden child pane should be tracked");
+
+            panes.toggle_maximize_pane(ctx);
+            assert!(panes.is_focused_pane_maximized(ctx));
+
+            panes.swap_active_pane_to_conversation(parent_pane_id, child.conversation_id, ctx);
+
+            assert_eq!(panes.focused_pane_id(ctx), child_pane_id);
+            assert!(panes.is_focused_pane_maximized(ctx));
+            assert_eq!(
+                split_pane_state(panes, child_pane_id, ctx),
+                SplitPaneState::InSplitPane(PaneState::Maximized),
+            );
+        });
+    });
+}
+
+#[test]
+fn test_restored_hidden_child_pane_reapplies_ambient_task_id_to_controller() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        pane_group.update(&mut app, |panes, ctx| {
+            let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+            let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+            let task_id = new_ambient_agent_task_id();
+
+            let mut child_conversation = AIConversation::new(false, false);
+            child_conversation.set_parent_conversation_id(parent_conversation_id);
+            child_conversation.set_task_id(task_id);
+            // Zap: only local CLI-harness children are launched with a task
+            // context, so only they get it back on restore.
+            child_conversation.set_orchestration_harness(Harness::Codex);
+            let child_conversation_id = child_conversation.id();
+
+            panes.create_hidden_child_agent_pane(child_conversation, parent_pane_id, ctx);
+
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .copied()
+                .expect("restored hidden child pane should be tracked");
+
+            assert_eq!(
+                request_ambient_agent_task_id_for_hidden_child(panes, child_pane_id, ctx,),
+                Some(task_id)
+            );
+        });
+    });
+}
+
+/// Zap: a local Oz child's task id is the synthetic run id assigned at launch
+/// (its own conversation id), and its launch never applies a task context, so
+/// restoring it must not turn its requests into ambient-agent requests.
+#[test]
+fn test_restored_hidden_oz_child_pane_does_not_apply_synthetic_task_id() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        pane_group.update(&mut app, |panes, ctx| {
+            let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+            let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+
+            let mut child_conversation = AIConversation::new(false, false);
+            child_conversation.set_parent_conversation_id(parent_conversation_id);
+            child_conversation.set_task_id(new_ambient_agent_task_id());
+            child_conversation.set_orchestration_harness(Harness::Oz);
+            let child_conversation_id = child_conversation.id();
+
+            panes.create_hidden_child_agent_pane(child_conversation, parent_pane_id, ctx);
+
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .copied()
+                .expect("restored hidden child pane should be tracked");
+
+            assert_eq!(
+                request_ambient_agent_task_id_for_hidden_child(panes, child_pane_id, ctx),
+                None
+            );
+        });
+    });
+}
+
+#[test]
+fn test_pane_group_restore_loop_keeps_orchestration_topology_and_materializes_child_pane() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        let (
+            parent_pane_id,
+            parent_conversation_id,
+            parent_run_id,
+            child_conversation_id,
+            child_run_id,
+            child_agent_name,
+        ) = pane_group.update(&mut app, |panes, ctx| {
+            let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+            let parent_terminal_view_id = panes
+                .terminal_view_from_pane_id(parent_pane_id, ctx)
+                .expect("parent pane should have a terminal view")
+                .id();
+
+            let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+            let parent_run_id = new_ambient_agent_task_id().to_string();
+            let child_run_id = new_ambient_agent_task_id().to_string();
+            let child_agent_name = "Agent 1".to_string();
+
+            // Restore a child conversation into the parent's terminal view. This
+            // is the same code path `RestoredAgentConversations::take_conversations`
+            // feeds into during pane restoration.
+            let mut child_conversation = AIConversation::new(false, false);
+            child_conversation.set_parent_conversation_id(parent_conversation_id);
+            child_conversation.set_agent_name(child_agent_name.clone());
+            let child_conversation_id = child_conversation.id();
+            BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
+                history.restore_conversations(
+                    parent_terminal_view_id,
+                    vec![child_conversation],
+                    ctx,
+                );
+                // Stamp run_ids so orchestration agent_id lookups resolve.
+                history.assign_run_id_for_conversation(
+                    parent_conversation_id,
+                    parent_run_id.clone(),
+                    None,
+                    parent_terminal_view_id,
+                    ctx,
+                );
+                history.assign_run_id_for_conversation(
+                    child_conversation_id,
+                    child_run_id.clone(),
+                    None,
+                    parent_terminal_view_id,
+                    ctx,
+                );
+            });
+
+            (
+                parent_pane_id,
+                parent_conversation_id,
+                parent_run_id,
+                child_conversation_id,
+                child_run_id,
+                child_agent_name,
+            )
+        });
+
+        // BEFORE the parent's fullscreen agent view is entered, the
+        // orchestration data layer must already know the parent → child
+        // topology, the child's local conversation (with agent name set), and
+        // the child's run_id → conversation id mapping.
+        pane_group.read(&app, |panes, ctx| {
+            let history = BlocklistAIHistoryModel::as_ref(ctx);
+
+            assert_eq!(
+                history.child_conversation_ids_of(&parent_conversation_id),
+                &[child_conversation_id],
+                "orchestration topology must list the restored child under its parent before any pane materializes",
+            );
+            assert_eq!(
+                crate::ai::blocklist::orchestration_topology::descendant_conversation_ids_in_spawn_order(
+                    history,
+                    parent_conversation_id,
+                ),
+                vec![child_conversation_id],
+                "pill bar pre-order walker must reach the restored child before any pane materializes",
+            );
+
+            let child_conversation = history
+                .conversation(&child_conversation_id)
+                .expect("restored child must be in conversations_by_id before parent fullscreen");
+            assert_eq!(
+                child_conversation.agent_name(),
+                Some(child_agent_name.as_str()),
+                "restored child must retain its display name for transcript / pill bar rendering",
+            );
+
+            assert_eq!(
+                history.conversation_id_for_agent_id(&child_run_id),
+                Some(child_conversation_id),
+                "child run_id must resolve to the restored child conversation",
+            );
+            assert_eq!(
+                history.conversation_id_for_agent_id(&parent_run_id),
+                Some(parent_conversation_id),
+                "parent run_id must resolve to the parent conversation",
+            );
+
+            // Hidden child pane must NOT exist yet — restoration is lazy and
+            // only materializes when the parent's agent view is entered.
+            assert!(
+                !panes.child_agent_panes.contains_key(&child_conversation_id),
+                "hidden child pane must not exist before parent fullscreen entry",
+            );
+        });
+
+        // Entering the parent's fullscreen agent view triggers
+        // `restore_missing_child_agent_panes_for_parent`.
+        pane_group.update(&mut app, |panes, ctx| {
+            enter_agent_view_for_conversation(panes, parent_pane_id, parent_conversation_id, ctx);
+        });
+
+        pane_group.read(&app, |panes, _ctx| {
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .copied()
+                .expect("parent fullscreen entry must materialize the hidden child pane");
+            assert!(
+                panes.has_pane_id(child_pane_id),
+                "materialized child pane must be tracked by the pane group",
+            );
+            assert!(
+                !panes.panes.is_pane_in_tree(child_pane_id),
+                "materialized child pane must remain off-tree (hidden)",
+            );
+        });
+    });
+}
+
+#[test]
+fn test_entering_parent_agent_view_lazily_restores_hidden_child_pane() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+        let (child_conversation_id, initial_pane_count, initial_visible_pane_count) = pane_group
+            .update(&mut app, |panes, ctx| {
+                let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+                let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+                let child_conversation_id =
+                    restore_child_conversation(panes, parent_pane_id, parent_conversation_id, ctx);
+                let initial_pane_count = panes.pane_count();
+                let initial_visible_pane_count = panes.visible_pane_count();
+
+                assert!(!panes.child_agent_panes.contains_key(&child_conversation_id));
+
+                enter_agent_view_for_conversation(
+                    panes,
+                    parent_pane_id,
+                    parent_conversation_id,
+                    ctx,
+                );
+                (
+                    child_conversation_id,
+                    initial_pane_count,
+                    initial_visible_pane_count,
+                )
+            });
+
+        pane_group.update(&mut app, |panes, _ctx| {
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .copied()
+                .expect("parent fullscreen restore should materialize the missing child pane");
+
+            assert!(panes.has_pane_id(child_pane_id));
+            assert_eq!(panes.pane_count(), initial_pane_count);
+            assert_eq!(panes.visible_pane_count(), initial_visible_pane_count);
+            assert!(!panes.panes.is_pane_in_tree(child_pane_id));
+        });
+    });
+}
+
+#[test]
+fn test_add_pane_restores_hidden_child_when_parent_is_already_fullscreen() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        pane_group.update(&mut app, |panes, ctx| {
+            let initial_pane_count = panes.pane_count();
+            let initial_visible_pane_count = panes.visible_pane_count();
+            let (pane_data, parent_pane_id, child_conversation_id) =
+                create_already_fullscreen_parent_pane_data(panes, ctx);
+
+            panes.add_pane_with_direction(Direction::Right, pane_data, true, ctx);
+
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .copied()
+                .expect("adding an already-fullscreen parent should materialize the child pane");
+
+            assert!(panes.has_pane_id(parent_pane_id));
+            assert!(panes.has_pane_id(child_pane_id));
+            assert_eq!(panes.pane_count(), initial_pane_count + 1);
+            assert_eq!(panes.visible_pane_count(), initial_visible_pane_count + 1);
+            assert!(!panes.panes.is_pane_in_tree(child_pane_id));
+            assert_eq!(panes.focused_pane_id(ctx), parent_pane_id);
+            assert_eq!(
+                panes.pane_id_for_owned_conversation(child_conversation_id, ctx),
+                Some(child_pane_id)
+            );
+        });
+    });
+}
+
+#[test]
+fn test_reattach_panes_restores_hidden_child_when_parent_is_already_fullscreen() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        pane_group.update(&mut app, |panes, ctx| {
+            let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+            let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+            let child_conversation_id =
+                restore_child_conversation(panes, parent_pane_id, parent_conversation_id, ctx);
+            let initial_pane_count = panes.pane_count();
+            let initial_visible_pane_count = panes.visible_pane_count();
+
+            panes.detach_panes(ctx);
+            enter_agent_view_for_conversation(panes, parent_pane_id, parent_conversation_id, ctx);
+            assert!(!panes.child_agent_panes.contains_key(&child_conversation_id));
+
+            panes.reattach_panes(ctx);
+
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .copied()
+                .expect(
+                    "reattaching an already-fullscreen parent should materialize the child pane",
+                );
+
+            assert!(panes.has_pane_id(child_pane_id));
+            assert_eq!(panes.pane_count(), initial_pane_count);
+            assert_eq!(panes.visible_pane_count(), initial_visible_pane_count);
+            assert!(!panes.panes.is_pane_in_tree(child_pane_id));
+            assert_eq!(
+                panes.pane_id_for_owned_conversation(child_conversation_id, ctx),
+                Some(child_pane_id)
+            );
+        });
+    });
+}
+
+#[test]
+fn test_restore_closed_pane_restores_hidden_child_when_parent_is_already_fullscreen() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+    let _undo_closed_panes = FeatureFlag::UndoClosedPanes.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        pane_group.update(&mut app, |panes, ctx| {
+            let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+            panes.add_pane_with_direction(
+                Direction::Right,
+                NotebookPane::new(new_notebook(ctx), ctx),
+                false,
+                ctx,
+            );
+
+            let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+            let child_conversation_id =
+                restore_child_conversation(panes, parent_pane_id, parent_conversation_id, ctx);
+            let initial_pane_count = panes.pane_count();
+            let initial_visible_pane_count = panes.visible_pane_count();
+
+            panes.close_pane(parent_pane_id, ctx);
+            assert!(panes.is_pane_hidden_for_close(parent_pane_id));
+
+            enter_agent_view_for_conversation(panes, parent_pane_id, parent_conversation_id, ctx);
+            assert!(!panes.child_agent_panes.contains_key(&child_conversation_id));
+
+            assert!(panes.restore_closed_pane(parent_pane_id, ctx));
+
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .copied()
+                .expect(
+                    "restoring an already-fullscreen closed parent should materialize the child pane",
+                );
+
+            assert!(panes.has_pane_id(child_pane_id));
+            assert_eq!(panes.pane_count(), initial_pane_count);
+            assert_eq!(panes.visible_pane_count(), initial_visible_pane_count);
+            assert!(!panes.panes.is_pane_in_tree(child_pane_id));
+            assert_eq!(panes.focused_pane_id(ctx), parent_pane_id);
+            assert_eq!(
+                panes.pane_id_for_owned_conversation(child_conversation_id, ctx),
+                Some(child_pane_id)
+            );
+        });
+    });
+}
+
+#[test]
+fn test_replace_pane_restores_hidden_child_when_replacement_is_already_fullscreen() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        pane_group.update(&mut app, |panes, ctx| {
+            let original_pane_id = get_newly_created_pane_id(panes, &[]);
+            let initial_pane_count = panes.pane_count();
+            let initial_visible_pane_count = panes.visible_pane_count();
+            let (replacement_pane, replacement_pane_id, child_conversation_id) =
+                create_already_fullscreen_parent_pane_data(panes, ctx);
+
+            assert!(panes.replace_pane(original_pane_id, replacement_pane, false, ctx));
+
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .copied()
+                .expect(
+                    "replacing with an already-fullscreen parent should materialize the child pane",
+                );
+
+            assert!(!panes.has_pane_id(original_pane_id));
+            assert!(panes.has_pane_id(replacement_pane_id));
+            assert!(panes.has_pane_id(child_pane_id));
+            assert_eq!(panes.pane_count(), initial_pane_count);
+            assert_eq!(panes.visible_pane_count(), initial_visible_pane_count);
+            assert!(!panes.panes.is_pane_in_tree(child_pane_id));
+            assert_eq!(panes.focused_pane_id(ctx), replacement_pane_id);
+            assert_eq!(
+                panes.pane_id_for_owned_conversation(child_conversation_id, ctx),
+                Some(child_pane_id)
+            );
+        });
+    });
+}
+
+#[test]
+fn test_ensure_hidden_child_agent_pane_materializes_missing_child_pane() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        pane_group.update(&mut app, |panes, ctx| {
+            let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+            let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+            let child_conversation_id =
+                restore_child_conversation(panes, parent_pane_id, parent_conversation_id, ctx);
+            let initial_pane_count = panes.pane_count();
+
+            assert!(!panes.child_agent_panes.contains_key(&child_conversation_id));
+            assert!(
+                panes.ensure_hidden_child_agent_pane_for_conversation(child_conversation_id, ctx),
+                "navigation fallback should materialize the missing child pane on demand"
+            );
+
+            let child_pane_id = panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .copied()
+                .expect("on-demand ensure should track the restored child pane");
+            assert!(panes.has_pane_id(child_pane_id));
+            assert_eq!(panes.pane_count(), initial_pane_count);
+            assert!(!panes.panes.is_pane_in_tree(child_pane_id));
+        });
+    });
+}
+
+#[test]
+fn test_entering_parent_agent_view_skips_child_owned_by_another_pane() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+        let (child_conversation_id, initial_pane_count) =
+            pane_group.update(&mut app, |panes, ctx| {
+                let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+                let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+
+                panes.add_terminal_pane(Direction::Right, None, ctx);
+                let sibling_pane_id = get_newly_created_pane_id(panes, &[parent_pane_id]);
+                let child_conversation_id =
+                    restore_child_conversation(panes, sibling_pane_id, parent_conversation_id, ctx);
+                let initial_pane_count = panes.pane_count();
+
+                enter_agent_view_for_conversation(
+                    panes,
+                    sibling_pane_id,
+                    child_conversation_id,
+                    ctx,
+                );
+                assert_eq!(
+                    panes.pane_id_for_owned_conversation(child_conversation_id, ctx),
+                    Some(sibling_pane_id)
+                );
+
+                enter_agent_view_for_conversation(
+                    panes,
+                    parent_pane_id,
+                    parent_conversation_id,
+                    ctx,
+                );
+                (child_conversation_id, initial_pane_count)
+            });
+
+        pane_group.update(&mut app, |panes, _ctx| {
+            assert!(!panes.child_agent_panes.contains_key(&child_conversation_id));
+            assert_eq!(panes.pane_count(), initial_pane_count);
+        });
+    });
+}
+
+#[test]
+fn test_ensure_hidden_child_agent_pane_skips_child_owned_by_another_pane_group() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let parent_pane_group = mock_pane_group(&mut app, Default::default());
+        let other_pane_group = mock_pane_group(&mut app, Default::default());
+
+        let parent_conversation_id = parent_pane_group.update(&mut app, |panes, ctx| {
+            let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+            start_parent_conversation(panes, parent_pane_id, ctx)
+        });
+        let (child_conversation_id, child_owner_terminal_view_id) =
+            other_pane_group.update(&mut app, |panes, ctx| {
+                let child_pane_id = get_newly_created_pane_id(panes, &[]);
+                let child_conversation_id =
+                    restore_child_conversation(panes, child_pane_id, parent_conversation_id, ctx);
+                let initial_owner_terminal_view_id = panes
+                    .terminal_view_from_pane_id(child_pane_id, ctx)
+                    .expect("child pane should have a terminal view")
+                    .id();
+
+                enter_agent_view_for_conversation(panes, child_pane_id, child_conversation_id, ctx);
+                (child_conversation_id, initial_owner_terminal_view_id)
+            });
+
+        parent_pane_group.update(&mut app, |panes, ctx| {
+            let initial_pane_count = panes.pane_count();
+
+            assert!(
+                panes.ensure_hidden_child_agent_pane_for_conversation(child_conversation_id, ctx),
+                "cross-tab child ownership should be treated as already reachable"
+            );
+            assert!(!panes.child_agent_panes.contains_key(&child_conversation_id));
+            assert_eq!(panes.pane_count(), initial_pane_count);
+            assert_eq!(
+                BlocklistAIHistoryModel::as_ref(ctx)
+                    .terminal_surface_id_for_conversation(&child_conversation_id),
+                Some(child_owner_terminal_view_id)
+            );
+        });
+    });
+}
+
+#[test]
+fn test_ensure_hidden_child_agent_pane_restores_child_from_detached_group() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let closed_pane_group = mock_pane_group(&mut app, Default::default());
+        let reopened_pane_group = mock_pane_group(&mut app, Default::default());
+
+        let (parent_conversation, child_conversation_id, previous_owner) = closed_pane_group
+            .update(&mut app, |panes, ctx| {
+                let parent_pane_id = panes.focused_pane_id(ctx);
+                let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+                let mut child = AIConversation::new(false, false);
+                child.set_parent_conversation_id(parent_conversation_id);
+                child.set_agent_name("architect".to_string());
+                let child_conversation_id = child.id();
+                panes.create_hidden_child_agent_pane(child, parent_pane_id, ctx);
+
+                let previous_owner = panes
+                    .terminal_view_from_pane_id(
+                        panes.child_agent_panes[&child_conversation_id],
+                        ctx,
+                    )
+                    .unwrap();
+                let parent_conversation = BlocklistAIHistoryModel::as_ref(ctx)
+                    .conversation(&parent_conversation_id)
+                    .unwrap()
+                    .clone();
+                panes.swap_active_pane_to_conversation(parent_pane_id, child_conversation_id, ctx);
+                panes.detach_panes(ctx);
+
+                (parent_conversation, child_conversation_id, previous_owner)
+            });
+
+        let restored_child = reopened_pane_group.update(&mut app, |panes, ctx| {
+            let parent_pane_id = panes.focused_pane_id(ctx);
+            let parent_view = panes
+                .terminal_view_from_pane_id(parent_pane_id, ctx)
+                .unwrap();
+            let parent_conversation_id =
+                restore_conversation_for_terminal_view(parent_view.id(), parent_conversation, ctx);
+            BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
+                history.set_active_conversation_id(parent_conversation_id, parent_view.id(), ctx);
+            });
+
+            assert!(
+                panes.ensure_hidden_child_agent_pane_for_conversation(child_conversation_id, ctx)
+            );
+            let child_pane_id = *panes
+                .child_agent_panes
+                .get(&child_conversation_id)
+                .expect("an undo-retained owner must not prevent restoring the child");
+            panes.swap_active_pane_to_conversation(parent_pane_id, child_conversation_id, ctx);
+
+            assert_eq!(panes.focused_pane_id(ctx), child_pane_id);
+            let child_view = panes
+                .terminal_view_from_pane_id(child_pane_id, ctx)
+                .unwrap();
+            assert_eq!(
+                child_view.as_ref(ctx).active_conversation_id(ctx),
+                Some(child_conversation_id)
+            );
+            child_view
+        });
+
+        assert_ne!(restored_child.id(), previous_owner.id());
+        closed_pane_group.update(&mut app, |panes, ctx| {
+            panes.reattach_panes(ctx);
+            assert!(!panes.child_agent_panes.contains_key(&child_conversation_id));
+            assert_eq!(
+                panes.find_pane_id_for_terminal_view(previous_owner.id(), ctx),
+                None
+            );
+            assert_eq!(panes.visible_pane_count(), 1);
+            assert!(
+                panes.ensure_hidden_child_agent_pane_for_conversation(child_conversation_id, ctx)
+            );
+        });
+        closed_pane_group.update(&mut app, |panes, ctx| {
+            panes.clean_up_panes(ctx);
+        });
+        app.read(|ctx| {
+            assert_eq!(
+                BlocklistAIHistoryModel::as_ref(ctx)
+                    .terminal_surface_id_for_conversation(&child_conversation_id),
+                Some(restored_child.id())
+            );
+            assert_eq!(
+                restored_child.as_ref(ctx).active_conversation_id(ctx),
+                Some(child_conversation_id)
+            );
+        });
+    });
+}
+
+#[test]
+fn test_entering_parent_agent_view_skips_child_owned_by_another_pane_group() {
+    let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let parent_pane_group = mock_pane_group(&mut app, Default::default());
+        let other_pane_group = mock_pane_group(&mut app, Default::default());
+
+        let (parent_conversation_id, parent_pane_id) =
+            parent_pane_group.update(&mut app, |panes, ctx| {
+                let parent_pane_id = get_newly_created_pane_id(panes, &[]);
+                let parent_conversation_id = start_parent_conversation(panes, parent_pane_id, ctx);
+                (parent_conversation_id, parent_pane_id)
+            });
+        let (child_conversation_id, child_owner_terminal_view_id) =
+            other_pane_group.update(&mut app, |panes, ctx| {
+                let child_pane_id = get_newly_created_pane_id(panes, &[]);
+                let child_conversation_id =
+                    restore_child_conversation(panes, child_pane_id, parent_conversation_id, ctx);
+                let initial_owner_terminal_view_id = panes
+                    .terminal_view_from_pane_id(child_pane_id, ctx)
+                    .expect("child pane should have a terminal view")
+                    .id();
+
+                enter_agent_view_for_conversation(panes, child_pane_id, child_conversation_id, ctx);
+                (child_conversation_id, initial_owner_terminal_view_id)
+            });
+        let initial_pane_count = parent_pane_group.update(&mut app, |panes, ctx| {
+            let initial_pane_count = panes.pane_count();
+            enter_agent_view_for_conversation(panes, parent_pane_id, parent_conversation_id, ctx);
+            initial_pane_count
+        });
+
+        parent_pane_group.update(&mut app, |panes, ctx| {
+            assert!(!panes.child_agent_panes.contains_key(&child_conversation_id));
+            assert_eq!(panes.pane_count(), initial_pane_count);
+            assert_eq!(
+                BlocklistAIHistoryModel::as_ref(ctx)
+                    .terminal_surface_id_for_conversation(&child_conversation_id),
+                Some(child_owner_terminal_view_id)
+            );
+        });
+    });
+}
+
+/// Zap regression (broken since v2026.07.19.1): the orchestration pill bar,
+/// the orchestrator status card and ESC back-navigation all end in the
+/// terminal view's `RevealChildAgent` / `SwapPaneToConversation` events. The
+/// pane group had no `SwapPaneToConversation` handler, so returning to the
+/// orchestrator silently did nothing, and child reveals split the tab instead
+/// of swapping in place. Drives both events through the real subscription.
+#[test]
+fn test_reveal_child_and_swap_back_events_swap_the_orchestrator_slot_in_place() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        let (parent_pane_id, parent_conversation_id, child_pane_id, child_conversation_id) =
+            pane_group.update(&mut app, |panes, ctx| {
+                let ids = create_parent_with_fresh_local_child(panes, ctx);
+                let (parent_pane_id, _, _, child_conversation_id) = ids;
+                panes
+                    .terminal_view_from_pane_id(parent_pane_id, ctx)
+                    .expect("parent pane should have a terminal view")
+                    .update(ctx, |_, ctx| {
+                        ctx.emit(crate::terminal::view::Event::RevealChildAgent {
+                            conversation_id: child_conversation_id,
+                        });
+                    });
+                ids
+            });
+
+        pane_group.update(&mut app, |panes, ctx| {
+            // The child takes the orchestrator's slot instead of splitting the tab.
+            assert_eq!(panes.focused_pane_id(ctx), child_pane_id);
+            assert_eq!(panes.visible_pane_count(), 1);
+            assert_eq!(
+                panes.original_pane_for_replacement(child_pane_id),
+                Some(parent_pane_id)
+            );
+
+            panes
+                .terminal_view_from_pane_id(child_pane_id, ctx)
+                .expect("child pane should have a terminal view")
+                .update(ctx, |_, ctx| {
+                    ctx.emit(crate::terminal::view::Event::SwapPaneToConversation {
+                        conversation_id: parent_conversation_id,
+                    });
+                });
+        });
+
+        pane_group.read(&app, |panes, ctx| {
+            assert_eq!(panes.focused_pane_id(ctx), parent_pane_id);
+            assert_eq!(panes.visible_pane_count(), 1);
+            assert!(panes.panes.is_pane_in_tree(parent_pane_id));
+            assert!(!panes.panes.is_pane_in_tree(child_pane_id));
+            assert_eq!(panes.original_pane_for_replacement(child_pane_id), None);
+            // The child pane (and its live session) survives off-tree.
+            assert!(panes.has_pane_id(child_pane_id));
+            assert_eq!(
+                panes.child_agent_panes.get(&child_conversation_id),
+                Some(&child_pane_id)
+            );
+        });
+    });
+}
+
+/// Zap regression: closing a swapped-in child returns it off-tree (not into
+/// `hidden_panes`), and the next reveal re-hosts the same pane.
+#[test]
+fn test_closing_swapped_in_child_agent_pane_keeps_it_revealable() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        let (parent_pane_id, child_pane_id, child_conversation_id) =
+            pane_group.update(&mut app, |panes, ctx| {
+                let (parent_pane_id, _, child_pane_id, child_conversation_id) =
+                    create_parent_with_fresh_local_child(panes, ctx);
+                panes.swap_active_pane_to_conversation(parent_pane_id, child_conversation_id, ctx);
+                assert_eq!(panes.focused_pane_id(ctx), child_pane_id);
+
+                panes.close_pane(child_pane_id, ctx);
+
+                assert_eq!(panes.focused_pane_id(ctx), parent_pane_id);
+                assert_eq!(panes.visible_pane_count(), 1);
+                assert!(panes.panes.is_pane_in_tree(parent_pane_id));
+                assert!(!panes.panes.is_pane_in_tree(child_pane_id));
+                assert!(!panes.panes.is_pane_hidden(&child_pane_id));
+                assert!(panes.has_pane_id(child_pane_id));
+                assert_eq!(
+                    panes.child_agent_panes.get(&child_conversation_id),
+                    Some(&child_pane_id)
+                );
+
+                panes
+                    .terminal_view_from_pane_id(parent_pane_id, ctx)
+                    .expect("parent pane should have a terminal view")
+                    .update(ctx, |_, ctx| {
+                        ctx.emit(crate::terminal::view::Event::RevealChildAgent {
+                            conversation_id: child_conversation_id,
+                        });
+                    });
+                (parent_pane_id, child_pane_id, child_conversation_id)
+            });
+
+        pane_group.read(&app, |panes, ctx| {
+            assert_eq!(panes.focused_pane_id(ctx), child_pane_id);
+            assert_eq!(
+                panes.original_pane_for_replacement(child_pane_id),
+                Some(parent_pane_id)
+            );
+            assert_eq!(
+                panes.child_agent_panes.get(&child_conversation_id),
+                Some(&child_pane_id)
+            );
+        });
+    });
+}
+
+/// Zap regression: "Open in new pane" splits the existing child pane off next
+/// to its orchestrator (reusing the live view), and closing it returns the
+/// pane off-tree with the split-off marker cleared.
+#[test]
+fn test_open_child_agent_in_new_pane_event_splits_off_the_existing_child_pane() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        let (parent_pane_id, child_pane_id, child_conversation_id) =
+            pane_group.update(&mut app, |panes, ctx| {
+                let (parent_pane_id, _, child_pane_id, child_conversation_id) =
+                    create_parent_with_fresh_local_child(panes, ctx);
+                panes
+                    .terminal_view_from_pane_id(parent_pane_id, ctx)
+                    .expect("parent pane should have a terminal view")
+                    .update(ctx, |_, ctx| {
+                        ctx.emit(crate::terminal::view::Event::OpenChildAgentInNewPane {
+                            conversation_id: child_conversation_id,
+                        });
+                    });
+                (parent_pane_id, child_pane_id, child_conversation_id)
+            });
+
+        pane_group.update(&mut app, |panes, ctx| {
+            assert_eq!(panes.visible_pane_count(), 2);
+            assert!(panes.panes.is_pane_in_tree(parent_pane_id));
+            assert!(panes.panes.is_pane_in_tree(child_pane_id));
+            assert_eq!(panes.original_pane_for_replacement(child_pane_id), None);
+            assert_eq!(panes.focused_pane_id(ctx), child_pane_id);
+            let child_view = panes
+                .terminal_view_from_pane_id(child_pane_id, ctx)
+                .expect("child pane should have a terminal view");
+            assert!(child_view.as_ref(ctx).is_orchestration_split_off());
+
+            panes.close_pane(child_pane_id, ctx);
+
+            assert_eq!(panes.visible_pane_count(), 1);
+            assert!(!panes.panes.is_pane_in_tree(child_pane_id));
+            assert!(panes.has_pane_id(child_pane_id));
+            assert_eq!(
+                panes.child_agent_panes.get(&child_conversation_id),
+                Some(&child_pane_id)
+            );
+            assert!(!child_view.as_ref(ctx).is_orchestration_split_off());
         });
     });
 }

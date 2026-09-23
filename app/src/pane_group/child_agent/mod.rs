@@ -1,3 +1,5 @@
+pub(in crate::pane_group) mod restoration;
+
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;

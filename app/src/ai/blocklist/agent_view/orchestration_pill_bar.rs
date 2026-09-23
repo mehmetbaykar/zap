@@ -1742,17 +1742,20 @@ fn render_pill(
             ));
             return;
         }
-        // Child pills should reveal the existing child pane/session, not
-        // switch the current pane in place. The hidden child pane owns the
-        // live harness/ambient session and associated view-scoped models; if
-        // we merely re-enter the child conversation in the current pane, the
-        // actual running session stays attached to the hidden pane and the
-        // user sees an empty child view. The orchestrator pill still switches
-        // the current pane back to the parent conversation.
+        // Both pill kinds navigate through the pane group's swap mechanism
+        // (`PaneGroup::swap_active_pane_to_conversation`): a child pill
+        // (`RevealChildAgent`) swaps the child's own off-tree pane into this
+        // pane's slot, lazily restoring it first if needed, and the
+        // orchestrator pill (`SwitchAgentViewToConversation`, emitted as
+        // `SwapPaneToConversation`) swaps back to the orchestrator's pane.
+        // Swapping the real owner pane in keeps the live harness session, CLI
+        // listener, view-scoped models and PTY output attached; re-entering
+        // the child conversation in the current pane would instead leave the
+        // running session in a hidden pane and show an empty child view.
         //
         // We keep the visible-owner fast path above so a child that's already
         // open in another visible pane/tab still focuses that existing
-        // destination rather than trying to reveal the hidden bootstrap pane.
+        // destination rather than swapping its pane a second time.
         let action = navigation_action_for_pill(kind, conversation_id);
         ctx.dispatch_typed_action(
             PaneHeaderAction::<TerminalAction, TerminalAction>::CustomAction(action),

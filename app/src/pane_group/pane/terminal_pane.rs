@@ -26,7 +26,7 @@ use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::ambient_agents::task::normalize_orchestrator_agent_name;
 #[cfg(feature = "local_fs")]
 use crate::ai::blocklist::BlocklistAIHistoryEvent;
-use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
+use crate::ai::blocklist::agent_view::{AgentViewControllerEvent, AgentViewEntryOrigin};
 use crate::ai::blocklist::{BlocklistAIHistoryModel, StartAgentRequest};
 use crate::ai::conversation_utils;
 use crate::ai::llms::LLMPreferences;
@@ -284,6 +284,21 @@ impl PaneContent for TerminalPane {
         agent_view_controller.update(ctx, |controller, _ctx| {
             controller.set_pane_group_id(pane_group_id);
         });
+        ctx.subscribe_to_model(&agent_view_controller, move |group, _, event, ctx| {
+            if let AgentViewControllerEvent::EnteredAgentView {
+                conversation_id,
+                display_mode,
+                ..
+            } = event
+                && display_mode.is_fullscreen()
+            {
+                group.restore_missing_child_agent_panes_for_parent(
+                    *conversation_id,
+                    terminal_pane_id.into(),
+                    ctx,
+                );
+            }
+        });
         // Zap: upstream also registers the active stack view's ambient session here; ambient
         // (cloud) runs are not supported, so only the agent view controller is registered.
         let active_session = terminal_view.as_ref(ctx).active_session().clone();
@@ -354,6 +369,13 @@ impl PaneContent for TerminalPane {
         ctx.unsubscribe_to_model(&pane_stack);
 
         ctx.unsubscribe_to_view(&self.view);
+        ctx.unsubscribe_to_model(
+            &self
+                .terminal_view(ctx)
+                .as_ref(ctx)
+                .agent_view_controller()
+                .clone(),
+        );
 
         #[cfg(feature = "local_fs")]
         {
@@ -607,72 +629,13 @@ fn pane_group_hosting_split_off_child(
         .into_iter()
         .find_map(|(_, workspace)| {
             workspace.as_ref(ctx).tab_views().find_map(|pane_group| {
-                pane_group
-                    .as_ref(ctx)
+                let group = pane_group.as_ref(ctx);
+                group
                     .child_agent_origin()
                     .is_some_and(|origin| origin.conversation_id == conversation_id)
                     .then(|| pane_group.clone())
             })
         })
-}
-
-fn discard_child_agent_pane_in_group(
-    group: &mut PaneGroup,
-    conversation_id: AIConversationId,
-    ctx: &mut ViewContext<PaneGroup>,
-) -> bool {
-    let tracked_child_pane = group.child_agent_panes.remove(&conversation_id);
-    let owner_child_pane = BlocklistAIHistoryModel::as_ref(ctx)
-        .terminal_surface_id_for_conversation(&conversation_id)
-        .and_then(|terminal_view_id| group.find_pane_id_for_terminal_view(terminal_view_id, ctx));
-    let Some(child_pane_id) = tracked_child_pane.or(owner_child_pane) else {
-        return false;
-    };
-
-    if group
-        .child_agent_origin
-        .as_ref()
-        .is_some_and(|origin| origin.conversation_id == conversation_id)
-    {
-        group.child_agent_origin = None;
-    }
-
-    let was_focused = group.focus_state.as_ref(ctx).is_pane_focused(child_pane_id);
-    if let Some(terminal_view) = group.terminal_view_from_pane_id(child_pane_id, ctx) {
-        terminal_view.update(ctx, |view, ctx| {
-            view.clear_orchestration_split_off(ctx);
-            view.shutdown_pty(ctx);
-        });
-    }
-
-    if let Some(original_pane_id) = group.panes.original_pane_for_replacement(child_pane_id) {
-        group.panes.revert_temporary_replacement(child_pane_id);
-        if was_focused {
-            group.focus_pane(original_pane_id, true, ctx);
-        }
-    } else {
-        group.panes.remove_hidden_pane(child_pane_id);
-    }
-
-    let is_in_tree = group.panes.is_pane_in_tree(child_pane_id);
-    if is_in_tree && group.panes.visible_pane_count() <= 1 {
-        ctx.emit(pane_group::Event::Exited {
-            add_to_undo_stack: false,
-        });
-        return true;
-    }
-
-    if is_in_tree {
-        group.focus_next_terminal_pane_and_activate_session(
-            child_pane_id,
-            pane_group::PaneRemovalReason::Close,
-            ctx,
-        );
-    }
-
-    let discarded = group.cleanup_closed_pane(child_pane_id, ctx);
-    group.handle_pane_count_change(ctx);
-    discarded
 }
 
 fn discard_child_agent_pane_for_conversation(
@@ -681,13 +644,13 @@ fn discard_child_agent_pane_for_conversation(
     conversation_id: AIConversationId,
     ctx: &mut ViewContext<PaneGroup>,
 ) -> bool {
-    if discard_child_agent_pane_in_group(group, conversation_id, ctx) {
+    if group.discard_child_agent_pane_for_conversation(conversation_id, ctx) {
         return true;
     }
     if let Some(split_off_pane_group) = pane_group_hosting_split_off_child(conversation_id, ctx)
         && split_off_pane_group.id() != ctx.view_id()
         && split_off_pane_group.update(ctx, |pane_group, ctx| {
-            discard_child_agent_pane_in_group(pane_group, conversation_id, ctx)
+            pane_group.discard_child_agent_pane_for_conversation(conversation_id, ctx)
         })
     {
         return true;
@@ -706,7 +669,7 @@ fn discard_child_agent_pane_for_conversation(
     }
 
     owner_pane_group.update(ctx, |pane_group, ctx| {
-        discard_child_agent_pane_in_group(pane_group, conversation_id, ctx)
+        pane_group.discard_child_agent_pane_for_conversation(conversation_id, ctx)
     })
 }
 
@@ -1210,6 +1173,57 @@ fn handle_terminal_view_event(
                     open_code_review: open_code_review.clone(),
                 });
             }
+            Event::RevealChildAgent { conversation_id } => {
+                // Routed through the swap mechanism to land all reveal cases in one path.
+                if group.ensure_hidden_child_agent_pane_for_conversation(*conversation_id, ctx) {
+                    group.swap_active_pane_to_conversation(pane_id, *conversation_id, ctx);
+                } else {
+                    log::warn!(
+                        "RevealChildAgent: failed to materialize child conversation {conversation_id:?}"
+                    );
+                }
+            }
+            Event::SwapPaneToConversation { conversation_id } => {
+                // Swap visibility instead of cloning so in-flight state in the
+                // target pane is preserved.
+                if group.ensure_hidden_child_agent_pane_for_conversation(*conversation_id, ctx) {
+                    group.swap_active_pane_to_conversation(pane_id, *conversation_id, ctx);
+                } else {
+                    log::warn!(
+                        "SwapPaneToConversation: failed to materialize conversation {conversation_id:?}"
+                    );
+                }
+            }
+            Event::OpenChildAgentInNewTab { conversation_id } => {
+                // Pane group can't add tabs; forward to the workspace.
+                if group.ensure_hidden_child_agent_pane_for_conversation(*conversation_id, ctx) {
+                    ctx.emit(pane_group::Event::OpenChildAgentInNewTab {
+                        conversation_id: *conversation_id,
+                    });
+                } else {
+                    log::warn!(
+                        "OpenChildAgentInNewTab: failed to materialize child conversation {conversation_id:?}"
+                    );
+                }
+            }
+            Event::OpenChildAgentInNewPane { conversation_id } => {
+                // Reuse the existing hidden child pane to preserve in-flight
+                // state and the live transcript instead of creating a new view.
+                if group.ensure_hidden_child_agent_pane_for_conversation(*conversation_id, ctx) {
+                    if group
+                        .unhide_child_agent_pane_for_split_off(*conversation_id, ctx)
+                        .is_none()
+                    {
+                        log::warn!(
+                            "OpenChildAgentInNewPane: no hidden child pane registered for conversation {conversation_id:?}"
+                        );
+                    }
+                } else {
+                    log::warn!(
+                        "OpenChildAgentInNewPane: failed to materialize child conversation {conversation_id:?}"
+                    );
+                }
+            }
             Event::StopAgentConversation { conversation_id } => {
                 stop_agent_conversation(group, *conversation_id, ctx);
             }
@@ -1227,44 +1241,6 @@ fn handle_terminal_view_event(
                     request.clone(),
                     ctx,
                 );
-            }
-            Event::RevealChildAgent { conversation_id } => {
-                if let Some(&child_pane_id) = group.child_agent_panes.get(conversation_id) {
-                    group.panes.show_pane_for_child_agent(child_pane_id);
-                    group.handle_pane_count_change(ctx);
-                    group.focus_pane(child_pane_id, true, ctx);
-                } else {
-                    log::warn!("No hidden pane found for child conversation {conversation_id:?}");
-                }
-            }
-            Event::OpenChildAgentInNewTab { conversation_id } => {
-                if group.child_agent_panes.contains_key(conversation_id) {
-                    ctx.emit(pane_group::Event::OpenChildAgentInNewTab {
-                        conversation_id: *conversation_id,
-                    });
-                } else {
-                    log::warn!(
-                        "OpenChildAgentInNewTab: no hidden pane found for conversation {conversation_id:?}"
-                    );
-                }
-            }
-            Event::OpenChildAgentInNewPane { conversation_id } => {
-                if let Some(&child_pane_id) = group.child_agent_panes.get(conversation_id) {
-                    group.panes.show_pane_for_child_agent(child_pane_id);
-                    if let Some(child_terminal_view) =
-                        group.terminal_view_from_pane_id(child_pane_id, ctx)
-                    {
-                        child_terminal_view.update(ctx, |view, ctx| {
-                            view.mark_as_orchestration_split_off(ctx);
-                        });
-                    }
-                    group.handle_pane_count_change(ctx);
-                    group.focus_pane(child_pane_id, true, ctx);
-                } else {
-                    log::warn!(
-                        "OpenChildAgentInNewPane: no hidden pane found for conversation {conversation_id:?}"
-                    );
-                }
             }
             _ => {}
         }
