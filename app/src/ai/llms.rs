@@ -1206,7 +1206,6 @@ impl LLMPreferences {
             .collect();
 
         let mut updated_agent_mode = false;
-        let mut updated_coding = false;
 
         self.base_llm_for_terminal_view.retain(|_, id| {
             let stale = custom_model_routers::is_local_custom_router_id(id.as_str())
@@ -1215,38 +1214,9 @@ impl LLMPreferences {
             !stale
         });
 
-        AIExecutionProfilesModel::handle(ctx).update(ctx, |profiles, ctx| {
-            for profile_id in profiles.get_all_profile_ids() {
-                let Some(profile) = profiles.get_profile_by_id(&profile_id, ctx) else {
-                    continue;
-                };
-                let profile_data = profile.data();
-                let base_stale = profile_data.base_model.as_ref().is_some_and(|id| {
-                    custom_model_routers::is_local_custom_router_id(id.as_str())
-                        && !valid_local.contains(id)
-                });
-                if base_stale {
-                    profiles.set_base_model(&profile_id, None, ctx);
-                    profiles.set_context_window_limit(&profile_id, None, ctx);
-                    updated_agent_mode = true;
-                }
-                let coding_stale = profile_data.coding_model.as_ref().is_some_and(|id| {
-                    custom_model_routers::is_local_custom_router_id(id.as_str())
-                        && !valid_local.contains(id)
-                });
-                if coding_stale {
-                    profiles.set_coding_model(&profile_id, None, ctx);
-                    updated_coding = true;
-                }
-            }
-        });
-
         if updated_agent_mode {
             self.trigger_snapshot_save(ctx);
             ctx.emit(LLMPreferencesEvent::UpdatedActiveAgentModeLLM);
-        }
-        if updated_coding {
-            ctx.emit(LLMPreferencesEvent::UpdatedActiveCodingLLM);
         }
     }
 

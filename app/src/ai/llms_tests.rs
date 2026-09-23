@@ -614,6 +614,55 @@ fn reconcile_preserves_custom_models_saved_on_execution_profile() {
 }
 
 #[test]
+fn reconcile_preserves_custom_router_models_not_configured_locally() {
+    // Regression test for QUALITY-1308 (upstream 326a9df60): a profile whose model is a
+    // local custom router that is not currently loaded (e.g. a router file saved
+    // mid-edit) must NOT be reset. The display fallback already shows the default
+    // model when the router cannot be resolved.
+    App::test((), |mut app| async move {
+        initialize_settings_for_tests(&mut app);
+        app.add_singleton_model(AgentProviderSecrets::new);
+        app.add_singleton_model(UserWorkspaces::default_mock);
+        app.add_singleton_model(UpdateManager::mock);
+        app.add_singleton_model(ObjectStoreModel::mock);
+        app.add_singleton_model(|_| TemplatableMCPServerManager::default());
+
+        let profiles_model = app.add_singleton_model(|ctx| {
+            AIExecutionProfilesModel::new(&LaunchMode::new_for_unit_test(), ctx)
+        });
+        let llm_preferences = app.add_singleton_model(LLMPreferences::new);
+
+        // No local routers are loaded, so this id is unresolved.
+        let router_id = LLMId::from("custom-router:local:my-special-router");
+
+        let default_profile_id =
+            profiles_model.read(&app, |profiles, _| profiles.default_profile_id());
+        profiles_model.update(&mut app, |profiles, ctx| {
+            profiles.set_base_model(&default_profile_id, Some(router_id.clone()), ctx);
+            profiles.set_coding_model(&default_profile_id, Some(router_id.clone()), ctx);
+        });
+
+        llm_preferences.update(&mut app, |preferences, ctx| {
+            preferences.reconcile_stale_custom_router_selection(ctx);
+        });
+
+        profiles_model.read(&app, |profiles, ctx| {
+            let profile = profiles.default_profile(ctx);
+            assert_eq!(
+                profile.data().base_model.as_ref(),
+                Some(&router_id),
+                "base_model must be preserved for unresolved custom-router:local:* ids"
+            );
+            assert_eq!(
+                profile.data().coding_model.as_ref(),
+                Some(&router_id),
+                "coding_model must be preserved for unresolved custom-router:local:* ids"
+            );
+        });
+    });
+}
+
+#[test]
 fn reconcile_preserves_custom_endpoint_models_not_configured_locally() {
     // Regression test for QUALITY-866: a profile whose model was set to a custom
     // endpoint on device A should NOT be reset when device B syncs that profile
