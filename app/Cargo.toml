@@ -593,7 +593,6 @@ default = [
     "shell_widget_handoff",
     "native_shell_completions",
     "history_search_ranking_v2",
-    "wait_for_events_parent_registration",
     "vertical_tabs",
     "vertical_tabs_summary_mode",
     "tab_configs",
@@ -871,7 +870,6 @@ file_based_mcp = []
 skill_arguments = []
 active_conversation_requires_interaction = []
 incremental_auto_reload = []
-wait_for_events_parent_registration = []
 pending_user_query_indicator = []
 queue_slash_command = []
 queued_prompts_v2 = ["queue_slash_command"]

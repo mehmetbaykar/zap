@@ -2345,11 +2345,8 @@ fn test_persist_with_optimistic_root_emits_event_with_no_task_rows() {
             history_model.start_new_conversation(terminal_view_id, false, false, false, ctx)
         });
 
-        // Force a persist while the root is still optimistic.
-        // `mark_conversation_as_remote_child` is one of several early-persist
-        // sites; any of them would exhibit the same writer behavior.
         history_model.update(&mut app, |history_model, ctx| {
-            history_model.mark_conversation_as_remote_child(conversation_id, ctx);
+            history_model.update_event_sequence(conversation_id, 0, ctx);
         });
 
         let event = receiver
@@ -2413,7 +2410,7 @@ fn test_optimistic_root_upgrade_then_persist_emits_event_with_single_server_task
 
         // First persist: while the root is still Optimistic(Root).
         history_model.update(&mut app, |history_model, ctx| {
-            history_model.mark_conversation_as_remote_child(conversation_id, ctx);
+            history_model.update_event_sequence(conversation_id, 0, ctx);
         });
         let first_event = receiver
             .recv_timeout(Duration::from_secs(1))
@@ -2431,8 +2428,7 @@ fn test_optimistic_root_upgrade_then_persist_emits_event_with_single_server_task
         );
 
         // Drive the optimistic→server upgrade in-place and trigger another
-        // persist via mark_conversation_as_remote_child (idempotent setter +
-        // unconditional persist) to keep this test isolated from the full
+        // persist while keeping this test isolated from the full
         // response-stream/CreateTask plumbing.
         let server_root_id = "server-root-task-id".to_string();
         history_model.update(&mut app, |history_model, ctx| {
@@ -2443,7 +2439,7 @@ fn test_optimistic_root_upgrade_then_persist_emits_event_with_single_server_task
                 &server_root_id,
                 vec![],
             ));
-            history_model.mark_conversation_as_remote_child(conversation_id, ctx);
+            history_model.update_event_sequence(conversation_id, 1, ctx);
         });
 
         let second_event = receiver
@@ -2738,7 +2734,7 @@ fn test_two_restart_cycles_keep_exactly_one_server_root_task_row() {
 
         // Early persist while the root is still optimistic.
         history_model.update(&mut app, |history_model, ctx| {
-            history_model.mark_conversation_as_remote_child(conversation_id, ctx);
+            history_model.update_event_sequence(conversation_id, 0, ctx);
         });
         let early_event = receiver
             .recv_timeout(Duration::from_secs(1))
@@ -2765,7 +2761,7 @@ fn test_two_restart_cycles_keep_exactly_one_server_root_task_row() {
                 &server_root_id,
                 vec![],
             ));
-            history_model.mark_conversation_as_remote_child(conversation_id, ctx);
+            history_model.update_event_sequence(conversation_id, 1, ctx);
         });
         let post_upgrade_event = receiver
             .recv_timeout(Duration::from_secs(1))
@@ -2815,7 +2811,7 @@ fn test_two_restart_cycles_keep_exactly_one_server_root_task_row() {
                 vec![restored_after_restart_1],
                 ctx,
             );
-            history_model.mark_conversation_as_remote_child(conversation_id, ctx);
+            history_model.update_event_sequence(conversation_id, 2, ctx);
         });
 
         let post_restart_event = receiver
@@ -2964,7 +2960,6 @@ fn test_assign_run_id_for_conversation_persists_updated_conversation_state() {
 
         let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
         let terminal_view_id = EntityId::new();
-
         let conversation_id = history_model.update(&mut app, |history_model, ctx| {
             let conversation_id =
                 history_model.start_new_conversation(terminal_view_id, false, false, false, ctx);

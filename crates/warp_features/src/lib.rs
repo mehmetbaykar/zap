@@ -613,10 +613,6 @@ pub enum FeatureFlag {
     /// content changes via auto-reload.
     CodeReviewScrollPreservation,
 
-    /// On `wait_for_events`, confirms parent status against the server and
-    /// registers an orchestrator for the owner-side ancestor stream so it
-    /// receives events for children created out-of-band (Oz CLI / web API).
-    WaitForEventsParentRegistration,
 
     /// Shows a pending user query indicator during summarization when a follow-up
     /// prompt is queued via `/fork-and-compact` or `/compact-and`.
@@ -911,7 +907,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::WarpControlCli,
     FeatureFlag::PromptCacheExpiryWarning,
     FeatureFlag::JupyterNotebookRendering,
-    FeatureFlag::WaitForEventsParentRegistration,
     FeatureFlag::BoxDrawingGlyphs,
     FeatureFlag::PricingTransparency,
     FeatureFlag::WarpingModelName,
