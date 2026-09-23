@@ -350,12 +350,12 @@ impl TerminalView {
         conversation_id: AIConversationId,
     ) -> Vec<MenuItem<TerminalAction>> {
         vec![
-            MenuItemFields::new("Copy conversation text")
+            MenuItemFields::new(crate::t!("menu-ai-block-copy-conversation-text"))
                 .with_on_select_action(TerminalAction::ContextMenu(
                     ContextMenuAction::CopyConversationText { conversation_id },
                 ))
                 .into_item(),
-            MenuItemFields::new("Fork")
+            MenuItemFields::new(crate::t!("menu-agent-view-entry-fork"))
                 .with_on_select_action(TerminalAction::ContextMenu(
                     ContextMenuAction::ForkAIConversation { conversation_id },
                 ))

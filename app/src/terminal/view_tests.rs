@@ -22,7 +22,9 @@ use crate::ai::agent::{
     MessageId, Shared, TodoOperation, UserQueryMode,
 };
 use crate::ai::blocklist::agent_view::toolbar_item::AgentToolbarItemKind;
-use crate::ai::blocklist::agent_view::{AgentViewEntryOrigin, AgentViewState};
+use crate::ai::blocklist::agent_view::{
+    AgentViewEntryBlock, AgentViewEntryOrigin, AgentViewState, EnterAgentBlockAction,
+};
 #[cfg(windows)]
 use crate::ai::blocklist::block::cli::CLISubagentViewEvent;
 use crate::ai::blocklist::block::cli_controller::{
@@ -620,6 +622,82 @@ fn exiting_restored_ordinary_agent_view_inserts_entry_card_from_entry_block() {
     assert_exiting_restored_ordinary_agent_view_inserts_entry_card(
         AgentViewEntryOrigin::AgentViewBlock,
     );
+}
+
+#[test]
+fn agent_view_entry_block_right_click_opens_conversation_context_menu() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+        FeatureFlag::AgentView.set_enabled(true);
+
+        let conversation = build_restored_conversation_without_cli_subagent_for_test();
+        let conversation_id = conversation.id();
+        let terminal = add_window_with_terminal(&mut app, None);
+        terminal.update(&mut app, |view, ctx| {
+            view.restore_conversation_after_view_creation(
+                RestoredAIConversation::new(conversation),
+                true,
+                RestoreConversationEntryBehavior::EnterRestoredConversation,
+                ctx,
+            );
+            view.enter_agent_view_for_conversation(
+                None,
+                AgentViewEntryOrigin::AgentViewBlock,
+                conversation_id,
+                ctx,
+            );
+            view.handle_action(&TerminalAction::ExitAgentView, ctx);
+        });
+
+        let window_id = app.read(|ctx| terminal.window_id(ctx));
+        let entry_block = app
+            .views_of_type::<AgentViewEntryBlock>(window_id)
+            .and_then(|blocks| blocks.last().cloned())
+            .expect("exiting the agent view should leave an agent view entry block");
+        let entry_block_id = entry_block.id();
+
+        // Right-clicking an entry row dispatches this action; the terminal view must turn it into
+        // the conversation-actions context menu anchored to that entry block.
+        entry_block.update(&mut app, |block, ctx| {
+            block.handle_action(
+                &EnterAgentBlockAction::OpenConversationContextMenu {
+                    conversation_id,
+                    agent_view_entry_block_id: entry_block_id,
+                    position: vec2f(4., 4.),
+                },
+                ctx,
+            );
+        });
+
+        terminal.read(&app, |view, ctx| {
+            assert!(view.is_context_menu_open());
+            assert!(matches!(
+                view.context_menu_state.as_ref().map(|state| &state.menu_type),
+                Some(ContextMenuType::AgentViewEntryConversation {
+                    agent_view_entry_block_id,
+                    ..
+                }) if *agent_view_entry_block_id == entry_block_id
+            ));
+            let actions: Vec<TerminalAction> = view
+                .context_menu
+                .as_ref(ctx)
+                .items()
+                .iter()
+                .filter_map(|item| item.fields()?.on_select_action().cloned())
+                .collect();
+            assert!(matches!(
+                actions.as_slice(),
+                [
+                    TerminalAction::ContextMenu(ContextMenuAction::CopyConversationText {
+                        conversation_id: copy_id,
+                    }),
+                    TerminalAction::ContextMenu(ContextMenuAction::ForkAIConversation {
+                        conversation_id: fork_id,
+                    }),
+                ] if *copy_id == conversation_id && *fork_id == conversation_id
+            ));
+        });
+    });
 }
 
 #[test]

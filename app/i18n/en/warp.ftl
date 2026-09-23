@@ -2344,6 +2344,9 @@ menu-ai-block-rewind-to-before-here = Rewind to before here
 menu-ai-block-fork-from-last-query = Fork from last query
 menu-ai-block-fork-from-query = Fork from "{ $query }"
 
+# --- Agent View entry right-click menu (terminal/view/context_menu.rs) ---
+menu-agent-view-entry-fork = Fork
+
 # --- tab right-click menu (tab.rs) ---
 menu-tab-stop-sharing = Stop sharing
 menu-tab-stop-sharing-all = Stop sharing all

@@ -207,6 +207,7 @@ use crate::ai::blocklist::agent_view::{
     AgentViewHeaderDisabledTheme, AgentViewHeaderTheme, AgentViewZeroStateBlock,
     AgentViewZeroStateEvent, EphemeralMessageModel, ExitAgentViewError, ExitConfirmationTrigger,
     GuiInputModePolicy, InlineAgentViewHeader, fork_from_last_known_good_state_exchange_id,
+    get_agent_view_entry_block_position_id,
 };
 use crate::ai::blocklist::block::cli::{
     CLISubagentView, CLISubagentViewEvent, CLISubagentViewMode,
@@ -13947,16 +13948,6 @@ fn fork_label_for_query(query: &str) -> String {
         let query = format!("{truncated}{suffix}");
         crate::t!("menu-ai-block-fork-from-query", query = query.as_str())
     }
-}
-
-/// Returns the saved position ID used to anchor the conversation-actions context menu to an
-/// Agent View entry (blocklist row) block.
-// TODO(zap-merge): this should ideally live alongside the other `*_position_id` helpers in
-// `ai::blocklist::agent_view`, keyed to whatever `SavePosition` wraps the entry row's overflow
-// trigger once that widget emits `AgentViewEntryBlockEvent::OpenConversationContextMenu` (see
-// crossFileNeeds).
-fn get_agent_view_entry_block_position_id(agent_view_entry_block_id: EntityId) -> String {
-    format!("agent_view_entry:{agent_view_entry_block_id}.position")
 }
 
 impl TerminalView {
