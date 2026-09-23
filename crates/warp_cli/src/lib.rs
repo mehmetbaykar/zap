@@ -104,7 +104,7 @@ Use the CLI to:
 * Manage local runs
 * Configure local providers and MCP servers"#
 )]
-#[clap(args_conflicts_with_subcommands = true)]
+#[clap(subcommand_precedence_over_arg = true)]
 pub struct Args {
     #[clap(flatten)]
     global_options: GlobalOptions,

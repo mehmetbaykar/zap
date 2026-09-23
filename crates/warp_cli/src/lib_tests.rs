@@ -22,6 +22,33 @@ fn agent_run_accepts_model() {
 }
 
 #[test]
+fn debug_before_subcommand_parses() {
+    // Regression test: `warp --debug <subcommand>` should work.
+    // Global flags like --debug must not prevent subcommand detection.
+    let args = Args::try_parse_from(["warp", "--debug", "whoami"]).unwrap();
+
+    assert!(args.debug());
+    let Some(Command::CommandLine(boxed_cmd)) = args.command else {
+        panic!("Expected `warp whoami` command");
+    };
+    assert!(matches!(boxed_cmd.as_ref(), CliCommand::Whoami));
+}
+
+#[test]
+fn multiple_global_flags_before_subcommand_parse() {
+    // Both --output-format and --debug before the subcommand should work.
+    let args =
+        Args::try_parse_from(["warp", "--output-format", "json", "--debug", "whoami"]).unwrap();
+
+    assert_eq!(args.output_format(), crate::agent::OutputFormat::Json);
+    assert!(args.debug());
+    let Some(Command::CommandLine(boxed_cmd)) = args.command else {
+        panic!("Expected `warp whoami` command");
+    };
+    assert!(matches!(boxed_cmd.as_ref(), CliCommand::Whoami));
+}
+
+#[test]
 fn model_list_parses() {
     let args = Args::try_parse_from(["warp", "model", "list"]).unwrap();
 
