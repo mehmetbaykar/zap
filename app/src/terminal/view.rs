@@ -11350,6 +11350,9 @@ impl TerminalView {
                                                     );
                                             });
                                         }
+
+                                        me.start_lsp_server_in_active_pwd(ctx);
+
                                         me.update_repo_banner_state(repo_path.clone(), ctx);
                                     }
                                     #[cfg(not(feature = "local_fs"))]
