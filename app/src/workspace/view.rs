@@ -139,6 +139,7 @@ use super::util::{
     WorkspaceMouseStates, WorkspaceState,
 };
 use super::{ActiveSession, TabBarDropTargetData, TabBarLocation, WorkspaceRegistry, util};
+use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{AIAgentInput, EntrypointType};
@@ -4885,7 +4886,23 @@ impl Workspace {
         ambient_agent_task_id: Option<AmbientAgentTaskId>,
         ctx: &mut ViewContext<Self>,
     ) {
-        let _ = (focused_terminal_view_id, ambient_agent_task_id, ctx);
+        let window_id = ctx.window_id();
+        ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
+            model.handle_pane_focus_change(
+                window_id,
+                focused_terminal_view_id,
+                ambient_agent_task_id,
+                ctx,
+            );
+        });
+        if let Some(terminal_view_id) = focused_terminal_view_id {
+            let is_active_window = ctx.windows().active_window() == Some(ctx.window_id());
+            if is_active_window {
+                NotificationsModel::handle(ctx).update(ctx, |model, ctx| {
+                    model.mark_items_from_terminal_view_read(terminal_view_id, ctx);
+                });
+            }
+        }
     }
 
     /// Change the active tab index. This must be used instead of setting `self.active_tab_index`
@@ -23873,6 +23890,32 @@ impl TypedActionView for Workspace {
                 conversation_id,
                 terminal_view_id,
             } => {
+                // Exit agent view first if this conversation is currently expanded.
+                // This must happen before updating BlocklistAIHistoryModel to avoid
+                // circular model references.
+                if let Some(controller) = ActiveAgentViewsModel::as_ref(ctx)
+                    .get_controller_for_conversation(*conversation_id, ctx)
+                {
+                    let succesfully_exited_agent_view =
+                        controller.update(ctx, |controller, ctx| {
+                            controller.exit_agent_view(ctx);
+                            !controller.is_active()
+                        });
+
+                    if !succesfully_exited_agent_view {
+                        ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
+                            toast_stack.add_ephemeral_toast(
+                                DismissibleToast::error(crate::t!(
+                                    "workspace-toast-conversation-delete-exit-agent-view-failed"
+                                )),
+                                window_id,
+                                ctx,
+                            );
+                        });
+                        return;
+                    }
+                }
+
                 conversation_utils::delete_conversation(*conversation_id, *terminal_view_id, ctx);
 
                 send_telemetry_from_ctx!(TelemetryEvent::ConversationListItemDeleted, ctx);

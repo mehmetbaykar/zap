@@ -21,6 +21,7 @@ use warp_core::ui::theme::color::internal_colors;
 use warpui::color::ColorU;
 use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity, WindowId};
 
+use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::ambient_agents::{
     AgentSource, AmbientAgentTask, AmbientAgentTaskId, AmbientAgentTaskState,
@@ -1067,39 +1068,34 @@ impl AgentConversationsModel {
         restore_layout: Option<RestoreConversationLayout>,
         app: &AppContext,
     ) -> Option<WorkspaceAction> {
-        // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed). There is no local
-        // registry replacement for "is this ambient task's terminal view already open" (ambient
-        // tasks are never populated outside tests — see `AgentConversationsModel::new`), so that
-        // fast path is dropped here; it's not a functional loss because the
-        // `OpenAmbientAgentSession` handler in `workspace/view.rs` already re-derives the open tab
-        // via `find_tab_with_ambient_agent_conversation` before doing anything else.
-        let history_model = BlocklistAIHistoryModel::as_ref(app);
+        // Zap: upstream's ambient-task fast path (`get_terminal_view_id_for_ambient_task`) is
+        // dropped: ambient tasks are never populated outside tests (see
+        // `AgentConversationsModel::new`), and the `OpenAmbientAgentSession` handler in
+        // `workspace/view.rs` already re-derives the open tab via
+        // `find_tab_with_ambient_agent_conversation` before doing anything else.
+        let active_views_model = ActiveAgentViewsModel::as_ref(app);
 
-        if let Some(conversation_id) = entry.identity.local_conversation_id {
-            // Replaces the removed `ActiveAgentViewsModel::is_conversation_open` check: a
-            // conversation counts as "open" when it still exists in the history model's memory.
-            if history_model.conversation(&conversation_id).is_some() {
-                if let Some(nav_data) = self
-                    .conversations
-                    .get(&conversation_id)
-                    .map(|metadata| &metadata.nav_data)
-                {
-                    return Some(WorkspaceAction::RestoreOrNavigateToConversation {
-                        conversation_id,
-                        window_id: nav_data.window_id,
-                        pane_view_locator: nav_data.pane_view_locator,
-                        terminal_view_id: nav_data.terminal_view_id,
-                        restore_layout,
-                    });
-                }
+        if let Some(conversation_id) = entry.identity.local_conversation_id
+            && active_views_model.is_conversation_open(conversation_id, app)
+        {
+            if let Some(nav_data) = self
+                .conversations
+                .get(&conversation_id)
+                .map(|metadata| &metadata.nav_data)
+            {
+                return Some(WorkspaceAction::RestoreOrNavigateToConversation {
+                    conversation_id,
+                    window_id: nav_data.window_id,
+                    pane_view_locator: nav_data.pane_view_locator,
+                    terminal_view_id: nav_data.terminal_view_id,
+                    restore_layout,
+                });
+            }
 
-                if let Some(terminal_view_id) =
-                    history_model.terminal_surface_id_for_conversation(&conversation_id)
-                {
-                    return Some(WorkspaceAction::FocusTerminalViewInWorkspace {
-                        terminal_view_id,
-                    });
-                }
+            if let Some(terminal_view_id) =
+                active_views_model.get_terminal_view_id_for_conversation(conversation_id, app)
+            {
+                return Some(WorkspaceAction::FocusTerminalViewInWorkspace { terminal_view_id });
             }
         }
 

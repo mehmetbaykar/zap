@@ -1567,6 +1567,42 @@ fn test_close_last_horizontal_tab_activates_tab_to_left() {
         });
     });
 }
+
+#[test]
+fn test_closing_tab_unregisters_terminal_view_from_active_agent_views() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let workspace = mock_workspace(&mut app);
+
+        let closed_terminal_view_id = workspace.update(&mut app, |workspace, ctx| {
+            workspace.add_terminal_tab(false, ctx);
+            let terminal_view_id = workspace
+                .get_pane_group_view(1)
+                .expect("the new tab should exist")
+                .as_ref(ctx)
+                .active_session_view(ctx)
+                .expect("the new tab should have a terminal session")
+                .id();
+            assert!(
+                crate::ai::active_agent_views_model::ActiveAgentViewsModel::as_ref(ctx)
+                    .is_terminal_view_attached(terminal_view_id, ctx),
+                "an attached terminal pane should register its agent view controller"
+            );
+
+            workspace.close_tab(1, true, true, ctx);
+            terminal_view_id
+        });
+
+        app.read(|ctx| {
+            assert!(
+                !crate::ai::active_agent_views_model::ActiveAgentViewsModel::as_ref(ctx)
+                    .is_terminal_view_attached(closed_terminal_view_id, ctx),
+                "a pane detached for undo-close should unregister its agent view controller"
+            );
+        });
+    });
+}
+
 #[test]
 fn test_close_pane_confirmation_dialog() {
     App::test((), |mut app| async move {

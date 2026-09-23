@@ -3,6 +3,7 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use pathfinder_geometry::vector::Vector2F;
+use warp_core::features::FeatureFlag;
 use warp_core::ui::Icon;
 use warp_editor::editor::NavigationKey;
 use warpui::elements::{
@@ -19,10 +20,11 @@ use warpui::platform::Cursor;
 use warpui::text_layout::TextAlignment;
 use warpui::{
     AppContext, BlurContext, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
-    ViewContext, ViewHandle,
+    ViewContext, ViewHandle, WindowId,
 };
 
 use super::view_model::{ConversationEntry, ConversationListViewModel};
+use crate::ai::active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId};
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent_conversations_model::{
     AgentConversationEntryId, AgentConversationNavigationSubject, AgentConversationsModel,
@@ -151,6 +153,7 @@ pub enum Event {
 }
 
 pub struct ConversationListView {
+    window_id: WindowId,
     view_id: EntityId,
     view_model: ModelHandle<ConversationListViewModel>,
     query_editor: ViewHandle<EditorView>,
@@ -198,6 +201,11 @@ impl ConversationListView {
         let view_model = ctx.add_model(ConversationListViewModel::new);
 
         ctx.subscribe_to_model(&view_model, |me, _, _, ctx| {
+            me.sync_list_items(ctx);
+        });
+
+        let active_agent_views_model = ActiveAgentViewsModel::handle(ctx);
+        ctx.subscribe_to_model(&active_agent_views_model, |me, _, _, ctx| {
             me.sync_list_items(ctx);
         });
 
@@ -279,6 +287,7 @@ impl ConversationListView {
         });
 
         let mut view = Self {
+            window_id: ctx.window_id(),
             view_id: ctx.view_id(),
             view_model,
             query_editor,
@@ -300,12 +309,20 @@ impl ConversationListView {
 
     /// Rebuilds the flat list of items based on sections and collapse state.
     fn rebuild_list_items(&mut self, ctx: &mut ViewContext<Self>) {
-        let model = self.view_model.as_ref(ctx);
-        let active_ids: HashSet<_> = BlocklistAIHistoryModel::as_ref(ctx)
-            .all_live_conversations()
+        let active_views_model = ActiveAgentViewsModel::as_ref(ctx);
+        let active_ids: HashSet<_> =
+            if FeatureFlag::ActiveConversationRequiresInteraction.is_enabled() {
+                active_views_model.get_all_active_conversation_ids(ctx)
+            } else {
+                active_views_model.get_all_open_conversation_ids(ctx)
+            }
             .into_iter()
-            .map(|(_, conversation)| AgentConversationEntryId::Conversation(conversation.id()))
+            .map(AgentConversationEntryId::from)
             .collect();
+
+        let focused_new_conversation =
+            active_views_model.maybe_get_focused_new_conversation(ctx.window_id(), ctx);
+        let model = self.view_model.as_ref(ctx);
 
         // Sort entries into active and past lists.
         let mut active_items = Vec::new();
@@ -330,13 +347,39 @@ impl ConversationListView {
             }
         }
 
-        // The removed cloud view registry tracked last-opened timestamps. Keep the local list
-        // deterministic by using the conversation's locally persisted update time instead.
+        // If the focused conversation is a new/empty conversation that's not already in the list,
+        // add it as a regular conversation entry so it participates in the sort.
+        if let Some(new_conv_id) = focused_new_conversation {
+            let conv_id = AgentConversationEntryId::Conversation(new_conv_id);
+            let already_in_list = active_items.iter().any(
+                |item| matches!(item, ListItem::Conversation { entry, .. } if entry.id == conv_id),
+            );
+            if !already_in_list {
+                active_items.push(ListItem::Conversation {
+                    entry: ConversationEntry {
+                        id: conv_id,
+                        highlight_indices: vec![],
+                    },
+                    section: ConversationSection::Active,
+                });
+            }
+        }
+
+        // Sort active items by last opened time (most recently opened first).
         active_items.sort_by(|a, b| {
             let get_time = |item: &ListItem| match item {
-                ListItem::Conversation { entry, .. } => model
-                    .get_item_by_id(&entry.id, ctx)
-                    .map(|item| item.display.last_updated),
+                ListItem::Conversation { entry, .. } => {
+                    let entry_time = active_views_model
+                        .get_last_opened_time(&ConversationOrTaskId::from(entry.id));
+                    let local_time = model
+                        .get_item_by_id(&entry.id, ctx)
+                        .and_then(|item| item.identity.local_conversation_id)
+                        .and_then(|id| {
+                            active_views_model
+                                .get_last_opened_time(&ConversationOrTaskId::ConversationId(id))
+                        });
+                    entry_time.max(local_time)
+                }
                 _ => None,
             };
             get_time(b).cmp(&get_time(a))
@@ -423,8 +466,12 @@ impl ConversationListView {
         // Focus the search bar when the panel is opened.
         ctx.focus(&self.query_editor);
 
-        // No focused conversation tracking after BYOP cloud removal.
-        self.selected_index = None;
+        // Select the focused conversation if there is one.
+        let focused_conversation =
+            ActiveAgentViewsModel::as_ref(ctx).get_focused_conversation(ctx.window_id());
+        self.selected_index = focused_conversation
+            .map(AgentConversationEntryId::from)
+            .and_then(|id| self.get_index_of_conversation_id(id));
 
         if let Some(index) = self.selected_index {
             self.state_handles.list_state.scroll_to(index);
@@ -619,8 +666,8 @@ impl ConversationListView {
         // Renaming requires the conversation to be loaded in the history model, which holds
         // for active conversations and any conversation open in an agent view (an open
         // conversation stays in the Past section until a prompt is sent).
-        let is_open = BlocklistAIHistoryModel::as_ref(ctx)
-            .conversation(&conversation_id)
+        let is_open = ActiveAgentViewsModel::as_ref(ctx)
+            .get_terminal_view_id_for_conversation(conversation_id, ctx)
             .is_some();
         if !self.is_in_active_section(id) && !is_open {
             return;
@@ -1058,10 +1105,14 @@ impl TypedActionView for ConversationListView {
 
                 self.selected_index = None;
 
-                // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed); resolve the
-                // owning terminal view from the local history model instead.
-                let terminal_view_id = BlocklistAIHistoryModel::as_ref(ctx)
-                    .terminal_surface_id_for_conversation(&ai_conversation_id);
+                // Zap: fall back to the history model's owning surface so deleting a loaded but
+                // collapsed conversation still clears that surface's live indices.
+                let terminal_view_id = ActiveAgentViewsModel::as_ref(ctx)
+                    .get_terminal_view_id_for_conversation(ai_conversation_id, ctx)
+                    .or_else(|| {
+                        BlocklistAIHistoryModel::as_ref(ctx)
+                            .terminal_surface_id_for_conversation(&ai_conversation_id)
+                    });
                 let conversation_title = entry.display.title;
                 ctx.emit(Event::ShowDeleteConfirmationDialog {
                     conversation_id: ai_conversation_id,
@@ -1217,13 +1268,13 @@ impl View for ConversationListView {
             let list_items = self.list_items.clone();
             let overflow_menu = self.item_overflow_menu.clone();
             let overflow_menu_state = self.overflow_menu_state;
+            let focused_conversation = ActiveAgentViewsModel::as_ref(app)
+                .get_focused_conversation(self.window_id)
+                .map(AgentConversationEntryId::from);
             let rename_editor = self.rename_editor.clone();
             let renaming_conversation_id = self.renaming_conversation_id;
-            let open_conversation_ids: HashSet<_> = BlocklistAIHistoryModel::as_ref(app)
-                .all_live_conversations()
-                .into_iter()
-                .map(|(_, conversation)| conversation.id())
-                .collect();
+            let open_conversation_ids =
+                ActiveAgentViewsModel::as_ref(app).get_all_open_conversation_ids(app);
             let list_position_id = self.get_position_id();
             let tooltip_opens_right = TabSettings::as_ref(app)
                 .header_toolbar_chip_selection
@@ -1264,7 +1315,15 @@ impl View for ConversationListView {
                                 }
                                 ListItem::Conversation { entry, section } => {
                                     let conversation = model.get_item_by_id(&entry.id, app)?;
-                                    let is_focused_conversation = false;
+                                    let local_conversation_entry_id = conversation
+                                        .identity
+                                        .local_conversation_id
+                                        .map(AgentConversationEntryId::Conversation);
+                                    let is_focused_conversation =
+                                        focused_conversation.is_some_and(|focused| {
+                                            entry.id == focused
+                                                || local_conversation_entry_id == Some(focused)
+                                        });
                                     let state = item_states.get(&entry.id)?;
                                     let highlight_ref = if entry.highlight_indices.is_empty() {
                                         None
@@ -1280,7 +1339,8 @@ impl View for ConversationListView {
                                     // a prompt is sent).
                                     let can_rename = local_conversation_id.is_some_and(|id| {
                                         *section == ConversationSection::Active
-                                            || open_conversation_ids.contains(&id)
+                                            || open_conversation_ids
+                                                .contains(&ConversationOrTaskId::ConversationId(id))
                                     });
 
                                     let overflow_menu_display = match overflow_menu_state {

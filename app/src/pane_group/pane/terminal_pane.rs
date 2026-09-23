@@ -20,6 +20,7 @@ use super::{
     ShareableLinkError, TerminalPaneId,
 };
 use crate::AIExecutionProfilesModel;
+use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent::StartAgentExecutionMode;
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::ambient_agents::task::normalize_orchestrator_agent_name;
@@ -283,7 +284,17 @@ impl PaneContent for TerminalPane {
         agent_view_controller.update(ctx, |controller, _ctx| {
             controller.set_pane_group_id(pane_group_id);
         });
-        let _ = (agent_view_controller, terminal_view_id);
+        // Zap: upstream also registers the active stack view's ambient session here; ambient
+        // (cloud) runs are not supported, so only the agent view controller is registered.
+        let active_session = terminal_view.as_ref(ctx).active_session().clone();
+        ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
+            model.register_agent_view_controller(
+                &agent_view_controller,
+                &active_session,
+                terminal_view_id,
+                ctx,
+            );
+        });
     }
 
     fn detach(
@@ -307,6 +318,10 @@ impl PaneContent for TerminalPane {
         // Unsubscribe from all views in the pane stack.
         let pane_stack = self.view.as_ref(ctx).pane_stack().clone();
         let contents = pane_stack.as_ref(ctx).entries().to_vec();
+        let terminal_view_ids = contents
+            .iter()
+            .map(|(_, view)| view.id())
+            .collect::<Vec<_>>();
         for (manager, view) in contents {
             // Notify the view that it's being detached so it can react appropriately
             // (e.g. the shared-session viewer tears down its network only when the detach
@@ -317,7 +332,16 @@ impl PaneContent for TerminalPane {
             ctx.unsubscribe_to_view(&view);
         }
 
+        // Notify the active agent views model that the terminal view has been closed
+        // (and that any active views are no longer active). On a `HiddenForClose` detach,
+        // `attach` will re-register via `register_agent_view_controller` when the tab is
+        // restored, so this is safe to run unconditionally.
         let terminal_view_id = self.terminal_view(ctx).id();
+        ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
+            for terminal_view_id in terminal_view_ids {
+                model.unregister_agent_view_controller(terminal_view_id, ctx);
+            }
+        });
 
         // Clean up any active CLI agent session so its notification is removed.
         // Skip this for moves — the session is still running and will re-register in the new tab.

@@ -7,6 +7,7 @@ use super::{
     CreatedOnFilter, CreatorFilter, EnvironmentFilter, HarnessFilter, OwnerFilter, SessionStatus,
     SourceFilter, StatusFilter, artifacts_match_filter,
 };
+use crate::ai::active_agent_views_model::ConversationOrTaskId;
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::ambient_agents::{AgentSource, AmbientAgentTask, AmbientAgentTaskId};
@@ -37,6 +38,17 @@ impl AgentConversationEntryId {
         match self {
             AgentConversationEntryId::AmbientRun(id) => format!("task_{id}"),
             AgentConversationEntryId::Conversation(id) => format!("conv_{id}"),
+        }
+    }
+}
+
+impl From<ConversationOrTaskId> for AgentConversationEntryId {
+    fn from(id: ConversationOrTaskId) -> Self {
+        match id {
+            ConversationOrTaskId::ConversationId(conversation_id) => {
+                AgentConversationEntryId::Conversation(conversation_id)
+            }
+            ConversationOrTaskId::TaskId(task_id) => AgentConversationEntryId::AmbientRun(task_id),
         }
     }
 }

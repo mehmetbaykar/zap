@@ -17,6 +17,7 @@ use super::{
     AgentRunDisplayStatus, ArtifactFilter, ConversationMetadata, ConversationUpdateKind,
     EnvironmentFilter, HarnessFilter, OwnerFilter, StatusFilter,
 };
+use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{AIConversation, AIConversationId, ConversationStatus};
 use crate::ai::ambient_agents::task::{HarnessConfig, TaskPrincipalInfo, TaskStatusMessage};
@@ -662,6 +663,7 @@ fn test_status_filter_uses_display_status_for_task_backed_conversations() {
 fn add_entry_projection_test_models(app: &mut App) {
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
     app.add_singleton_model(|_| BlocklistAIHistoryModel::new(vec![], vec![], &[]));
+    app.add_singleton_model(|_| ActiveAgentViewsModel::new());
 }
 
 #[test]

@@ -164,6 +164,7 @@ workspace-toast-out-of-ai-credits = Looks like you're out of AI credits.
 workspace-toast-upgrade-more-credits = Upgrade for more credits.
 workspace-toast-disabled-synchronized-inputs = Disabled all synchronized inputs.
 workspace-toast-conversation-deleted = Conversation deleted
+workspace-toast-conversation-delete-exit-agent-view-failed = Failed to delete conversation. Please exit the agent view and try again.
 workspace-search-repos-placeholder = Search repos
 workspace-search-tabs-placeholder = Search tabs...
 terminal-onekey-search-placeholder = Search saved SSH credentials...

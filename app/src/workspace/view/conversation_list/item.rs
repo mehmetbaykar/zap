@@ -15,6 +15,7 @@ use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 use warpui::ui_components::text_input::TextInput;
 use warpui::{AppContext, SingletonEntity, ViewHandle};
 
+use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent_conversations_model::{
     AgentConversationEntry, AgentConversationEntryId, AgentConversationProvenance,
 };
@@ -261,7 +262,7 @@ pub fn render_item(props: ItemProps<'_>, app: &AppContext) -> Box<dyn Element> {
     .with_color(theme.sub_text_color(theme.background()).into())
     .finish();
 
-    let bottom_row = if let Some(subtext) = format_item_subtext(conversation) {
+    let bottom_row = if let Some(subtext) = format_item_subtext(conversation, app) {
         let subtext_element = Shrinkable::new(
             1.0,
             Text::new_inline(subtext, font_family, title_font_size - 2.)
@@ -451,7 +452,7 @@ fn render_inline_rename_editor(
 /// Returns the secondary label for a conversation list item:
 /// - For local conversations: the working directory.
 /// - For tasks: the source (Linear, Slack, CLI, etc.)
-fn format_item_subtext(conversation: &AgentConversationEntry) -> Option<String> {
+fn format_item_subtext(conversation: &AgentConversationEntry, app: &AppContext) -> Option<String> {
     if matches!(
         conversation.provenance,
         AgentConversationProvenance::AmbientRun
@@ -463,9 +464,16 @@ fn format_item_subtext(conversation: &AgentConversationEntry) -> Option<String> 
             .map(|source| source.display_name().to_string());
     }
 
-    // Zap: no `ActiveAgentViewsModel` (cloud-view state source, removed) live-session lookup;
-    // fall back directly to the entry's recorded working directory.
-    let pwd = conversation.display.working_directory.clone();
+    let live_pwd = conversation
+        .identity
+        .local_conversation_id
+        .and_then(|conversation_id| {
+            ActiveAgentViewsModel::as_ref(app)
+                .get_active_session_for_conversation(conversation_id, app)
+                .and_then(|session| session.as_ref(app).current_working_directory().cloned())
+        });
+
+    let pwd = live_pwd.or_else(|| conversation.display.working_directory.clone());
     pwd.map(|pwd| {
         let home_dir = dirs::home_dir().and_then(|p| p.to_str().map(String::from));
         user_friendly_path(&pwd, home_dir.as_deref()).into_owned()

@@ -8,6 +8,7 @@ use warpui::{
 
 use super::UndoCloseSettings;
 use super::settings::UndoCloseSettingsChangedEvent;
+use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::pane_group::{PaneGroup, PaneId};
 use crate::send_telemetry_from_app_ctx;
@@ -74,6 +75,9 @@ impl ClosedItem {
         match self {
             ClosedItem::Window(data) => {
                 let ClosedWindowData { window_id, .. } = *data;
+                ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
+                    model.remove_focused_state_for_window(window_id, ctx);
+                });
                 if let Some(workspace) = window_workspace(window_id, ctx) {
                     workspace.update(ctx, |workspace, ctx| {
                         for pane_group in workspace.tab_views() {
