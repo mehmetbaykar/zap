@@ -41,6 +41,7 @@ mod cache_stability_tests;
 // ---------------------------------------------------------------------------
 use std::collections::HashMap;
 
+use ai::api_keys::CustomEndpointSchema;
 pub use openai_compatible::fetch_openai_compatible_models;
 pub use secrets::AgentProviderSecrets;
 use settings::Setting;
@@ -193,7 +194,11 @@ pub fn lookup_byop(app: &AppContext, id: &ai::LLMId) -> Option<(AgentProvider, S
             id: format!("custom-endpoint:{config_key}"),
             name: endpoint.name.clone(),
             kind: Default::default(),
-            api_type: AgentProviderApiType::OpenAi,
+            api_type: match endpoint.schema {
+                CustomEndpointSchema::OpenaiChatCompletions => AgentProviderApiType::OpenAi,
+                CustomEndpointSchema::OpenaiResponses => AgentProviderApiType::OpenAiResp,
+                CustomEndpointSchema::AnthropicMessages => AgentProviderApiType::Anthropic,
+            },
             base_url: endpoint.url.clone(),
             models: vec![provider_model],
             extra_headers: Vec::new(),

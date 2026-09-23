@@ -1,6 +1,7 @@
 //! Smoke tests for BYOP provider configuration and lookup.
 
 use ai::LLMId;
+use ai::api_keys::{ApiKeyManager, CustomEndpointParams, CustomEndpointSchema};
 use settings::Setting;
 use warpui::{App, SingletonEntity};
 
@@ -181,6 +182,62 @@ fn smoke_lookup_byop_resolves_custom_endpoint_config_key_locally() {
             assert_eq!(provider.models[0].id, "upstream-model");
             assert_eq!(api_key, "local-secret");
             assert_eq!(model_id, "upstream-model");
+        });
+    });
+}
+
+#[test]
+fn smoke_lookup_byop_maps_custom_endpoint_schema_to_api_type() {
+    App::test((), |mut app| async move {
+        init_byop_test_app(&mut app);
+
+        let cases = [
+            (
+                "chat-completions-config-key",
+                CustomEndpointSchema::OpenaiChatCompletions,
+                AgentProviderApiType::OpenAi,
+            ),
+            (
+                "responses-config-key",
+                CustomEndpointSchema::OpenaiResponses,
+                AgentProviderApiType::OpenAiResp,
+            ),
+            (
+                "anthropic-messages-config-key",
+                CustomEndpointSchema::AnthropicMessages,
+                AgentProviderApiType::Anthropic,
+            ),
+        ];
+        app.update(|ctx| {
+            ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
+                for (config_key, schema, _) in cases {
+                    manager.add_custom_endpoint(
+                        CustomEndpointParams {
+                            name: format!("Gateway {config_key}"),
+                            url: "https://gateway.example.com/v1".to_owned(),
+                            api_key: "synthetic-key".to_owned(),
+                            models: vec![(
+                                "upstream-model".to_owned(),
+                                None,
+                                Some(config_key.to_owned()),
+                            )],
+                            schema,
+                        },
+                        ctx,
+                    );
+                }
+            });
+        });
+
+        app.read(|ctx| {
+            for (config_key, _, expected_api_type) in cases {
+                let (provider, _, _) = lookup_byop(ctx, &LLMId::from(config_key))
+                    .expect("custom endpoint should route");
+                assert_eq!(
+                    provider.api_type, expected_api_type,
+                    "schema of {config_key} should pick the matching BYOP api type"
+                );
+            }
         });
     });
 }
