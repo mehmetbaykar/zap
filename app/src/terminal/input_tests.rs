@@ -768,7 +768,9 @@ fn zero_state_hint_text_only_registers_active_slash_command_placeholders() {
             "always-active slash command placeholders should still be registered"
         );
         assert!(
-            editor.read(&app, |editor, _| editor.placeholder_text(&fork_prefix).is_none()),
+            editor.read(&app, |editor, _| editor
+                .placeholder_text(&fork_prefix)
+                .is_none()),
             "/fork should not be registered outside an active agent conversation"
         );
     });

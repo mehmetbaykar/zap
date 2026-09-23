@@ -1086,7 +1086,8 @@ fn lrc_finish_queued_compact_and_sends_followup_after_summary() {
                 QueuedQuery::new_with_attachments(
                     format!(
                         "{} follow up",
-                        crate::search::slash_command_menu::static_commands::commands::COMPACT_AND.name
+                        crate::search::slash_command_menu::static_commands::commands::COMPACT_AND
+                            .name
                     ),
                     QueuedQueryOrigin::LrcAutoQueue,
                     vec![image_attachment("queued-context.png")],
