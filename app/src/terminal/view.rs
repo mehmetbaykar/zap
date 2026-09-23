@@ -11621,7 +11621,7 @@ impl TerminalView {
 
                                     // Agents that use OSC 9 notifications do not emit structured SessionStart events,
                                     // so we proactively create a listener during command detection.
-                                    if let Some((agent @ (CLIAgent::Codex | CLIAgent::DeepSeek), _)) =
+                                    if let Some((agent @ (CLIAgent::Codex | CLIAgent::DeepSeek | CLIAgent::Grok), _)) =
                                         detection
                                     {
                                         me.register_cli_agent_listener_without_session_start_event(
@@ -12385,7 +12385,7 @@ impl TerminalView {
                     let has_osc9_listener = CLIAgentSessionsModel::as_ref(ctx)
                         .session(self.view_id)
                         .is_some_and(|s| {
-                            matches!(s.agent, CLIAgent::Codex | CLIAgent::DeepSeek)
+                            matches!(s.agent, CLIAgent::Codex | CLIAgent::DeepSeek | CLIAgent::Grok)
                                 && s.listener.is_some()
                         });
                     if has_osc9_listener {
