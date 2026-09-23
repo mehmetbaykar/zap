@@ -801,13 +801,18 @@ impl BlocklistAIController {
                 running_command,
                 ..
             } => {
-                let prompt_attachments = queued_query_id
-                    .map(|query_id| {
-                        QueuedQueryModel::as_ref(ctx)
-                            .attachments_for(conversation_id, query_id)
-                            .to_vec()
-                    })
-                    .unwrap_or_default();
+                // Resolve the attachment set for this submission: fired queued rows read their
+                // row-owned snapshot, direct submissions consume the live input staging.
+                let prompt_attachments = match queued_query_id {
+                    Some(query_id) => QueuedQueryModel::as_ref(ctx)
+                        .attachments_for(conversation_id, query_id)
+                        .to_vec(),
+                    None => self
+                        .context_model
+                        .as_ref(ctx)
+                        .pending_attachments()
+                        .to_vec(),
+                };
                 input_for_query(
                     query,
                     &task_id,
@@ -4218,7 +4223,11 @@ fn input_for_query(
     let mut file_attachments = Vec::new();
     for attachment in prompt_attachments {
         match attachment {
-            PendingAttachment::Image(image) => image_context.push(AIAgentContext::Image(image)),
+            // A direct send's live images are already read by `pending_context`.
+            PendingAttachment::Image(image) if is_queued_prompt => {
+                image_context.push(AIAgentContext::Image(image));
+            }
+            PendingAttachment::Image(_) => {}
             PendingAttachment::File(file) => file_attachments.push(file),
         }
     }

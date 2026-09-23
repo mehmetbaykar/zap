@@ -259,6 +259,8 @@ fn input_for_query_routes_queued_and_direct_attachments_independently() {
             assert!(referenced_attachments.contains_key("notes.txt (1)"));
             assert!(!referenced_attachments.contains_key("live.txt"));
 
+            // Direct sends resolve the live staging, as the send path does.
+            let live_attachments = context_model.as_ref(ctx).pending_attachments().to_vec();
             let direct_input = super::input_for_query(
                 "build a direct query".to_owned(),
                 &task_id,
@@ -267,7 +269,7 @@ fn input_for_query_routes_queued_and_direct_attachments_independently() {
                 UserQueryMode::Normal,
                 None,
                 HashMap::new(),
-                vec![],
+                live_attachments,
                 false,
                 context_model.as_ref(ctx),
                 active_session.as_ref(ctx),
