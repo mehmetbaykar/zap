@@ -57,6 +57,7 @@ pub const KEYBOARD_PROTOCOL_ENABLED_KEY: &str = "KeyboardProtocolEnabled";
 pub const CLI_AGENT_SESSION_ACTIVE_KEY: &str = "CLIAgentSessionActive";
 pub const ROOT_AMBIENT_AGENT_PANE_KEY: &str = "RootAmbientAgentPane";
 pub const CAN_ATTACH_FILE_KEY: &str = "CanAttachFile";
+pub const CAN_SHOW_CONVERSATION_DETAILS_KEY: &str = "CanShowConversationDetails";
 
 /// Some keybindings will do different things in different contexts. We break
 /// these into their own function to ensure we pay special attention to
@@ -1005,6 +1006,16 @@ pub fn init(app: &mut AppContext) {
     )
     .with_enabled(|| FeatureFlag::Projects.is_enabled())
     .with_context_predicate(id!("Workspace") & id!(flags::IS_ANY_AI_ENABLED))]);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    app.register_editable_bindings([EditableBinding::new(
+        "terminal:toggle_conversation_details_panel",
+        crate::t!("keybinding-desc-terminal-toggle-conversation-details-panel"),
+        TerminalAction::ToggleConversationDetailsPanel,
+    )
+    .with_group(bindings::BindingGroup::WarpAi.as_str())
+    .with_context_predicate(id!("Terminal") & id!(CAN_SHOW_CONVERSATION_DETAILS_KEY))]);
+
     app.register_editable_bindings([
         EditableBinding::new(
             CYCLE_NEXT_ORCHESTRATION_CHILD_AGENT_KEYBINDING,

@@ -6,6 +6,7 @@ pub mod block_onboarding;
 pub(crate) mod blocklist_filter;
 mod bookmarks;
 mod context_menu;
+mod conversation_details;
 pub mod init;
 pub mod inline_banner;
 pub mod load_ai_conversation;
@@ -247,6 +248,7 @@ use crate::ai::blocklist::{
     get_ai_block_overflow_menu_element_position_id, get_attached_blocks_chip_element_position_id,
     is_lrc_auto_queue_active,
 };
+use crate::ai::conversation_details_panel::ConversationDetailsPanelEvent;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel, AIDocumentVersion};
 use crate::ai::execution_profiles::ExecutionProfileId;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
@@ -2823,6 +2825,21 @@ pub struct TerminalView {
 
     ambient_agent_view_model: ModelHandle<ambient_agent::AmbientAgentViewModel>,
 
+    /// Conversation details panel (side panel showing conversation metadata).
+    /// Available for any active local AI conversation (Zap has no cloud Oz runs).
+    conversation_details_panel:
+        ViewHandle<crate::ai::conversation_details_panel::ConversationDetailsPanel>,
+    /// Whether the conversation details panel is currently open.
+    is_conversation_details_panel_open: bool,
+    /// Whether we've already auto-opened the panel when the agent started running.
+    /// This prevents re-opening the panel if the user manually closes it. Only set
+    /// by the cloud-mode auto-open path (not present in Zap); local conversations
+    /// require the user to click the pane-header toggle button to open the panel.
+    has_auto_opened_conversation_details_panel: bool,
+    /// Mouse state handle for the conversation details panel toggle button in the pane header.
+    /// Only available on non-WASM platforms (WASM uses a per-window button instead).
+    #[cfg(not(target_arch = "wasm32"))]
+    conversation_details_panel_toggle_mouse_state: warpui::elements::MouseStateHandle,
     /// Mouse state handle for the ambient agent cancel button in the pane header.
     ambient_agent_cancel_mouse_state: warpui::elements::MouseStateHandle,
 
@@ -3641,6 +3658,15 @@ impl TerminalView {
 
         ctx.subscribe_to_model(&ai_controller, |me, handle, event, ctx| {
             me.handle_ai_controller_event(handle, event, ctx);
+            // Refresh the conversation details panel when agent output completes
+            // (may include new artifacts, run time, credits) as long as the panel is open.
+            if matches!(
+                event,
+                BlocklistAIControllerEvent::FinishedReceivingOutput { .. }
+            ) && me.is_conversation_details_panel_open
+            {
+                me.fetch_and_update_conversation_details_panel(ctx);
+            }
         });
 
         let _ = ctx.spawn_stream_local(
@@ -4180,6 +4206,24 @@ impl TerminalView {
             })
         });
 
+        // Conversation details panel (any active local AI conversation).
+        let conversation_details_panel = ctx.add_typed_action_view(|ctx| {
+            crate::ai::conversation_details_panel::ConversationDetailsPanel::new(
+                false, // don't show "Open" button since we're already viewing the conversation
+                320.0, // initial width
+                ctx,
+            )
+        });
+        ctx.subscribe_to_view(
+            &conversation_details_panel,
+            |me, _, event, ctx| match event {
+                ConversationDetailsPanelEvent::Close => {
+                    me.is_conversation_details_panel_open = false;
+                    ctx.notify();
+                }
+            },
+        );
+
         let window_id = ctx.window_id();
         let mut terminal_view = Self {
             model,
@@ -4332,6 +4376,11 @@ impl TerminalView {
             is_orchestration_split_off: false,
             is_using_conversation_for_pane_header_title: false,
             ambient_agent_view_model,
+            conversation_details_panel,
+            is_conversation_details_panel_open: false,
+            has_auto_opened_conversation_details_panel: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            conversation_details_panel_toggle_mouse_state: Default::default(),
             ambient_agent_cancel_mouse_state: Default::default(),
 
             is_pending_aws_login: false,
@@ -6011,6 +6060,24 @@ impl TerminalView {
             return;
         }
         self.route_ai_block_history_event(event, ctx);
+        // If the conversation details panel is open and showing an active local
+        // AI conversation in this terminal view, refresh its data when status,
+        // title, artifacts, exchanges, or metadata change. Mirrors the WASM transcript
+        // panel refresh logic in `Workspace::handle_history_model_event`.
+        if self.is_conversation_details_panel_open
+            && matches!(
+                event,
+                BlocklistAIHistoryEvent::UpdatedConversationStatus { .. }
+                    | BlocklistAIHistoryEvent::UpdatedConversationTitle { .. }
+                    | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. }
+                    | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
+                    | BlocklistAIHistoryEvent::UpdatedStreamingExchange { .. }
+                    | BlocklistAIHistoryEvent::SetActiveConversation { .. }
+                    | BlocklistAIHistoryEvent::RestoredConversations { .. }
+            )
+        {
+            self.fetch_and_update_conversation_details_panel(ctx);
+        }
         match event {
             BlocklistAIHistoryEvent::AppendedExchange {
                 exchange_id,
@@ -7993,6 +8060,19 @@ impl TerminalView {
     ) -> Option<AmbientAgentTaskId> {
         let model = self.model.lock();
         self.ambient_agent_task_id_for_details_panel_from_model(&model, app)
+    }
+
+    /// Whether the conversation details side panel should be available in the pane header / pane
+    /// layout for this terminal view.
+    ///
+    /// Zap: local conversations only. Upstream also accepts an ambient cloud task id, which needs
+    /// the terminal model (hence its `_from_model` variant for callers holding the lock). This fork
+    /// has no cloud task fetch (see `conversation_details.rs`), so the check never locks the
+    /// terminal model and is safe to call from `render` and `keymap_context`.
+    fn can_show_conversation_details_ui(&self, app: &AppContext) -> bool {
+        BlocklistAIHistoryModel::as_ref(app)
+            .active_conversation(self.view_id)
+            .is_some_and(|conversation| !conversation.is_empty())
     }
 
     pub fn active_session(&self) -> &ModelHandle<ActiveSession> {
@@ -26326,6 +26406,7 @@ impl TypedActionView for TerminalView {
             | OpenConversationsPalette
             | ExitAgentView
             | StartNewAgentConversation { .. }
+            | ToggleConversationDetailsPanel
             | CancelAmbientAgentTask
             | OpenInlineHistoryMenu
             | OpenModelSelector
@@ -27341,6 +27422,14 @@ impl TypedActionView for TerminalView {
             AwsCliNotInstalledBanner(action) => {
                 self.handle_aws_cli_not_installed_banner_action(*action, ctx);
             }
+            ToggleConversationDetailsPanel => {
+                let will_open = !self.is_conversation_details_panel_open;
+                self.is_conversation_details_panel_open = will_open;
+                if will_open {
+                    self.fetch_and_update_conversation_details_panel(ctx);
+                }
+                ctx.notify();
+            }
             CancelAmbientAgentTask => {
                 self.ambient_agent_view_model.update(ctx, |model, ctx| {
                     model.cancel_task(ctx);
@@ -27881,13 +27970,35 @@ impl View for TerminalView {
             SavePosition::new(stack.finish(), &self.terminal_position_id()).finish()
         };
 
-        (if self.is_file_drop_target && FeatureFlag::SshDragAndDrop.is_enabled() {
+        let final_element = if self.is_file_drop_target && FeatureFlag::SshDragAndDrop.is_enabled()
+        {
             Container::new(element)
                 .with_foreground_overlay(appearance.theme().accent_overlay())
                 .finish()
         } else {
             element
-        }) as _
+        };
+
+        // Wrap with conversation details panel on the right if open.
+        // On WASM, the panel is rendered in the wasm_view instead.
+        let should_show_panel = !cfg!(target_family = "wasm")
+            && self.is_conversation_details_panel_open
+            && self.can_show_conversation_details_ui(app);
+
+        if should_show_panel {
+            Container::new(
+                Flex::row()
+                    .with_main_axis_size(warpui::elements::MainAxisSize::Max)
+                    .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+                    .with_child(Shrinkable::new(1., final_element).finish())
+                    .with_child(ChildView::new(&self.conversation_details_panel).finish())
+                    .finish(),
+            )
+            .with_border(Border::top(1.0).with_border_fill(appearance.theme().outline()))
+            .finish()
+        } else {
+            final_element
+        }
     }
 
     fn on_focus(&mut self, focus_ctx: &FocusContext, ctx: &mut ViewContext<Self>) {
@@ -28048,6 +28159,11 @@ impl View for TerminalView {
 
         if self.current_repo_path.is_some() {
             context.set.insert("InsideRepository");
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.can_show_conversation_details_ui(app) {
+            context.set.insert(init::CAN_SHOW_CONVERSATION_DETAILS_KEY);
         }
 
         let active_conversation = if FeatureFlag::AgentView.is_enabled() {

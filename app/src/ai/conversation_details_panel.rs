@@ -389,7 +389,8 @@ impl ConversationDetailsData {
     }
 
     /// Builds details data from an in-memory `AIConversation` for a local (non-ambient)
-    /// conversation. Used by the WASM transcript/shared-session details panel.
+    /// conversation. Used both by the WASM transcript/shared-session details panel and by the
+    /// native pane-level details panel for the terminal view's active conversation.
     ///
     /// Zap conversations have no server-side creator/executor metadata (there is no server); the
     /// creator/executor fields are always `None` here.
@@ -407,6 +408,20 @@ impl ConversationDetailsData {
             .map(|model| model.warp_tokens + model.byok_tokens + model.custom_endpoint_tokens)
             .sum();
 
+        let first_exchange = conversation.first_exchange();
+        let last_exchange = conversation.latest_exchange();
+        let mut run_time = None;
+        let mut created_at = None;
+        if let (Some(first), Some(last)) = (first_exchange, last_exchange) {
+            if let Some(finish_time) = last.finish_time {
+                let duration = finish_time.signed_duration_since(first.start_time);
+                if duration.num_seconds() >= 0 {
+                    run_time = Some(duration);
+                }
+            }
+            created_at = Some(first.start_time);
+        }
+
         ConversationDetailsData {
             mode: PanelMode::Conversation {
                 directory: conversation.initial_working_directory(),
@@ -419,11 +434,11 @@ impl ConversationDetailsData {
             title,
             creator: None,
             executor: None,
-            created_at: None,
+            created_at,
             credits: Some(conversation.credits_spent()),
             total_tokens: (total_tokens > 0).then_some(total_tokens),
             charged_usage: usage_totals.charged_usage,
-            run_time: None,
+            run_time,
             artifacts: conversation.artifacts().to_vec(),
             open_action: None,
             source_prompt,

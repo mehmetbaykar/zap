@@ -370,6 +370,8 @@ pub enum TerminalAction {
     StartNewAgentConversation {
         origin: AgentViewEntryOrigin,
     },
+    /// Toggle the conversation details panel
+    ToggleConversationDetailsPanel,
     /// Cancel the ambient agent task while it's loading
     CancelAmbientAgentTask,
     OpenInlineHistoryMenu,
@@ -672,6 +674,7 @@ impl fmt::Debug for TerminalAction {
             StartNewAgentConversation { origin } => {
                 write!(f, "StartNewAgentConversation {{ origin: {origin:?} }}")
             }
+            ToggleConversationDetailsPanel => write!(f, "ToggleConversationDetailsPanel"),
             CancelAmbientAgentTask => write!(f, "CancelAmbientAgentTask"),
             OpenInlineHistoryMenu => write!(f, "OpenInlineHistoryMenu"),
             OpenModelSelector => write!(f, "OpenModelSelector"),

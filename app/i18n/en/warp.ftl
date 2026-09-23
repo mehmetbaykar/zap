@@ -1913,6 +1913,7 @@ keybinding-desc-terminal-toggle-block-filter = Toggle block filter on selected o
 keybinding-desc-terminal-toggle-sticky-command-header = Toggle Sticky Command Header in Active Pane
 keybinding-desc-terminal-toggle-autoexecute-mode = Toggle Auto-execute Mode
 keybinding-desc-terminal-toggle-queue-next-prompt = Toggle Queue Next Prompt
+keybinding-desc-terminal-toggle-conversation-details-panel = Toggle Conversation Details Panel
 
 # Pane group bindings
 keybinding-desc-pane-group-close-current-session = Close Current Session
@@ -2905,6 +2906,8 @@ workspace-right-panel-code-review = Code review
 workspace-right-panel-minimize = Minimize
 workspace-right-panel-maximize = Maximize
 terminal-pane-new-agent-conversation-title = New agent conversation
+terminal-pane-show-conversation-details = Show details
+terminal-pane-hide-conversation-details = Hide details
 vertical-tabs-no-tabs-open = No tabs open
 vertical-tabs-untitled-tab = Untitled tab
 vertical-tabs-view-options-tooltip = View options

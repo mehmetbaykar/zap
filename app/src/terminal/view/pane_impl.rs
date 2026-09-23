@@ -7,6 +7,8 @@ use warpui::elements::{
 use warpui::prelude::{ChildView, Container};
 use warpui::text_layout::ClipConfig;
 use warpui::ui_components::components::UiComponent;
+#[cfg(not(target_arch = "wasm32"))]
+use warpui::ui_components::components::UiComponentStyles;
 use warpui::{
     AppContext, Element, ModelHandle, SingletonEntity, TypedActionView, ViewContext,
     WeakModelHandle,
@@ -335,7 +337,34 @@ impl TerminalView {
             None
         };
 
-        let left_of_overflow = self.render_shared_session_header_content(app);
+        let mut left_of_overflow = self.render_shared_session_header_content(app);
+
+        let mut icon_button_count: u32 = 0;
+
+        // Zap: upstream also shows the cloud-mode ambient agent cancel button here while
+        // waiting for a cloud session; only the local conversation details toggle is kept.
+        let button_element = if self.can_show_conversation_details_ui(app) {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                Some(self.render_conversation_details_toggle_button(app))
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(button) = button_element {
+            icon_button_count += 1;
+            if let Some(existing) = left_of_overflow {
+                left_of_overflow =
+                    Some(Flex::row().with_child(existing).with_child(button).finish());
+            } else {
+                left_of_overflow = Some(button);
+            }
+        }
 
         let mut right_row = Flex::row()
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -361,7 +390,7 @@ impl TerminalView {
                 button_size,
             ),
         );
-        let icon_button_count = show_close_button as u32
+        icon_button_count += show_close_button as u32
             + header_ctx.has_overflow_items as u32
             + has_sharing_element as u32;
 
@@ -645,6 +674,55 @@ impl TerminalView {
             );
         })
         .finish()
+    }
+
+    /// Render the info button for toggling the conversation details panel.
+    /// Only available on non-WASM platforms (WASM uses a per-window button instead).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_conversation_details_toggle_button(&self, app: &AppContext) -> Box<dyn Element> {
+        let appearance = Appearance::as_ref(app);
+        let theme = appearance.theme();
+        let is_open = self.is_conversation_details_panel_open;
+        let ui_builder = appearance.ui_builder().clone();
+
+        // Use main text color when panel is open (hover-like appearance), sub color when closed
+        let icon_color = if is_open {
+            blended_colors::text_main(theme, theme.background()).into()
+        } else {
+            blended_colors::text_sub(theme, theme.background()).into()
+        };
+
+        let button = icon_button_with_color(
+            appearance,
+            icons::Icon::Info,
+            is_open, // show active background when panel is open
+            self.conversation_details_panel_toggle_mouse_state.clone(),
+            icon_color,
+        );
+
+        // Add explicit background when panel is open
+        let button = if is_open {
+            button.with_style(UiComponentStyles::default().set_background(theme.surface_2().into()))
+        } else {
+            button
+        };
+
+        button
+            .with_tooltip(move || {
+                let tooltip_text = if is_open {
+                    crate::t!("terminal-pane-hide-conversation-details")
+                } else {
+                    crate::t!("terminal-pane-show-conversation-details")
+                };
+                ui_builder.tool_tip(tooltip_text).build().finish()
+            })
+            .build()
+            .on_click(|ctx, _, _| {
+                ctx.dispatch_typed_action::<PaneHeaderAction<TerminalAction, TerminalAction>>(
+                    PaneHeaderAction::CustomAction(TerminalAction::ToggleConversationDetailsPanel),
+                );
+            })
+            .finish()
     }
 
     /// Render the indicator for terminal mode (no conversation selected).

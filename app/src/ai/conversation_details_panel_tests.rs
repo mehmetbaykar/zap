@@ -9,25 +9,29 @@
 //!   `ConversationDetailsPanel::oz_run_url` in this fork (the "Open in Oz" link surface requires
 //!   `ChannelState::oz_root_url()`, which does not exist here — there is no Oz web app to link
 //!   to).
-//! - `test_from_conversation_populates_local_conversation_fields` and the two
-//!   `test_from_task_includes_linked_directory_when_*` tests are dropped: they depend on upstream
-//!   test-local helpers (`create_restored_conversation`, `create_message_with_directory`,
-//!   `create_agent_output_message`) built on `warp_multi_agent_api::Task` / message-shape
-//!   construction that was not independently re-verified against this fork's current
-//!   `AIConversation::new_restored` surface during this port; porting them without that
-//!   verification risked adding new, unrelated compile failures rather than a working test.
-//!   `from_conversation`'s coverage is consequently reduced to nothing in this port — the
-//!   function itself is still ported (see `conversation_details_panel.rs`), just untested here.
+//! - `test_from_conversation_populates_local_conversation_fields` is ported together with its
+//!   upstream test-local helpers (`create_restored_conversation`, `create_message_with_directory`,
+//!   `create_agent_output_message`); their `warp_multi_agent_api` message shapes are the ones
+//!   `terminal/conversation_restoration_tests.rs` already builds against this fork. The persisted
+//!   `AgentConversationData` is `AgentConversationData::default()` (all `None`/`false`, the same
+//!   values as upstream's explicit literal).
+//! - The two `test_from_task_includes_linked_directory_when_*` tests are dropped: they cover the
+//!   task-backed (cloud `AmbientAgentTask`) mode resolving a linked conversation's directory,
+//!   which this fork's `from_task` does not do (it always sets `directory: None`).
 //! - `create_test_task` drops the `run_time: Some("PT1S".parse().unwrap())` field: this fork's
 //!   `AmbientAgentTask` has no `run_time` field (it's `AmbientAgentTask::run_time()`, a method
 //!   computed from `started_at`/`updated_at`, not stored data).
 
+use std::collections::HashMap;
+
 use chrono::Utc;
+use persistence::model::AgentConversationData;
 use warp_cli::agent::Harness;
-use warpui::App;
+use warp_multi_agent_api as api;
+use warpui::{App, EntityId, SingletonEntity};
 
 use super::{ConversationDetailsData, PanelMode};
-use crate::ai::agent::conversation::AIConversationId;
+use crate::ai::agent::conversation::{AIConversation, AIConversationId};
 use crate::ai::ambient_agents::task::{AgentConfigSnapshot, HarnessConfig, TaskPrincipalInfo};
 use crate::ai::ambient_agents::{AmbientAgentTask, AmbientAgentTaskState};
 use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
@@ -61,6 +65,74 @@ fn create_test_task(task_id: &str) -> AmbientAgentTask {
         last_event_sequence: None,
         children: vec![],
     }
+}
+
+fn create_message_with_directory(id: &str, task_id: &str, directory: &str) -> api::Message {
+    api::Message {
+        fetched_memories: vec![],
+        id: id.to_string(),
+        task_id: task_id.to_string(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::UserQuery(api::message::UserQuery {
+            query: "test query".to_string(),
+            context: Some(api::InputContext {
+                directory: Some(api::input_context::Directory {
+                    pwd: directory.to_string(),
+                    home: String::new(),
+                    pwd_file_symbols_indexed: false,
+                }),
+                ..Default::default()
+            }),
+            referenced_attachments: HashMap::new(),
+            mode: None,
+            intended_agent: Default::default(),
+            origin: None,
+            author: None,
+            source_message: None,
+        })),
+        request_id: "request-1".to_string(),
+        timestamp: None,
+    }
+}
+
+fn create_agent_output_message(id: &str, task_id: &str) -> api::Message {
+    api::Message {
+        fetched_memories: vec![],
+        id: id.to_string(),
+        task_id: task_id.to_string(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::AgentOutput(
+            api::message::AgentOutput {
+                text: "done".to_string(),
+            },
+        )),
+        request_id: "request-1".to_string(),
+        timestamp: None,
+    }
+}
+
+fn create_restored_conversation(
+    conversation_id: AIConversationId,
+    root_task_id: &str,
+    directory: &str,
+    conversation_data: AgentConversationData,
+) -> AIConversation {
+    let task = api::Task {
+        id: root_task_id.to_string(),
+        messages: vec![
+            create_message_with_directory("message-1", root_task_id, directory),
+            create_agent_output_message("message-2", root_task_id),
+        ],
+        dependencies: None,
+        description: String::new(),
+        summary: String::new(),
+        server_data: String::new(),
+    };
+
+    AIConversation::new_restored(conversation_id, vec![task], Some(conversation_data))
+        .expect("restored conversation should build")
 }
 
 #[test]
@@ -153,6 +225,63 @@ fn test_from_task_populates_executor() {
                     .map(|executor| executor.display_name.as_str()),
                 Some("Deploy Agent")
             );
+        });
+    });
+}
+
+#[test]
+fn test_from_conversation_populates_local_conversation_fields() {
+    // Locks in that `ConversationDetailsData::from_conversation` works on native
+    // and surfaces the conversation-derived fields the pane-level conversation
+    // details panel renders for local agent conversations.
+    App::test((), |mut app| async move {
+        let history_model =
+            app.add_singleton_model(|_| BlocklistAIHistoryModel::new(vec![], vec![], &[]));
+
+        let conversation_id = AIConversationId::new();
+        let directory = "/tmp/local-conversation-directory";
+        let conversation = create_restored_conversation(
+            conversation_id,
+            "root-task",
+            directory,
+            AgentConversationData::default(),
+        );
+
+        history_model.update(&mut app, |model, ctx| {
+            model.restore_conversations(EntityId::new(), vec![conversation], ctx);
+        });
+
+        app.update(|ctx| {
+            let conversation = BlocklistAIHistoryModel::as_ref(ctx)
+                .conversation(&conversation_id)
+                .expect("conversation should be present");
+            let data = ConversationDetailsData::from_conversation(conversation, ctx);
+
+            // Mode should be Conversation with the working directory and no server-side
+            // conversation id (since this conversation was restored without a server token).
+            match &data.mode {
+                PanelMode::Conversation {
+                    directory: panel_directory,
+                    server_conversation_id,
+                    ai_conversation_id,
+                    status,
+                } => {
+                    assert_eq!(panel_directory.as_deref(), Some(directory));
+                    assert!(server_conversation_id.is_none());
+                    // `from_conversation` does not have access to the in-memory
+                    // AIConversationId; that field is populated only by the
+                    // management view path (`from_conversation_metadata`).
+                    assert!(ai_conversation_id.is_none());
+                    assert!(status.is_some());
+                }
+                PanelMode::Task { .. } => {
+                    panic!("expected Conversation mode for a local conversation")
+                }
+            }
+
+            assert_eq!(data.title, "test query");
+            assert_eq!(data.source_prompt.as_deref(), Some("test query"));
+            assert!(data.credits.is_some());
         });
     });
 }
