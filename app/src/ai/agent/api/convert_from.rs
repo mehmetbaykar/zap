@@ -85,7 +85,7 @@ pub(crate) fn convert_user_query_mode(mode: Option<&api::UserQueryMode>) -> User
 /// `Oz` and `Gemini` are mapped through faithfully even though that parse
 /// rejects them, so an unsupported harness surfaces as an explicit executor
 /// error rather than silently falling back to a different agent.
-fn convert_run_agents_harness(harness: Option<&api::Harness>) -> String {
+pub(crate) fn convert_run_agents_harness(harness: Option<&api::Harness>) -> String {
     let Some(variant) = harness.and_then(|harness| harness.variant.as_ref()) else {
         return String::new();
     };

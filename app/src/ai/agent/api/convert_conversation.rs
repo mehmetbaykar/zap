@@ -1282,12 +1282,76 @@ pub(crate) fn convert_tool_call_result_to_input(
             // The cloud tool has been physically excised
             None
         }
+        Some(ToolCallResultType::RunAgentsResult(result)) => {
+            use ai::agent::action_result::{
+                RunAgentsAgentOutcome, RunAgentsAgentOutcomeKind, RunAgentsLaunchedExecutionMode,
+                RunAgentsResult,
+            };
+            let run_agents_result = match &result.outcome {
+                Some(api::run_agents_result::Outcome::Launched(launched)) => {
+                    let agents = launched
+                        .agents
+                        .iter()
+                        .map(|outcome| RunAgentsAgentOutcome {
+                            name: outcome.name.clone(),
+                            // Proto field is model_id (renamed from resolved_model_id).
+                            resolved_model_id: outcome.model_id.clone(),
+                            kind: match &outcome.result {
+                                Some(api::run_agents_result::agent_outcome::Result::Launched(
+                                    launched_agent,
+                                )) => RunAgentsAgentOutcomeKind::Launched {
+                                    agent_id: launched_agent.agent_id.clone(),
+                                },
+                                Some(api::run_agents_result::agent_outcome::Result::Failed(
+                                    failed,
+                                )) => RunAgentsAgentOutcomeKind::Failed {
+                                    error: failed.error.clone(),
+                                },
+                                None => RunAgentsAgentOutcomeKind::Failed {
+                                    error: String::new(),
+                                },
+                            },
+                        })
+                        .collect();
+                    #[allow(deprecated)]
+                    let model_id = launched.resolved_model_id.clone();
+                    #[allow(deprecated)]
+                    let harness_type =
+                        crate::ai::agent::api::convert_from::convert_run_agents_harness(
+                            launched.resolved_harness.as_ref(),
+                        );
+                    RunAgentsResult::Launched {
+                        model_id,
+                        harness_type,
+                        // Zap launches children locally only.
+                        execution_mode: RunAgentsLaunchedExecutionMode::Local,
+                        agents,
+                    }
+                }
+                Some(api::run_agents_result::Outcome::Denied(denied)) => RunAgentsResult::Denied {
+                    reason: denied.reason.clone(),
+                },
+                Some(api::run_agents_result::Outcome::Failure(failure)) => {
+                    RunAgentsResult::Failure {
+                        error: failure.error.clone(),
+                    }
+                }
+                None => RunAgentsResult::Cancelled,
+            };
+            Some(AIAgentInput::ActionResult {
+                result: AIAgentActionResult {
+                    id: tool_call_id.into(),
+                    task_id: task_id.clone(),
+                    result: AIAgentActionResultType::RunAgents(run_agents_result),
+                },
+                context,
+            })
+        }
         // Deprecated/unused result types.
         Some(ToolCallResultType::SuggestCreatePlan(..))
         | Some(ToolCallResultType::SuggestPlan(..))
         // Stripped in this fork: no codebase index, no cloud orchestration, no recording.
         | Some(ToolCallResultType::SearchCodebase(..))
-        | Some(ToolCallResultType::RunAgentsResult(..))
         | Some(ToolCallResultType::WaitForEvents(..))
         | Some(ToolCallResultType::StartRecording(..))
         | Some(ToolCallResultType::StopRecording(..)) => None,
@@ -1713,3 +1777,7 @@ impl From<String> for crate::ai::agent::MessageId {
         crate::ai::agent::MessageId(s)
     }
 }
+
+#[cfg(test)]
+#[path = "convert_conversation_tests.rs"]
+mod tests;
