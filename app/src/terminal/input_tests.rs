@@ -732,6 +732,49 @@ fn select_first_command_line_of_block(
 }
 
 #[test]
+fn zero_state_hint_text_only_registers_active_slash_command_placeholders() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+
+        let terminal = add_window_with_bootstrapped_terminal(
+            &mut app, None, /* history_file_commands */
+            None,
+        )
+        .await;
+        let input = terminal.read(&app, |terminal, _| terminal.input().clone());
+        let editor = input.read(&app, |input, _| input.editor().clone());
+        let rename_tab_prefix = format!(
+            "{} ",
+            crate::search::slash_command_menu::static_commands::commands::RENAME_TAB.name
+        );
+        let fork_prefix = format!(
+            "{} ",
+            crate::search::slash_command_menu::static_commands::commands::FORK.name
+        );
+
+        // A stale placeholder for a command that is not active (no agent view here) must be
+        // cleared, while always-active commands keep theirs.
+        editor.update(&mut app, |editor, ctx| {
+            editor.set_placeholder_text_with_prefix(fork_prefix.clone(), "stale hint", ctx);
+        });
+        input.update(&mut app, |input, ctx| {
+            input.set_zero_state_hint_text(ctx);
+        });
+
+        assert!(
+            editor.read(&app, |editor, _| editor
+                .placeholder_text(&rename_tab_prefix)
+                .is_some()),
+            "always-active slash command placeholders should still be registered"
+        );
+        assert!(
+            editor.read(&app, |editor, _| editor.placeholder_text(&fork_prefix).is_none()),
+            "/fork should not be registered outside an active agent conversation"
+        );
+    });
+}
+
+#[test]
 fn test_input_tab() {
     App::test((), |mut app| async move {
         initialize_app(&mut app);
