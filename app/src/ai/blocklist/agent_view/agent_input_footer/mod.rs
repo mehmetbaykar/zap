@@ -309,6 +309,7 @@ impl AgentInputFooter {
             ActionButton::new("", AgentInputButtonTheme)
                 .with_icon(Icon::Plus)
                 .with_tooltip(crate::t!("terminal-attach-file-tooltip"))
+                .with_tooltip_keybinding(crate::terminal::view::init::ATTACH_FILE_KEYBINDING)
                 .with_size(button_size)
                 .with_tooltip_alignment(TooltipAlignment::Left)
                 .on_click(|ctx| {
