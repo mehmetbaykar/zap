@@ -516,6 +516,11 @@ impl BlocklistAIHistoryModel {
             orchestration_harness,
             ctx,
         );
+        // Upstream marks this in `start_new_child_conversation(.., is_remote: true, ..)`;
+        // `assign_run_id_for_conversation` below persists it.
+        if let Some(conversation) = self.conversation_mut(&conversation_id) {
+            conversation.mark_as_remote_child();
+        }
         if !fallback_title.is_empty()
             && let Some(conversation) = self.conversation_mut(&conversation_id)
         {

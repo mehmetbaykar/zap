@@ -2882,7 +2882,6 @@ server-file-browser-upload-verify-size = Verification failed: size mismatch for 
 workspace-left-panel-close-panel = Close panel
 workspace-tabs-panel-tooltip = Tabs panel
 workspace-tools-panel-tooltip = Tools panel
-workspace-agent-management-panel-tooltip = Agent management panel
 workspace-code-review-panel-tooltip = Code review panel
 workspace-notifications-tooltip = Notifications
 workspace-new-tab-tooltip = New Tab
