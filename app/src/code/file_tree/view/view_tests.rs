@@ -1,9 +1,11 @@
-use repo_metadata::RepoMetadataModel;
+use std::path::Path;
+
 use repo_metadata::entry::{DirectoryEntry, Entry, FileMetadata};
 use repo_metadata::file_tree_store::FileTreeState;
 use repo_metadata::local_model::IndexedRepoState;
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
+use repo_metadata::{RepoMetadataModel, RepositoryIdentifier};
 use settings::Setting;
 use virtual_fs::{Stub, VirtualFS};
 use warp_core::ui::appearance::Appearance;
@@ -120,6 +122,42 @@ fn flattened_paths(
         .collect()
 }
 
+async fn await_repository_indexed(
+    app: &mut App,
+    repository_metadata_model: &ModelHandle<RepoMetadataModel>,
+    repo_root: &Path,
+) {
+    let id = RepositoryIdentifier::local(std_path(repo_root));
+    let completion =
+        repository_metadata_model.update(app, |model, ctx| model.repository_indexed(&id, ctx));
+    completion.await;
+
+    repository_metadata_model.read(app, |model, ctx| {
+        assert!(matches!(
+            model.repository_state(&id, ctx),
+            Some(IndexedRepoState::Indexed(_))
+        ));
+    });
+    futures_lite::future::yield_now().await;
+}
+
+async fn await_directory_loaded(
+    app: &mut App,
+    repository_metadata_model: &ModelHandle<RepoMetadataModel>,
+    repo_root: &Path,
+    dir_path: &Path,
+) {
+    let repo_root = std_path(repo_root);
+    let dir_path = std_path(dir_path);
+    let completion = repository_metadata_model
+        .update(app, |model, ctx| {
+            model.load_directory_with_completion(&repo_root, &dir_path, ctx)
+        })
+        .expect("directory load should start or join an in-flight load");
+    completion.await.expect("directory should load");
+    futures_lite::future::yield_now().await;
+}
+
 fn set_show_hidden_files(app: &mut App, show_hidden_files: bool) {
     CodeSettings::handle(app).update(app, |settings, ctx| {
         Setting::set_value(&mut settings.show_hidden_files, show_hidden_files, ctx)
@@ -141,7 +179,7 @@ fn hidden_files_are_filtered_until_setting_is_enabled() {
         let visible_file = tree.join("visible.txt");
 
         App::test((), |mut app| async move {
-            let _ = initialize_app(&mut app);
+            let (_, repository_metadata_model) = initialize_app(&mut app);
             set_show_hidden_files(&mut app, false);
             let (_, file_tree_view) = app.add_window(WindowStyle::NotStealFocus, FileTreeView::new);
 
@@ -149,6 +187,7 @@ fn hidden_files_are_filtered_until_setting_is_enabled() {
                 view.set_is_active(true, ctx);
                 view.set_root_directories(vec![tree.clone()], ctx);
             });
+            await_repository_indexed(&mut app, &repository_metadata_model, &tree).await;
 
             file_tree_view.read(&app, |view, _ctx| {
                 let paths = flattened_paths(view, &tree);
@@ -181,7 +220,7 @@ fn hidden_root_directory_is_not_filtered() {
         let hidden_file = hidden_root.join(".secret");
 
         App::test((), |mut app| async move {
-            let _ = initialize_app(&mut app);
+            let (_, repository_metadata_model) = initialize_app(&mut app);
             set_show_hidden_files(&mut app, false);
             let (_, file_tree_view) = app.add_window(WindowStyle::NotStealFocus, FileTreeView::new);
 
@@ -189,6 +228,7 @@ fn hidden_root_directory_is_not_filtered() {
                 view.set_is_active(true, ctx);
                 view.set_root_directories(vec![hidden_root.clone()], ctx);
             });
+            await_repository_indexed(&mut app, &repository_metadata_model, &hidden_root).await;
 
             file_tree_view.read(&app, |view, _ctx| {
                 let paths = flattened_paths(view, &hidden_root);
@@ -213,7 +253,7 @@ fn selected_hidden_file_is_cleared_when_filtered() {
             let hidden_file = tree.join(".env");
 
             App::test((), |mut app| async move {
-                let _ = initialize_app(&mut app);
+                let (_, repository_metadata_model) = initialize_app(&mut app);
                 set_show_hidden_files(&mut app, true);
 
                 let (_, file_tree_view) =
@@ -221,7 +261,10 @@ fn selected_hidden_file_is_cleared_when_filtered() {
                 file_tree_view.update(&mut app, |view, ctx| {
                     view.set_is_active(true, ctx);
                     view.set_root_directories(vec![tree.clone()], ctx);
+                });
+                await_repository_indexed(&mut app, &repository_metadata_model, &tree).await;
 
+                file_tree_view.update(&mut app, |view, ctx| {
                     let root_dir = view.root_directories.get(&std_path(&tree)).unwrap();
                     let (index, _) = root_dir
                         .items
@@ -425,6 +468,8 @@ fn repo_backed_unloaded_directory_loads_through_model() {
                     ctx,
                 );
             });
+            await_directory_loaded(&mut app, &repository_metadata_model, &repo_root, &src_dir)
+                .await;
 
             file_tree_view.read(&app, |view, _ctx| {
                 assert!(
@@ -453,6 +498,13 @@ fn repo_backed_unloaded_directory_loads_through_model() {
                     ctx,
                 );
             });
+            await_directory_loaded(
+                &mut app,
+                &repository_metadata_model,
+                &repo_root,
+                &nested_dir,
+            )
+            .await;
 
             file_tree_view.read(&app, |view, _ctx| {
                 assert!(
@@ -614,6 +666,7 @@ fn failed_lazy_loaded_path_registration_is_retried() {
             file_tree_view.update(&mut app, |view, ctx| {
                 view.set_root_directories(vec![displayed_root.clone()], ctx);
             });
+            await_repository_indexed(&mut app, &repository_metadata_model, &displayed_root).await;
 
             file_tree_view.read(&app, |view, _ctx| {
                 assert!(view.registered_lazy_loaded_paths.contains(&std_path(&displayed_root)));
@@ -639,7 +692,6 @@ fn failed_lazy_loaded_path_registration_is_retried() {
 }
 
 // ── Ancestor grouping (APP-4106) ────────────────────────────────────
-
 #[test]
 fn sibling_roots_are_preserved() {
     VirtualFS::test("file_tree_sibling_roots", |dirs, mut vfs| {
@@ -721,7 +773,7 @@ fn auto_expand_preserves_existing_selection() {
             let sub = tree.join("sub");
 
             App::test((), |mut app| async move {
-                let _ = initialize_app(&mut app);
+                let (_, repository_metadata_model) = initialize_app(&mut app);
                 let (_, file_tree_view) =
                     app.add_window(WindowStyle::NotStealFocus, FileTreeView::new);
 
@@ -729,6 +781,7 @@ fn auto_expand_preserves_existing_selection() {
                     view.set_is_active(true, ctx);
                     view.set_root_directories(vec![tree.clone()], ctx);
                 });
+                await_repository_indexed(&mut app, &repository_metadata_model, &tree).await;
 
                 // Simulate a prior explicit selection (e.g. user focused a
                 // file in the code editor and `scroll_to_file` selected it).
@@ -783,7 +836,7 @@ fn click_on_file_under_absorbed_descendant_keeps_file_selected() {
             let main_rs = warp_server.join("main.rs");
 
             App::test((), |mut app| async move {
-                let _ = initialize_app(&mut app);
+                let (_, repository_metadata_model) = initialize_app(&mut app);
                 let (_, file_tree_view) =
                     app.add_window(WindowStyle::NotStealFocus, FileTreeView::new);
 
@@ -792,8 +845,14 @@ fn click_on_file_under_absorbed_descendant_keeps_file_selected() {
                 file_tree_view.update(&mut app, |view, ctx| {
                     view.set_is_active(true, ctx);
                     view.set_root_directories(vec![code.clone()], ctx);
+                });
+                await_repository_indexed(&mut app, &repository_metadata_model, &code).await;
+
+                file_tree_view.update(&mut app, |view, ctx| {
                     view.toggle_folder_expansion(&std_path(&code), &std_path(&warp_server), ctx);
                 });
+                await_directory_loaded(&mut app, &repository_metadata_model, &code, &warp_server)
+                    .await;
 
                 // Simulate a click on main.rs (select_id is what the click
                 // action and the active-file scroll both go through).
@@ -849,13 +908,14 @@ fn pending_focus_target_does_not_re_scroll_after_first_apply() {
         let warp_server = tree.join("warp-server");
 
         App::test((), |mut app| async move {
-            let _ = initialize_app(&mut app);
+            let (_, repository_metadata_model) = initialize_app(&mut app);
             let (_, file_tree_view) = app.add_window(WindowStyle::NotStealFocus, FileTreeView::new);
 
             file_tree_view.update(&mut app, |view, ctx| {
                 view.set_is_active(true, ctx);
                 view.set_root_directories(vec![warp_server.clone(), tree.clone()], ctx);
             });
+            await_repository_indexed(&mut app, &repository_metadata_model, &tree).await;
 
             // Initial apply should have scrolled once.
             file_tree_view.read(&app, |view, _ctx| {
@@ -895,7 +955,7 @@ fn focus_follows_absorbed_descendant_once_its_item_is_materialized() {
         let warp_server = tree.join("warp-server");
 
         App::test((), |mut app| async move {
-            let _ = initialize_app(&mut app);
+            let (_, repository_metadata_model) = initialize_app(&mut app);
             let (_, file_tree_view) = app.add_window(WindowStyle::NotStealFocus, FileTreeView::new);
 
             // User cd's into warp-server with ~/tree as the ancestor root.
@@ -905,6 +965,7 @@ fn focus_follows_absorbed_descendant_once_its_item_is_materialized() {
                 view.set_is_active(true, ctx);
                 view.set_root_directories(vec![warp_server.clone(), tree.clone()], ctx);
             });
+            await_repository_indexed(&mut app, &repository_metadata_model, &tree).await;
 
             file_tree_view.read(&app, |view, _ctx| {
                 // Single displayed root, descendant absorbed.
