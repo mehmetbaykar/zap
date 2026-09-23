@@ -3551,3 +3551,7 @@ fn format_conversation_search_phase(phase: &ConversationSearchPhase) -> String {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "output_tests.rs"]
+mod tests;

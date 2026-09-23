@@ -2007,6 +2007,11 @@ impl BlocklistAIController {
         });
     }
 
+    #[cfg(test)]
+    pub fn get_ambient_agent_task_id(&self) -> Option<AmbientAgentTaskId> {
+        self.ambient_agent_task_id
+    }
+
     /// Set the per-session directory for downloading file attachments.
     pub fn set_attachments_download_dir(&mut self, dir: std::path::PathBuf) {
         self.attachments_download_dir = Some(dir);
@@ -4391,3 +4396,7 @@ fn byop_get_running_command_for_lrc(terminal_model: &TerminalModel) -> Option<Ru
         is_alt_screen_active,
     })
 }
+
+#[cfg(test)]
+#[path = "controller_tests.rs"]
+mod tests;

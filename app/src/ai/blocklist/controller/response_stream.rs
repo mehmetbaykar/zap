@@ -19,6 +19,9 @@ use crate::ai::byop_readiness::BlockedByopReadinessError;
 use crate::network::NetworkStatus;
 use crate::{report_error, send_telemetry_from_ctx};
 
+/// Maximum number of in-request retries for a failure received before any client actions.
+const MAX_RETRIES: usize = 3;
+
 /// Request routing parameters for the BYOP path. Extracted from LLMId, settings, and conversation,
 /// then handed to the spawn closure all at once (ctx can't cross await boundaries).
 pub(super) struct PendingTitleGeneration {
@@ -249,9 +252,44 @@ pub struct ResponseStream {
     /// Note this is unique compared to `id`; this is unique across retry requests while the response
     /// stream id remains stable.
     current_request_id: Option<Uuid>,
+
+    #[cfg(test)]
+    suppress_request_spawn: bool,
 }
 
 impl ResponseStream {
+    #[cfg(test)]
+    pub fn emit_response_event_for_test(
+        &mut self,
+        event: warp_multi_agent_api::ResponseEvent,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let request_id = self
+            .current_request_id
+            .expect("test response stream must have a current request");
+        self.handle_response_stream_event(request_id, Ok(event), ctx);
+    }
+
+    #[cfg(test)]
+    pub fn emit_error_event_for_test(
+        &mut self,
+        error: Arc<AIApiError>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let request_id = self
+            .current_request_id
+            .expect("test response stream must have a current request");
+        self.handle_response_stream_event(request_id, Err(error), ctx);
+    }
+
+    /// Spends every in-request retry, so the next failure can't be retried.
+    #[cfg(test)]
+    pub fn exhaust_recovery_budget_for_test(&mut self, ctx: &mut ModelContext<Self>) {
+        while self.retry_count < MAX_RETRIES {
+            self.retry(ctx);
+        }
+    }
+
     #[cfg(test)]
     pub fn new_for_test(id: ResponseStreamId) -> Self {
         let (cancellation_tx, _cancellation_rx) = oneshot::channel();
@@ -269,6 +307,7 @@ impl ResponseStream {
             pending_title_generation: None,
             should_resume_conversation_after_stream_finished: false,
             current_request_id: Some(Uuid::new_v4()),
+            suppress_request_spawn: true,
         }
     }
 
@@ -341,6 +380,8 @@ impl ResponseStream {
             pending_title_generation,
             should_resume_conversation_after_stream_finished: false,
             current_request_id: Some(request_id),
+            #[cfg(test)]
+            suppress_request_spawn: false,
         }
     }
 
@@ -403,6 +444,10 @@ impl ResponseStream {
 
         let request_id = Uuid::new_v4();
         self.current_request_id = Some(request_id);
+        #[cfg(test)]
+        if self.suppress_request_spawn {
+            return;
+        }
         let params = self.params.clone();
         let byop_dispatch = byop_dispatch_info(&params, &self.ai_identifiers, ctx);
         let prepared_params = params.prepare_for_dispatch(ctx);
@@ -554,7 +599,6 @@ impl ResponseStream {
                 // 2. The error is retryable
                 // 3. We haven't exceeded max retries
                 // 4. We're online
-                const MAX_RETRIES: usize = 3;
                 let network_status = NetworkStatus::as_ref(ctx);
                 let is_online = network_status.is_online();
                 let is_retryable = e.is_retryable();
@@ -708,3 +752,7 @@ async fn byop_required_response_stream(
     .take_until(cancellation_rx);
     Ok(Box::pin(error_stream))
 }
+
+#[cfg(test)]
+#[path = "response_stream_tests.rs"]
+mod tests;
