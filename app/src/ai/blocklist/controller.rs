@@ -585,6 +585,11 @@ impl BlocklistAIController {
                         );
                     });
                 }
+                // Unlock any pending-LRC row so it isn't left locked if the action
+                // completes without triggering a follow-up request.
+                QueuedQueryModel::handle(ctx).update(ctx, |model, ctx| {
+                    model.unlock_pending_lrc_rows(*conversation_id, ctx);
+                });
                 return;
             }
             let trigger = if has_manual_follow_up {
@@ -596,9 +601,18 @@ impl BlocklistAIController {
             // original prompt); if there is none, take the original follow-up path (sending only
             // finished_action_results).
             if me.flush_pending_byop_request_after_finished_action(*conversation_id, ctx) {
+                // The resent request carries the snapshot, same as a follow-up below.
+                QueuedQueryModel::handle(ctx).update(ctx, |model, ctx| {
+                    model.unlock_pending_lrc_rows(*conversation_id, ctx);
+                });
                 return;
             }
             me.send_follow_up_for_conversation(*conversation_id, trigger, ctx);
+            // Unlock any query queued during the pre-snapshot window now that the
+            // snapshot has been sent.
+            QueuedQueryModel::handle(ctx).update(ctx, |model, ctx| {
+                model.unlock_pending_lrc_rows(*conversation_id, ctx);
+            });
         });
 
         ctx.subscribe_to_model(&agent_view_controller, |me, _, event, ctx| {
@@ -2926,7 +2940,9 @@ impl BlocklistAIController {
             );
         });
 
-        if input_contains_user_query {
+        // Skip the context reset for a fired queued-prompt row: its attachments came from
+        // the row, so the live staging belongs to the user's next prompt.
+        if input_contains_user_query && !is_queued_prompt {
             let pending_document_id = self.context_model.as_ref(ctx).pending_document_id();
             self.context_model.update(ctx, |context_model, ctx| {
                 context_model.reset_context_to_default(ctx);
@@ -3214,7 +3230,10 @@ impl BlocklistAIController {
             ctx,
         );
 
-        if input_contains_user_query {
+        // Skip the context reset for a fired queued-prompt row (`is_queued_prompt`): its
+        // attachments came from the row, not the live staging, so the live `pending_attachments`
+        // belong to the user's next prompt and must be preserved.
+        if input_contains_user_query && !is_queued_prompt {
             // Get the pending document ID before clearing context
             let pending_document_id = self.context_model.as_ref(ctx).pending_document_id();
 
@@ -3339,6 +3358,11 @@ impl BlocklistAIController {
         // Discard any queued passive suggestion results for this conversation.
         self.pending_passive_suggestion_results
             .remove(&conversation_id);
+
+        // Remove any locked pending-LRC queries so they don't linger after cancellation.
+        QueuedQueryModel::handle(ctx).update(ctx, |model, ctx| {
+            model.remove_pending_lrc_rows(conversation_id, ctx);
+        });
 
         if !self
             .in_flight_response_streams

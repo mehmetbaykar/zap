@@ -12413,6 +12413,7 @@ impl Input {
                 QueuedQueryModel::as_ref(ctx)
                     .queue(conversation_id)
                     .first()
+                    .filter(|row| !row.is_locked())
                     .map(|row| (row.id(), row.text().to_owned(), row.is_command()))
             });
             if let (Some(conversation_id), Some((query_id, text, is_command))) =
