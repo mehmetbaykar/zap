@@ -14605,11 +14605,11 @@ impl TypedActionView for Input {
                 }
 
                 if FeatureFlag::AgentView.is_enabled() {
-                    if matches!(origin, AgentViewEntryOrigin::Keybinding(..)) {
+                    if let AgentViewEntryOrigin::Keybinding(keystroke) = origin {
                         let should_start_new_conversation =
                             self.agent_view_controller.update(ctx, |controller, ctx| {
-                                controller.should_start_new_conversation_for_keybinding(
-                                    START_NEW_CONVERSATION_KEYBINDING_NAME,
+                                controller.should_start_new_conversation_for_keystroke(
+                                    keystroke.clone(),
                                     ctx,
                                 )
                             });
