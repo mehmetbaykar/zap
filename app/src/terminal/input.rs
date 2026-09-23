@@ -373,6 +373,7 @@ pub fn get_input_box_top_border_width() -> f32 {
 
 pub const COMPLETIONS_MENU_WIDTH: f32 = 330.;
 pub const OPEN_COMPLETIONS_KEYBINDING_NAME: &str = "input:open_completion_suggestions";
+pub(crate) const EXTERNAL_ALT_C_BINDING_CONTEXT: &str = "ExternalAltCDirectorySearch";
 pub const INPUT_A11Y_LABEL_KEY: &str = "terminal-input-a11y-label";
 pub const INPUT_A11Y_HELPER_KEY: &str = "terminal-input-a11y-helper";
 pub const AI_COMMAND_SEARCH_HINT_KEY: &str = "terminal-input-ai-command-search-hint";
@@ -2002,6 +2003,14 @@ pub fn init(app: &mut AppContext) {
         .with_enabled(|| FeatureFlag::ShellWidgetHandoff.is_enabled())
         .with_context_predicate(id!("Input") & !id!("VoltronActive") & !id!("LongRunningCommand"))
         .with_key_binding("ctrl-t"),
+        EditableBinding::new(
+            "workspace:trigger_external_alt_c_directory_search",
+            "External Directory Search",
+            WorkspaceAction::TriggerExternalAltCDirectorySearch,
+        )
+        .with_enabled(|| FeatureFlag::ShellWidgetHandoff.is_enabled())
+        .with_context_predicate(id!(EXTERNAL_ALT_C_BINDING_CONTEXT))
+        .with_key_binding("alt-c"),
     ]);
 
     if let Some(custom_action) = workflows::CategoriesView::custom_action() {
@@ -14411,6 +14420,10 @@ impl Input {
 
     pub fn should_show_universal_developer_input(&self, app: &AppContext) -> bool {
         InputSettings::as_ref(app).is_universal_developer_input_enabled(app)
+    }
+
+    pub(crate) fn is_voltron_open(&self) -> bool {
+        self.is_voltron_open
     }
 
     /// Returns whether the input box is currently pinned to the top of the screen.

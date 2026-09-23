@@ -343,6 +343,7 @@ pub enum WorkspaceAction {
     ToggleKeybindingsPage,
     ShowCommandSearch(CommandSearchOptions),
     TriggerExternalCtrlTFileSearch,
+    TriggerExternalAltCDirectorySearch,
     CreatePersonalNotebook,
     ImportToPersonalDrive,
     CreatePersonalWorkflow,
@@ -924,6 +925,7 @@ impl WorkspaceAction {
             | ToggleKeybindingsPage
             | ShowCommandSearch(_)
             | TriggerExternalCtrlTFileSearch
+            | TriggerExternalAltCDirectorySearch
             | ToggleMouseReporting
             | ToggleScrollReporting
             | ToggleFocusReporting
