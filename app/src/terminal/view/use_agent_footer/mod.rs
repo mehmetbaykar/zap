@@ -1281,7 +1281,7 @@ impl UseAgentToolbar {
                 ctx.emit(UseAgentToolbarEvent::ToggleCodeReviewPane(*agent));
             }
             AgentInputFooterEvent::ToggleFileExplorer(agent) => {
-                ctx.emit(UseAgentToolbarEvent::ToggleFileExplorer(Some(*agent)));
+                ctx.emit(UseAgentToolbarEvent::ToggleFileExplorer(*agent));
             }
             AgentInputFooterEvent::OpenRichInput => {
                 ctx.emit(UseAgentToolbarEvent::OpenRichInput);

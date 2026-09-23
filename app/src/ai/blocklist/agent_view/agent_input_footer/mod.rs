@@ -591,6 +591,19 @@ impl AgentInputFooter {
                 ctx.notify()
             }
         });
+        // The File explorer item's availability follows this setting, so the footer has to
+        // repaint when it is toggled rather than waiting for an unrelated re-render.
+        ctx.subscribe_to_model(
+            &crate::settings::CodeSettings::handle(ctx),
+            |_, _, event, ctx| {
+                if matches!(
+                    event,
+                    crate::settings::CodeSettingsChangedEvent::ShowProjectExplorer { .. }
+                ) {
+                    ctx.notify()
+                }
+            },
+        );
         let prompt_for_session_settings = prompt.clone();
         ctx.subscribe_to_model(
             &SessionSettings::handle(ctx),
@@ -1168,9 +1181,9 @@ impl AgentInputFooter {
             AgentToolbarItemKind::ContextChip(chip_kind) => {
                 self.cli_display_chip(chip_kind.clone(), app)
             }
-            AgentToolbarItemKind::FileExplorer => {
-                Some(ChildView::new(&self.file_explorer_button).finish())
-            }
+            AgentToolbarItemKind::FileExplorer => item
+                .is_available(app)
+                .then(|| ChildView::new(&self.file_explorer_button).finish()),
             AgentToolbarItemKind::RichInput => FeatureFlag::CLIAgentRichInput
                 .is_enabled()
                 .then(|| ChildView::new(&self.rich_input_button).finish()),
@@ -1732,10 +1745,11 @@ impl AgentInputFooter {
             AgentToolbarItemKind::FastForwardToggle => FeatureFlag::FastForwardAutoexecuteButton
                 .is_enabled()
                 .then(|| ChildView::new(&self.fast_forward_button).finish()),
+            AgentToolbarItemKind::FileExplorer => item
+                .is_available(app)
+                .then(|| ChildView::new(&self.file_explorer_button).finish()),
             // Handled by the available_in() guard above; included for exhaustiveness.
-            AgentToolbarItemKind::FileExplorer
-            | AgentToolbarItemKind::RichInput
-            | AgentToolbarItemKind::Settings => None,
+            AgentToolbarItemKind::RichInput | AgentToolbarItemKind::Settings => None,
         }
     }
 
@@ -1924,9 +1938,9 @@ impl TypedActionView for AgentInputFooter {
                 }
             }
             AgentInputFooterAction::ToggleFileExplorer => {
-                if let Some(agent) = self.cli_agent(ctx) {
-                    ctx.emit(AgentInputFooterEvent::ToggleFileExplorer(agent));
-                }
+                ctx.emit(AgentInputFooterEvent::ToggleFileExplorer(
+                    self.cli_agent(ctx),
+                ));
             }
             AgentInputFooterAction::ToggleRichInput => {
                 if self.has_active_cli_agent_input_session(ctx) {
@@ -2071,7 +2085,9 @@ pub enum AgentInputFooterEvent {
     /// Insert text into the CLI agent rich input.
     InsertIntoCLIRichInput(String),
     ToggleCodeReviewPane(CLIAgent),
-    ToggleFileExplorer(CLIAgent),
+    /// Toggle the file explorer side panel. `None` when no CLI agent session is
+    /// attached to this pane.
+    ToggleFileExplorer(Option<CLIAgent>),
     OpenRichInput,
     HideRichInput,
     ToggledChipMenu {
