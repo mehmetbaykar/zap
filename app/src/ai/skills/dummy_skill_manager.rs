@@ -83,7 +83,12 @@ impl SkillManager {
         None
     }
 
-    pub fn find_skill_by_name(&self, _name: &str) -> Option<&ParsedSkill> {
+    pub fn find_skill_by_name(
+        &self,
+        _name: &str,
+        _path_origin: &SkillPathOrigin,
+        _ctx: &AppContext,
+    ) -> Option<&ParsedSkill> {
         None
     }
 

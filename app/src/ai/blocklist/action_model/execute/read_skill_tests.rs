@@ -1,13 +1,20 @@
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 
 use ai::agent::action_result::AnyFileContent;
-use ai::skills::{SkillReference, parse_skill};
+use ai::skills::{ParsedSkill, SkillProvider, SkillReference, SkillScope, parse_skill};
+use async_channel::unbounded;
 use repo_metadata::RepoMetadataModel;
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
 use tempfile::TempDir;
-use warpui::App;
+use warp_core::HostId;
+use warp_core::features::FeatureFlag;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
+use warp_util::remote_path::RemotePath;
+use warp_util::standardized_path::StandardizedPath;
+use warpui::{App, ModelHandle};
 use watcher::HomeDirectoryWatcher;
 
 use super::*;
@@ -17,7 +24,10 @@ use crate::ai::agent::{
     ReadSkillResult,
 };
 use crate::ai::blocklist::action_model::AIConversationId;
-use crate::ai::skills::SkillManager;
+use crate::ai::skills::{BundledSkillActivation, SkillManager};
+use crate::terminal::model::session::active_session::ActiveSession;
+use crate::terminal::model::session::{BootstrapSessionType, SessionId, SessionInfo, Sessions};
+use crate::terminal::model_events::ModelEventDispatcher;
 use crate::warp_managed_paths_watcher::WarpManagedPathsWatcher;
 
 fn initialize_app(app: &mut App) {
@@ -27,6 +37,109 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
     app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
     app.add_singleton_model(SkillManager::new);
+}
+
+fn add_test_read_skill_executor(app: &mut App) -> ModelHandle<ReadSkillExecutor> {
+    let sessions = app.add_model(|_| Sessions::new_for_test());
+    let (_model_events_tx, model_events_rx) = unbounded();
+    let model_event_dispatcher =
+        app.add_model(|ctx| ModelEventDispatcher::new(model_events_rx, sessions.clone(), ctx));
+    let active_session = app
+        .add_model(|ctx| ActiveSession::new(sessions.clone(), model_event_dispatcher.clone(), ctx));
+    app.add_model(|_| ReadSkillExecutor::new(active_session))
+}
+
+/// Builds an executor whose active session is a Warpified remote session, connected to
+/// `host_id` when it is `Some` and still waiting for its remote server otherwise.
+fn add_remote_read_skill_executor(
+    app: &mut App,
+    host_id: Option<HostId>,
+) -> ModelHandle<ReadSkillExecutor> {
+    let session_id = SessionId::from(42);
+    let sessions = app.add_model(|_| Sessions::new_for_test());
+    sessions.update(app, |sessions, _ctx| {
+        sessions.register_session_for_test(
+            SessionInfo::new_for_test()
+                .with_id(session_id)
+                .with_session_type(BootstrapSessionType::WarpifiedRemote),
+        );
+    });
+    if let Some(host_id) = host_id {
+        let session = sessions
+            .read(app, |sessions, _ctx| sessions.get(session_id))
+            .unwrap();
+        session.set_remote_host_id(Some(host_id));
+    }
+
+    let (_model_events_tx, model_events_rx) = unbounded();
+    let model_event_dispatcher =
+        app.add_model(|ctx| ModelEventDispatcher::new(model_events_rx, sessions.clone(), ctx));
+    model_event_dispatcher.update(app, |dispatcher, _ctx| {
+        dispatcher.set_active_session_id(session_id);
+    });
+    let active_session = app
+        .add_model(|ctx| ActiveSession::new(sessions.clone(), model_event_dispatcher.clone(), ctx));
+    app.add_model(|_| ReadSkillExecutor::new(active_session))
+}
+
+fn bundled_skill(name: &str) -> ParsedSkill {
+    ParsedSkill {
+        name: name.to_string(),
+        description: format!("{name} bundled skill"),
+        path: LocalOrRemotePath::Local(PathBuf::from(format!("/bundled/skills/{name}/SKILL.md"))),
+        content: format!("# {name}"),
+        line_range: None,
+        provider: SkillProvider::Zap,
+        scope: SkillScope::Bundled,
+    }
+}
+
+fn remote_skill_path(host_id: &HostId, path: &str) -> LocalOrRemotePath {
+    LocalOrRemotePath::Remote(RemotePath::new(
+        host_id.clone(),
+        StandardizedPath::try_new(path).unwrap(),
+    ))
+}
+
+/// Builds a `ReadSkill` action for `skill`.
+fn read_skill_action(skill: SkillReference) -> AIAgentAction {
+    AIAgentAction {
+        id: AIAgentActionId::from("test-action-id".to_string()),
+        action: AIAgentActionType::ReadSkill(ReadSkillRequest { skill }),
+        task_id: TaskId::new("test-task-id".to_string()),
+        requires_result: false,
+    }
+}
+
+/// Builds the reference the BYOP `read_skill` tool produces: the bare skill name packed into
+/// the `Path` slot (see `agent_providers::tools::skill`).
+fn byop_name_reference(name: &str) -> SkillReference {
+    SkillReference::Path(LocalOrRemotePath::Local(PathBuf::from(name)))
+}
+
+/// Runs `action` synchronously and returns the read skill's `(file_name, content)`, or the
+/// error message when the read failed.
+fn execute_sync_read(
+    app: &mut App,
+    executor_handle: &ModelHandle<ReadSkillExecutor>,
+    action: &AIAgentAction,
+) -> Result<(String, AnyFileContent), String> {
+    executor_handle.update(app, |executor, ctx| {
+        let input = ExecuteActionInput {
+            action,
+            conversation_id: AIConversationId::new(),
+        };
+        let result: AnyActionExecution = executor.execute(input, ctx).into();
+        match result {
+            AnyActionExecution::Sync(AIAgentActionResultType::ReadSkill(
+                ReadSkillResult::Success { content },
+            )) => Ok((content.file_name, content.content)),
+            AnyActionExecution::Sync(AIAgentActionResultType::ReadSkill(
+                ReadSkillResult::Error(message),
+            )) => Err(message),
+            _ => panic!("read_skill should resolve synchronously"),
+        }
+    })
 }
 
 fn create_test_skill_file(dir: &TempDir, name: &str, description: &str) -> std::path::PathBuf {
@@ -71,7 +184,7 @@ fn test_read_skill_executor_success() {
             manager.add_skill_for_testing(parsed_skill);
         });
 
-        let executor_handle = app.add_model(|_| ReadSkillExecutor::new());
+        let executor_handle = add_test_read_skill_executor(&mut app);
 
         let action = AIAgentAction {
             id: AIAgentActionId::from("test-action-id".to_string()),
@@ -103,6 +216,115 @@ fn test_read_skill_executor_success() {
 }
 
 #[test]
+fn disconnected_remote_session_does_not_fall_back_to_client_global_bundled_skill() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let _bundled_skills = FeatureFlag::BundledSkills.override_enabled(true);
+        SkillManager::handle(&app).update(&mut app, |manager, _ctx| {
+            manager.add_bundled_skill_for_testing(
+                "remote-only",
+                bundled_skill("remote-only"),
+                BundledSkillActivation::Always,
+            );
+        });
+        let executor_handle = add_remote_read_skill_executor(&mut app, None);
+
+        let action = read_skill_action(SkillReference::BundledSkillId("remote-only".to_string()));
+        assert_eq!(
+            execute_sync_read(&mut app, &executor_handle, &action),
+            Err("Bundled skills are not available on this remote session".to_string())
+        );
+    });
+}
+
+#[test]
+fn remote_session_reads_remote_bundled_skill_catalog() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let _bundled_skills = FeatureFlag::BundledSkills.override_enabled(true);
+        let host_id = HostId::new("remote-host".to_string());
+        let remote_skill = ParsedSkill {
+            name: "host-specific".to_string(),
+            description: "remote bundled skill".to_string(),
+            path: remote_skill_path(
+                &host_id,
+                "/opt/warp/resources/bundled/skills/host-specific/SKILL.md",
+            ),
+            content: "remote rendered content".to_string(),
+            line_range: None,
+            provider: SkillProvider::Zap,
+            scope: SkillScope::Bundled,
+        };
+        SkillManager::handle(&app).update(&mut app, |manager, _ctx| {
+            manager.add_bundled_skill_for_testing(
+                "host-specific",
+                bundled_skill("host-specific"),
+                BundledSkillActivation::Always,
+            );
+            manager.add_remote_bundled_skill_for_testing(
+                host_id.clone(),
+                "host-specific",
+                remote_skill,
+                BundledSkillActivation::Always,
+            );
+        });
+        let executor_handle = add_remote_read_skill_executor(&mut app, Some(host_id));
+
+        let action = read_skill_action(SkillReference::BundledSkillId("host-specific".to_string()));
+        assert_eq!(
+            execute_sync_read(&mut app, &executor_handle, &action),
+            Ok((
+                "/opt/warp/resources/bundled/skills/host-specific/SKILL.md".to_string(),
+                AnyFileContent::StringContent("remote rendered content".to_string()),
+            )),
+            "Remote session should read its host-specific bundled skill"
+        );
+    });
+}
+
+#[test]
+fn test_read_skill_executor_reads_enabled_bundled_skill() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let _bundled_skills = FeatureFlag::BundledSkills.override_enabled(true);
+        SkillManager::handle(&app).update(&mut app, |manager, _ctx| {
+            manager.add_bundled_skill_for_testing(
+                "pr-comments",
+                bundled_skill("pr-comments"),
+                BundledSkillActivation::Always,
+            );
+        });
+        let executor_handle = add_test_read_skill_executor(&mut app);
+
+        let action = read_skill_action(SkillReference::BundledSkillId("pr-comments".to_string()));
+        let (file_name, _) = execute_sync_read(&mut app, &executor_handle, &action)
+            .expect("Enabled bundled skill should return ReadSkillResult::Success");
+        assert_eq!(file_name, "/bundled/skills/pr-comments/SKILL.md");
+    });
+}
+
+#[test]
+fn test_read_skill_executor_rejects_warp_control_bundled_skills_when_disabled() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let _bundled_skills = FeatureFlag::BundledSkills.override_enabled(true);
+        let _warp_control_cli = FeatureFlag::WarpControlCli.override_enabled(false);
+        let skill_id = "warpctrl";
+        SkillManager::handle(&app).update(&mut app, |manager, _ctx| {
+            manager.add_bundled_skill_for_testing(
+                skill_id,
+                bundled_skill(skill_id),
+                BundledSkillActivation::RequiresFeature(FeatureFlag::WarpControlCli),
+            );
+        });
+        let executor_handle = add_test_read_skill_executor(&mut app);
+
+        let action = read_skill_action(SkillReference::BundledSkillId(skill_id.to_string()));
+        assert!(execute_sync_read(&mut app, &executor_handle, &action).is_err());
+    });
+}
+
+#[test]
 fn test_read_skill_executor_file_not_found() {
     let temp_dir = TempDir::new().unwrap();
     // Don't create the SKILL.md file
@@ -110,7 +332,7 @@ fn test_read_skill_executor_file_not_found() {
 
     App::test((), |mut app| async move {
         initialize_app(&mut app);
-        let executor_handle = app.add_model(|_| ReadSkillExecutor::new());
+        let executor_handle = add_test_read_skill_executor(&mut app);
 
         let action = AIAgentAction {
             id: AIAgentActionId::from("test-action-id".to_string()),
@@ -154,7 +376,7 @@ fn test_read_skill_executor_fallback_reads_disk_on_cache_miss() {
     App::test((), |mut app| async move {
         initialize_app(&mut app);
         // Note: don't call add_skill_for_testing, to simulate a cache miss.
-        let executor_handle = app.add_model(|_| ReadSkillExecutor::new());
+        let executor_handle = add_test_read_skill_executor(&mut app);
 
         let action = AIAgentAction {
             id: AIAgentActionId::from("fallback-action".to_string()),
@@ -214,7 +436,7 @@ fn test_read_skill_executor_fallback_returns_error_when_file_missing() {
 
     App::test((), |mut app| async move {
         initialize_app(&mut app);
-        let executor_handle = app.add_model(|_| ReadSkillExecutor::new());
+        let executor_handle = add_test_read_skill_executor(&mut app);
 
         let action = AIAgentAction {
             id: AIAgentActionId::from("missing-action".to_string()),
@@ -273,7 +495,7 @@ fn test_read_skill_executor_resolves_by_name() {
             manager.add_skill_for_testing(parsed_skill);
         });
 
-        let executor_handle = app.add_model(|_| ReadSkillExecutor::new());
+        let executor_handle = add_test_read_skill_executor(&mut app);
 
         // Simulate BYOP from_args: pass the name in as the path.
         let action = AIAgentAction {
@@ -304,6 +526,123 @@ fn test_read_skill_executor_resolves_by_name() {
     });
 }
 
+/// The BYOP name lookup respects bundled-skill activation like `BundledSkillId` reads do:
+/// a disabled bundled skill is not readable by name, and becomes readable once enabled.
+#[test]
+fn test_read_skill_executor_by_name_respects_bundled_skill_activation() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let _bundled_skills = FeatureFlag::BundledSkills.override_enabled(true);
+        let warp_control_cli = FeatureFlag::WarpControlCli.override_enabled(false);
+        SkillManager::handle(&app).update(&mut app, |manager, _ctx| {
+            manager.add_bundled_skill_for_testing(
+                "warpctrl",
+                bundled_skill("warpctrl"),
+                BundledSkillActivation::RequiresFeature(FeatureFlag::WarpControlCli),
+            );
+        });
+        let executor_handle = add_test_read_skill_executor(&mut app);
+        let action = read_skill_action(byop_name_reference("warpctrl"));
+
+        let disabled = execute_sync_read(&mut app, &executor_handle, &action);
+        assert!(
+            matches!(&disabled, Err(message) if message.starts_with("Skill not found")),
+            "a disabled bundled skill must not be readable by name, got: {disabled:?}"
+        );
+
+        drop(warp_control_cli);
+        let _warp_control_cli_enabled = FeatureFlag::WarpControlCli.override_enabled(true);
+        let (file_name, _) = execute_sync_read(&mut app, &executor_handle, &action)
+            .expect("an enabled bundled skill should be readable by name");
+        assert_eq!(file_name, "/bundled/skills/warpctrl/SKILL.md");
+    });
+}
+
+/// In a remote session the BYOP name lookup reads the remote host's bundled catalog, never the
+/// client's same-named bundled skill.
+#[test]
+fn remote_session_reads_remote_bundled_skill_by_name() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let _bundled_skills = FeatureFlag::BundledSkills.override_enabled(true);
+        let host_id = HostId::new("remote-host".to_string());
+        let remote_skill = ParsedSkill {
+            path: remote_skill_path(
+                &host_id,
+                "/opt/warp/resources/bundled/skills/host-specific/SKILL.md",
+            ),
+            content: "remote rendered content".to_string(),
+            ..bundled_skill("host-specific")
+        };
+        SkillManager::handle(&app).update(&mut app, |manager, _ctx| {
+            manager.add_bundled_skill_for_testing(
+                "host-specific",
+                bundled_skill("host-specific"),
+                BundledSkillActivation::Always,
+            );
+            manager.add_remote_bundled_skill_for_testing(
+                host_id.clone(),
+                "host-specific",
+                remote_skill,
+                BundledSkillActivation::Always,
+            );
+        });
+        let executor_handle = add_remote_read_skill_executor(&mut app, Some(host_id));
+
+        let action = read_skill_action(byop_name_reference("host-specific"));
+        assert_eq!(
+            execute_sync_read(&mut app, &executor_handle, &action),
+            Ok((
+                "/opt/warp/resources/bundled/skills/host-specific/SKILL.md".to_string(),
+                AnyFileContent::StringContent("remote rendered content".to_string()),
+            ))
+        );
+    });
+}
+
+/// The BYOP name lookup only considers file skills on the active session's host: a local
+/// session reads the local skill and a remote session reads the remote host's skill, even when
+/// the other host's same-named skill comes from a higher-priority provider.
+#[test]
+fn test_read_skill_executor_resolves_name_on_the_session_host() {
+    let temp_dir = TempDir::new().unwrap();
+    let local_skill_path = create_test_skill_file(&temp_dir, "deploy", "Local deploy");
+
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let host_id = HostId::new("remote-host".to_string());
+        let local_skill = parse_skill(&local_skill_path).expect("Failed to parse test skill");
+        // `.agents` outranks the local skill's `.claude` provider.
+        let remote_skill = ParsedSkill {
+            name: "deploy".to_string(),
+            description: "Remote deploy".to_string(),
+            path: remote_skill_path(&host_id, "/repo/.agents/skills/deploy/SKILL.md"),
+            content: "# deploy".to_string(),
+            line_range: None,
+            provider: SkillProvider::Agents,
+            scope: SkillScope::Project,
+        };
+        SkillManager::handle(&app).update(&mut app, |manager, _ctx| {
+            manager.add_skill_for_testing(local_skill);
+            manager.add_skill_for_testing(remote_skill);
+        });
+        let local_executor = add_test_read_skill_executor(&mut app);
+        let remote_executor = add_remote_read_skill_executor(&mut app, Some(host_id));
+        let action = read_skill_action(byop_name_reference("deploy"));
+
+        let (local_file_name, _) = execute_sync_read(&mut app, &local_executor, &action)
+            .expect("a local session should read the local skill by name");
+        assert_eq!(
+            local_file_name,
+            local_skill_path.to_string_lossy().to_string()
+        );
+
+        let (remote_file_name, _) = execute_sync_read(&mut app, &remote_executor, &action)
+            .expect("a remote session should read the remote host's skill by name");
+        assert_eq!(remote_file_name, "/repo/.agents/skills/deploy/SKILL.md");
+    });
+}
+
 /// For an unknown name (not in the SkillManager index), after exhausting all fallbacks:
 /// `name_candidate` hits but `find_skill_by_name` returns None, continuing to the fs fallback —
 /// here the path shape is invalid (a bare name with no `/`), so it returns Sync Error directly.
@@ -311,7 +650,7 @@ fn test_read_skill_executor_resolves_by_name() {
 fn test_read_skill_executor_rejects_unknown_name() {
     App::test((), |mut app| async move {
         initialize_app(&mut app);
-        let executor_handle = app.add_model(|_| ReadSkillExecutor::new());
+        let executor_handle = add_test_read_skill_executor(&mut app);
 
         let action = AIAgentAction {
             id: AIAgentActionId::from("unknown-name-action".to_string()),
@@ -353,7 +692,7 @@ fn test_read_skill_executor_rejects_non_skill_path_on_cache_miss() {
 
     App::test((), |mut app| async move {
         initialize_app(&mut app);
-        let executor_handle = app.add_model(|_| ReadSkillExecutor::new());
+        let executor_handle = add_test_read_skill_executor(&mut app);
 
         let action = AIAgentAction {
             id: AIAgentActionId::from("non-skill-action".to_string()),

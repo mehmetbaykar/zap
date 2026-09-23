@@ -1504,8 +1504,10 @@ fn find_skill_by_name_returns_filesystem_skill() {
             manager.add_skill_for_testing(deploy_skill.clone());
         });
 
-        let resolved = handle.read(&app, |manager, _| {
-            manager.find_skill_by_name("deploy").cloned()
+        let resolved = handle.read(&app, |manager, ctx| {
+            manager
+                .find_skill_by_name("deploy", &SkillPathOrigin::Local, ctx)
+                .cloned()
         });
         let resolved = resolved.expect("expected to find skill by name");
         assert_eq!(resolved.name, "deploy");
@@ -1532,8 +1534,10 @@ fn find_skill_by_name_prefers_higher_priority_provider() {
             manager.add_skill_for_testing(agents_skill.clone());
         });
 
-        let resolved = handle.read(&app, |manager, _| {
-            manager.find_skill_by_name("deploy").cloned()
+        let resolved = handle.read(&app, |manager, ctx| {
+            manager
+                .find_skill_by_name("deploy", &SkillPathOrigin::Local, ctx)
+                .cloned()
         });
         let resolved = resolved.expect("expected to find skill by name");
         assert_eq!(resolved.provider, SkillProvider::Agents);
@@ -1558,9 +1562,124 @@ fn find_skill_by_name_returns_none_for_unknown_name() {
             manager.add_skill_for_testing(known);
         });
 
-        let resolved = handle.read(&app, |manager, _| {
-            manager.find_skill_by_name("nope").cloned()
+        let resolved = handle.read(&app, |manager, ctx| {
+            manager
+                .find_skill_by_name("nope", &SkillPathOrigin::Local, ctx)
+                .cloned()
         });
         assert!(resolved.is_none());
+    });
+}
+
+#[test]
+fn find_skill_by_name_is_scoped_to_the_execution_host() {
+    // Same-named skills on the client and on two remote hosts: each origin only resolves the
+    // skill on its own host, and an unavailable remote session resolves none of them.
+    let first_host = HostId::new("first-host".to_string());
+    let second_host = HostId::new("second-host".to_string());
+    let local_skill = make_skill("deploy", ".claude");
+    let first_host_skill = make_remote_skill(&first_host, "deploy");
+
+    App::test((), |mut app| async move {
+        app.add_singleton_model(DirectoryWatcher::new);
+        app.add_singleton_model(|_| DetectedRepositories::default());
+        app.add_singleton_model(RepoMetadataModel::new);
+        app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
+        app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
+        let handle = app.add_singleton_model(SkillManager::new);
+
+        handle.update(&mut app, |manager, _| {
+            manager.add_skill_for_testing(local_skill.clone());
+            manager.add_skill_for_testing(first_host_skill.clone());
+        });
+
+        let resolved_path = |origin: SkillPathOrigin| {
+            handle.read(&app, |manager, ctx| {
+                manager
+                    .find_skill_by_name("deploy", &origin, ctx)
+                    .map(|skill| skill.path.clone())
+            })
+        };
+        assert_eq!(
+            resolved_path(SkillPathOrigin::Local),
+            Some(local_skill.path.clone())
+        );
+        assert_eq!(
+            resolved_path(SkillPathOrigin::Remote {
+                host_id: first_host,
+            }),
+            Some(first_host_skill.path.clone())
+        );
+        assert_eq!(
+            resolved_path(SkillPathOrigin::Remote {
+                host_id: second_host,
+            }),
+            None
+        );
+        assert_eq!(resolved_path(SkillPathOrigin::Unavailable), None);
+    });
+}
+
+#[test]
+fn find_skill_by_name_returns_only_active_bundled_skills_from_the_selected_catalog() {
+    let remote_host = HostId::new("remote-host".to_string());
+    let remote_bundled_skill = ParsedSkill {
+        path: remote_test_path(
+            &remote_host,
+            "/home/user/.warp/remote-server/bundled_resources/bundled/skills/warpctrl/SKILL.md",
+        ),
+        content: "# remote warpctrl".to_string(),
+        ..bundled_test_skill("warpctrl", "Control Warp")
+    };
+
+    App::test((), |mut app| async move {
+        app.add_singleton_model(DirectoryWatcher::new);
+        app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(|_| DetectedRepositories::default());
+        app.add_singleton_model(RepoMetadataModel::new);
+        app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
+        app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
+        let handle = app.add_singleton_model(SkillManager::new);
+        let warp_control_cli = FeatureFlag::WarpControlCli.override_enabled(false);
+
+        handle.update(&mut app, |manager, _| {
+            manager.add_bundled_skill_for_testing(
+                "warpctrl",
+                bundled_test_skill("warpctrl", "Control Warp"),
+                BundledSkillActivation::RequiresFeature(FeatureFlag::WarpControlCli),
+            );
+            manager.add_remote_bundled_skill_for_testing(
+                remote_host.clone(),
+                "warpctrl",
+                remote_bundled_skill,
+                BundledSkillActivation::RequiresFeature(FeatureFlag::WarpControlCli),
+            );
+        });
+
+        let resolved_content = |origin: SkillPathOrigin| {
+            handle.read(&app, |manager, ctx| {
+                manager
+                    .find_skill_by_name("warpctrl", &origin, ctx)
+                    .map(|skill| skill.content.clone())
+            })
+        };
+        let remote_origin = SkillPathOrigin::Remote {
+            host_id: remote_host,
+        };
+        assert_eq!(resolved_content(SkillPathOrigin::Local), None);
+        assert_eq!(resolved_content(remote_origin.clone()), None);
+
+        drop(warp_control_cli);
+        let warp_control_cli_enabled = FeatureFlag::WarpControlCli.override_enabled(true);
+        assert_eq!(
+            resolved_content(SkillPathOrigin::Local),
+            Some("# warpctrl".to_string())
+        );
+        assert_eq!(
+            resolved_content(remote_origin),
+            Some("# remote warpctrl".to_string())
+        );
+        assert_eq!(resolved_content(SkillPathOrigin::Unavailable), None);
+        drop(warp_control_cli_enabled);
     });
 }

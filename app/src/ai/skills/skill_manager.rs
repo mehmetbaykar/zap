@@ -367,19 +367,30 @@ impl SkillManager {
         }
     }
 
-    /// Finds the best match by skill name (the `name` field in SKILL.md frontmatter).
+    /// Finds the best match by skill name (the `name` field in SKILL.md frontmatter) on the
+    /// execution host selected by `path_origin`.
     ///
     /// Used by the BYOP `read_skill` tool: the model only sees the `<name>` in the system prompt
     /// and doesn't know the absolute path of SKILL.md, so name → ParsedSkill resolution must be supported.
     ///
-    /// When there are multiple with the same name, take the first by ascending [`provider_rank`] (`Agents > Zap > Claude > …`),
+    /// Only file skills located on the selected host are considered, so a remote session resolves
+    /// the remote host's skills rather than the client's. When there are multiple with the same
+    /// name, take the first by ascending [`provider_rank`] (`Agents > Zap > Claude > …`),
     /// consistent with the priority of `unique_skills`/`list_skill_inventory`. Bundled skills
-    /// are not in the `skills_by_name` index, so they are iterated separately as a fallback.
-    pub fn find_skill_by_name(&self, name: &str) -> Option<&ParsedSkill> {
+    /// are not in the `skills_by_name` index, so the selected host's bundled catalog is searched
+    /// separately as a fallback; like [`Self::active_skill_by_reference_with_origin`], a bundled
+    /// skill is only returned while its activation condition is met.
+    pub fn find_skill_by_name(
+        &self,
+        name: &str,
+        path_origin: &SkillPathOrigin,
+        ctx: &AppContext,
+    ) -> Option<&ParsedSkill> {
         // Prefer filesystem skills: when there are duplicates, pick the best by provider_rank.
         let best_fs_path = self
             .skill_paths_by_name(name)
             .into_iter()
+            .filter(|path| path_matches_origin(path, path_origin))
             .min_by_key(|path| {
                 get_provider_for_path(path)
                     .map(provider_rank)
@@ -390,8 +401,9 @@ impl SkillManager {
         {
             return Some(skill);
         }
-        // Fallback: bundled skills (matched by name rather than id).
-        self.bundled_skills.local_skill_by_name(name)
+        // Fallback: active bundled skills (matched by name rather than id).
+        self.bundled_skills
+            .active_skill_by_name(name, path_origin, ctx)
     }
 
     /// Get the definition of a skill only if it is currently available for invocation.
@@ -761,6 +773,29 @@ impl Entity for SkillManager {
 }
 
 impl SingletonEntity for SkillManager {}
+
+/// Returns whether a file skill at `path` lives on the execution host selected by `path_origin`.
+fn path_matches_origin(path: &LocalOrRemotePath, path_origin: &SkillPathOrigin) -> bool {
+    match (path, path_origin) {
+        (
+            LocalOrRemotePath::Local(_),
+            SkillPathOrigin::Local | SkillPathOrigin::RestoredDisplayOnly,
+        ) => true,
+        (LocalOrRemotePath::Remote(path), SkillPathOrigin::Remote { host_id }) => {
+            path.host_id == *host_id
+        }
+        (
+            LocalOrRemotePath::Local(_),
+            SkillPathOrigin::Remote { .. } | SkillPathOrigin::Unavailable,
+        )
+        | (
+            LocalOrRemotePath::Remote(_),
+            SkillPathOrigin::Local
+            | SkillPathOrigin::RestoredDisplayOnly
+            | SkillPathOrigin::Unavailable,
+        ) => false,
+    }
+}
 
 fn path_matches_reference_location(path: &LocalOrRemotePath, reference: &SkillReference) -> bool {
     match (path, reference) {

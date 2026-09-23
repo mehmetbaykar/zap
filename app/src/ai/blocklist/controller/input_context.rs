@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use chrono::Local;
@@ -13,7 +12,7 @@ use crate::ai::agent::{
     AIAgentAttachment, AIAgentContext, DocumentContentAttachmentSource, DriveObjectPayload,
 };
 use crate::ai::block_context::BlockContext;
-use crate::ai::blocklist::BlocklistAIContextModel;
+use crate::ai::blocklist::{BlocklistAIContextModel, SessionContext};
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel};
 use crate::ai::facts::AIFactObjectModel;
 use crate::ai::skills::list_skills;
@@ -64,8 +63,13 @@ pub(super) fn input_context_for_request(
         // After the project moved off the cloud, the system prompt is fully re-rendered on the client every round (BYOP is stateless),
         // so skills must be delivered in full every round, with no incremental diffing. When the list is empty it is not pushed, keeping
         // the context compact (the template-side `{% if skills %}` guard omits the section normally).
+        // The session-aware location and origin route remote sessions to the remote host's skills.
+        let current_working_directory_location =
+            active_session.current_working_directory_location(app);
+        let path_origin = SessionContext::from_session(active_session, app).skill_path_origin();
         let skills = list_skills(
-            active_session.current_working_directory().map(Path::new),
+            current_working_directory_location.as_ref(),
+            &path_origin,
             app,
         );
         if !skills.is_empty() {

@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
 
 use ai::skills::{
-    ParsedSkill, SkillProvider, provider_parent_directory_for_skills_root, provider_rank,
+    ParsedSkill, SkillPathOrigin, SkillProvider, provider_parent_directory_for_skills_root,
+    provider_rank,
 };
 use lazy_static::lazy_static;
 use siphasher::sip::SipHasher;
@@ -171,10 +171,20 @@ fn skill_reference_key(reference: &ai::skills::SkillReference) -> String {
 /// `/chat/completions` like OpenAI/Anthropic; the system prompt is fully re-rendered on the client every round, so the data must be delivered every round,
 /// otherwise the skills section in the system prompt would disappear from the second round on.
 /// It is therefore simplified to return everything every round.
-pub fn list_skills(working_directory: Option<&Path>, app: &AppContext) -> Vec<SkillDescriptor> {
-    let working_directory =
-        working_directory.map(|dir| LocalOrRemotePath::Local(dir.to_path_buf()));
-    SkillManager::as_ref(app).get_skills_for_working_directory(working_directory.as_ref(), app)
+///
+/// `working_directory` is the active session's location and `path_origin` selects its execution
+/// host, so remote sessions list the remote host's home, project, and bundled skills instead of
+/// the client's.
+pub fn list_skills(
+    working_directory: Option<&LocalOrRemotePath>,
+    path_origin: &SkillPathOrigin,
+    app: &AppContext,
+) -> Vec<SkillDescriptor> {
+    SkillManager::as_ref(app).get_skills_for_working_directory_with_origin(
+        working_directory,
+        path_origin,
+        app,
+    )
 }
 
 /// Renders an 'open skill' button for blocklist AI actions and the code diff view.

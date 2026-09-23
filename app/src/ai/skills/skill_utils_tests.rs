@@ -1,18 +1,117 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use ai::skills::{ParsedSkill, SkillProvider, SkillScope};
+use repo_metadata::repositories::DetectedRepositories;
+use repo_metadata::{DirectoryWatcher, RepoMetadataModel};
+use warp_core::features::FeatureFlag;
 use warp_util::host_id::HostId;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 use warp_util::remote_path::RemotePath;
 use warp_util::standardized_path::StandardizedPath;
+use warpui::App;
+use watcher::HomeDirectoryWatcher;
 
 use super::*;
+use crate::ai::skills::BundledSkillActivation;
+use crate::warp_managed_paths_watcher::WarpManagedPathsWatcher;
 
 fn remote_location(path: &str) -> LocalOrRemotePath {
     LocalOrRemotePath::Remote(RemotePath::new(
         HostId::new("remote-host".to_string()),
         StandardizedPath::try_new(path).unwrap(),
     ))
+}
+
+fn listed_skill_names(
+    app: &App,
+    working_directory: Option<&LocalOrRemotePath>,
+    path_origin: &SkillPathOrigin,
+) -> HashSet<String> {
+    app.read(|ctx| {
+        list_skills(working_directory, path_origin, ctx)
+            .into_iter()
+            .map(|skill| skill.name)
+            .collect()
+    })
+}
+
+/// Agent Mode lists skills from the active session's execution host: a remote session sees the
+/// remote host's project and bundled skills (even before its working directory is known), never
+/// the client's bundled catalog, and an unavailable remote session sees none.
+#[test]
+fn list_skills_uses_the_session_host_catalogs() {
+    let host_id = HostId::new("remote-host".to_string());
+    let remote_project_skill = ParsedSkill {
+        name: "remote-project".to_string(),
+        description: "remote project skill".to_string(),
+        path: remote_location("/repo/.agents/skills/remote-project/SKILL.md"),
+        content: "# remote-project".to_string(),
+        line_range: None,
+        provider: SkillProvider::Agents,
+        scope: SkillScope::Project,
+    };
+    let remote_bundled_skill = ParsedSkill {
+        name: "remote-bundled".to_string(),
+        description: "remote bundled skill".to_string(),
+        path: remote_location("/opt/zap/resources/bundled/skills/remote-bundled/SKILL.md"),
+        content: "# remote-bundled".to_string(),
+        line_range: None,
+        provider: SkillProvider::Zap,
+        scope: SkillScope::Bundled,
+    };
+    let local_bundled_skill = ParsedSkill {
+        name: "local-bundled".to_string(),
+        description: "local bundled skill".to_string(),
+        path: LocalOrRemotePath::Local(PathBuf::from("/bundled/skills/local-bundled/SKILL.md")),
+        content: "# local-bundled".to_string(),
+        line_range: None,
+        provider: SkillProvider::Zap,
+        scope: SkillScope::Bundled,
+    };
+
+    App::test((), |mut app| async move {
+        app.add_singleton_model(DirectoryWatcher::new);
+        app.add_singleton_model(|_| DetectedRepositories::default());
+        app.add_singleton_model(RepoMetadataModel::new);
+        app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
+        app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
+        let handle = app.add_singleton_model(SkillManager::new);
+        let _bundled_skills = FeatureFlag::BundledSkills.override_enabled(true);
+
+        handle.update(&mut app, |manager, ctx| {
+            manager.handle_skills_added(vec![remote_project_skill], ctx);
+            manager.add_bundled_skill_for_testing(
+                "local-bundled",
+                local_bundled_skill,
+                BundledSkillActivation::Always,
+            );
+            manager.add_remote_bundled_skill_for_testing(
+                host_id.clone(),
+                "remote-bundled",
+                remote_bundled_skill,
+                BundledSkillActivation::Always,
+            );
+        });
+
+        let remote_origin = SkillPathOrigin::Remote { host_id };
+        let remote_names =
+            listed_skill_names(&app, Some(&remote_location("/repo")), &remote_origin);
+        assert!(remote_names.contains("remote-project"));
+        assert!(remote_names.contains("remote-bundled"));
+        assert!(!remote_names.contains("local-bundled"));
+
+        let remote_names_without_cwd = listed_skill_names(&app, None, &remote_origin);
+        assert!(remote_names_without_cwd.contains("remote-bundled"));
+        assert!(!remote_names_without_cwd.contains("local-bundled"));
+
+        let local_names = listed_skill_names(&app, None, &SkillPathOrigin::Local);
+        assert!(local_names.contains("local-bundled"));
+        assert!(!local_names.contains("remote-bundled"));
+        assert!(!local_names.contains("remote-project"));
+
+        assert!(listed_skill_names(&app, None, &SkillPathOrigin::Unavailable).is_empty());
+    });
 }
 
 #[test]

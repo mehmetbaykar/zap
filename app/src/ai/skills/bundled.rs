@@ -81,8 +81,16 @@ impl BundledSkills {
         self.local.skill(id)
     }
 
-    pub fn local_skill_by_name(&self, name: &str) -> Option<&ParsedSkill> {
-        self.local.skill_by_name(name)
+    /// Returns a bundled skill by name from the catalog selected by the
+    /// execution path origin, only if its activation condition is met.
+    pub fn active_skill_by_name(
+        &self,
+        name: &str,
+        path_origin: &SkillPathOrigin,
+        ctx: &AppContext,
+    ) -> Option<&ParsedSkill> {
+        self.for_path_origin(path_origin)?
+            .active_skill_by_name(name, ctx)
     }
 
     pub fn active_skill(
@@ -250,11 +258,14 @@ impl BundledSkill {
         self.definitions.get(id).map(|definition| &definition.skill)
     }
 
-    pub fn skill_by_name(&self, name: &str) -> Option<&ParsedSkill> {
+    /// Returns a bundled skill by name only if its activation condition is met.
+    pub fn active_skill_by_name(&self, name: &str, ctx: &AppContext) -> Option<&ParsedSkill> {
         self.definitions
             .values()
+            .find(|definition| {
+                definition.skill.name == name && definition.activation.is_enabled(ctx)
+            })
             .map(|definition| &definition.skill)
-            .find(|skill| skill.name == name)
     }
 
     /// Returns a bundled skill by ID only if its activation condition is met.

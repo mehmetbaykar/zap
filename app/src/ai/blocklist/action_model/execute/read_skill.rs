@@ -4,22 +4,26 @@ use ai::skills::SkillReference;
 use ai::skills::parse_skill;
 use futures::future::{BoxFuture, FutureExt};
 use warp_util::local_or_remote_path::LocalOrRemotePath;
-use warpui::{Entity, ModelContext, SingletonEntity};
+use warpui::{Entity, ModelContext, ModelHandle, SingletonEntity};
 
 use super::{ActionExecution, AnyActionExecution, ExecuteActionInput, PreprocessActionInput};
 #[cfg(feature = "local_fs")]
 use crate::ai::agent::AIAgentActionResultType;
 use crate::ai::agent::{AIAgentActionType, ReadSkillRequest, ReadSkillResult};
+use crate::ai::blocklist::SessionContext;
 #[cfg(feature = "local_fs")]
 use crate::ai::skills::extract_skill_parent_directory;
 use crate::ai::skills::{SkillManager, SkillTelemetryEvent};
 use crate::send_telemetry_from_ctx;
+use crate::terminal::model::session::active_session::ActiveSession;
 
-pub struct ReadSkillExecutor;
+pub struct ReadSkillExecutor {
+    active_session: ModelHandle<ActiveSession>,
+}
 
 impl ReadSkillExecutor {
-    pub fn new() -> Self {
-        Self
+    pub fn new(active_session: ModelHandle<ActiveSession>) -> Self {
+        Self { active_session }
     }
 
     pub(super) fn should_autoexecute(
@@ -42,31 +46,41 @@ impl ReadSkillExecutor {
             return ActionExecution::InvalidAction;
         };
 
+        // Resolve from the catalog selected by the active session's host, so
+        // remote sessions read the host-rendered bundled skill.
+        let path_origin =
+            SessionContext::from_session(self.active_session.as_ref(ctx), ctx).skill_path_origin();
         let manager = SkillManager::as_ref(ctx);
 
         // Cache hit: the proto's `SkillReference::Path(p)` only hits at this step when p is exactly
-        // a real SKILL.md absolute path in the index.
-        if let Some(skill) = manager.skill_by_reference(skill_ref) {
-            send_telemetry_from_ctx!(
-                SkillTelemetryEvent::Read {
-                    reference: skill_ref.clone(),
-                    name: Some(skill.name.clone()),
-                    scope: Some(skill.scope),
-                    provider: Some(skill.provider),
-                    error: false,
-                },
-                ctx
-            );
-            return success_execution(skill);
-        }
+        // a real SKILL.md absolute path in the index. Bundled skills resolve from the active host's
+        // catalog and only while their activation condition is met, so disabled bundled skills are
+        // not readable.
+        let lookup_error =
+            match manager.active_skill_by_reference_with_origin(skill_ref, &path_origin, ctx) {
+                Ok(skill) => {
+                    send_telemetry_from_ctx!(
+                        SkillTelemetryEvent::Read {
+                            reference: skill_ref.clone(),
+                            name: Some(skill.name.clone()),
+                            scope: Some(skill.scope),
+                            provider: Some(skill.provider),
+                            error: false,
+                        },
+                        ctx
+                    );
+                    return success_execution(skill);
+                }
+                Err(error) => error,
+            };
 
         // The BYOP `read_skill` tool's argument is the skill **name**, packed by `from_args` into
         // the `SkillReference::SkillPath(name)` slot (to avoid a proto schema change).
-        // Here, on a cache miss, look up the real SKILL.md path by name, covering all skills the Skill manager
-        // can see (file skills + bundled skills).
+        // Here, on a cache miss, look up the real SKILL.md path by name, covering the skills the Skill manager
+        // can see on the active session's host (file skills + active bundled skills).
         if let SkillReference::Path(p) = skill_ref
             && let Some(candidate_name) = name_candidate(p)
-            && let Some(skill) = manager.find_skill_by_name(candidate_name)
+            && let Some(skill) = manager.find_skill_by_name(candidate_name, &path_origin, ctx)
         {
             send_telemetry_from_ctx!(
                 SkillTelemetryEvent::Read {
@@ -133,9 +147,7 @@ impl ReadSkillExecutor {
             },
             ctx
         );
-        ActionExecution::Sync(
-            ReadSkillResult::Error(format!("Skill not found: {:?}", skill_ref)).into(),
-        )
+        ActionExecution::Sync(ReadSkillResult::Error(lookup_error.to_string()).into())
     }
 
     pub(super) fn preprocess_action(

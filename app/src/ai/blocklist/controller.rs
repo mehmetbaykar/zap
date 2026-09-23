@@ -135,7 +135,7 @@ impl SessionContext {
         matches!(self.session_type, Some(SessionType::WarpifiedRemote { .. }))
     }
 
-    fn skill_path_origin(&self) -> SkillPathOrigin {
+    pub fn skill_path_origin(&self) -> SkillPathOrigin {
         match &self.session_type {
             Some(SessionType::WarpifiedRemote {
                 host_id: Some(host_id),
