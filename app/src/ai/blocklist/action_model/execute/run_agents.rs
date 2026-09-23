@@ -184,10 +184,16 @@ impl RunAgentsExecutor {
         let mut slots = Vec::with_capacity(request.agent_run_configs.len());
         for config in &request.agent_run_configs {
             let prompt = compose_run_agents_child_prompt(&request.base_prompt, &config.prompt);
+            // Per-agent model_id overrides the batch-level model when set.
+            let model_id = if !config.model_id.trim().is_empty() {
+                &config.model_id
+            } else {
+                &request.model_id
+            };
             let execution_mode = match run_agents_to_start_agent_mode(
                 &request.execution_mode,
                 &request.harness_type,
-                &request.model_id,
+                model_id,
             ) {
                 Ok(mode) => mode,
                 Err(error) => {
