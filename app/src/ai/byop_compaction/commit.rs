@@ -15,7 +15,7 @@ use crate::ai::agent::conversation::AIConversation;
 /// Searches backward from the conversation's root task for the last `Message::AgentOutput` —
 /// it is the summary text the model just emitted.
 ///
-/// `user_msg_id` picks the id of the nearest real UserQuery before the last AgentOutput;
+/// `user_msg_id` picks the id of the nearest user turn (UserQuery or InvokeSkill) before the last AgentOutput;
 /// when there is none, synthesizes a standalone uuid (used only as a marker key; the hidden
 /// projection of build_chat_request will not hit a real message).
 pub fn commit_summarization(
@@ -55,7 +55,9 @@ pub fn commit_summarization(
                 .iter()
                 .rev()
                 .find_map(|m| match m.message.as_ref() {
-                    Some(api::message::Message::UserQuery(_)) => Some(m.id.clone()),
+                    Some(
+                        api::message::Message::UserQuery(_) | api::message::Message::InvokeSkill(_),
+                    ) => Some(m.id.clone()),
                     _ => None,
                 })
         })

@@ -610,6 +610,40 @@ fn conversation_with_messages(messages: Vec<api::Message>) -> AIConversation {
     AIConversation::new_restored(AIConversationId::new(), vec![task], None).unwrap()
 }
 
+fn invoke_skill(id: &str, task_id: &str, request_id: &str, seconds: i64) -> api::Message {
+    api::Message {
+        fetched_memories: Vec::new(),
+        id: id.to_string(),
+        task_id: task_id.to_string(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::InvokeSkill(
+            api::message::InvokeSkill::default(),
+        )),
+        request_id: request_id.to_string(),
+        timestamp: Some(ts(seconds)),
+    }
+}
+
+/// A run started with /skill has no UserQuery; the summary must still anchor on its user turn,
+/// or it is never inserted back into later requests.
+#[test]
+fn commit_summarization_anchors_on_skill_invocation() {
+    let mut conversation = conversation_with_messages(vec![
+        invoke_skill("s1", "root", "r1", 1),
+        agent_output("a1", "root", "r1", 2),
+    ]);
+    let cfg = CompactionConfig {
+        tail_turns: 1,
+        preserve_recent_tokens: Some(1_000),
+        ..Default::default()
+    };
+
+    assert!(commit_summarization(&mut conversation, false, &cfg));
+    let completed = conversation.compaction_state.completed().last().unwrap();
+    assert_eq!(completed.user_msg_id, "s1");
+}
+
 #[test]
 fn commit_summarization_records_head_message_ids() {
     let mut conversation = conversation_with_messages(vec![
