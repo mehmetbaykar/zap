@@ -169,6 +169,14 @@ impl SessionContext {
             is_legacy_ssh: false,
         }
     }
+
+    #[cfg(test)]
+    pub fn new_for_test_with_session_type(session_type: SessionType) -> Self {
+        SessionContext {
+            session_type: Some(session_type),
+            ..Self::new_for_test()
+        }
+    }
 }
 
 pub enum BlocklistAIControllerEvent {

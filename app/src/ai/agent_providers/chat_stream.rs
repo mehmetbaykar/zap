@@ -187,6 +187,25 @@ fn render_ssh_session_block(
     ))
 }
 
+/// Zap: a warpified SSH session whose SSH extension is not connected (install declined or failed,
+/// or the handshake has not completed). `read_files` / `apply_file_diffs` are withheld there (see
+/// `REMOTE_SERVER_FILE_TOOLS`), so the system templates' standing advice to prefer them over shell
+/// commands must be overridden, or the model has no sanctioned way to read or edit files.
+fn render_remote_file_tools_unavailable_block(params: &RequestParams) -> Option<String> {
+    remote_file_tools_unavailable(params).then(|| {
+        "\n\n<remote_session_without_ssh_extension>\n  \
+         <fact>The active terminal is an SSH session on a remote host without the SSH extension connected, \
+         so the `read_files` and `apply_file_diffs` tools are unavailable in this session.</fact>\n  \
+         <rules>\n    \
+         - Read files with shell commands through `run_shell_command` (for example `cat` or `sed -n '1,200p' <file>`).\n    \
+         - Create or edit files with shell commands through `run_shell_command` (for example a quoted heredoc or `patch`), then re-read the file to confirm the change.\n    \
+         - These rules override any other instruction to prefer `read_files` or `apply_file_diffs`.\n  \
+         </rules>\n\
+         </remote_session_without_ssh_extension>"
+            .to_owned()
+    })
+}
+
 /// XML-escape, and also strip all illegal/problematic control characters to avoid JSON serialization failures.
 ///
 /// `grid_contents` (alt-screen content extracted from `formatted_terminal_contents_for_input`)
@@ -1193,6 +1212,9 @@ fn build_chat_request(
     // so we append an SSH status block to correct the LLM's inference.
     if let Some(ssh_block) = render_ssh_session_block(&params.session_context) {
         system_text.push_str(&ssh_block);
+    }
+    if let Some(block) = render_remote_file_tools_unavailable_block(params) {
+        system_text.push_str(&block);
     }
     // Note: the LRC / long-command tool-usage guidance (write_to_long_running_shell_command + command_id +
     // the various modes and raw byte sequences) is already fully covered in `prompts/system/default.j2:69-79`.
@@ -2720,6 +2742,16 @@ const PLAN_MODE_BLOCKED_TOOLS: &[&str] = &[
 /// filters with no shared helper -- keep gating from one place.
 const CHILD_ORCHESTRATION_TOOLS: &[&str] = &[tools::run_agents::TOOL_NAME];
 
+/// File tools that a remote session serves through the SSH extension (remote server). A remote
+/// session without a connected extension has no way to run them, so they are withheld there
+/// rather than offered to fail, as upstream's `get_supported_tools` does.
+const REMOTE_SERVER_FILE_TOOLS: &[&str] = &["read_files", "apply_file_diffs"];
+
+/// Whether this turn's session is remote with no connected SSH extension.
+fn remote_file_tools_unavailable(params: &RequestParams) -> bool {
+    params.session_context.is_remote() && params.session_context.host_id().is_none()
+}
+
 /// How many levels of orchestration this fork allows: a user-started root agent
 /// (depth 0) may spawn children (depth 1), and those children may spawn
 /// grandchildren (depth 2). Depth-2 agents get no `run_agents` tool, which
@@ -2733,9 +2765,14 @@ const CHILD_ORCHESTRATION_TOOLS: &[&str] = &[tools::run_agents::TOOL_NAME];
 pub const MAX_ORCHESTRATION_DEPTH: u32 = 2;
 
 /// Whether `run_agents` is exposed this turn: the profile permission must allow
-/// it and the conversation must sit above the depth budget.
+/// it, the conversation must sit above the depth budget, and the session must be
+/// local. Children always launch in local panes, so from an SSH session they would
+/// run on this machine instead of the remote host; upstream gates orchestration to
+/// local sessions the same way.
 fn child_orchestration_enabled(params: &RequestParams) -> bool {
-    params.run_agents_enabled && params.orchestration_depth < MAX_ORCHESTRATION_DEPTH
+    params.run_agents_enabled
+        && params.orchestration_depth < MAX_ORCHESTRATION_DEPTH
+        && !params.session_context.is_remote()
 }
 
 /// Lists the tool names actually fed to the upstream model this turn (built-in REGISTRY + current MCP tools),
@@ -2746,6 +2783,7 @@ pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
     let is_lrc = params.lrc_command_id.is_some();
     let web_enabled = params.web_search_enabled;
     let child_orchestration_enabled = child_orchestration_enabled(params);
+    let remote_file_tools_unavailable = remote_file_tools_unavailable(params);
     let plan_mode = is_plan_mode_turn(&params.input);
     let mut names: Vec<String> = tools::REGISTRY
         .iter()
@@ -2757,6 +2795,9 @@ pub fn available_tool_names(params: &RequestParams) -> Vec<String> {
                 return false;
             }
             if !child_orchestration_enabled && CHILD_ORCHESTRATION_TOOLS.contains(&t.name) {
+                return false;
+            }
+            if remote_file_tools_unavailable && REMOTE_SERVER_FILE_TOOLS.contains(&t.name) {
                 return false;
             }
             if t.name == "suggest_new_conversation" {
@@ -2794,8 +2835,9 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
     // information gathering and asking back.
     let is_lrc = params.lrc_command_id.is_some();
     let web_enabled = params.web_search_enabled;
-    // run_agents: profile `run_agents` permission gate + client-side depth budget.
+    // run_agents: profile `run_agents` permission gate + client-side depth budget + local session.
     let child_orchestration_enabled = child_orchestration_enabled(params);
+    let remote_file_tools_unavailable = remote_file_tools_unavailable(params);
     let plan_mode = is_plan_mode_turn(&params.input);
     // Zap BYOP: the `suggest_prompt` chip UI is restored via the view layer subscribing to
     // PromptSuggestionExecutorEvent (see `terminal/view.rs::
@@ -2815,6 +2857,9 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
                 return false;
             }
             if !child_orchestration_enabled && CHILD_ORCHESTRATION_TOOLS.contains(&t.name) {
+                return false;
+            }
+            if remote_file_tools_unavailable && REMOTE_SERVER_FILE_TOOLS.contains(&t.name) {
                 return false;
             }
             // suggest_new_conversation: no UI implementation; the executor in Zap is changed to
@@ -7896,10 +7941,69 @@ mod issue_94_task_linearization_tests {
 /// cannot call, or the reverse.
 #[cfg(test)]
 mod run_agents_gating_tests {
+    use warp_core::HostId;
+
     use super::*;
+    use crate::ai::blocklist::SessionContext;
+    use crate::terminal::model::session::SessionType;
 
     fn params() -> RequestParams {
         RequestParams::new_for_test(vec![], vec![])
+    }
+
+    fn remote_session(host_id: Option<&str>) -> SessionContext {
+        SessionContext::new_for_test_with_session_type(SessionType::WarpifiedRemote {
+            host_id: host_id.map(|id| HostId::new(id.to_owned())),
+        })
+    }
+
+    fn exposes_tool(params: &RequestParams, name: &str) -> bool {
+        let in_names = available_tool_names(params).iter().any(|n| n == name);
+        let in_array = build_tools_array(params)
+            .iter()
+            .any(|t| t.name.as_str() == name);
+        assert_eq!(in_names, in_array, "{name} gated inconsistently");
+        in_names
+    }
+
+    /// Children launch in local panes, so an SSH parent would run them on this
+    /// machine; with or without the SSH extension the tool must stay hidden.
+    #[test]
+    fn hidden_in_remote_sessions() {
+        for host_id in [None, Some("host-1")] {
+            let mut params = params();
+            params.run_agents_enabled = true;
+            params.session_context = remote_session(host_id);
+            assert!(!exposes_tool(&params, tools::run_agents::TOOL_NAME));
+        }
+        let mut params = params();
+        params.run_agents_enabled = true;
+        params.session_context =
+            SessionContext::new_for_test_with_session_type(SessionType::Local);
+        assert!(exposes_tool(&params, tools::run_agents::TOOL_NAME));
+    }
+
+    #[test]
+    fn file_tools_withheld_only_without_ssh_extension() {
+        let mut params = params();
+        params.session_context = remote_session(None);
+        for name in REMOTE_SERVER_FILE_TOOLS {
+            assert!(!exposes_tool(&params, name), "{name} offered without extension");
+        }
+        assert!(render_remote_file_tools_unavailable_block(&params).is_some());
+
+        for session_context in [
+            remote_session(Some("host-1")),
+            SessionContext::new_for_test_with_session_type(SessionType::Local),
+            SessionContext::new_for_test(),
+        ] {
+            let mut params = self::params();
+            params.session_context = session_context;
+            for name in REMOTE_SERVER_FILE_TOOLS {
+                assert!(exposes_tool(&params, name), "{name} withheld");
+            }
+            assert!(render_remote_file_tools_unavailable_block(&params).is_none());
+        }
     }
 
     fn has_run_agents(params: &RequestParams) -> bool {

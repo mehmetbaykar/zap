@@ -305,8 +305,13 @@ impl BlocklistAIActionExecutor {
         let ask_user_question_executor =
             ctx.add_model(|_| AskUserQuestionExecutor::new(terminal_view_id));
         let start_agent_executor = ctx.add_model(|_| StartAgentExecutor::new(terminal_view_id));
-        let run_agents_executor = ctx
-            .add_model(|_| RunAgentsExecutor::new(start_agent_executor.clone(), terminal_view_id));
+        let run_agents_executor = ctx.add_model(|_| {
+            RunAgentsExecutor::new(
+                start_agent_executor.clone(),
+                active_session.clone(),
+                terminal_view_id,
+            )
+        });
         let wait_for_events_executor = ctx.add_model(|_| WaitForEventsExecutor::new());
         Self {
             shell_command_executor,

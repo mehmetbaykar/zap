@@ -13,7 +13,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use warp_cli::agent::Harness;
 use warp_core::execution_mode::AppExecutionMode;
-use warpui::{Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
+use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
 
 use super::start_agent::{StartAgentExecutor, StartAgentOutcome};
 use super::{ActionExecution, AnyActionExecution, ExecuteActionInput};
@@ -24,6 +24,8 @@ use crate::ai::agent::{
 };
 use crate::ai::blocklist::{BlocklistAIHistoryModel, BlocklistAIPermissions};
 use crate::ai::local_harness_setup::local_harness_product_disabled_message;
+use crate::terminal::model::session::SessionType;
+use crate::terminal::model::session::active_session::ActiveSession;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -42,6 +44,7 @@ pub struct RunAgentsExecutor {
     pending: HashSet<AIAgentActionId>,
     launched_agents: HashMap<AIConversationId, HashMap<String, ExistingLaunchedAgent>>,
     start_agent_executor: ModelHandle<StartAgentExecutor>,
+    active_session: ModelHandle<ActiveSession>,
     terminal_view_id: EntityId,
 }
 
@@ -62,12 +65,14 @@ impl Entity for RunAgentsExecutor {
 impl RunAgentsExecutor {
     pub fn new(
         start_agent_executor: ModelHandle<StartAgentExecutor>,
+        active_session: ModelHandle<ActiveSession>,
         terminal_view_id: EntityId,
     ) -> Self {
         Self {
             pending: HashSet::new(),
             launched_agents: HashMap::new(),
             start_agent_executor,
+            active_session,
             terminal_view_id,
         }
     }
@@ -101,6 +106,7 @@ impl RunAgentsExecutor {
             &mut request,
             input.conversation_id,
             self.terminal_view_id,
+            &self.active_session,
             &self.launched_agents,
             ctx,
         ) {
@@ -123,7 +129,10 @@ impl RunAgentsExecutor {
         let AIAgentActionType::RunAgents(request) = &input.action.action else {
             return false;
         };
-        if AppExecutionMode::as_ref(ctx).is_autonomous() {
+        // Skip the approval prompt for a call that execution refuses anyway.
+        if AppExecutionMode::as_ref(ctx).is_autonomous()
+            || remote_session_reason(&self.active_session, ctx).is_some()
+        {
             return true;
         }
 
@@ -311,13 +320,35 @@ enum ChildSlot {
     Pending(async_channel::Receiver<StartAgentOutcome>),
 }
 
+/// Children always launch in local panes, so a parent in an SSH session would run them on this
+/// machine instead of the remote host. The tool is not offered there; this refuses calls that
+/// arrive anyway, such as a model calling a tool it was not offered.
+fn remote_session_reason(
+    active_session: &ModelHandle<ActiveSession>,
+    ctx: &AppContext,
+) -> Option<String> {
+    matches!(
+        active_session.as_ref(ctx).session_type(ctx),
+        Some(SessionType::WarpifiedRemote { .. })
+    )
+    .then(|| {
+        "Child agents can't be started from an SSH session: they would run on this machine, \
+         not on the remote host."
+            .to_string()
+    })
+}
+
 fn prepare_request_for_execution(
     request: &mut RunAgentsRequest,
     parent_conversation_id: AIConversationId,
     terminal_view_id: EntityId,
+    active_session: &ModelHandle<ActiveSession>,
     launched_agents: &HashMap<AIConversationId, HashMap<String, ExistingLaunchedAgent>>,
     ctx: &ModelContext<RunAgentsExecutor>,
 ) -> Option<String> {
+    if let Some(reason) = remote_session_reason(active_session, ctx) {
+        return Some(reason);
+    }
     let status = match apply_approved_local_plan_config(request, parent_conversation_id, ctx) {
         Ok(status) => status,
         Err(reason) => return Some(reason),
