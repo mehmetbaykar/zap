@@ -870,9 +870,7 @@ pub(crate) fn format_terminal_state(result: &RunAgentsResult) -> (String, Status
                 "Orchestration is currently disabled. Re-enable on the plan card to launch."
                     .to_string()
             } else {
-                format!(
-                    "Orchestration is currently disabled. Re-enable on the plan card to launch. ({reason})"
-                )
+                format!("Couldn't start agents: {reason}")
             };
             (body, StatusKind::Cancelled)
         }
