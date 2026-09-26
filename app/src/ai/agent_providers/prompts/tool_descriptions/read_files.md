@@ -1,4 +1,4 @@
-Read the contents of one or more files from the local filesystem.
+Read the contents of one or more files on the machine the terminal session runs on (the remote host in an SSH session).
 
 Usage:
 - The `files[].path` parameter should be an absolute path when possible. Relative paths are resolved against the working directory.

@@ -20,6 +20,6 @@ Spawns a **batch** of local child agents in a single call. Every child in the ba
 - `summary` is one line describing the whole batch; it is shown to the user on the approval card.
 - Each `agents[].name` must be non-empty and unique within the call — it is how the result correlates back to your request and how duplicate launches are rejected.
 - `harness` (optional) applies to **every** child in the batch: `claude` (Claude Code), `opencode`, or `codex`, each of which must already be installed on this machine. Omit it to use the built-in native agent — the right default unless the user asked for a specific harness.
-- At most 4 children per call, and at most 2 `run_agents` calls per assistant turn. Prefer one well-scoped batch over several small ones; wait for a batch to finish before launching the next.
-- Child agents cannot spawn their own children.
+- At most 4 children per call, and at most 1 `run_agents` call per assistant turn. Prefer one well-scoped batch over several small ones; wait for a batch to finish before launching the next.
+- A child agent can start one further level of children; agents at that level cannot.
 - Depending on the user's permission settings, a batch may require explicit user approval before anything launches — don't re-issue a batch the user rejected.
