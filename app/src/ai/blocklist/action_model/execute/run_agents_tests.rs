@@ -217,24 +217,22 @@ fn add_test_executor(
 /// The assertion happens inside the `App::test` future because its closure must
 /// be `'static`, so a result cannot be borrowed back out to the caller.
 fn assert_autoexecute(permission: RunAgentsPermission, plan_id: &'static str, expected: bool) {
-    App::test((), move |mut app| {
-        async move {
-            let (executor, conversation_id) =
-                add_test_executor(&mut app, permission, BootstrapSessionType::Local);
-            let action = build_run_agents_action("run-agents", plan_id);
+    App::test((), move |mut app| async move {
+        let (executor, conversation_id) =
+            add_test_executor(&mut app, permission, BootstrapSessionType::Local);
+        let action = build_run_agents_action("run-agents", plan_id);
 
-            let autoexecuted = executor.update(&mut app, |executor, ctx| {
-                executor.should_autoexecute(
-                    ExecuteActionInput {
-                        action: &action,
-                        conversation_id,
-                    },
-                    ctx,
-                )
-            });
+        let autoexecuted = executor.update(&mut app, |executor, ctx| {
+            executor.should_autoexecute(
+                ExecuteActionInput {
+                    action: &action,
+                    conversation_id,
+                },
+                ctx,
+            )
+        });
 
-            assert_eq!(autoexecuted, expected);
-        }
+        assert_eq!(autoexecuted, expected);
     });
 }
 

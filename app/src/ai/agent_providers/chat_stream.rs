@@ -1629,7 +1629,9 @@ fn build_chat_request(
                     &skill.name,
                     &skill.content,
                     skill_path.as_deref(),
-                    user_query.as_ref().map(|user_query| user_query.query.as_str()),
+                    user_query
+                        .as_ref()
+                        .map(|user_query| user_query.query.as_str()),
                 )));
             }
             AIAgentInput::ResumeConversation { context } => {
@@ -8157,8 +8159,7 @@ mod run_agents_gating_tests {
         }
         let mut params = params();
         params.run_agents_enabled = true;
-        params.session_context =
-            SessionContext::new_for_test_with_session_type(SessionType::Local);
+        params.session_context = SessionContext::new_for_test_with_session_type(SessionType::Local);
         assert!(exposes_tool(&params, tools::run_agents::TOOL_NAME));
     }
 
@@ -8167,7 +8168,10 @@ mod run_agents_gating_tests {
         let mut params = params();
         params.session_context = remote_session(None);
         for name in REMOTE_SERVER_FILE_TOOLS {
-            assert!(!exposes_tool(&params, name), "{name} offered without extension");
+            assert!(
+                !exposes_tool(&params, name),
+                "{name} offered without extension"
+            );
         }
         assert!(render_remote_file_tools_unavailable_block(&params).is_some());
 

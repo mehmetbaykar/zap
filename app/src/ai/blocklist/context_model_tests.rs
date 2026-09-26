@@ -22,9 +22,9 @@ use warpui::r#async::executor::Background;
 use warpui::{App, EntityId, ModelHandle, SingletonEntity};
 
 use super::{BlocklistAIContextModel, PendingAttachment, PendingFile};
-use crate::ai::agent::conversation::AIConversationId;
 #[cfg(feature = "local_fs")]
 use crate::ai::agent::AnyFileContent;
+use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{AIAgentAttachment, AIAgentContext, ImageContext};
 use crate::ai::agent_conversations_model::{
     AgentConversationEntry, AgentConversationListEntryState, AgentConversationListPolicy,
