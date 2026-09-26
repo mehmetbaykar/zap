@@ -53,6 +53,21 @@ fn records_provider_skill_files_and_project_rules() {
 }
 
 #[test]
+fn records_claude_md_as_project_rule() {
+    let definitions = definitions();
+    let mut results = StandingQueryResults::default();
+    let claude_rule = repo_path("CLAUDE.md");
+
+    results.record_path(&claude_rule, false, &definitions);
+
+    assert!(
+        results
+            .project_rules()
+            .any(|content| content == &StandingQueryContent::file(standardized(&claude_rule)))
+    );
+}
+
+#[test]
 fn replacing_removed_direct_skill_child_can_reupsert_provider_for_hydration() {
     let definitions = definitions();
     let provider_path = repo_path(".agents/skills");

@@ -19,7 +19,13 @@ impl Default for StandingQueryDefinitions {
     fn default() -> Self {
         Self {
             project_skill_provider_paths: Vec::new(),
-            project_rule_file_names: vec!["WARP.md".to_string(), "AGENTS.md".to_string()],
+            // Must list every name in `ai::project_context::model::RULES_FILE_PATTERN`: this index
+            // is the only rule source for remote (SSH) repositories.
+            project_rule_file_names: vec![
+                "WARP.md".to_string(),
+                "AGENTS.md".to_string(),
+                "CLAUDE.md".to_string(),
+            ],
         }
     }
 }
