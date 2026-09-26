@@ -5,9 +5,17 @@
 
 use std::sync::Arc;
 
+#[cfg(feature = "local_fs")]
+use ai::project_context::model::{ProjectContextModel, ProjectRule};
 use parking_lot::FairMutex;
 #[cfg(feature = "local_fs")]
 use repo_metadata::DirectoryWatcher;
+#[cfg(feature = "local_fs")]
+use warp_util::host_id::HostId;
+#[cfg(feature = "local_fs")]
+use warp_util::local_or_remote_path::LocalOrRemotePath;
+#[cfg(feature = "local_fs")]
+use warp_util::remote_path::RemotePath;
 #[cfg(feature = "local_fs")]
 use warp_util::standardized_path::StandardizedPath;
 use warpui::r#async::executor::Background;
@@ -15,6 +23,8 @@ use warpui::{App, EntityId, ModelHandle, SingletonEntity};
 
 use super::{BlocklistAIContextModel, PendingAttachment, PendingFile};
 use crate::ai::agent::conversation::AIConversationId;
+#[cfg(feature = "local_fs")]
+use crate::ai::agent::AnyFileContent;
 use crate::ai::agent::{AIAgentAttachment, AIAgentContext, ImageContext};
 use crate::ai::agent_conversations_model::{
     AgentConversationEntry, AgentConversationListEntryState, AgentConversationListPolicy,
@@ -588,6 +598,69 @@ fn retain_at_context_attachments_in_query_drops_deleted_prefix_reference() {
                 m.pending_at_context_attachments()
                     .contains_key("@commit (4)")
             );
+        });
+    });
+}
+
+#[cfg(feature = "local_fs")]
+fn project_rule_contents(context: &[AIAgentContext]) -> Vec<String> {
+    context
+        .iter()
+        .filter_map(|context| match context {
+            AIAgentContext::ProjectRules { active_rules, .. } => Some(active_rules),
+            _ => None,
+        })
+        .flatten()
+        .map(|rule| match &rule.content {
+            AnyFileContent::StringContent(content) => content.clone(),
+            other => panic!("unexpected rule content: {other:?}"),
+        })
+        .collect()
+}
+
+#[cfg(feature = "local_fs")]
+#[test]
+fn pending_context_resolves_remote_cwd_rules_on_the_remote_host() {
+    App::test((), |mut app| async move {
+        let context_model = build_test_context_model(&mut app);
+        let project_context = app.add_singleton_model(|_| ProjectContextModel::default());
+
+        // The remote cwd also exists locally with its own AGENTS.md, as when both machines share a
+        // username. A remote session must get the remote host's rules, never this local file.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let cwd = temp_dir.path().canonicalize().unwrap();
+        std::fs::write(cwd.join("AGENTS.md"), "local rules").unwrap();
+
+        let host_id = HostId::new("remote-host".to_owned());
+        project_context.update(&mut app, |model, _| {
+            model.set_remote_global_rules(
+                host_id.clone(),
+                vec![ProjectRule {
+                    path: LocalOrRemotePath::Remote(RemotePath::new(
+                        host_id.clone(),
+                        StandardizedPath::try_new("/home/me/.agents/AGENTS.md").unwrap(),
+                    )),
+                    content: "remote rules".to_owned(),
+                }],
+            );
+        });
+
+        let remote_cwd = LocalOrRemotePath::Remote(RemotePath::new(
+            host_id,
+            StandardizedPath::from_local_canonicalized(&cwd).unwrap(),
+        ));
+        let local_cwd = LocalOrRemotePath::Local(cwd);
+
+        context_model.read(&app, |model, ctx| {
+            assert_eq!(
+                project_rule_contents(&model.pending_context(ctx, false, Some(&remote_cwd))),
+                vec!["remote rules".to_owned()]
+            );
+            assert_eq!(
+                project_rule_contents(&model.pending_context(ctx, false, Some(&local_cwd))),
+                vec!["local rules".to_owned()]
+            );
+            assert!(project_rule_contents(&model.pending_context(ctx, false, None)).is_empty());
         });
     });
 }

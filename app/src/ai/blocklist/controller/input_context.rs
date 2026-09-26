@@ -49,7 +49,13 @@ pub(super) fn input_context_for_request(
     additional_context: Vec<AIAgentContext>,
     app: &AppContext,
 ) -> Arc<[AIAgentContext]> {
-    let mut context = context_model.pending_context(app, is_user_query);
+    // The session-aware location routes remote sessions to the remote host's rules and skills.
+    let current_working_directory_location = active_session.current_working_directory_location(app);
+    let mut context = context_model.pending_context(
+        app,
+        is_user_query,
+        current_working_directory_location.as_ref(),
+    );
 
     context.push(AIAgentContext::CurrentTime {
         current_time: Local::now(),
@@ -63,9 +69,6 @@ pub(super) fn input_context_for_request(
         // After the project moved off the cloud, the system prompt is fully re-rendered on the client every round (BYOP is stateless),
         // so skills must be delivered in full every round, with no incremental diffing. When the list is empty it is not pushed, keeping
         // the context compact (the template-side `{% if skills %}` guard omits the section normally).
-        // The session-aware location and origin route remote sessions to the remote host's skills.
-        let current_working_directory_location =
-            active_session.current_working_directory_location(app);
         let path_origin = SessionContext::from_session(active_session, app).skill_path_origin();
         let skills = list_skills(
             current_working_directory_location.as_ref(),

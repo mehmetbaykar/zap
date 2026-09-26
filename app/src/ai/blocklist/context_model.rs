@@ -3,12 +3,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use ai::project_context::model::ProjectContextModel;
 use parking_lot::FairMutex;
 use warp_core::features::FeatureFlag;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 #[cfg(feature = "local_fs")]
 use warpui::WeakModelHandle;
 use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
@@ -584,28 +584,34 @@ impl BlocklistAIContextModel {
     /// Returns `AIAgentContext` for the blocks to be included in the current AI query.
     /// If `is_user_query` is true, includes blocks, selected text, and images as context.
     /// If false, excludes these user-specific contexts but includes everything else.
-    pub fn pending_context(&self, app: &AppContext, is_user_query: bool) -> Vec<AIAgentContext> {
+    pub fn pending_context(
+        &self,
+        app: &AppContext,
+        is_user_query: bool,
+        current_working_directory_location: Option<&LocalOrRemotePath>,
+    ) -> Vec<AIAgentContext> {
         // `pwd` is the shell-reported path used for directory context and local indexing.
+        // The location is passed separately because it preserves remote host identity for rules.
         let pwd = self.current_pwd();
         // Zap: this used to query RepoOutlines to check whether the repo under the current pwd was
         // already indexed, so "use codebase semantic search" could be offered as context. Outline is
         // now retired, so this is always false.
         let is_pwd_indexed = false;
 
-        let project_rules = if let Some(pwd) = pwd.clone().and_then(|path| {
-            PathBuf::from_str(&path)
-                .ok()
-                .and_then(|s| s.canonicalize().ok())
-        }) {
+        let project_rules = match current_working_directory_location {
             // Prefer the normal path (zero IO, fetch the result from the HashMap once async indexing
             // completes); when not ready, synchronously fast-path stat + read rule files from the
             // cwd/ancestor directories. Aligned with opencode's `findUp` pattern, ensuring AGENTS.md
             // is picked up even when a query is sent right after a cd. The fast-path has an internal
             // cache + time budget, so the UI never blocks. See
             // `crates/ai/src/project_context/model.rs::find_rules_with_fast_path`.
-            ProjectContextModel::as_ref(app).find_rules_with_fast_path(&pwd)
-        } else {
-            None
+            Some(LocalOrRemotePath::Local(path)) => {
+                ProjectContextModel::as_ref(app).find_rules_with_fast_path(path)
+            }
+            // A remote cwd must never be resolved against the local disk: that either drops the
+            // remote repo's rules or injects a local repo's rules found at the same path.
+            Some(location) => ProjectContextModel::as_ref(app).find_applicable_rules(location),
+            None => None,
         };
 
         let mut context = Vec::new();
