@@ -1,4 +1,4 @@
-Read the contents of one or more files on the machine the terminal session runs on (the remote host in an SSH session).
+Read the contents of one or more files. In a warpified SSH session with the SSH extension connected this reads the remote host; otherwise it reads this computer, even while an `ssh` command runs in the terminal.
 
 Usage:
 - The `files[].path` parameter should be an absolute path when possible. Relative paths are resolved against the working directory.
