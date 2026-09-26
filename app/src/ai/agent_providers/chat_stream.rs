@@ -193,18 +193,28 @@ fn render_ssh_session_block(
 /// `REMOTE_SERVER_FILE_TOOLS`), so the system templates' standing advice to prefer them over shell
 /// commands must be overridden, or the model has no sanctioned way to read or edit files.
 fn render_remote_file_tools_unavailable_block(params: &RequestParams) -> Option<String> {
-    remote_file_tools_unavailable(params).then(|| {
+    if !remote_file_tools_unavailable(params) {
+        return None;
+    }
+    // `run_shell_command` is itself withheld in plan mode and while a long-running command is
+    // attached; pointing the model at it there would only produce refused calls.
+    let rules = if available_tool_names(params)
+        .iter()
+        .any(|name| name == "run_shell_command")
+    {
+        "    - Read files with shell commands through `run_shell_command` (for example `cat` or `sed -n '1,200p' <file>`).\n    \
+         - Create or edit files with shell commands through `run_shell_command` (for example a quoted heredoc or `patch`), then re-read the file to confirm the change.\n    \
+         - These rules override any other instruction to prefer `read_files` or `apply_file_diffs`.\n"
+    } else {
+        "    - Inspect files with `grep` and `file_glob`.\n"
+    };
+    Some(format!(
         "\n\n<remote_session_without_ssh_extension>\n  \
          <fact>The active terminal is an SSH session on a remote host without the SSH extension connected, \
          so the `read_files` and `apply_file_diffs` tools are unavailable in this session.</fact>\n  \
-         <rules>\n    \
-         - Read files with shell commands through `run_shell_command` (for example `cat` or `sed -n '1,200p' <file>`).\n    \
-         - Create or edit files with shell commands through `run_shell_command` (for example a quoted heredoc or `patch`), then re-read the file to confirm the change.\n    \
-         - These rules override any other instruction to prefer `read_files` or `apply_file_diffs`.\n  \
-         </rules>\n\
+         <rules>\n{rules}  </rules>\n\
          </remote_session_without_ssh_extension>"
-            .to_owned()
-    })
+    ))
 }
 
 /// XML-escape, and also strip all illegal/problematic control characters to avoid JSON serialization failures.
@@ -8173,7 +8183,13 @@ mod run_agents_gating_tests {
                 "{name} offered without extension"
             );
         }
-        assert!(render_remote_file_tools_unavailable_block(&params).is_some());
+        let block = render_remote_file_tools_unavailable_block(&params).unwrap();
+        assert!(block.contains("run_shell_command"));
+        // With the shell tool withheld (an attached long-running command), the block must not
+        // point the model at it.
+        params.lrc_command_id = Some("block-1".to_owned());
+        let block = render_remote_file_tools_unavailable_block(&params).unwrap();
+        assert!(!block.contains("run_shell_command"), "{block}");
 
         for session_context in [
             remote_session(Some("host-1")),
