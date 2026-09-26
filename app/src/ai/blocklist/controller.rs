@@ -136,7 +136,14 @@ impl SessionContext {
     }
 
     pub fn skill_path_origin(&self) -> SkillPathOrigin {
-        match &self.session_type {
+        Self::skill_path_origin_for_session_type(self.session_type.as_ref())
+    }
+
+    /// The execution host whose skills a session of `session_type` can use.
+    pub fn skill_path_origin_for_session_type(
+        session_type: Option<&SessionType>,
+    ) -> SkillPathOrigin {
+        match session_type {
             Some(SessionType::WarpifiedRemote {
                 host_id: Some(host_id),
             }) => SkillPathOrigin::Remote {
