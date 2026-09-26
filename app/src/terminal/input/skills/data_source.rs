@@ -15,6 +15,7 @@ use warpui::{
     AppContext, Element, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity as _,
 };
 
+use crate::ai::blocklist::SessionContext;
 use crate::appearance::Appearance;
 use crate::search::data_source::{Query, QueryResult};
 use crate::search::mixer::DataSourceRunErrorWrapper;
@@ -148,8 +149,11 @@ impl SyncDataSource for SkillSelectorDataSource {
         }
 
         let cwd = self.get_current_working_directory(app);
+        let path_origin =
+            SessionContext::from_session(self.active_session.as_ref(app), app).skill_path_origin();
         Ok(query_selectable_skills(
             cwd.as_ref(),
+            &path_origin,
             self.terminal_view_id,
             self.include_bundled,
             &query.text,

@@ -15,7 +15,7 @@ use warpui::fonts::FamilyId;
 use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
 
 use crate::ai::blocklist::block::cli_controller::{CLISubagentController, CLISubagentEvent};
-use crate::ai::blocklist::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
+use crate::ai::blocklist::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel, SessionContext};
 use crate::ai::skills::{SkillDescriptor, SkillManager};
 use crate::search::slash_command_menu::fuzzy_match::SlashCommandFuzzyMatchResult;
 use crate::search::slash_command_menu::static_commands::{Availability, commands};
@@ -221,9 +221,10 @@ pub trait SlashCommandDataSource {
 
         let active_session = self.active_session().as_ref(ctx);
         let cwd_path = active_session.current_working_directory_location(ctx);
+        let path_origin = SessionContext::from_session(active_session, ctx).skill_path_origin();
         let matched_skill = SkillManager::handle(ctx)
             .as_ref(ctx)
-            .get_skills_for_working_directory(cwd_path.as_ref(), ctx)
+            .get_skills_for_working_directory_with_origin(cwd_path.as_ref(), &path_origin, ctx)
             .into_iter()
             .find(|skill| skill.name == skill_name)?;
 
@@ -445,9 +446,12 @@ pub trait SlashCommandDataSource {
         let cli_agent_providers = self.active_cli_agent_providers(app);
         let active_session = self.active_session().as_ref(app);
         let cwd_path = active_session.current_working_directory_location(app);
+        // Offer the skills the agent can use in this session: an SSH session without a connected
+        // SSH extension has no cwd location and must not fall back to this machine's skills.
+        let path_origin = SessionContext::from_session(active_session, app).skill_path_origin();
         let skills = SkillManager::handle(app)
             .as_ref(app)
-            .get_skills_for_working_directory(cwd_path.as_ref(), app);
+            .get_skills_for_working_directory_with_origin(cwd_path.as_ref(), &path_origin, app);
 
         let skill_manager = SkillManager::as_ref(app);
         let mut results = Vec::new();

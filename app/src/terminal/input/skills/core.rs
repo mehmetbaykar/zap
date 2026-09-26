@@ -1,4 +1,4 @@
-use ai::skills::{SkillProvider, SkillReference, SkillScope};
+use ai::skills::{SkillPathOrigin, SkillProvider, SkillReference, SkillScope};
 use fuzzy_match::{FuzzyMatchResult, match_indices_case_insensitive};
 use ordered_float::OrderedFloat;
 use warp_core::ui::icons::Icon;
@@ -28,6 +28,7 @@ pub struct SelectableSkill {
 /// policy, fuzzy matching, and ordering used by both frontend adapters.
 pub fn query_selectable_skills(
     working_directory: Option<&LocalOrRemotePath>,
+    path_origin: &SkillPathOrigin,
     terminal_view_id: EntityId,
     include_bundled: bool,
     query_text: &str,
@@ -40,7 +41,7 @@ pub fn query_selectable_skills(
     let skill_manager = SkillManager::as_ref(app);
     let query_text = query_text.trim();
     let mut results = skill_manager
-        .get_skills_for_working_directory(working_directory, app)
+        .get_skills_for_working_directory_with_origin(working_directory, path_origin, app)
         .into_iter()
         .filter(|skill| {
             if let Some(providers) = &cli_agent_providers {
