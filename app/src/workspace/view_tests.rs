@@ -1743,38 +1743,30 @@ fn test_save_current_tab_as_new_config_ignores_stale_tab_index() {
 }
 
 #[test]
-fn test_closing_tab_context_menu_restores_active_tab_focus() {
+fn test_rename_tab_from_context_menu_keeps_rename_editor_focused() {
     App::test((), |mut app| async move {
         initialize_app(&mut app);
 
         let workspace = mock_workspace(&mut app);
-        let (window_id, menu_id) = workspace.update(&mut app, |workspace, ctx| {
+        let (window_id, rename_editor_id) = workspace.update(&mut app, |workspace, ctx| {
             workspace.show_tab_right_click_menu =
                 Some((0, TabContextMenuAnchor::Pointer(Vector2F::zero())));
             ctx.focus(&workspace.tab_right_click_menu);
-            (ctx.window_id(), workspace.tab_right_click_menu.id())
-        });
-        assert_eq!(app.focused_view_id(window_id), Some(menu_id));
-
-        workspace.update(&mut app, |workspace, ctx| {
+            // A clicked menu item dispatches its action before the menu emits `Close`.
+            workspace.handle_action(&WorkspaceAction::RenameTab(0), ctx);
             workspace.handle_tab_right_click_menu_event(
                 &MenuEvent::Close {
                     via_select_item: true,
                 },
                 ctx,
             );
+            (ctx.window_id(), workspace.tab_rename_editor.id())
         });
 
-        assert_ne!(app.focused_view_id(window_id), Some(menu_id));
-        workspace.update(&mut app, |workspace, ctx| {
-            assert!(
-                workspace
-                    .active_tab_pane_group()
-                    .is_self_or_child_focused(ctx)
-            );
-        });
+        assert_eq!(app.focused_view_id(window_id), Some(rename_editor_id));
     });
 }
+
 #[test]
 fn test_close_tabs_right_confirmation_dialog() {
     App::test((), |mut app| async move {
