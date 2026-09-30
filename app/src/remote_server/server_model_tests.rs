@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 
 use warp_util::standardized_path::StandardizedPath;
-use warpui::App;
+use warpui::{App, ModelHandle};
 
 use super::super::diff_state_tracker::RemoteDiffStateManager;
 use super::super::proto::{
@@ -55,7 +55,7 @@ fn invalid_request_response_uses_the_invalid_request_code() {
     assert_eq!(error.message, "invalid repo");
 }
 
-fn test_model(app: &mut App) -> ServerModel {
+fn test_model_with_diff_states(diff_states: ModelHandle<RemoteDiffStateManager>) -> ServerModel {
     ServerModel {
         connection_senders: HashMap::new(),
         snapshot_sent_roots_by_connection: HashMap::new(),
@@ -74,12 +74,33 @@ fn test_model(app: &mut App) -> ServerModel {
         pending_file_ops: PendingFileOps::new(),
         #[cfg(feature = "local_fs")]
         buffers: ServerBufferTracker::new(),
-        diff_states: app.add_model(|_| RemoteDiffStateManager::new()),
+        diff_states,
         host_scoped_requests: HashMap::new(),
         git_status_models: HashMap::new(),
         github_repo_models: HashMap::new(),
         git_status_subscribers: HashMap::new(),
         git_status_repo_by_conn: HashMap::new(),
+    }
+}
+
+fn test_model(app: &mut App) -> ServerModel {
+    let diff_states = app.add_model(|_| RemoteDiffStateManager::new());
+    test_model_with_diff_states(diff_states)
+}
+
+fn test_model_handle(app: &mut App) -> ModelHandle<ServerModel> {
+    app.add_model(|ctx| {
+        let diff_states = ctx.add_model(|_| RemoteDiffStateManager::new());
+        test_model_with_diff_states(diff_states)
+    })
+}
+
+/// Uses `try_new` instead of `try_from_local` so that Unix-style paths
+/// like `/repo` are recognised as absolute on all platforms (including Windows).
+fn test_key(repo: &str, mode: DiffMode) -> DiffModelKey {
+    DiffModelKey {
+        repo_path: StandardizedPath::try_new(repo).unwrap(),
+        mode,
     }
 }
 
@@ -577,3 +598,7 @@ fn non_host_scoped_response_is_not_failed_over() {
         );
     });
 }
+
+#[cfg(unix)]
+#[path = "server_model_unix_tests.rs"]
+mod unix;
