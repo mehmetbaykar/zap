@@ -178,15 +178,6 @@ fn remote_agent_context_snapshot_broadcasts_replacements_and_initializes_once() 
     });
 }
 
-/// Uses `try_new` instead of `try_from_local` so that Unix-style paths
-/// like `/repo` are recognised as absolute on all platforms (including Windows).
-fn test_key(repo: &str, mode: DiffMode) -> DiffModelKey {
-    DiffModelKey {
-        repo_path: StandardizedPath::try_new(repo).unwrap(),
-        mode,
-    }
-}
-
 // ── Diff state: connection cleanup ──────────────────────────────────
 
 #[test]

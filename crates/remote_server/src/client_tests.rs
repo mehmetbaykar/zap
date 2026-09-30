@@ -37,6 +37,13 @@ fn unwrap_host_scoped(msg: &ClientMessage) -> &host_scoped_request::Message {
     }
 }
 
+fn unwrap_notification(msg: &ClientMessage) -> &notification::Message {
+    match &msg.message {
+        Some(client_message::Message::Notification(w)) => w.message.as_ref().unwrap(),
+        other => panic!("Expected Notification, got {other:?}"),
+    }
+}
+
 fn not_enabled_codebase_status(repo_path: &str) -> CodebaseIndexStatus {
     CodebaseIndexStatus {
         repo_path: repo_path.to_string(),
@@ -447,6 +454,7 @@ async fn write_file_chunk_round_trip() {
         panic!("expected write chunk success");
     };
     assert_eq!(success.next_offset, 3);
+}
 
 #[tokio::test]
 async fn timed_out_run_command_removes_pending_request_and_sends_abort() {
@@ -454,7 +462,7 @@ async fn timed_out_run_command_removes_pending_request_and_sends_abort() {
     let (server_read, _server_write) = tokio::io::split(server_stream);
     let (client_read, client_write) = tokio::io::split(client_stream);
     let executor = executor::Background::default();
-    let (client, _event_rx, _failure_rx, _host_rx) =
+    let (client, _event_rx, _failure_rx) =
         RemoteServerClient::new(client_read.compat(), client_write.compat_write(), &executor);
     let client = Arc::new(client);
 
