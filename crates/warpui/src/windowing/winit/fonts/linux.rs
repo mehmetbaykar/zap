@@ -156,10 +156,11 @@ impl FontconfigLoader {
         // reduces the overall set of fallback fonts we need to load.
         let sort_fonts = sort_fonts(&pattern, true /* trim */);
 
-        // Skip the first font, since this is considered the primary "font" we're trying to match.
+        // Keep the first font. The primary font may be a built-in font that isn't in Fontconfig, so the first
+        // sorted entry can be the only system fallback that covers some characters. Trim already drops later
+        // fonts that repeat its coverage, and `insert_font` dedups by path and face index.
         let fallback_fonts = sort_fonts
             .iter()
-            .skip(1)
             .filter_map(|pattern| {
                 // Fallback fonts we load aren't guaranteed to support english.
                 // Also, parse_font already has logging for parsing, so we log there.
